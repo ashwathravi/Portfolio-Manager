@@ -9,12 +9,12 @@
 3. **Strategy & Backtesting** — Rule-based strategy builder with backtesting engine
 4. **Execution** — Controlled order execution with constraint-based guardrails
 
-The full UX specification lives in `Atlas-Wealth-UX-Prototype-Spec.md` (4,573 lines, 148KB). Always consult this spec before building any component or page.
+The full UX specification lives in `docs/Atlas-Wealth-UX-Prototype-Spec.md` (4,573 lines, 148KB). Always consult this spec before building any component or page.
 
 ## Tech Stack
 
 | Category | Technology | Notes |
-|----------|-----------|-------|
+| :--- | :--- | :--- |
 | Framework | Next.js 15+ (App Router) | Server Components, streaming SSR |
 | UI | React 19 + TypeScript 5.3+ | Strict mode, concurrent features |
 | Styling | Tailwind CSS v4 | Utility-first, 4px base spacing unit |
@@ -47,7 +47,7 @@ npm run test:watch   # Vitest watch mode
 
 ## Project Structure (Target)
 
-```
+```text
 src/
 ├── app/                          # Next.js App Router pages
 │   ├── layout.tsx                # Root layout with AppShell
@@ -93,6 +93,7 @@ These principles from the spec must guide every implementation decision:
 ## Design System
 
 ### Colors
+
 - **Primary:** Indigo scale (`#6366f1` as primary-500)
 - **Success/Gains:** Emerald (`#10b981`)
 - **Danger/Losses:** Red (`#ef4444`)
@@ -101,21 +102,25 @@ These principles from the spec must guide every implementation decision:
 - **Neutrals:** Gray scale from `#ffffff` to `#111827`
 
 ### Typography
+
 - **UI font:** Inter (sans-serif)
 - **Code font:** JetBrains Mono (monospace)
 - **Scale:** 12px–36px, weights 400–700
 
 ### Spacing
+
 - **Base unit:** 4px
 - **Scale:** 4/8/12/16/20/24/32/40/48/64/80/96
 
 ### Layout
+
 - **Sidebar:** 256px expanded, 64px collapsed
 - **TopBar:** 64px fixed height
 - **Content max-width:** varies by page
 - **Breakpoints:** sm(640) / md(768) / lg(1024) / xl(1280) / 2xl(1536)
 
 ### Animation
+
 - **Fast:** 100ms, **Base:** 200ms, **Slow:** 300ms
 - **Easing:** ease-in-out for most, bounce for delight moments
 - Respect `prefers-reduced-motion`
@@ -123,18 +128,21 @@ These principles from the spec must guide every implementation decision:
 ## Coding Conventions
 
 ### TypeScript
+
 - Strict mode enabled. No `any` types.
 - Use interfaces (not type aliases) for component props — they are defined in the spec.
 - All props interfaces follow the naming pattern: `ComponentNameProps`.
 - Export types from `src/types/`.
 
 ### Components
+
 - Use shadcn/ui as the base. Extend with Radix primitives when needed.
 - Every component must support keyboard navigation and screen readers (WCAG 2.1 AA).
 - Use Framer Motion for all animations — wrap in `prefers-reduced-motion` checks.
 - Components follow the spec's interface definitions exactly.
 
 ### State Management
+
 - **Server data** (portfolios, market data, etc.) → TanStack Query with specified stale times.
 - **Global UI state** (sidebar open, active portfolio, theme) → Zustand.
 - **Form state** → React Hook Form + Zod validation.
@@ -142,11 +150,13 @@ These principles from the spec must guide every implementation decision:
 - Use optimistic updates for mutations.
 
 ### Styling
+
 - Tailwind utility classes only — no custom CSS files unless absolutely necessary.
 - Use CSS custom properties for design tokens (defined in spec section 3.1).
 - Responsive: mobile-first approach with Tailwind breakpoint prefixes.
 
 ### Data
+
 - All mock data must match the TypeScript interfaces defined in spec section 10.
 - Use realistic financial data (proper ticker symbols, plausible returns, etc.).
 
