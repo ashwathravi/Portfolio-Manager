@@ -1,8 +1,8 @@
 'use client';
 
-import { StatCard } from '@/components/dashboard/StatCard';
-import { PortfolioCard } from '@/components/dashboard/PortfolioCard';
-import { PerformanceChart } from '@/components/dashboard/PerformanceChart';
+import { StatCard } from '@/components/data-display/StatCard';
+import { PortfolioCard } from '@/components/portfolios/PortfolioCard';
+import { PerformanceChart } from '@/components/charts/PerformanceChart';
 import { ActivityFeed } from '@/components/dashboard/ActivityFeed';
 import { Wallet, TrendingUp, DollarSign, Activity, Calendar, Plus } from 'lucide-react';
 import { useState } from 'react';
@@ -14,6 +14,8 @@ import {
 
 export default function Dashboard() {
   const [allocationView, setAllocationView] = useState<'account' | 'theme'>('account');
+
+  // ... (keeping existing calculation logic)
 
   const totalNetWorth = mockPortfolios.reduce(
     (sum, p) => sum + p.totalValue,
@@ -100,7 +102,7 @@ export default function Dashboard() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6">
         {/* Total Net Worth */}
         <StatCard
-          title="Total Net Worth"
+          label="Total Net Worth"
           value={`$${totalNetWorth.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
           change={1.2}
           changeLabel="vs last month"
@@ -110,19 +112,18 @@ export default function Dashboard() {
 
         {/* Today's P&L ($) */}
         <StatCard
-          title="Today's P&L ($)"
+          label="Today's P&L ($)"
           value={`+$${todayChange.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
           subtitle="Updated 5 min ago"
           changeLabel="Good day"
-          trend="up" // Using trend=up to simulate positive change style if desired, or manual styling
-          change={undefined} // Manually handling the layout in original code, but here using StatCard standard? 
-          // Customizing StatCard to match specific design might be needed, but sticking to standard for now.
+          trend="up"
+          change={undefined}
           icon={<DollarSign className="h-6 w-6" />}
         />
 
         {/* Today's P&L (%) */}
         <StatCard
-          title="Today's P&L (%)"
+          label="Today's P&L (%)"
           value={`+${todayChangePercent.toFixed(2)}%`}
           subtitle="Outperforming S&P 500 by 0.8%"
           icon={<Activity className="h-6 w-6" />}

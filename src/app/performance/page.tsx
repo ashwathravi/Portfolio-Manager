@@ -1,6 +1,6 @@
 'use client';
 
-import { StatCard } from '@/components/dashboard/StatCard';
+import { StatCard } from '@/components/data-display/StatCard';
 import { Card } from '@/components/ui/card';
 import { TrendingUp, Activity, AlertTriangle, Award, Calendar, ChevronDown, Settings, Plus, ChevronLeft, ChevronRight, Share2 } from 'lucide-react';
 import {

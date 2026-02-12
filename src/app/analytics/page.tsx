@@ -1,6 +1,7 @@
 'use client';
 
 import { Card } from '@/components/ui/card';
+import { StatCard } from '@/components/data-display/StatCard';
 import { Settings, Plus, ChevronLeft, ChevronRight, Share2, TrendingUp, Calendar as CalendarIcon } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
 
@@ -38,23 +39,26 @@ export default function TradeAnalyticsPage() {
 
                 {/* Metrics Row */}
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-                    <div className="p-4 rounded-lg border border-border bg-card">
-                        <p className="text-xs text-muted-foreground mb-1">Total P&L</p>
-                        <h3 className="text-2xl font-bold text-primary">$2,22,525.00</h3>
-                    </div>
-                    <div className="p-4 rounded-lg border border-border bg-card">
-                        <p className="text-xs text-muted-foreground mb-1">Win Rate</p>
-                        <h3 className="text-2xl font-bold">100.0%</h3>
-                    </div>
-                    <div className="p-4 rounded-lg border border-border bg-card">
-                        <p className="text-xs text-muted-foreground mb-1">Best Day</p>
-                        <h3 className="text-2xl font-bold text-primary">$2,22,525.00</h3>
-                        <p className="text-xs text-muted-foreground mt-1">Feb 6</p>
-                    </div>
-                    <div className="p-4 rounded-lg border border-border bg-card">
-                        <p className="text-xs text-muted-foreground mb-1">Worst Day</p>
-                        <h3 className="text-2xl font-bold text-destructive">$0.00</h3>
-                    </div>
+                    <StatCard
+                        label="Total P&L"
+                        value="$2,22,525.00"
+                        color="primary"
+                    />
+                    <StatCard
+                        label="Win Rate"
+                        value="100.0%"
+                    />
+                    <StatCard
+                        label="Best Day"
+                        value="$2,22,525.00"
+                        changeLabel="Feb 6"
+                        color="primary"
+                    />
+                    <StatCard
+                        label="Worst Day"
+                        value="$0.00"
+                        color="danger"
+                    />
                 </div>
 
                 {/* Year Heatmap Calendar */}
