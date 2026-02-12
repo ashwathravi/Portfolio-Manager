@@ -6,6 +6,7 @@ import { IntegrationsList } from "@/components/settings/IntegrationsList";
 import { NotificationPreferences } from "@/components/settings/NotificationPreferences";
 import { SecuritySettings } from "@/components/settings/SecuritySettings";
 import { DataManagement } from "@/components/settings/DataManagement";
+import { User, Bell, Shield, Database, Palette, Link as LinkIcon, Tag } from "lucide-react";
 
 export default function SettingsPage() {
     return (
@@ -13,45 +14,97 @@ export default function SettingsPage() {
             <div className="space-y-0.5">
                 <h2 className="text-2xl font-bold tracking-tight">Settings</h2>
                 <p className="text-muted-foreground">
-                    Manage your account settings and set e-mail preferences.
+                    Manage your account preferences and application settings
                 </p>
             </div>
-            <div className="flex flex-col space-y-8 lg:flex-row lg:space-x-12 lg:space-y-0">
-                <aside className="-mx-4 lg:w-1/5">
-                    {/* Sidebar navigation could go here, but using Tabs for now */}
-                </aside>
-                <div className="flex-1 lg:max-w-4xl">
-                    <Tabs defaultValue="profile" className="space-y-6">
-                        <TabsList className="grid w-full grid-cols-5 h-auto">
-                            <TabsTrigger value="profile">Profile</TabsTrigger>
-                            <TabsTrigger value="integrations">Integrations</TabsTrigger>
-                            <TabsTrigger value="notifications">Notifications</TabsTrigger>
-                            <TabsTrigger value="security">Security</TabsTrigger>
-                            <TabsTrigger value="data">Data</TabsTrigger>
-                        </TabsList>
 
-                        <TabsContent value="profile" className="space-y-6">
-                            <ProfileForm />
-                        </TabsContent>
+            <Tabs defaultValue="profile" className="space-y-6">
+                <TabsList className="flex h-auto w-full justify-start gap-2 bg-transparent p-0">
+                    <TabsTrigger
+                        value="profile"
+                        className="data-[state=active]:bg-muted data-[state=active]:text-foreground rounded-full px-4 py-2 gap-2"
+                    >
+                        <User className="h-4 w-4" />
+                        Profile
+                    </TabsTrigger>
+                    <TabsTrigger
+                        value="notifications"
+                        className="data-[state=active]:bg-muted data-[state=active]:text-foreground rounded-full px-4 py-2 gap-2"
+                    >
+                        <Bell className="h-4 w-4" />
+                        Notifications
+                    </TabsTrigger>
+                    <TabsTrigger
+                        value="security"
+                        className="data-[state=active]:bg-muted data-[state=active]:text-foreground rounded-full px-4 py-2 gap-2"
+                    >
+                        <Shield className="h-4 w-4" />
+                        Security
+                    </TabsTrigger>
+                    <TabsTrigger
+                        value="data"
+                        className="data-[state=active]:bg-muted data-[state=active]:text-foreground rounded-full px-4 py-2 gap-2"
+                    >
+                        <Database className="h-4 w-4" />
+                        Data & Privacy
+                    </TabsTrigger>
+                    <TabsTrigger
+                        value="appearance"
+                        className="data-[state=active]:bg-muted data-[state=active]:text-foreground rounded-full px-4 py-2 gap-2"
+                    >
+                        <Palette className="h-4 w-4" />
+                        Appearance
+                    </TabsTrigger>
+                    <TabsTrigger
+                        value="accounts"
+                        className="data-[state=active]:bg-muted data-[state=active]:text-foreground rounded-full px-4 py-2 gap-2"
+                    >
+                        <LinkIcon className="h-4 w-4" />
+                        Accounts
+                    </TabsTrigger>
+                    <TabsTrigger
+                        value="tags"
+                        className="data-[state=active]:bg-muted data-[state=active]:text-foreground rounded-full px-4 py-2 gap-2"
+                    >
+                        <Tag className="h-4 w-4" />
+                        Tags
+                    </TabsTrigger>
+                </TabsList>
 
-                        <TabsContent value="integrations" className="space-y-6">
-                            <IntegrationsList />
-                        </TabsContent>
+                <TabsContent value="profile" className="space-y-6">
+                    <ProfileForm />
+                </TabsContent>
 
-                        <TabsContent value="notifications" className="space-y-6">
-                            <NotificationPreferences />
-                        </TabsContent>
+                <TabsContent value="notifications" className="space-y-6">
+                    <NotificationPreferences />
+                </TabsContent>
 
-                        <TabsContent value="security" className="space-y-6">
-                            <SecuritySettings />
-                        </TabsContent>
+                <TabsContent value="security" className="space-y-6">
+                    <SecuritySettings />
+                </TabsContent>
 
-                        <TabsContent value="data" className="space-y-6">
-                            <DataManagement />
-                        </TabsContent>
-                    </Tabs>
-                </div>
-            </div>
+                <TabsContent value="data" className="space-y-6">
+                    <DataManagement />
+                </TabsContent>
+
+                <TabsContent value="appearance" className="space-y-6">
+                    <div className="p-4 border rounded-lg bg-card text-card-foreground shadow-sm">
+                        <h3 className="text-lg font-medium">Appearance Settings</h3>
+                        <p className="text-muted-foreground">Coming soon...</p>
+                    </div>
+                </TabsContent>
+
+                <TabsContent value="accounts" className="space-y-6">
+                    <IntegrationsList />
+                </TabsContent>
+
+                <TabsContent value="tags" className="space-y-6">
+                    <div className="p-4 border rounded-lg bg-card text-card-foreground shadow-sm">
+                        <h3 className="text-lg font-medium">Tags Management</h3>
+                        <p className="text-muted-foreground">Coming soon...</p>
+                    </div>
+                </TabsContent>
+            </Tabs>
         </div>
     );
 }

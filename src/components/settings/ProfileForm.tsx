@@ -5,8 +5,6 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 export function ProfileForm() {
     const [isLoading, setIsLoading] = useState(false);
@@ -16,59 +14,54 @@ export function ProfileForm() {
         // Simulate API call
         await new Promise(resolve => setTimeout(resolve, 1000));
         setIsLoading(false);
-        // In a real app, we'd show a success toast here
     };
 
     return (
-        <Card>
-            <CardHeader>
-                <CardTitle>Profile</CardTitle>
-                <CardDescription>
-                    Manage your public profile and preferences.
-                </CardDescription>
+        <Card className="border-border shadow-sm">
+            <CardHeader className="pb-4">
+                <CardTitle className="text-xl">Profile Information</CardTitle>
             </CardHeader>
             <CardContent className="space-y-6">
-                <div className="flex items-center space-x-4">
-                    <Avatar className="h-20 w-20">
-                        <AvatarImage src="/avatars/01.png" />
-                        <AvatarFallback>AR</AvatarFallback>
-                    </Avatar>
-                    <Button variant="outline">Change Avatar</Button>
-                </div>
-
-                <div className="grid gap-4 md:grid-cols-2">
-                    <div className="space-y-2">
-                        <Label htmlFor="firstName">First name</Label>
-                        <Input id="firstName" defaultValue="Ashwath" />
-                    </div>
-                    <div className="space-y-2">
-                        <Label htmlFor="lastName">Last name</Label>
-                        <Input id="lastName" defaultValue="Ravi" />
+                <div className="space-y-2">
+                    <Label htmlFor="fullName" className="text-base font-normal text-muted-foreground">Full Name</Label>
+                    <div className="bg-muted/50 p-1 rounded-md">
+                        <Input
+                            id="fullName"
+                            defaultValue="John Doe"
+                            className="border-0 bg-transparent shadow-none focus-visible:ring-0 h-10"
+                        />
                     </div>
                 </div>
 
                 <div className="space-y-2">
-                    <Label htmlFor="email">Email</Label>
-                    <Input id="email" type="email" defaultValue="ashwath@example.com" />
+                    <Label htmlFor="email" className="text-base font-normal text-muted-foreground">Email</Label>
+                    <div className="bg-muted/50 p-1 rounded-md">
+                        <Input
+                            id="email"
+                            type="email"
+                            defaultValue="john@example.com"
+                            className="border-0 bg-transparent shadow-none focus-visible:ring-0 h-10"
+                        />
+                    </div>
                 </div>
 
                 <div className="space-y-2">
-                    <Label htmlFor="currency">Base Currency</Label>
-                    <Select defaultValue="usd">
-                        <SelectTrigger id="currency">
-                            <SelectValue placeholder="Select currency" />
-                        </SelectTrigger>
-                        <SelectContent>
-                            <SelectItem value="usd">USD ($)</SelectItem>
-                            <SelectItem value="eur">EUR (€)</SelectItem>
-                            <SelectItem value="gbp">GBP (£)</SelectItem>
-                            <SelectItem value="inr">INR (₹)</SelectItem>
-                        </SelectContent>
-                    </Select>
+                    <Label htmlFor="phone" className="text-base font-normal text-muted-foreground">Phone Number</Label>
+                    <div className="bg-muted/50 p-1 rounded-md">
+                        <Input
+                            id="phone"
+                            defaultValue="+1 (555) 123-4567"
+                            className="border-0 bg-transparent shadow-none focus-visible:ring-0 h-10"
+                        />
+                    </div>
                 </div>
             </CardContent>
-            <CardFooter>
-                <Button onClick={handleSave} disabled={isLoading}>
+            <CardFooter className="pt-2 pb-6">
+                <Button
+                    onClick={handleSave}
+                    disabled={isLoading}
+                    className="bg-emerald-500 hover:bg-emerald-600 text-white font-medium px-6 py-2 h-auto"
+                >
                     {isLoading ? "Saving..." : "Save Changes"}
                 </Button>
             </CardFooter>
