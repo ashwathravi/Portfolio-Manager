@@ -19,8 +19,8 @@ export const passwordChangeSchema = z.object({
 });
 
 export const tagSchema = z.object({
-    name: z.string().min(1, "Tag name is required").max(30, "Tag name is too long"),
-    color: z.string().regex(/^#[0-9a-fA-F]{6}$/, "Must be a valid hex color"),
+    name: z.string().trim().min(1, "Tag name is required").max(30, "Tag name is too long"),
+    color: z.string().regex(/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/, "Must be a valid hex color"),
 });
 
 export type ProfileFormValues = z.infer<typeof profileSchema>;
