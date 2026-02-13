@@ -4,7 +4,7 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Filter, Download, Plus, ArrowUpRight, ArrowDownRight, X, ChevronRight } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import {
     Select,
@@ -130,12 +130,28 @@ function TradeLogContent() {
         return !!(searchParams.get('account') || searchParams.get('strategy') || searchParams.get('tag'));
     });
 
-    const filteredTrades = mockTrades.filter((trade) => {
-        const accountMatch = selectedAccount === 'All Accounts' || trade.account === selectedAccount;
-        const strategyMatch = selectedStrategy === 'All Strategies' || trade.strategy === selectedStrategy;
-        const tagMatch = selectedTag === 'All Tags' || trade.tags.includes(selectedTag);
-        return accountMatch && strategyMatch && tagMatch;
-    });
+    const filteredTrades = useMemo(() => {
+        return mockTrades.filter((trade) => {
+            const accountMatch = selectedAccount === 'All Accounts' || trade.account === selectedAccount;
+            const strategyMatch = selectedStrategy === 'All Strategies' || trade.strategy === selectedStrategy;
+            const tagMatch = selectedTag === 'All Tags' || trade.tags.includes(selectedTag);
+            return accountMatch && strategyMatch && tagMatch;
+        });
+    }, [selectedAccount, selectedStrategy, selectedTag]);
+
+    const summaryStats = useMemo(() => {
+        return filteredTrades.reduce(
+            (acc, trade) => {
+                if (trade.type === 'BUY') {
+                    acc.totalBuyVolume += trade.totalValue;
+                } else if (trade.type === 'SELL') {
+                    acc.totalSellVolume += trade.totalValue;
+                }
+                return acc;
+            },
+            { totalBuyVolume: 0, totalSellVolume: 0 }
+        );
+    }, [filteredTrades]);
 
     const clearFilters = () => {
         setSelectedAccount('All Accounts');
@@ -195,19 +211,19 @@ function TradeLogContent() {
                 <Card className="p-4">
                     <p className="text-xs text-muted-foreground mb-1">Total Buy Volume</p>
                     <h3 className="text-2xl font-bold text-primary">
-                        ${filteredTrades
-                            .filter(t => t.type === 'BUY')
-                            .reduce((sum, t) => sum + t.totalValue, 0)
-                            .toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        ${summaryStats.totalBuyVolume.toLocaleString('en-US', {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                        })}
                     </h3>
                 </Card>
                 <Card className="p-4">
                     <p className="text-xs text-muted-foreground mb-1">Total Sell Volume</p>
                     <h3 className="text-2xl font-bold text-destructive">
-                        ${filteredTrades
-                            .filter(t => t.type === 'SELL')
-                            .reduce((sum, t) => sum + t.totalValue, 0)
-                            .toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        ${summaryStats.totalSellVolume.toLocaleString('en-US', {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                        })}
                     </h3>
                 </Card>
                 <Card className="p-4">
