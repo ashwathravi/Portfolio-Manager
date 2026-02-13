@@ -63,8 +63,8 @@ export default function JournalPage() {
         <AppShell>
             <div className="flex items-center justify-between space-y-2 mb-8">
                 <div className="flex items-center gap-4">
-                    <Button variant="ghost" size="icon" asChild>
-                        <Link href="/research"><ArrowLeft className="h-4 w-4" /></Link>
+                    <Button variant="ghost" size="icon" asChild aria-label="Back to Research">
+                        <Link href="/research"><ArrowLeft className="h-4 w-4" aria-hidden="true" /></Link>
                     </Button>
                     <div>
                         <h2 className="text-3xl font-bold tracking-tight">Decision Journal</h2>

@@ -32,8 +32,8 @@ export default function StrategyBuilderPage() {
             <div className="max-w-3xl mx-auto">
                 <div className="mb-8">
                     <div className="flex items-center gap-4 mb-4">
-                        <Button variant="ghost" size="icon" asChild>
-                            <Link href="/strategies"><ArrowLeft className="h-4 w-4" /></Link>
+                        <Button variant="ghost" size="icon" asChild aria-label="Back to Strategies">
+                            <Link href="/strategies"><ArrowLeft className="h-4 w-4" aria-hidden="true" /></Link>
                         </Button>
                         <div>
                             <h2 className="text-2xl font-bold tracking-tight">Create Strategy</h2>

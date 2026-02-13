@@ -9,9 +9,11 @@ export const profileSchema = z.object({
 export const passwordChangeSchema = z.object({
     currentPassword: z.string().min(1, "Current password is required"),
     newPassword: z.string()
-        .min(8, "Password must be at least 8 characters")
+        .min(12, "Password must be at least 12 characters")
         .regex(/[A-Z]/, "Must contain at least one uppercase letter")
-        .regex(/[0-9]/, "Must contain at least one number"),
+        .regex(/[a-z]/, "Must contain at least one lowercase letter")
+        .regex(/[0-9]/, "Must contain at least one number")
+        .regex(/[^A-Za-z0-9]/, "Must contain at least one special character"),
     confirmPassword: z.string().min(1, "Please confirm your password"),
 }).refine((data) => data.newPassword === data.confirmPassword, {
     message: "Passwords don't match",
@@ -19,8 +21,8 @@ export const passwordChangeSchema = z.object({
 });
 
 export const tagSchema = z.object({
-    name: z.string().min(1, "Tag name is required").max(30, "Tag name is too long"),
-    color: z.string().regex(/^#[0-9a-fA-F]{6}$/, "Must be a valid hex color"),
+    name: z.string().trim().min(1, "Tag name is required").max(30, "Tag name is too long"),
+    color: z.string().regex(/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/, "Must be a valid hex color"),
 });
 
 export type ProfileFormValues = z.infer<typeof profileSchema>;
