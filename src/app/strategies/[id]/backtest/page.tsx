@@ -49,6 +49,7 @@ const mockBacktest: BacktestResult = {
     runDate: new Date()
 };
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const CustomTooltip = ({ active, payload, label }: any) => {
     if (active && payload && payload.length) {
         return (
@@ -70,8 +71,8 @@ export default function BacktestPage() {
         <AppShell>
             <div className="flex items-center justify-between space-y-2 mb-8">
                 <div className="flex items-center gap-4">
-                    <Button variant="ghost" size="icon" asChild>
-                        <Link href="/strategies"><ArrowLeft className="h-4 w-4" /></Link>
+                    <Button variant="ghost" size="icon" asChild aria-label="Back to Strategies">
+                        <Link href="/strategies"><ArrowLeft className="h-4 w-4" aria-hidden="true" /></Link>
                     </Button>
                     <div>
                         <h2 className="text-3xl font-bold tracking-tight">Backtest Results</h2>
