@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { ArrowLeft, Download, RefreshCw } from "lucide-react";
 import Link from "next/link";
 import { BacktestResult } from "@/types/strategy";
-import { ResponsiveContainer, XAxis, YAxis, CartesianGrid, Tooltip, AreaChart, Area } from 'recharts';
+import { ResponsiveContainer, XAxis, YAxis, CartesianGrid, Tooltip, AreaChart, Area, TooltipProps } from 'recharts';
 
 // Mock Data
 const mockBacktest: BacktestResult = {
@@ -49,13 +49,12 @@ const mockBacktest: BacktestResult = {
     runDate: new Date()
 };
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const CustomTooltip = ({ active, payload, label }: any) => {
+const CustomTooltip = ({ active, payload, label }: TooltipProps<number, string>) => {
     if (active && payload && payload.length) {
         return (
             <div className="bg-background border rounded p-2 shadow-md">
                 <p className="label text-sm font-medium">{new Date(label).toLocaleDateString()}</p>
-                <p className="text-sm text-primary">Equity: ${payload[0].value.toFixed(2)}</p>
+                <p className="text-sm text-primary">Equity: ${payload[0].value?.toFixed(2)}</p>
             </div>
         );
     }
