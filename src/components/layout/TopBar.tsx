@@ -18,7 +18,7 @@ export function TopBar({ onSearchClick }: TopBarProps) {
                         className="w-full max-w-md justify-start text-muted-foreground border-border hover:border-primary/50 transition-colors"
                         onClick={onSearchClick}
                     >
-                        <Search className="mr-2 h-4 w-4" />
+                        <Search className="mr-2 h-4 w-4" aria-hidden="true" />
                         <span className="hidden sm:inline">Search or jump to...</span>
                         <span className="sm:hidden">Search...</span>
                         <kbd className="pointer-events-none ml-auto hidden h-5 select-none items-center gap-1 rounded border border-border bg-muted px-1.5 font-mono text-[10px] font-medium opacity-100 sm:flex">
@@ -28,11 +28,17 @@ export function TopBar({ onSearchClick }: TopBarProps) {
                 </div>
 
                 <div className="flex items-center gap-3">
-                    <Button variant="ghost" size="icon" className="relative hover:bg-accent">
-                        <Bell className="h-5 w-5" />
+                    <Button
+                        variant="ghost"
+                        size="icon"
+                        className="relative hover:bg-accent"
+                    >
+                        <span className="sr-only">Notifications</span>
+                        <Bell className="h-5 w-5" aria-hidden="true" />
                         <Badge className="absolute -right-1 -top-1 h-5 w-5 rounded-full bg-primary p-0 text-xs text-primary-foreground border-0 flex items-center justify-center">
                             3
                         </Badge>
+                        <span className="sr-only">unread</span>
                     </Button>
                 </div>
             </div>
