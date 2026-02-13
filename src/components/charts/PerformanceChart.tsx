@@ -1,8 +1,7 @@
 'use client';
 
-import { Card } from '@/components/ui/card';
-import { AreaChart, Area, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { TrendingUp, TrendingDown } from 'lucide-react';
+import { memo } from 'react';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
 interface PerformanceChartProps {
     data: Array<{
@@ -13,7 +12,8 @@ interface PerformanceChartProps {
     title?: string;
 }
 
-export function PerformanceChart({ data, title = 'Performance' }: PerformanceChartProps) {
+// Optimized: Wrapped in React.memo to prevent unnecessary re-renders when parent state updates
+export const PerformanceChart = memo(function PerformanceChart({ data, title = 'Performance' }: PerformanceChartProps) {
     return (
         <>
             {title && (
@@ -102,4 +102,4 @@ export function PerformanceChart({ data, title = 'Performance' }: PerformanceCha
             </ResponsiveContainer>
         </>
     );
-}
+});
