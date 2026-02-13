@@ -52,33 +52,35 @@ src/
 ├── app/                          # Next.js App Router pages
 │   ├── layout.tsx                # Root layout with AppShell
 │   ├── page.tsx                  # Dashboard (/)
-│   ├── portfolios/[id]/          # Portfolio Detail
+│   ├── analytics/                # Analytics features
+│   ├── execution/                # Execution & Orders
 │   ├── performance/              # Performance Deep Dive
-│   ├── accounts/                 # Account Linking
-│   ├── research/
-│   │   ├── theses/[id]/          # Thesis Workspace
-│   │   └── journal/              # Decision Journal
-│   ├── strategies/
-│   │   ├── builder/              # Strategy Builder (7-step wizard)
-│   │   └── [id]/backtests/[backtestId]/ # Backtest Results
-│   └── execution/
-│       ├── planner/              # Order Planner
-│       └── active/               # Execution Monitor
+│   ├── portfolios/               # Portfolio Management
+│   ├── research/                 # Research & Thesis
+│   ├── settings/                 # App Settings
+│   ├── strategies/               # Strategy Builder & Backtesting
+│   ├── trade-analytics/          # Trade Analysis
+│   └── trade-log/                # Trade Logging
 ├── components/
-│   ├── layout/                   # AppShell, Sidebar, TopBar, PageHeader, Panel, SplitView
-│   ├── navigation/               # SideNav, TabNav, Breadcrumbs, CommandPalette
-│   ├── data-display/             # StatCard, MetricTile, DataTable, SparklineCell, etc.
-│   ├── charts/                   # TimeSeriesChart, AllocationDonut, DrawdownChart, etc.
-│   ├── forms/                    # SearchInput, FilterBar, DateRangePicker, RuleBuilder, etc.
-│   ├── feedback/                 # Toast, Alert, EmptyState, LoadingSkeleton, etc.
-│   └── specialized/              # ThesisCard, JournalEntry, StrategyLifecycleBadge, etc.
+│   ├── charts/                   # Chart components
+│   ├── dashboard/                # Dashboard specific components
+│   ├── data-display/             # Reusable data display components
+│   ├── execution/                # Execution features components
+│   ├── layout/                   # Layout components (AppShell, etc.)
+│   ├── navigation/               # Navigation components
+│   ├── portfolios/               # Portfolio features components
+│   ├── providers/                # Context providers
+│   ├── research/                 # Research features components
+│   ├── settings/                 # Settings components
+│   ├── strategies/               # Strategy features components
+│   └── ui/                       # shadcn/ui primitives
 ├── lib/
+│   ├── hooks/                    # Custom hooks
 │   ├── stores/                   # Zustand stores
-│   ├── hooks/                    # Custom hooks (TanStack Query wrappers, etc.)
-│   ├── utils/                    # Formatters, calculations, helpers
+│   ├── utils/                    # Helper functions
 │   └── validators/               # Zod schemas
-├── types/                        # TypeScript interfaces (50+ defined in spec)
-└── mock-data/                    # Static mock data for prototype
+├── types/                        # TypeScript interfaces
+└── mock-data/                    # Static mock data
 ```
 
 ## Core Principles
