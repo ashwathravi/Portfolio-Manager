@@ -227,7 +227,7 @@ export function AppSidebar() {
         <div className="flex h-screen w-64 flex-col border-r border-border bg-card/50 backdrop-blur-xl fixed left-0 top-0 z-40">
             <div className="border-b border-border p-6">
                 <div className="flex items-center gap-3">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-emerald-800 shadow-lg shadow-primary/20">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-green-800 shadow-lg shadow-primary/20">
                         <TrendingUp className="h-6 w-6 text-primary-foreground" />
                     </div>
                     <div>

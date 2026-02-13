@@ -7,6 +7,8 @@ import { NotificationPreferences } from "@/components/settings/NotificationPrefe
 import { SecuritySettings } from "@/components/settings/SecuritySettings";
 import { DataManagement } from "@/components/settings/DataManagement";
 import { User, Bell, Shield, Database, Palette, Link as LinkIcon, Tag } from "lucide-react";
+import { AppearanceSettings } from "@/components/settings/AppearanceSettings";
+import { TagsManager } from "@/components/settings/TagsManager";
 
 export default function SettingsPage() {
     return (
@@ -88,10 +90,7 @@ export default function SettingsPage() {
                 </TabsContent>
 
                 <TabsContent value="appearance" className="space-y-6">
-                    <div className="p-4 border rounded-lg bg-card text-card-foreground shadow-sm">
-                        <h3 className="text-lg font-medium">Appearance Settings</h3>
-                        <p className="text-muted-foreground">Coming soon...</p>
-                    </div>
+                    <AppearanceSettings />
                 </TabsContent>
 
                 <TabsContent value="accounts" className="space-y-6">
@@ -99,10 +98,7 @@ export default function SettingsPage() {
                 </TabsContent>
 
                 <TabsContent value="tags" className="space-y-6">
-                    <div className="p-4 border rounded-lg bg-card text-card-foreground shadow-sm">
-                        <h3 className="text-lg font-medium">Tags Management</h3>
-                        <p className="text-muted-foreground">Coming soon...</p>
-                    </div>
+                    <TagsManager />
                 </TabsContent>
             </Tabs>
         </div>
