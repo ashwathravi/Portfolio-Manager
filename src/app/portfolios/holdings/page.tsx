@@ -12,6 +12,7 @@ import {
     SelectTrigger,
     SelectValue,
 } from '@/components/ui/select';
+import { SparklineCell } from '@/components/data-display/SparklineCell';
 
 interface Holding {
     id: string;
@@ -305,22 +306,12 @@ function CurrentHoldingsContent() {
                                     </td>
                                     <td className="py-4 px-4">
                                         <div className="flex items-center justify-center">
-                                            <svg width="80" height="30" className="text-primary">
-                                                <polyline
-                                                    fill="none"
-                                                    stroke="currentColor"
-                                                    strokeWidth="2"
-                                                    points={holding.trend
-                                                        .map((value, i) => {
-                                                            const x = (i / (holding.trend.length - 1)) * 80;
-                                                            const min = Math.min(...holding.trend);
-                                                            const max = Math.max(...holding.trend);
-                                                            const y = 25 - ((value - min) / (max - min)) * 20;
-                                                            return `${x},${y}`;
-                                                        })
-                                                        .join(' ')}
-                                                />
-                                            </svg>
+                                            <SparklineCell
+                                                data={holding.trend}
+                                                width={80}
+                                                height={30}
+                                                color="primary"
+                                            />
                                         </div>
                                     </td>
                                     <td className="py-4 px-4">
