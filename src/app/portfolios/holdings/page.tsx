@@ -3,7 +3,7 @@
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Filter, Download, Plus, X, ChevronRight } from 'lucide-react';
-import { useState } from 'react';
+import { useState, useCallback, memo, useMemo, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
     Select,
@@ -12,6 +12,7 @@ import {
     SelectTrigger,
     SelectValue,
 } from '@/components/ui/select';
+import { calculateSparklinePoints } from '@/lib/charts';
 
 interface Holding {
     id: string;
@@ -66,7 +67,58 @@ const accounts = ['All Accounts', 'Fidelity Individual', 'Vanguard Roth IRA', 'R
 const strategies = ['All Strategies', 'Growth Tech', 'Value Investing', 'Momentum Trading'];
 const tags = ['All Tags', 'High Conviction', 'VCP Setup', 'Earnings Play', 'FOMO'];
 
-import { Suspense } from 'react';
+// Optimized: Memoized row component to prevent unnecessary re-renders when parent filters change but this item is still visible
+const HoldingRow = memo(({ holding, onDoubleClick }: { holding: Holding; onDoubleClick: (symbol: string) => void }) => {
+    // Optimized: Calculate points once using O(M) algorithm instead of O(M^2) inside render loop
+    const trendPoints = useMemo(() => calculateSparklinePoints(holding.trend, 80, 30), [holding.trend]);
+
+    return (
+        <tr
+            className="border-t border-border hover:bg-accent/30 transition-colors cursor-pointer"
+            onDoubleClick={() => onDoubleClick(holding.symbol)}
+        >
+            <td className="py-4 px-4">
+                <div className="flex items-center gap-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10">
+                        <span className="text-xs font-bold">{holding.symbol.slice(0, 2)}</span>
+                    </div>
+                    <div>
+                        <p className="font-medium">{holding.name}</p>
+                        <p className="text-sm text-muted-foreground">{holding.symbol}</p>
+                    </div>
+                </div>
+            </td>
+            <td className="py-4 px-4 text-right font-medium">${holding.price.toFixed(2)}</td>
+            <td className="py-4 px-4 text-right">{holding.quantity}</td>
+            <td className="py-4 px-4 text-right font-medium">${holding.totalValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+            <td className="py-4 px-4 text-right">${holding.avgCost.toFixed(2)}</td>
+            <td className="py-4 px-4 text-right">
+                <div>
+                    <p className="font-medium text-primary">+${holding.totalReturn.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                    <p className="text-xs text-primary">+{holding.returnPercentage}%</p>
+                </div>
+            </td>
+            <td className="py-4 px-4">
+                <div className="flex items-center justify-center">
+                    <svg width="80" height="30" className="text-primary">
+                        <polyline
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            points={trendPoints}
+                        />
+                    </svg>
+                </div>
+            </td>
+            <td className="py-4 px-4">
+                <Button size="sm" className="rounded-full w-10 h-10 p-0">
+                    <Plus className="h-5 w-5" />
+                </Button>
+            </td>
+        </tr>
+    );
+});
+HoldingRow.displayName = 'HoldingRow';
 
 function CurrentHoldingsContent() {
     const router = useRouter();
@@ -118,9 +170,10 @@ function CurrentHoldingsContent() {
         (filter, index) => filter !== ['All Accounts', 'All Strategies', 'All Tags'][index]
     ).length;
 
-    const handleHoldingDoubleClick = (symbol: string) => {
+    // Optimized: Wrapped in useCallback to ensure stable function reference for memoized child
+    const handleHoldingDoubleClick = useCallback((symbol: string) => {
         router.push(`/portfolios/detail/${symbol}`);
-    };
+    }, [router]);
 
     // Determine if filters are active
     const hasActiveFilters = activeFiltersCount > 0;
@@ -277,58 +330,11 @@ function CurrentHoldingsContent() {
                         </thead>
                         <tbody>
                             {filteredHoldings.map((holding) => (
-                                <tr
+                                <HoldingRow
                                     key={holding.id}
-                                    className="border-t border-border hover:bg-accent/30 transition-colors cursor-pointer"
-                                    onDoubleClick={() => handleHoldingDoubleClick(holding.symbol)}
-                                >
-                                    <td className="py-4 px-4">
-                                        <div className="flex items-center gap-3">
-                                            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10">
-                                                <span className="text-xs font-bold">{holding.symbol.slice(0, 2)}</span>
-                                            </div>
-                                            <div>
-                                                <p className="font-medium">{holding.name}</p>
-                                                <p className="text-sm text-muted-foreground">{holding.symbol}</p>
-                                            </div>
-                                        </div>
-                                    </td>
-                                    <td className="py-4 px-4 text-right font-medium">${holding.price.toFixed(2)}</td>
-                                    <td className="py-4 px-4 text-right">{holding.quantity}</td>
-                                    <td className="py-4 px-4 text-right font-medium">${holding.totalValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                                    <td className="py-4 px-4 text-right">${holding.avgCost.toFixed(2)}</td>
-                                    <td className="py-4 px-4 text-right">
-                                        <div>
-                                            <p className="font-medium text-primary">+${holding.totalReturn.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
-                                            <p className="text-xs text-primary">+{holding.returnPercentage}%</p>
-                                        </div>
-                                    </td>
-                                    <td className="py-4 px-4">
-                                        <div className="flex items-center justify-center">
-                                            <svg width="80" height="30" className="text-primary">
-                                                <polyline
-                                                    fill="none"
-                                                    stroke="currentColor"
-                                                    strokeWidth="2"
-                                                    points={holding.trend
-                                                        .map((value, i) => {
-                                                            const x = (i / (holding.trend.length - 1)) * 80;
-                                                            const min = Math.min(...holding.trend);
-                                                            const max = Math.max(...holding.trend);
-                                                            const y = 25 - ((value - min) / (max - min)) * 20;
-                                                            return `${x},${y}`;
-                                                        })
-                                                        .join(' ')}
-                                                />
-                                            </svg>
-                                        </div>
-                                    </td>
-                                    <td className="py-4 px-4">
-                                        <Button size="sm" className="rounded-full w-10 h-10 p-0">
-                                            <Plus className="h-5 w-5" />
-                                        </Button>
-                                    </td>
-                                </tr>
+                                    holding={holding}
+                                    onDoubleClick={handleHoldingDoubleClick}
+                                />
                             ))}
                         </tbody>
                     </table>
