@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { Card } from '@/components/ui/card';
 import { TrendingUp, TrendingDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -8,7 +9,9 @@ interface PortfolioCardProps {
     onClick?: () => void;
 }
 
-export function PortfolioCard({ portfolio, onClick }: PortfolioCardProps) {
+// Optimized: Wrapped in React.memo to prevent unnecessary re-renders when parent state updates.
+// This component is used in a list in Dashboard, which updates frequently on user interaction.
+export const PortfolioCard = memo(function PortfolioCard({ portfolio, onClick }: PortfolioCardProps) {
     const isPositive = portfolio.todayChangePercent > 0;
 
     return (
@@ -77,4 +80,4 @@ export function PortfolioCard({ portfolio, onClick }: PortfolioCardProps) {
             </div>
         </Card>
     );
-}
+});
