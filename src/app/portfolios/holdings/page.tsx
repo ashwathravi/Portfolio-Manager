@@ -12,7 +12,7 @@ import {
     SelectTrigger,
     SelectValue,
 } from '@/components/ui/select';
-import { calculateSparklinePoints } from '@/lib/charts';
+import { SparklineCell } from '@/components/data-display/SparklineCell';
 
 interface Holding {
     id: string;
@@ -69,9 +69,6 @@ const tags = ['All Tags', 'High Conviction', 'VCP Setup', 'Earnings Play', 'FOMO
 
 // Optimized: Memoized row component to prevent unnecessary re-renders when parent filters change but this item is still visible
 const HoldingRow = memo(({ holding, onDoubleClick }: { holding: Holding; onDoubleClick: (symbol: string) => void }) => {
-    // Optimized: Calculate points once using O(M) algorithm instead of O(M^2) inside render loop
-    const trendPoints = useMemo(() => calculateSparklinePoints(holding.trend, 80, 30), [holding.trend]);
-
     return (
         <tr
             className="border-t border-border hover:bg-accent/30 transition-colors cursor-pointer"
@@ -100,14 +97,12 @@ const HoldingRow = memo(({ holding, onDoubleClick }: { holding: Holding; onDoubl
             </td>
             <td className="py-4 px-4">
                 <div className="flex items-center justify-center">
-                    <svg width="80" height="30" className="text-primary">
-                        <polyline
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                            points={trendPoints}
-                        />
-                    </svg>
+                    <SparklineCell
+                        data={holding.trend}
+                        width={80}
+                        height={30}
+                        color="primary"
+                    />
                 </div>
             </td>
             <td className="py-4 px-4">
