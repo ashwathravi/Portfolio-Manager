@@ -3,6 +3,7 @@ import { Card } from '@/components/ui/card';
 import { TrendingUp, TrendingDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { Portfolio } from '@/lib/mockData';
+import { KeyboardEvent } from 'react';
 
 interface PortfolioCardProps {
     portfolio: Portfolio;
@@ -14,13 +15,24 @@ interface PortfolioCardProps {
 export const PortfolioCard = memo(function PortfolioCard({ portfolio, onClick }: PortfolioCardProps) {
     const isPositive = portfolio.todayChangePercent > 0;
 
+    const handleKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+        if (onClick && (e.key === 'Enter' || e.key === ' ')) {
+            e.preventDefault();
+            onClick();
+        }
+    };
+
     return (
         <Card
             className={cn(
-                'group cursor-pointer p-6 transition-all hover:shadow-lg border-border hover:border-primary/40',
+                'group cursor-pointer p-6 transition-all hover:shadow-lg border-border hover:border-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
                 onClick && 'active:scale-[0.98]'
             )}
             onClick={onClick}
+            role={onClick ? "button" : undefined}
+            tabIndex={onClick ? 0 : undefined}
+            onKeyDown={onClick ? handleKeyDown : undefined}
+            aria-label={onClick ? `View ${portfolio.name} portfolio details` : undefined}
         >
             <div className="space-y-4">
                 <div className="flex items-start justify-between">
@@ -50,10 +62,11 @@ export const PortfolioCard = memo(function PortfolioCard({ portfolio, onClick }:
                                 )}
                             >
                                 {isPositive ? (
-                                    <TrendingUp className="h-3 w-3" />
+                                    <TrendingUp className="h-3 w-3" aria-hidden="true" />
                                 ) : (
-                                    <TrendingDown className="h-3 w-3" />
+                                    <TrendingDown className="h-3 w-3" aria-hidden="true" />
                                 )}
+                                <span className="sr-only">{isPositive ? 'Up by ' : 'Down by '}</span>
                                 {isPositive ? '+' : ''}{portfolio.todayChangePercent.toFixed(2)}%
                             </div>
                             <p className="text-xs text-muted-foreground mt-0.5">
@@ -69,6 +82,7 @@ export const PortfolioCard = memo(function PortfolioCard({ portfolio, onClick }:
                                     portfolio.returnPercent > 0 ? 'text-primary' : 'text-destructive'
                                 )}
                             >
+                                <span className="sr-only">{portfolio.returnPercent > 0 ? 'Up by ' : 'Down by '}</span>
                                 {portfolio.returnPercent > 0 ? '+' : ''}{portfolio.returnPercent.toFixed(2)}%
                             </div>
                             <p className="text-xs text-muted-foreground mt-0.5">
