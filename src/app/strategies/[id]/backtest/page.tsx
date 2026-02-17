@@ -49,7 +49,8 @@ const mockBacktest: BacktestResult = {
     runDate: new Date()
 };
 
-const CustomTooltip = ({ active, payload, label }: TooltipProps<number, string>) => {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const CustomTooltip = ({ active, payload, label }: any) => {
     if (active && payload && payload.length) {
         return (
             <div className="bg-background border rounded p-2 shadow-md">
