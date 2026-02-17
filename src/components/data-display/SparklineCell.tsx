@@ -1,13 +1,14 @@
 "use client";
 
-import { Line, LineChart, ResponsiveContainer, YAxis } from "recharts";
+import { useMemo } from "react";
 import { cn } from "@/lib/utils";
 
 interface SparklineCellProps {
     data: number[];
-    color?: "success" | "danger" | "neutral";
+    color?: "success" | "danger" | "neutral" | "primary";
     height?: number; // default 32px
     width?: number; // default 120px
+    className?: string;
     showValue?: boolean;
 }
 
@@ -16,39 +17,56 @@ export function SparklineCell({
     color = "neutral",
     height = 32,
     width = 120,
+    className,
 }: SparklineCellProps) {
-    // Determine color based on trend if not explicitly set
-    // Or just use the prop. Spec says "Color coded by trend (green/red/gray)"
-    // Let's infer trend from first vs last if color is 'neutral' and we want auto-coloring,
-    // but the interface implies explicit control or we can compute it.
-    // For now, let's map the 'color' prop to actual colors.
+    const points = useMemo(() => {
+        if (!data || data.length < 2) return "";
+
+        const min = Math.min(...data);
+        const max = Math.max(...data);
+        const range = max - min || 1;
+
+        // Add padding to prevent lines from touching the edges (15% top/bottom)
+        const padding = height * 0.15;
+        const drawHeight = height - (padding * 2);
+
+        return data
+            .map((val, i) => {
+                const x = (i / (data.length - 1)) * width;
+                // Invert Y axis: 0 is top, height is bottom
+                // Value: min -> height-padding, max -> padding
+                const y = (height - padding) - ((val - min) / range) * drawHeight;
+                return `${x},${y}`;
+            })
+            .join(" ");
+    }, [data, height, width]);
 
     const first = data[0] || 0;
     const last = data[data.length - 1] || 0;
     const isPositive = last >= first;
 
-    let strokeColor = "#6b7280"; // neutral-500
-    if (color === "success" || (color === "neutral" && isPositive)) strokeColor = "#10b981"; // success-500
-    if (color === "danger" || (color === "neutral" && !isPositive)) strokeColor = "#ef4444"; // danger-500
-
-    const chartData = data.map((val, i) => ({ i, val }));
+    let strokeColorClass = "text-muted-foreground";
+    if (color === "success" || (color === "neutral" && isPositive)) strokeColorClass = "text-emerald-500";
+    if (color === "danger" || (color === "neutral" && !isPositive)) strokeColorClass = "text-red-500";
+    if (color === "primary") strokeColorClass = "text-primary";
 
     return (
-        <div className="flex items-center" style={{ width, height }}>
-            <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={chartData}>
-                    <Line
-                        type="monotone"
-                        dataKey="val"
-                        stroke={strokeColor}
-                        strokeWidth={2}
-                        dot={false}
-                        isAnimationActive={false} // Disable animation for table performance
-                    />
-                    {/* Hidden YAxis to auto-scale nicely */}
-                    <YAxis domain={["dataMin", "dataMax"]} hide />
-                </LineChart>
-            </ResponsiveContainer>
-        </div>
+        <svg
+            width={width}
+            height={height}
+            className={cn(strokeColorClass, className)}
+            viewBox={`0 0 ${width} ${height}`}
+            fill="none"
+            xmlns="http://www.w3.org/2000/svg"
+        >
+            <polyline
+                points={points}
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+            />
+        </svg>
     );
 }
