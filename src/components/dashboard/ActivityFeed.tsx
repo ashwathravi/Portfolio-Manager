@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { Card } from '@/components/ui/card';
 import { ArrowUpRight, ArrowDownLeft, DollarSign, TrendingUp } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -24,7 +25,9 @@ const transactionColors = {
     withdrawal: 'text-red-600 bg-red-100',
 } as const;
 
-export function ActivityFeed({ transactions, title = 'Recent Activity' }: ActivityFeedProps) {
+// Optimized: Wrapped in React.memo to prevent unnecessary re-renders when parent state updates.
+// The component iterates over a list of transactions, and memoization ensures this work is skipped unless props change.
+export const ActivityFeed = memo(function ActivityFeed({ transactions, title = 'Recent Activity' }: ActivityFeedProps) {
     return (
         <Card className="p-6">
             <h3 className="mb-4 font-semibold">{title}</h3>
@@ -68,4 +71,4 @@ export function ActivityFeed({ transactions, title = 'Recent Activity' }: Activi
             </div>
         </Card>
     );
-}
+});
