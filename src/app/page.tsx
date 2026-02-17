@@ -4,6 +4,7 @@ import { StatCard } from '@/components/data-display/StatCard';
 import { PortfolioCard } from '@/components/portfolios/PortfolioCard';
 import { PerformanceChart } from '@/components/charts/PerformanceChart';
 import { ActivityFeed } from '@/components/dashboard/ActivityFeed';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Wallet, TrendingUp, DollarSign, Activity, Calendar, Plus } from 'lucide-react';
 import { useState } from 'react';
 import {
@@ -160,26 +161,26 @@ export default function Dashboard() {
           <div className="flex items-center justify-between mb-4">
             <h3 className="font-bold text-lg">Asset Allocation</h3>
             {/* Toggle Buttons */}
-            <div className="flex bg-accent rounded-lg p-1 border border-border">
-              <button
-                onClick={() => setAllocationView('account')}
-                className={`px-2 py-1 rounded-md text-xs font-medium transition-colors ${allocationView === 'account'
-                  ? 'bg-primary/20 text-primary font-bold shadow-sm'
-                  : 'text-muted-foreground hover:text-foreground'
-                  }`}
-              >
-                Account
-              </button>
-              <button
-                onClick={() => setAllocationView('theme')}
-                className={`px-2 py-1 rounded-md text-xs font-medium transition-colors ${allocationView === 'theme'
-                  ? 'bg-primary/20 text-primary font-bold shadow-sm'
-                  : 'text-muted-foreground hover:text-foreground'
-                  }`}
-              >
-                Theme
-              </button>
-            </div>
+            <Tabs
+              value={allocationView}
+              onValueChange={(v) => setAllocationView(v as 'account' | 'theme')}
+              className="w-auto"
+            >
+              <TabsList className="bg-accent rounded-lg p-1 border border-border h-auto">
+                <TabsTrigger
+                  value="account"
+                  className="h-auto px-2 py-1 text-xs rounded-md hover:text-foreground data-[state=active]:bg-primary/20 data-[state=active]:text-primary data-[state=active]:font-bold data-[state=active]:shadow-sm"
+                >
+                  Account
+                </TabsTrigger>
+                <TabsTrigger
+                  value="theme"
+                  className="h-auto px-2 py-1 text-xs rounded-md hover:text-foreground data-[state=active]:bg-primary/20 data-[state=active]:text-primary data-[state=active]:font-bold data-[state=active]:shadow-sm"
+                >
+                  Theme
+                </TabsTrigger>
+              </TabsList>
+            </Tabs>
           </div>
           <div className="flex-1 flex flex-col items-center justify-center gap-6">
             {/* CSS Donut Chart */}
