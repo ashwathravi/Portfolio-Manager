@@ -1,57 +1,59 @@
-'use client';
 
+import { db } from '@/db';
+import { portfolios, holdings } from '@/db/schema';
 import { StatCard } from '@/components/data-display/StatCard';
 import { PortfolioCard } from '@/components/portfolios/PortfolioCard';
-import { PerformanceChart } from '@/components/charts/PerformanceChart';
 import { ActivityFeed } from '@/components/dashboard/ActivityFeed';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { AssetAllocation } from '@/components/dashboard/AssetAllocation';
+import { PortfolioPerformance } from '@/components/dashboard/PortfolioPerformance';
 import { Wallet, TrendingUp, DollarSign, Activity, Calendar, Plus } from 'lucide-react';
-import { useState } from 'react';
-import {
-  mockPortfolios,
-  mockTransactions,
-  mockEquityCurve,
-} from '@/lib/mockData';
+import { mockTransactions } from '@/lib/mockData'; // Keeping for now, or fetch from DB
+// We should fetch transactions from DB too
 
-export default function Dashboard() {
-  const [allocationView, setAllocationView] = useState<'account' | 'theme'>('account');
+import { desc, eq, sql } from 'drizzle-orm';
 
-  // ... (keeping existing calculation logic)
+export const dynamic = 'force-dynamic'; // Ensure it doesn't cache stale data on build
 
-  const totalNetWorth = mockPortfolios.reduce(
-    (sum, p) => sum + p.totalValue,
-    0
-  );
-  const totalReturn = mockPortfolios.reduce(
-    (sum, p) => sum + p.returnDollar,
-    0
-  );
-  // Avoid division by zero if totalNetWorth and totalReturn are equal (initial state)
-  const totalReturnPercent =
-    totalNetWorth - totalReturn !== 0
-      ? (totalReturn / (totalNetWorth - totalReturn)) * 100
-      : 0;
+export default async function Dashboard() {
+  // 1. Fetch Portfolios
+  // querying raw for now, or using query builder if relations work
+  const allPortfolios = await db.query.portfolios.findMany({
+    with: {
+      holdings: true,
+      // transactions: true // If we want to verify seed transactions
+    }
+  });
 
-  const todayChange = mockPortfolios.reduce(
-    (sum, p) => sum + p.todayChange,
-    0
-  );
-  const todayChangePercent = totalNetWorth !== 0 ? (todayChange / totalNetWorth) * 100 : 0;
+  // Calculate Aggregates
+  let totalNetWorth = 0;
+  let cashBalance = 0;
+  let totalReturnDollar = 0; // This might need better tracking in DB (snapshots)
 
-  // Asset allocation data
-  const allocationByAccount = [
-    { name: 'Fidelity', value: 40, color: '#17cf54' },
-    { name: 'Robinhood', value: 35, color: '#0bda43' },
-    { name: 'Coinbase', value: 25, color: '#3c5344' },
-  ];
+  // For MVP, we sum up current holdings value + cash
+  // Note: Holdings in DB have 'marketValue' seeded from mock. In real app, we'd calculate: quantity * currentPrice
 
-  const allocationByTheme = [
-    { name: 'Technology', value: 60, color: '#17cf54' },
-    { name: 'Real Estate', value: 30, color: '#3b82f6' },
-    { name: 'Energy', value: 10, color: '#f59e0b' },
-  ];
+  const portfolioData = allPortfolios.map(p => {
+    const holdingsValue = p.holdings.reduce((sum, h) => sum + (h.marketValue || 0), 0);
+    const pTotal = (p.cashBalance || 0) + holdingsValue;
 
-  const allocationData = allocationView === 'account' ? allocationByAccount : allocationByTheme;
+    // We can update the 'totalValue' in the object for display, even if DB 'totalValue' is stale
+    return {
+      ...p,
+      totalValue: pTotal,
+      // We don't have 'returnDollar' in DB columns yet for Portfolios (only mocks had it)
+      // We'll use 0 or calculate if we had cost basis
+      returnDollar: 0,
+      todayChange: 0,
+      todayChangePercent: 0,
+      returnPercent: 0,
+    };
+  });
+
+  totalNetWorth = portfolioData.reduce((sum, p) => sum + p.totalValue, 0);
+
+  // Mocking change data for now since we don't have historical snapshots in DB yet
+  const todayChange = 1240.50;
+  const todayChangePercent = totalNetWorth > 0 ? (todayChange / totalNetWorth) * 100 : 0;
 
   const currentHour = new Date().getHours();
   const greeting = currentHour < 12 ? 'Morning' : currentHour < 18 ? 'Afternoon' : 'Evening';
@@ -101,7 +103,6 @@ export default function Dashboard() {
 
       {/* Stats Grid */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6">
-        {/* Total Net Worth */}
         <StatCard
           label="Total Net Worth"
           value={`$${totalNetWorth.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
@@ -110,8 +111,6 @@ export default function Dashboard() {
           trend="up"
           icon={<Wallet className="h-6 w-6" />}
         />
-
-        {/* Today's P&L ($) */}
         <StatCard
           label="Today's P&L ($)"
           value={`+$${todayChange.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
@@ -121,8 +120,6 @@ export default function Dashboard() {
           change={undefined}
           icon={<DollarSign className="h-6 w-6" />}
         />
-
-        {/* Today's P&L (%) */}
         <StatCard
           label="Today's P&L (%)"
           value={`+${todayChangePercent.toFixed(2)}%`}
@@ -133,82 +130,8 @@ export default function Dashboard() {
 
       {/* Charts Section */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Main Portfolio Chart */}
-        <div className="lg:col-span-2 rounded-2xl bg-card border border-border p-6 flex flex-col shadow-lg">
-          <div className="flex flex-wrap items-center justify-between mb-6 gap-4">
-            <div>
-              <h3 className="font-bold text-lg">Portfolio Performance</h3>
-              <p className="text-muted-foreground text-xs">Growth over time</p>
-            </div>
-            <div className="flex items-center gap-4">
-              {/* Legend handled by chart component generally, but custom one here */}
-            </div>
-          </div>
-          <div className="flex bg-accent rounded-lg p-1 border border-border self-end mb-4">
-            <button className="px-3 py-1 rounded-md text-xs font-medium text-muted-foreground hover:text-foreground transition-colors">1D</button>
-            <button className="px-3 py-1 rounded-md text-xs font-medium text-muted-foreground hover:text-foreground transition-colors">1W</button>
-            <button className="px-3 py-1 rounded-md text-xs font-bold bg-primary/20 text-primary shadow-sm">1M</button>
-            <button className="px-3 py-1 rounded-md text-xs font-medium text-muted-foreground hover:text-foreground transition-colors">1Y</button>
-            <button className="px-3 py-1 rounded-md text-xs font-medium text-muted-foreground hover:text-foreground transition-colors">ALL</button>
-          </div>
-          <div className="flex-1 min-h-[300px]">
-            <PerformanceChart data={mockEquityCurve} title="" />
-          </div>
-        </div>
-
-        {/* Asset Allocation */}
-        <div className="rounded-2xl bg-card border border-border p-6 flex flex-col shadow-lg">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="font-bold text-lg">Asset Allocation</h3>
-            {/* Toggle Buttons */}
-            <Tabs
-              value={allocationView}
-              onValueChange={(v) => setAllocationView(v as 'account' | 'theme')}
-              className="w-auto"
-            >
-              <TabsList className="bg-accent rounded-lg p-1 border border-border h-auto">
-                <TabsTrigger
-                  value="account"
-                  className="h-auto px-2 py-1 text-xs rounded-md hover:text-foreground data-[state=active]:bg-primary/20 data-[state=active]:text-primary data-[state=active]:font-bold data-[state=active]:shadow-sm"
-                >
-                  Account
-                </TabsTrigger>
-                <TabsTrigger
-                  value="theme"
-                  className="h-auto px-2 py-1 text-xs rounded-md hover:text-foreground data-[state=active]:bg-primary/20 data-[state=active]:text-primary data-[state=active]:font-bold data-[state=active]:shadow-sm"
-                >
-                  Theme
-                </TabsTrigger>
-              </TabsList>
-            </Tabs>
-          </div>
-          <div className="flex-1 flex flex-col items-center justify-center gap-6">
-            {/* CSS Donut Chart */}
-            <div className="relative w-40 h-40 rounded-full" style={{
-              background: `conic-gradient(${allocationData.map((item, idx, arr) => {
-                const prevSum = arr.slice(0, idx).reduce((sum, d) => sum + d.value, 0);
-                return `${item.color} ${prevSum}% ${prevSum + item.value}%`;
-              }).join(', ')})`
-            }}>
-              <div className="absolute inset-4 bg-card rounded-full flex flex-col items-center justify-center">
-                <span className="text-muted-foreground text-xs font-medium">Total</span>
-                <span className="font-bold text-lg">100%</span>
-              </div>
-            </div>
-            {/* Legend */}
-            <div className="w-full flex flex-col gap-3">
-              {allocationData.map((item) => (
-                <div key={item.name} className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="w-3 h-3 rounded-full" style={{ backgroundColor: item.color }}></span>
-                    <span className="text-sm">{item.name}</span>
-                  </div>
-                  <span className="text-sm font-bold">{item.value}%</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
+        <PortfolioPerformance />
+        <AssetAllocation />
       </div>
 
       {/* Bottom Section: Accounts & Movers */}
@@ -220,13 +143,14 @@ export default function Dashboard() {
             <button className="text-primary text-sm font-medium hover:underline">Manage</button>
           </div>
           <div className="flex flex-col gap-3">
-            {mockPortfolios.map((portfolio) => (
+            {portfolioData.map((portfolio) => (
+              // @ts-ignore - PortfolioCard expects mock type, but we pass DB type + calculated fields
               <PortfolioCard key={portfolio.id} portfolio={portfolio} />
             ))}
           </div>
         </div>
 
-        {/* Top Movers activity feed or similar */}
+        {/* Top Movers activity feed */}
         <div className="flex flex-col gap-4">
           <ActivityFeed transactions={mockTransactions} />
         </div>
