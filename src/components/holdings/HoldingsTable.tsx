@@ -4,7 +4,7 @@
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Filter, Download, Plus, X, ChevronRight } from 'lucide-react';
-import { useState, useCallback, memo } from 'react';
+import { useState, useCallback, memo, useMemo } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
     Select,
@@ -113,12 +113,14 @@ export function HoldingsTable({ holdings }: { holdings: Holding[] }) {
         return !!(searchParams.get('account') || searchParams.get('strategy') || searchParams.get('tag'));
     });
 
-    const filteredHoldings = holdings.filter((holding) => {
-        const accountMatch = selectedAccount === 'All Accounts' || holding.account === selectedAccount;
-        const strategyMatch = selectedStrategy === 'All Strategies' || holding.strategy === selectedStrategy;
-        const tagMatch = selectedTag === 'All Tags' || holding.tags.includes(selectedTag);
-        return accountMatch && strategyMatch && tagMatch;
-    });
+    const filteredHoldings = useMemo(() => {
+        return holdings.filter((holding) => {
+            const accountMatch = selectedAccount === 'All Accounts' || holding.account === selectedAccount;
+            const strategyMatch = selectedStrategy === 'All Strategies' || holding.strategy === selectedStrategy;
+            const tagMatch = selectedTag === 'All Tags' || holding.tags.includes(selectedTag);
+            return accountMatch && strategyMatch && tagMatch;
+        });
+    }, [holdings, selectedAccount, selectedStrategy, selectedTag]);
 
     const clearFilters = () => {
         setSelectedAccount('All Accounts');
@@ -143,8 +145,8 @@ export function HoldingsTable({ holdings }: { holdings: Holding[] }) {
     };
 
     // Calculate totals for dynamic metrics
-    const totalNetValue = filteredHoldings.reduce((sum, h) => sum + h.totalValue, 0);
-    const totalReturn = filteredHoldings.reduce((sum, h) => sum + h.totalReturn, 0);
+    const totalNetValue = useMemo(() => filteredHoldings.reduce((sum, h) => sum + h.totalValue, 0), [filteredHoldings]);
+    const totalReturn = useMemo(() => filteredHoldings.reduce((sum, h) => sum + h.totalReturn, 0), [filteredHoldings]);
 
     return (
         <div className="space-y-6 p-6">

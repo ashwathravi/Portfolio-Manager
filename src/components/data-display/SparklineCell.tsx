@@ -22,8 +22,12 @@ export function SparklineCell({
     const points = useMemo(() => {
         if (!data || data.length < 2) return "";
 
-        const min = Math.min(...data);
-        const max = Math.max(...data);
+        let min = Infinity;
+        let max = -Infinity;
+        for (const val of data) {
+            if (val < min) min = val;
+            if (val > max) max = val;
+        }
         const range = max - min || 1;
 
         // Add padding to prevent lines from touching the edges (15% top/bottom)
