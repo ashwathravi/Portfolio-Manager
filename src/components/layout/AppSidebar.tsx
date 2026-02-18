@@ -153,55 +153,60 @@ export function AppSidebar() {
         const isActive = pathname === item.href || (item.href !== '/' && pathname.startsWith(item.href));
         const isExpanded = expandedItems.includes(item.title);
         const hasChildren = item.children && item.children.length > 0;
+        const submenuId = hasChildren ? `submenu-${item.title.toLowerCase().replace(/\s+/g, '-')}` : undefined;
 
         return (
             <div key={item.title}>
-                <div
-                    className={cn(
-                        'flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors cursor-pointer',
-                        isActive && !hasChildren // Only highlight parent if it has no children or exact match
-                            ? 'bg-primary text-primary-foreground'
-                            : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
-                    )}
-                    onClick={(e) => {
-                        if (hasChildren) {
-                            e.preventDefault();
-                            toggleExpanded(item.title);
-                        }
-                    }}
-                >
-                    {/* If it has children, the parent click toggles expansion. If not, it's a link. */}
-                    {hasChildren ? (
-                        <>
-                            <item.icon className="h-4 w-4" />
-                            <span className="flex-1 text-left select-none">{item.title}</span>
-                            {item.badge && (
-                                <span className="rounded-full bg-primary px-2 py-0.5 text-xs text-primary-foreground">
-                                    {item.badge}
-                                </span>
+                {hasChildren ? (
+                    <button
+                        type="button"
+                        className={cn(
+                            'flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors cursor-pointer',
+                            'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+                        )}
+                        onClick={() => toggleExpanded(item.title)}
+                        aria-expanded={isExpanded}
+                        aria-controls={submenuId}
+                    >
+                        <item.icon className="h-4 w-4" />
+                        <span className="flex-1 text-left select-none">{item.title}</span>
+                        {item.badge && (
+                            <span className="rounded-full bg-primary px-2 py-0.5 text-xs text-primary-foreground">
+                                {item.badge}
+                            </span>
+                        )}
+                        <ChevronRight
+                            className={cn(
+                                'h-4 w-4 transition-transform',
+                                isExpanded && 'rotate-90'
                             )}
-                            <ChevronRight
-                                className={cn(
-                                    'h-4 w-4 transition-transform',
-                                    isExpanded && 'rotate-90'
-                                )}
-                            />
-                        </>
-                    ) : (
-                        <Link href={item.href} className="flex w-full items-center gap-3">
-                            <item.icon className="h-4 w-4" />
-                            <span className="flex-1 text-left">{item.title}</span>
-                            {item.badge && (
-                                <span className="rounded-full bg-primary px-2 py-0.5 text-xs text-primary-foreground">
-                                    {item.badge}
-                                </span>
-                            )}
-                        </Link>
-                    )}
-                </div>
+                        />
+                    </button>
+                ) : (
+                    <Link
+                        href={item.href}
+                        className={cn(
+                            'flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors',
+                            isActive
+                                ? 'bg-primary text-primary-foreground'
+                                : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+                        )}
+                    >
+                        <item.icon className="h-4 w-4" />
+                        <span className="flex-1 text-left">{item.title}</span>
+                        {item.badge && (
+                            <span className="rounded-full bg-primary px-2 py-0.5 text-xs text-primary-foreground">
+                                {item.badge}
+                            </span>
+                        )}
+                    </Link>
+                )}
 
                 {hasChildren && isExpanded && (
-                    <div className="ml-4 mt-1 space-y-1 border-l border-border pl-2">
+                    <div
+                        id={submenuId}
+                        className="ml-4 mt-1 space-y-1 border-l border-border pl-2"
+                    >
                         {item.children?.map((child) => (
                             <Link
                                 key={child.title}
