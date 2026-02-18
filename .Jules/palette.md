@@ -19,3 +19,8 @@
 
 **Learning:** Overriding default input focus styles (e.g., `focus-visible:ring-0`) removes accessibility.
 **Action:** Always provide an alternative focus indicator, such as `focus-within:ring-2` on the parent container, to maintain keyboard accessibility.
+
+## 2026-02-13 - [Semantic Navigation]
+
+**Learning:** Using `div` with `onClick` for expandable navigation menus is a common accessibility anti-pattern. It breaks keyboard navigation (Enter/Space) and screen reader support (no role/state).
+**Action:** Always replace interactive `div`s with semantic `<button type="button">` elements. Add `aria-expanded` and `aria-controls` to properly communicate the state and relationship to the controlled submenu.
