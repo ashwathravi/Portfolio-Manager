@@ -1,7 +1,8 @@
 import { z } from 'zod';
+import { safeText } from './common';
 
 export const profileSchema = z.object({
-    fullName: z.string().min(2, "Name must be at least 2 characters").max(100, "Name is too long"),
+    fullName: z.string().min(2, "Name must be at least 2 characters").max(100, "Name is too long").pipe(safeText),
     email: z.string().email("Please enter a valid email address"),
     phone: z.string().min(10, "Phone number must be at least 10 characters").max(20, "Phone number is too long"),
 });
@@ -21,7 +22,7 @@ export const passwordChangeSchema = z.object({
 });
 
 export const tagSchema = z.object({
-    name: z.string().trim().min(1, "Tag name is required").max(30, "Tag name is too long"),
+    name: z.string().trim().min(1, "Tag name is required").max(30, "Tag name is too long").pipe(safeText),
     color: z.string().regex(/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/, "Must be a valid hex color"),
 });
 
