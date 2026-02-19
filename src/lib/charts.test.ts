@@ -13,15 +13,15 @@ test('calculateSparklinePoints - single point', () => {
 
 test('calculateSparklinePoints - linear trend', () => {
     const points = calculateSparklinePoints([10, 20, 30], 100, 30);
-    assert.strictEqual(points, '0,25 50,15 100,5');
+    assert.strictEqual(points, '0.00,25.00 50.00,15.00 100.00,5.00');
 });
 
 test('calculateSparklinePoints - flat line', () => {
     const points = calculateSparklinePoints([10, 10, 10], 100, 30);
-    assert.strictEqual(points, '0,25 50,25 100,25');
+    assert.strictEqual(points, '0.00,25.00 50.00,25.00 100.00,25.00');
 });
 
 test('calculateSparklinePoints - random values check', () => {
     const points = calculateSparklinePoints([0, 100], 100, 30);
-    assert.strictEqual(points, '0,25 100,5');
+    assert.strictEqual(points, '0.00,25.00 100.00,5.00');
 });

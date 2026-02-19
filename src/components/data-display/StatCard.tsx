@@ -1,6 +1,6 @@
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
-import { ArrowDown, ArrowUp, Minus, TrendingUp, TrendingDown } from "lucide-react";
+import { ArrowDown, ArrowUp, Minus } from "lucide-react";
 
 interface StatCardProps {
     label?: string; // Unified prop for title/label
@@ -46,6 +46,13 @@ export function StatCard({
     const TrendIcon =
         calculatedTrend === "up" ? ArrowUp : calculatedTrend === "down" ? ArrowDown : Minus;
 
+    const trendText =
+        calculatedTrend === "up"
+            ? "Up by "
+            : calculatedTrend === "down"
+                ? "Down by "
+                : "Change of ";
+
     return (
         <Card className={cn("overflow-hidden transition-all hover:shadow-md", className)}>
             <CardContent className="p-6 relative">
@@ -71,7 +78,8 @@ export function StatCard({
                                     "px-1.5 py-0.5 rounded bg-muted/20"
                                 )}
                             >
-                                <TrendIcon className="mr-1 size-3" />
+                                <TrendIcon className="mr-1 size-3" aria-hidden="true" />
+                                <span className="sr-only">{trendText}</span>
                                 {Math.abs(change)}%
                             </span>
                         )}

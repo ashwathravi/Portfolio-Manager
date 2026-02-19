@@ -7,3 +7,7 @@
 
 **Learning:** Functional components used in lists (like `PortfolioCard` and `ActivityFeed` in `Dashboard`) are not memoized by default and will re-render on every parent state change (e.g., `allocationView` toggle).
 **Action:** Wrap these components in `React.memo` if their props are stable (e.g., mock data constants) to prevent unnecessary re-renders.
+
+## 2025-02-18 - [Sparkline Calculation Optimization]
+**Learning:** String interpolation with `toFixed(2)` is significantly faster than `Number(val.toFixed(2))` inside tight loops. Also, `Math.min(...data)` can cause stack overflow on large datasets; explicit loops are safer and faster.
+**Action:** Use explicit loops for min/max calculation and avoid unnecessary type casting in critical render paths.
