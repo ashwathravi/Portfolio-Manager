@@ -82,6 +82,18 @@ describe('tagSchema', () => {
         const result = tagSchema.safeParse(validTag);
         assert.strictEqual(result.success, true);
     });
+
+    test('should fail if tag name contains HTML tags', () => {
+        const invalidTag = {
+            name: '<script>alert(1)</script>',
+            color: '#FF0000'
+        };
+        const result = tagSchema.safeParse(invalidTag);
+        assert.strictEqual(result.success, false);
+        if (!result.success) {
+            assert.strictEqual(result.error.issues[0].message, 'Input contains invalid characters (< or >)');
+        }
+    });
 });
 
 // ---------------------------------------------------------------------------
@@ -121,6 +133,14 @@ describe('profileSchema', () => {
         assert.strictEqual(min.success, true);
         const max = profileSchema.safeParse({ ...validProfile, fullName: 'a'.repeat(100) });
         assert.strictEqual(max.success, true);
+    });
+
+    test('should fail if fullName contains HTML tags', () => {
+        const result = profileSchema.safeParse({ ...validProfile, fullName: 'John <script>Doe' });
+        assert.strictEqual(result.success, false);
+        if (!result.success) {
+            assert.strictEqual(result.error.issues[0].message, 'Input contains invalid characters (< or >)');
+        }
     });
 
     test('should fail if email is invalid', () => {

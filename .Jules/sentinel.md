@@ -21,3 +21,9 @@
 **Vulnerability:** Missing `Content-Security-Policy` header allows potential XSS attacks if an injection vulnerability is introduced.
 **Learning:** Next.js requires `'unsafe-inline'` for scripts and styles to function correctly, especially in development. A strict CSP must balance security with framework requirements. Also, `browsing-topics` in `Permissions-Policy` is the modern standard replacing `interest-cohort`.
 **Prevention:** Implement a CSP that allows `self`, `unsafe-inline`, `unsafe-eval` (dev), and necessary external sources (images, fonts) while blocking `object-src` and `frame-ancestors`.
+
+## 2026-02-27 - Input Sanitization for User Text
+
+**Vulnerability:** User inputs like names and tags were validated for length but not for content, potentially allowing HTML/XSS injection if rendered improperly.
+**Learning:** Zod validation schemas should include explicit checks for dangerous characters (like `<` and `>`) in free-text fields, even if the frontend framework escapes output by default.
+**Prevention:** Use a reusable `safeText` validator that rejects HTML tags in all user-facing text inputs.
