@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 import { cn } from "@/lib/utils";
+import { calculateSparklinePoints } from "@/lib/charts";
 
 interface SparklineCellProps {
     data: number[];
@@ -20,29 +21,12 @@ export function SparklineCell({
     className,
 }: SparklineCellProps) {
     const points = useMemo(() => {
+        // Keep original behavior of not showing anything for < 2 points
+        // calculateSparklinePoints can handle 1 point (returns a dot), but we stick to current behavior
         if (!data || data.length < 2) return "";
 
-        let min = Infinity;
-        let max = -Infinity;
-        for (const val of data) {
-            if (val < min) min = val;
-            if (val > max) max = val;
-        }
-        const range = max - min || 1;
-
-        // Add padding to prevent lines from touching the edges (15% top/bottom)
-        const padding = height * 0.15;
-        const drawHeight = height - (padding * 2);
-
-        return data
-            .map((val, i) => {
-                const x = (i / (data.length - 1)) * width;
-                // Invert Y axis: 0 is top, height is bottom
-                // Value: min -> height-padding, max -> padding
-                const y = (height - padding) - ((val - min) / range) * drawHeight;
-                return `${x},${y}`;
-            })
-            .join(" ");
+        // Pass height * 0.15 as padding to match original implementation
+        return calculateSparklinePoints(data, width, height, height * 0.15);
     }, [data, height, width]);
 
     const first = data[0] || 0;

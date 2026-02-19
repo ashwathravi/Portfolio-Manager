@@ -12,3 +12,8 @@
 
 **Learning:** Client-side filtering and aggregation logic in `HoldingsTable` was running on every render, even when only UI state (like `showFilters`) changed. This causes unnecessary recalculation for large lists. Also, `Math.min(...data)` spread syntax in `SparklineCell` poses a stack overflow risk for large datasets and is less performant than a simple loop.
 **Action:** Use `useMemo` for filtering/aggregation results and replace spread syntax with explicit loops in data processing utilities.
+
+## 2025-02-18 - [Sparkline Calculation Optimization]
+
+**Learning:** String interpolation with `toFixed(2)` is significantly faster than `Number(val.toFixed(2))` inside tight loops. Also, `Math.min(...data)` can cause stack overflow on large datasets; explicit loops are safer and faster.
+**Action:** Use explicit loops for min/max calculation and avoid unnecessary type casting in critical render paths.
