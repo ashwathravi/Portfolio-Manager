@@ -41,15 +41,20 @@ export function calculateSparklinePoints(data: number[], width: number = 80, hei
 
     const stepX = width / (data.length - 1);
 
-    // Using a simple loop is generally faster than map for critical performance
-    // but map is cleaner. We will stick with map but optimize inside.
-    return data.map((value, i) => {
+    // Optimized: Using a loop and string concatenation is significantly faster
+    // than .map().join() as it avoids intermediate array creation and extra allocations.
+    // This improves performance when rendering many sparklines (e.g., in tables).
+    let points = '';
+    for (let i = 0; i < data.length; i++) {
+        const value = data[i];
         const x = i * stepX;
         const normalized = (value - min) / effectiveRange;
         // Invert Y axis because SVG 0 is at top
         const y = (height - padding) - (normalized * drawHeight);
 
-        // Round to 2 decimal places to reduce string size and avoid extra conversions
-        return `${x.toFixed(2)},${y.toFixed(2)}`;
-    }).join(' ');
+        if (i > 0) points += ' ';
+        points += x.toFixed(2) + ',' + y.toFixed(2);
+    }
+
+    return points;
 }
