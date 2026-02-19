@@ -156,7 +156,7 @@ export function AppSidebar() {
         const submenuId = hasChildren ? `submenu-${item.title.toLowerCase().replace(/\s+/g, '-')}` : undefined;
 
         return (
-            <div key={item.title}>
+            <li key={item.title}>
                 {hasChildren ? (
                     <button
                         type="button"
@@ -185,6 +185,7 @@ export function AppSidebar() {
                 ) : (
                     <Link
                         href={item.href}
+                        aria-current={pathname === item.href ? 'page' : undefined}
                         className={cn(
                             'flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors',
                             isActive
@@ -203,28 +204,30 @@ export function AppSidebar() {
                 )}
 
                 {hasChildren && isExpanded && (
-                    <div
+                    <ul
                         id={submenuId}
                         className="ml-4 mt-1 space-y-1 border-l border-border pl-2"
                     >
                         {item.children?.map((child) => (
-                            <Link
-                                key={child.title}
-                                href={child.href}
-                                className={cn(
-                                    'flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors',
-                                    pathname === child.href
-                                        ? 'bg-primary/10 text-primary font-medium'
-                                        : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
-                                )}
-                            >
-                                <child.icon className="h-4 w-4" />
-                                <span>{child.title}</span>
-                            </Link>
+                            <li key={child.title}>
+                                <Link
+                                    href={child.href}
+                                    aria-current={pathname === child.href ? 'page' : undefined}
+                                    className={cn(
+                                        'flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors',
+                                        pathname === child.href
+                                            ? 'bg-primary/10 text-primary font-medium'
+                                            : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+                                    )}
+                                >
+                                    <child.icon className="h-4 w-4" />
+                                    <span>{child.title}</span>
+                                </Link>
+                            </li>
                         ))}
-                    </div>
+                    </ul>
                 )}
-            </div>
+            </li>
         );
     };
 
@@ -241,8 +244,10 @@ export function AppSidebar() {
                     </div>
                 </div>
             </div>
-            <nav className="flex-1 space-y-2 p-4 overflow-y-auto">
-                {navigationItems.map(renderNavItem)}
+            <nav className="flex-1 overflow-y-auto p-4" aria-label="Main navigation">
+                <ul className="space-y-2">
+                    {navigationItems.map(renderNavItem)}
+                </ul>
             </nav>
             <div className="border-t border-border p-4">
                 <div className="flex items-center gap-3 rounded-xl bg-primary/10 p-3">
