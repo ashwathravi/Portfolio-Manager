@@ -250,6 +250,12 @@ export const useSettingsStore = create<SettingsState>()(
         }),
         {
             name: 'atlas-settings',
+            // Sentinel: Only persist non-sensitive preferences
+            partialize: (state) => ({
+                appearance: state.appearance,
+                notifications: state.notifications,
+                tags: state.tags,
+            }),
         }
     )
 );
