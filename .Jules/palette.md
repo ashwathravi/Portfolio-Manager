@@ -24,3 +24,11 @@
 
 **Learning:** Using `div` with `onClick` for expandable navigation menus is a common accessibility anti-pattern. It breaks keyboard navigation (Enter/Space) and screen reader support (no role/state).
 **Action:** Always replace interactive `div`s with semantic `<button type="button">` elements. Add `aria-expanded` and `aria-controls` to properly communicate the state and relationship to the controlled submenu.
+
+## 2026-02-13 - [Semantic Lists for Feeds]
+**Learning:** Using `div`s for activity feeds or lists deprives screen reader users of list context (e.g., "Item 1 of 5").
+**Action:** Always use `<ul>` and `<li>` for lists of items, even if they look like cards or complex rows.
+
+## 2026-02-13 - [Explicit Financial Signs]
+**Learning:** Relying on color (green/red) to indicate positive/negative values fails for colorblind users and sometimes screen readers.
+**Action:** Always prefix financial changes with explicit `+` or `-` signs. Use `sr-only` text to add context like "Inflow of" or "Outflow of" if the sign isn't sufficient or if the context is ambiguous.
