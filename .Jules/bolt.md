@@ -17,3 +17,8 @@
 
 **Learning:** String interpolation with `toFixed(2)` is significantly faster than `Number(val.toFixed(2))` inside tight loops. Also, `Math.min(...data)` can cause stack overflow on large datasets; explicit loops are safer and faster.
 **Action:** Use explicit loops for min/max calculation and avoid unnecessary type casting in critical render paths.
+
+## 2025-02-19 - Filter & Reduce Fusion
+
+**Learning:** Combining filter and reduce into a single pass loop avoids multiple iterations (O(3N) -> O(N)) and array allocations, significantly improving performance for derived state from large lists.
+**Action:** Use single-pass loops for simultaneous filtering and aggregation when dealing with large datasets.
