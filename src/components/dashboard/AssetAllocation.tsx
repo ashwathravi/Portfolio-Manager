@@ -50,11 +50,12 @@ export const AssetAllocation = memo(function AssetAllocation({ accountData, them
     // Also optimized loop from O(N^2) (nested reduce) to O(N) (single pass).
     const gradientBackground = useMemo(() => {
         let currentSum = 0;
-        const stops = allocationData.map((item) => {
+        const stops: string[] = [];
+        for (const item of allocationData) {
             const start = currentSum;
             currentSum += item.value;
-            return `${item.color} ${start}% ${currentSum}%`;
-        });
+            stops.push(`${item.color} ${start}% ${currentSum}%`);
+        }
         return `conic-gradient(${stops.join(', ')})`;
     }, [allocationData]);
 
@@ -87,9 +88,12 @@ export const AssetAllocation = memo(function AssetAllocation({ accountData, them
             <div className="flex-1 flex flex-col items-center justify-center gap-6">
                 {/* CSS Donut Chart */}
                 {allocationData.length > 0 ? (
-                    <div className="relative w-40 h-40 rounded-full" style={{
-                        background: gradientBackground
-                    }}>
+                    <div
+                        className="relative w-40 h-40 rounded-full"
+                        style={{ background: gradientBackground }}
+                        role="img"
+                        aria-label={`Asset allocation chart showing distribution by ${allocationView}`}
+                    >
                         <div className="absolute inset-4 bg-card rounded-full flex flex-col items-center justify-center">
                             <span className="text-muted-foreground text-xs font-medium">Total</span>
                             <span className="font-bold text-lg">100%</span>
@@ -101,19 +105,23 @@ export const AssetAllocation = memo(function AssetAllocation({ accountData, them
                     </div>
                 )}
                 {/* Legend */}
-                <div className="w-full flex flex-col gap-3">
+                <ul className="w-full flex flex-col gap-3" aria-label="Legend">
                     {allocationData.map((item) => (
-                        <div key={`${item.name}-${item.color}`} className="flex items-center justify-between">
+                        <li key={`${item.name}-${item.color}`} className="flex items-center justify-between">
                             <div className="flex items-center gap-2">
-                                <span className="w-3 h-3 rounded-full" style={{ backgroundColor: item.color }}></span>
+                                <span
+                                    className="w-3 h-3 rounded-full"
+                                    style={{ backgroundColor: item.color }}
+                                    aria-hidden="true"
+                                ></span>
                                 <span className="text-sm">{item.name}</span>
                             </div>
                             <span className="text-sm font-bold">
                                 {Number.isInteger(item.value) ? item.value : item.value.toFixed(1)}%
                             </span>
-                        </div>
+                        </li>
                     ))}
-                </div>
+                </ul>
             </div>
         </div>
     );
