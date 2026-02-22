@@ -1,5 +1,5 @@
 
-import { pgTable, text, doublePrecision, timestamp, uuid } from "drizzle-orm/pg-core";
+import { pgTable, text, doublePrecision, timestamp, uuid, index } from "drizzle-orm/pg-core";
 import { sql, relations } from "drizzle-orm";
 
 // Portfolios Table
@@ -29,6 +29,10 @@ export const holdings = pgTable("holdings", {
     allocation: doublePrecision("allocation"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => {
+    return {
+        portfolioIdIdx: index("holdings_portfolio_id_idx").on(table.portfolioId),
+    };
 });
 
 // Transactions Table
