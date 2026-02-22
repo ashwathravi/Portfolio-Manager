@@ -11,16 +11,32 @@
 export function calculateSparklinePoints(data: number[], width: number = 80, height: number = 30, padding: number = 5): string {
     if (!data || data.length === 0) return '';
 
-    // Handle single point - center it vertically
-    if (data.length === 1) {
+    // Find finite values and their count
+    let firstFiniteIndex = -1;
+    let finiteCount = 0;
+    for (let i = 0; i < data.length; i++) {
+        if (Number.isFinite(data[i])) {
+            if (firstFiniteIndex === -1) firstFiniteIndex = i;
+            finiteCount++;
+        }
+    }
+
+    // Return empty if no valid data points
+    if (finiteCount === 0) return '';
+
+    // Handle single finite point - center it vertically
+    if (finiteCount === 1) {
         return `0,${height / 2}`;
     }
 
-    let min = data[0];
-    let max = data[0];
-    for (let i = 1; i < data.length; i++) {
-        if (data[i] < min) min = data[i];
-        if (data[i] > max) max = data[i];
+    let min = data[firstFiniteIndex];
+    let max = data[firstFiniteIndex];
+    for (let i = firstFiniteIndex + 1; i < data.length; i++) {
+        const value = data[i];
+        if (Number.isFinite(value)) {
+            if (value < min) min = value;
+            if (value > max) max = value;
+        }
     }
 
     const range = max - min;
@@ -30,29 +46,33 @@ export function calculateSparklinePoints(data: number[], width: number = 80, hei
 
     const drawHeight = height - (padding * 2);
 
-    // Ensure we have positive draw height
-    if (drawHeight <= 0) {
-        const stepX = width / (data.length - 1);
-        return data.map((_, i) => {
-            const x = i * stepX;
-            return `${x.toFixed(2)},${(height / 2).toFixed(2)}`;
-        }).join(' ');
-    }
+    const stepX = data.length > 1 ? width / (data.length - 1) : 0;
 
-    const stepX = width / (data.length - 1);
+    // Fallback for invalid draw height
+    if (drawHeight <= 0) {
+        let points = '';
+        for (let i = 0; i < data.length; i++) {
+            if (!Number.isFinite(data[i])) continue;
+            const x = i * stepX;
+            if (points.length > 0) points += ' ';
+            points += x.toFixed(2) + ',' + (height / 2).toFixed(2);
+        }
+        return points;
+    }
 
     // Optimized: Using a loop and string concatenation is significantly faster
     // than .map().join() as it avoids intermediate array creation and extra allocations.
-    // This improves performance when rendering many sparklines (e.g., in tables).
     let points = '';
     for (let i = 0; i < data.length; i++) {
         const value = data[i];
+        if (!Number.isFinite(value)) continue;
+
         const x = i * stepX;
         const normalized = (value - min) / effectiveRange;
         // Invert Y axis because SVG 0 is at top
         const y = (height - padding) - (normalized * drawHeight);
 
-        if (i > 0) points += ' ';
+        if (points.length > 0) points += ' ';
         points += x.toFixed(2) + ',' + y.toFixed(2);
     }
 
