@@ -87,3 +87,34 @@ test('calculateSparklinePoints - single point uses default dimensions', () => {
     // Defaults: width=80, height=30
     assert.strictEqual(calculateSparklinePoints([42]), '0,15');
 });
+
+test('calculateSparklinePoints - handles NaN values by skipping them', () => {
+    const points = calculateSparklinePoints([10, NaN, 30], 100, 30);
+    // min=10, max=30, range=20, drawHeight=20, stepX=50
+    // point 0: x=0, y=25
+    // point 1: NaN -> skipped
+    // point 2: x=100, y=5
+    assert.strictEqual(points, '0.00,25.00 100.00,5.00');
+});
+
+test('calculateSparklinePoints - handles Infinity values by skipping them', () => {
+    const points = calculateSparklinePoints([10, Infinity, 30], 100, 30);
+    // min=10, max=30, range=20, drawHeight=20, stepX=50
+    // point 0: x=0, y=25
+    // point 1: Infinity -> skipped
+    // point 2: x=100, y=5
+    assert.strictEqual(points, '0.00,25.00 100.00,5.00');
+});
+
+test('calculateSparklinePoints - handles NaN at the start', () => {
+    const points = calculateSparklinePoints([NaN, 10, 20], 100, 30);
+    // min=10, max=20, range=10, drawHeight=20, stepX=50
+    // point 0: NaN -> skipped
+    // point 1: x=50, y=25
+    // point 2: x=100, y=5
+    assert.strictEqual(points, '50.00,25.00 100.00,5.00');
+});
+
+test('calculateSparklinePoints - returns empty string for only non-finite values', () => {
+    assert.strictEqual(calculateSparklinePoints([NaN, Infinity, -Infinity]), '');
+});
