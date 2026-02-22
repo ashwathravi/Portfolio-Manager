@@ -113,13 +113,29 @@ export function HoldingsTable({ holdings }: { holdings: Holding[] }) {
         return !!(searchParams.get('account') || searchParams.get('strategy') || searchParams.get('tag'));
     });
 
-    const filteredHoldings = useMemo(() => {
-        return holdings.filter((holding) => {
+    // Optimized: Combine filter and reduce into a single pass loop to avoid multiple iterations (O(N) vs O(3N))
+    const { filteredHoldings, totalNetValue, totalReturn } = useMemo(() => {
+        const result = [];
+        let netValue = 0;
+        let ret = 0;
+
+        for (const holding of holdings) {
             const accountMatch = selectedAccount === 'All Accounts' || holding.account === selectedAccount;
             const strategyMatch = selectedStrategy === 'All Strategies' || holding.strategy === selectedStrategy;
             const tagMatch = selectedTag === 'All Tags' || holding.tags.includes(selectedTag);
-            return accountMatch && strategyMatch && tagMatch;
-        });
+
+            if (accountMatch && strategyMatch && tagMatch) {
+                result.push(holding);
+                netValue += holding.totalValue;
+                ret += holding.totalReturn;
+            }
+        }
+
+        return {
+            filteredHoldings: result,
+            totalNetValue: netValue,
+            totalReturn: ret
+        };
     }, [holdings, selectedAccount, selectedStrategy, selectedTag]);
 
     const clearFilters = () => {
@@ -144,9 +160,6 @@ export function HoldingsTable({ holdings }: { holdings: Holding[] }) {
         return '';
     };
 
-    // Calculate totals for dynamic metrics
-    const totalNetValue = useMemo(() => filteredHoldings.reduce((sum, h) => sum + h.totalValue, 0), [filteredHoldings]);
-    const totalReturn = useMemo(() => filteredHoldings.reduce((sum, h) => sum + h.totalReturn, 0), [filteredHoldings]);
 
     return (
         <div className="space-y-6 p-6">

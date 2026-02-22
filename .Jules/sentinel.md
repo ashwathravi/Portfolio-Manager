@@ -27,3 +27,14 @@
 **Vulnerability:** User inputs like names and tags were validated for length but not for content, potentially allowing HTML/XSS injection if rendered improperly.
 **Learning:** Zod validation schemas should include explicit checks for dangerous characters (like `<` and `>`) in free-text fields, even if the frontend framework escapes output by default.
 **Prevention:** Use a reusable `safeText` validator that rejects HTML tags in all user-facing text inputs.
+
+## 2026-02-27 - Preventing PII Leakage in Zustand Persistence
+
+**Vulnerability:** Sensitive user data (profile, security settings, financial accounts) was being persisted to `localStorage` in plain text by the default `persist` middleware behavior.
+**Learning:** Zustand's `persist` middleware stores the entire state by default. This is dangerous for stores containing both UI preferences and sensitive data.
+**Prevention:** Always use the `partialize` option in `persist` middleware to explicitly allowlist only non-sensitive slices (e.g., appearance, notifications) for storage.
+
+## 2024-05-22 - [Order Entry Validation]
+**Vulnerability:** Critical financial form (Order Entry) lacked input validation, relying solely on HTML5 attributes.
+**Learning:** React Hook Form + Zod `superRefine` is essential for complex, interdependent validation logic (e.g., Limit Price required only for Limit orders).
+**Prevention:** Enforce Zod schemas for all user inputs, especially those involving financial transactions. Use `valueAsNumber` carefully or preprocess inputs to handle empty strings correctly.

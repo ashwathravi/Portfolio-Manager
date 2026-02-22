@@ -1,18 +1,12 @@
-
 'use client';
 
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { useState } from 'react';
+import { useState, useMemo, memo } from 'react';
 
 export interface AllocationItem {
     name: string;
     value: number;
     color: string;
-}
-
-interface AssetAllocationProps {
-    accountData?: AllocationItem[];
-    themeData?: AllocationItem[];
 }
 
 export const DEFAULT_ALLOCATION_COLORS = [
@@ -25,7 +19,13 @@ export const DEFAULT_ALLOCATION_COLORS = [
     '#ec4899', // Pink
 ];
 
-export function AssetAllocation({ accountData, themeData }: AssetAllocationProps) {
+interface AssetAllocationProps {
+    accountData?: AllocationItem[];
+    themeData?: AllocationItem[];
+}
+
+// Optimized: Wrapped in React.memo to prevent unnecessary re-renders when parent state updates.
+export const AssetAllocation = memo(function AssetAllocation({ accountData, themeData }: AssetAllocationProps) {
     const [allocationView, setAllocationView] = useState<'account' | 'theme'>('account');
 
     // Default static data if none provided
@@ -45,6 +45,18 @@ export function AssetAllocation({ accountData, themeData }: AssetAllocationProps
     const currentThemeData = themeData || defaultThemeData;
 
     const allocationData = allocationView === 'account' ? currentAccountData : currentThemeData;
+
+    // Optimized: Memoize gradient string to avoid O(N) string construction on every render.
+    // Also optimized loop from O(N^2) (nested reduce) to O(N) (single pass).
+    const gradientBackground = useMemo(() => {
+        let currentSum = 0;
+        const stops = allocationData.map((item) => {
+            const start = currentSum;
+            currentSum += item.value;
+            return `${item.color} ${start}% ${currentSum}%`;
+        });
+        return `conic-gradient(${stops.join(', ')})`;
+    }, [allocationData]);
 
     return (
         <div className="rounded-2xl bg-card border border-border p-6 flex flex-col shadow-lg h-full">
@@ -76,11 +88,7 @@ export function AssetAllocation({ accountData, themeData }: AssetAllocationProps
                 {/* CSS Donut Chart */}
                 {allocationData.length > 0 ? (
                     <div className="relative w-40 h-40 rounded-full" style={{
-                        background: `conic-gradient(${allocationData.map((item, idx, arr) => {
-                            const prevSum = arr.slice(0, idx).reduce((sum, d) => sum + d.value, 0);
-                            const end = idx === arr.length - 1 ? 100 : prevSum + item.value;
-                            return `${item.color} ${prevSum}% ${end}%`;
-                        }).join(', ')})`
+                        background: gradientBackground
                     }}>
                         <div className="absolute inset-4 bg-card rounded-full flex flex-col items-center justify-center">
                             <span className="text-muted-foreground text-xs font-medium">Total</span>
@@ -109,4 +117,4 @@ export function AssetAllocation({ accountData, themeData }: AssetAllocationProps
             </div>
         </div>
     );
-}
+});
