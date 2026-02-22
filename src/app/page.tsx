@@ -4,7 +4,7 @@ import { portfolios, holdings } from '@/db/schema';
 import { StatCard } from '@/components/data-display/StatCard';
 import { PortfolioCard } from '@/components/portfolios/PortfolioCard';
 import { ActivityFeed } from '@/components/dashboard/ActivityFeed';
-import { AssetAllocation } from '@/components/dashboard/AssetAllocation';
+import { AssetAllocation, DEFAULT_ALLOCATION_COLORS } from '@/components/dashboard/AssetAllocation';
 import { PortfolioPerformance } from '@/components/dashboard/PortfolioPerformance';
 import { Wallet, TrendingUp, DollarSign, Activity, Calendar, Plus } from 'lucide-react';
 import { mockTransactions } from '@/lib/mockData'; // Keeping for now, or fetch from DB
@@ -58,6 +58,40 @@ export default async function Dashboard() {
   const currentHour = new Date().getHours();
   const greeting = currentHour < 12 ? 'Morning' : currentHour < 18 ? 'Afternoon' : 'Evening';
   const currentDate = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+
+  // 3. Calculate Allocation Data
+  const TICKER_THEMES: Record<string, string> = {
+    AAPL: 'Technology',
+    MSFT: 'Technology',
+    NVDA: 'Technology',
+    GOOGL: 'Technology',
+    AMZN: 'Consumer Discretionary',
+    TSLA: 'Automotive',
+  };
+
+  const allocationByAccount = portfolioData.map((p, i) => ({
+    name: p.name,
+    value: totalNetWorth > 0 ? (p.totalValue / totalNetWorth) * 100 : 0,
+    color: DEFAULT_ALLOCATION_COLORS[i % DEFAULT_ALLOCATION_COLORS.length]
+  })).filter(item => item.value > 0);
+
+  const themeMap: Record<string, number> = {};
+  allPortfolios.forEach(p => {
+    p.holdings.forEach(h => {
+      const theme = TICKER_THEMES[h.ticker as keyof typeof TICKER_THEMES] || 'Other';
+      themeMap[theme] = (themeMap[theme] || 0) + (h.marketValue || 0);
+    });
+    if (p.cashBalance && p.cashBalance > 0) {
+      themeMap['Cash'] = (themeMap['Cash'] || 0) + p.cashBalance;
+    }
+  });
+
+  const allocationByTheme = Object.entries(themeMap).map(([name, amount], i) => ({
+    name,
+    value: totalNetWorth > 0 ? (amount / totalNetWorth) * 100 : 0,
+    color: DEFAULT_ALLOCATION_COLORS[i % DEFAULT_ALLOCATION_COLORS.length]
+  })).filter(item => item.value > 0)
+    .sort((a, b) => b.value - a.value);
 
   return (
     <div className="space-y-8 p-6">
@@ -131,7 +165,10 @@ export default async function Dashboard() {
       {/* Charts Section */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <PortfolioPerformance />
-        <AssetAllocation />
+        <AssetAllocation
+          accountData={allocationByAccount}
+          themeData={allocationByTheme}
+        />
       </div>
 
       {/* Bottom Section: Accounts & Movers */}

@@ -4,31 +4,47 @@
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useState } from 'react';
 
-// Types for props (can be refined based on DB types later)
-interface AssetAllocationProps {
-    // If data is passed from parent, use it. Otherwise retain internal logic for now or update later.
-    // For now, we'll keep the static data inside or accept it as props if we fetch it.
-    // The original page.tsx had hardcoded data.
+export interface AllocationItem {
+    name: string;
+    value: number;
+    color: string;
 }
 
-export function AssetAllocation() {
+interface AssetAllocationProps {
+    accountData?: AllocationItem[];
+    themeData?: AllocationItem[];
+}
+
+export const DEFAULT_ALLOCATION_COLORS = [
+    '#17cf54', // Primary/Emerald
+    '#3b82f6', // Blue
+    '#f59e0b', // Amber
+    '#ef4444', // Red
+    '#8b5cf6', // Violet
+    '#06b6d4', // Cyan
+    '#ec4899', // Pink
+];
+
+export function AssetAllocation({ accountData, themeData }: AssetAllocationProps) {
     const [allocationView, setAllocationView] = useState<'account' | 'theme'>('account');
 
-    // Asset allocation data (Static for now, but ready to be dynamic)
-    // In a real app, this would be aggregated from Holdings.
-    const allocationByAccount = [
-        { name: 'Fidelity', value: 40, color: '#17cf54' },
-        { name: 'Robinhood', value: 35, color: '#0bda43' },
-        { name: 'Coinbase', value: 25, color: '#3c5344' },
+    // Default static data if none provided
+    const defaultAccountData = [
+        { name: 'Fidelity', value: 40, color: DEFAULT_ALLOCATION_COLORS[0] },
+        { name: 'Robinhood', value: 35, color: DEFAULT_ALLOCATION_COLORS[1] },
+        { name: 'Coinbase', value: 25, color: DEFAULT_ALLOCATION_COLORS[2] },
     ];
 
-    const allocationByTheme = [
-        { name: 'Technology', value: 60, color: '#17cf54' },
-        { name: 'Real Estate', value: 30, color: '#3b82f6' },
-        { name: 'Energy', value: 10, color: '#f59e0b' },
+    const defaultThemeData = [
+        { name: 'Technology', value: 60, color: DEFAULT_ALLOCATION_COLORS[0] },
+        { name: 'Real Estate', value: 30, color: DEFAULT_ALLOCATION_COLORS[1] },
+        { name: 'Energy', value: 10, color: DEFAULT_ALLOCATION_COLORS[2] },
     ];
 
-    const allocationData = allocationView === 'account' ? allocationByAccount : allocationByTheme;
+    const currentAccountData = accountData || defaultAccountData;
+    const currentThemeData = themeData || defaultThemeData;
+
+    const allocationData = allocationView === 'account' ? currentAccountData : currentThemeData;
 
     return (
         <div className="rounded-2xl bg-card border border-border p-6 flex flex-col shadow-lg h-full">
@@ -58,26 +74,35 @@ export function AssetAllocation() {
             </div>
             <div className="flex-1 flex flex-col items-center justify-center gap-6">
                 {/* CSS Donut Chart */}
-                <div className="relative w-40 h-40 rounded-full" style={{
-                    background: `conic-gradient(${allocationData.map((item, idx, arr) => {
-                        const prevSum = arr.slice(0, idx).reduce((sum, d) => sum + d.value, 0);
-                        return `${item.color} ${prevSum}% ${prevSum + item.value}%`;
-                    }).join(', ')})`
-                }}>
-                    <div className="absolute inset-4 bg-card rounded-full flex flex-col items-center justify-center">
-                        <span className="text-muted-foreground text-xs font-medium">Total</span>
-                        <span className="font-bold text-lg">100%</span>
+                {allocationData.length > 0 ? (
+                    <div className="relative w-40 h-40 rounded-full" style={{
+                        background: `conic-gradient(${allocationData.map((item, idx, arr) => {
+                            const prevSum = arr.slice(0, idx).reduce((sum, d) => sum + d.value, 0);
+                            const end = idx === arr.length - 1 ? 100 : prevSum + item.value;
+                            return `${item.color} ${prevSum}% ${end}%`;
+                        }).join(', ')})`
+                    }}>
+                        <div className="absolute inset-4 bg-card rounded-full flex flex-col items-center justify-center">
+                            <span className="text-muted-foreground text-xs font-medium">Total</span>
+                            <span className="font-bold text-lg">100%</span>
+                        </div>
                     </div>
-                </div>
+                ) : (
+                    <div className="w-40 h-40 rounded-full bg-accent flex items-center justify-center">
+                        <span className="text-muted-foreground text-xs">No data</span>
+                    </div>
+                )}
                 {/* Legend */}
                 <div className="w-full flex flex-col gap-3">
                     {allocationData.map((item) => (
-                        <div key={item.name} className="flex items-center justify-between">
+                        <div key={`${item.name}-${item.color}`} className="flex items-center justify-between">
                             <div className="flex items-center gap-2">
                                 <span className="w-3 h-3 rounded-full" style={{ backgroundColor: item.color }}></span>
                                 <span className="text-sm">{item.name}</span>
                             </div>
-                            <span className="text-sm font-bold">{item.value}%</span>
+                            <span className="text-sm font-bold">
+                                {Number.isInteger(item.value) ? item.value : item.value.toFixed(1)}%
+                            </span>
                         </div>
                     ))}
                 </div>
