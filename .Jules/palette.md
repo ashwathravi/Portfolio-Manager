@@ -32,3 +32,7 @@
 ## 2026-02-13 - [Explicit Financial Signs]
 **Learning:** Relying on color (green/red) to indicate positive/negative values fails for colorblind users and sometimes screen readers.
 **Action:** Always prefix financial changes with explicit `+` or `-` signs. Use `sr-only` text to add context like "Inflow of" or "Outflow of" if the sign isn't sufficient or if the context is ambiguous.
+
+## 2026-02-13 - [Expanded Abbreviations]
+**Learning:** Abbreviated controls like "1M" (for 1 Month) or "Account" (for View by Account) are efficient visually but ambiguous or terse for screen readers.
+**Action:** Use `aria-label` to provide the full, descriptive text for these controls (e.g., `aria-label="1 Month"` or `aria-label="View allocation by account"`) while keeping the visual label compact.
