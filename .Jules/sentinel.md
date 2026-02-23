@@ -38,3 +38,8 @@
 **Vulnerability:** Critical financial form (Order Entry) lacked input validation, relying solely on HTML5 attributes.
 **Learning:** React Hook Form + Zod `superRefine` is essential for complex, interdependent validation logic (e.g., Limit Price required only for Limit orders).
 **Prevention:** Enforce Zod schemas for all user inputs, especially those involving financial transactions. Use `valueAsNumber` carefully or preprocess inputs to handle empty strings correctly.
+
+## 2025-02-27 - Input Sanitization for Phone Numbers
+**Vulnerability:** The `phone` field in `profileSchema` was validated only for length (10-20 chars), allowing potential XSS payloads (e.g. `<script>1</script>`, `<b onclick=...>`) to be stored.
+**Learning:** Length validation alone is insufficient for security. XSS payloads can be very short.
+**Prevention:** Always apply `safeText` or strict regex validation to ALL user inputs, even those expected to be numeric or formatted like phone numbers.
