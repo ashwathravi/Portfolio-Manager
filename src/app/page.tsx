@@ -26,8 +26,8 @@ export default async function Dashboard() {
 
   // Calculate Aggregates
   let totalNetWorth = 0;
-  let cashBalance = 0;
-  let totalReturnDollar = 0; // This might need better tracking in DB (snapshots)
+  const cashBalance = 0;
+  const totalReturnDollar = 0; // This might need better tracking in DB (snapshots)
 
   // For MVP, we sum up current holdings value + cash
   // Note: Holdings in DB have 'marketValue' seeded from mock. In real app, we'd calculate: quantity * currentPrice
@@ -181,7 +181,7 @@ export default async function Dashboard() {
           </div>
           <div className="flex flex-col gap-3">
             {portfolioData.map((portfolio) => (
-              // @ts-ignore - PortfolioCard expects mock type, but we pass DB type + calculated fields
+              // @ts-expect-error - PortfolioCard expects mock type, but we pass DB type + calculated fields
               <PortfolioCard key={portfolio.id} portfolio={portfolio} />
             ))}
           </div>

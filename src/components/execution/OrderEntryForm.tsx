@@ -22,6 +22,7 @@ export function OrderEntryForm() {
         reset,
         formState: { errors, isSubmitting },
     } = useForm<OrderFormValues>({
+        // @ts-expect-error - Resolver type mismatch due to z.preprocess in schema
         resolver: zodResolver(orderSchema),
         defaultValues: {
             side: "buy",
@@ -60,7 +61,7 @@ export function OrderEntryForm() {
                 <CardDescription>Place manual trade orders to the broker.</CardDescription>
             </CardHeader>
             <CardContent>
-                <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+                <form onSubmit={handleSubmit(onSubmit as any)} className="space-y-4">
 
                     <Controller
                         control={control}
