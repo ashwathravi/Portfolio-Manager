@@ -12,6 +12,51 @@ interface PerformanceChartProps {
     title?: string;
 }
 
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+// Optimized: Manual date parsing avoids `new Date()` allocation and timezone issues.
+// significantly faster than creating Date objects inside render loops.
+// Format: "YYYY-MM-DD" -> "M/D" (e.g., "2024-02-05" -> "2/5")
+const formatDateTick = (value: string) => {
+    // "YYYY-MM-DD" is 10 chars
+    //  0123456789
+    // month is at 5,7. day is at 8,10.
+    if (typeof value === 'string' && value.length >= 10) {
+        const m = parseInt(value.substring(5, 7), 10);
+        const d = parseInt(value.substring(8, 10), 10);
+        return `${m}/${d}`;
+    }
+    return value;
+};
+
+// Optimized: Manual date parsing avoids `new Date()` allocation.
+// Format: "YYYY-MM-DD" -> "MMM D, YYYY" (e.g., "Feb 5, 2024")
+const formatDateLabel = (value: string) => {
+    if (typeof value === 'string' && value.length >= 10) {
+        const y = parseInt(value.substring(0, 4), 10);
+        const m = parseInt(value.substring(5, 7), 10);
+        const d = parseInt(value.substring(8, 10), 10);
+        return `${MONTHS[m - 1]} ${d}, ${y}`;
+    }
+    return value;
+};
+
+// Optimized: Cached Intl.NumberFormat instance avoids re-creation on every render/tooltip.
+const currencyFormatter = new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+});
+
+const formatTooltipValue = (value: number | undefined) => {
+    if (value === undefined) return '';
+    return currencyFormatter.format(value);
+};
+
+// Optimized: Stable function reference.
+const formatYAxisTick = (value: number) => `$${(value / 1000).toFixed(0)}k`;
+
 // Optimized: Wrapped in React.memo to prevent unnecessary re-renders when parent state updates
 export const PerformanceChart = memo(function PerformanceChart({ data, title = 'Performance' }: PerformanceChartProps) {
     return (
@@ -39,34 +84,20 @@ export const PerformanceChart = memo(function PerformanceChart({ data, title = '
                     <CartesianGrid strokeDasharray="4 4" stroke="hsl(var(--border))" opacity={0.3} />
                     <XAxis
                         dataKey="date"
-                        tickFormatter={(value) => {
-                            const date = new Date(value);
-                            return `${date.getMonth() + 1}/${date.getDate()}`;
-                        }}
+                        tickFormatter={formatDateTick}
                         stroke="hsl(var(--muted-foreground))"
                         style={{ fontSize: '12px', fontWeight: 500 }}
                         tickLine={false}
                     />
                     <YAxis
-                        tickFormatter={(value) =>
-                            `$${(value / 1000).toFixed(0)}k`
-                        }
+                        tickFormatter={formatYAxisTick}
                         stroke="hsl(var(--muted-foreground))"
                         style={{ fontSize: '12px', fontWeight: 500 }}
                         tickLine={false}
                     />
                     <Tooltip
-                        formatter={(value: number | undefined) =>
-                            value !== undefined ? `$${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : ''
-                        }
-                        labelFormatter={(label) => {
-                            const date = new Date(label);
-                            return date.toLocaleDateString('en-US', {
-                                month: 'short',
-                                day: 'numeric',
-                                year: 'numeric',
-                            });
-                        }}
+                        formatter={formatTooltipValue}
+                        labelFormatter={formatDateLabel}
                         contentStyle={{
                             backgroundColor: 'hsl(var(--card))',
                             border: '1px solid hsl(var(--border))',
