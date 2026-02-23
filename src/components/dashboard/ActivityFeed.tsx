@@ -25,6 +25,33 @@ const transactionColors = {
     withdrawal: 'text-red-600 bg-red-100',
 } as const;
 
+// Optimized: Moved formatters outside to avoid re-creation on every render.
+const currencyFormatter = new Intl.NumberFormat('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+});
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+// Optimized: Manual date parsing avoids `new Date()` allocation and potential timezone hydration mismatches.
+// Format: "YYYY-MM-DD" -> "MMM D" (e.g., "Feb 5")
+function formatTransactionDate(dateStr: string) {
+    if (!dateStr) return '';
+    // Expected format: "YYYY-MM-DD" (10 chars)
+    if (dateStr.length >= 10) {
+        // Parse directly to avoid timezone issues with new Date()
+        // Month is 0-indexed for array access, but date string is 1-based (01-12)
+        const monthIndex = parseInt(dateStr.substring(5, 7), 10) - 1;
+        const day = parseInt(dateStr.substring(8, 10), 10);
+
+        if (monthIndex >= 0 && monthIndex < 12 && !isNaN(day)) {
+            return `${MONTHS[monthIndex]} ${day}`;
+        }
+    }
+    // Fallback
+    return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
 // Optimized: Wrapped in React.memo to prevent unnecessary re-renders when parent state updates.
 // The component iterates over a list of transactions, and memoization ensures this work is skipped unless props change.
 export const ActivityFeed = memo(function ActivityFeed({ transactions, title = 'Recent Activity' }: ActivityFeedProps) {
@@ -71,10 +98,7 @@ export const ActivityFeed = memo(function ActivityFeed({ transactions, title = '
                                                 <span aria-hidden="true">{transaction.amount > 0 ? '+' : '-'}</span>
                                                 <span>
                                                     $
-                                                    {Math.abs(transaction.amount).toLocaleString('en-US', {
-                                                        minimumFractionDigits: 2,
-                                                        maximumFractionDigits: 2,
-                                                    })}
+                                                    {currencyFormatter.format(Math.abs(transaction.amount))}
                                                 </span>
                                             </div>
                                         </div>
@@ -85,10 +109,7 @@ export const ActivityFeed = memo(function ActivityFeed({ transactions, title = '
                                                 {transaction.notes && !transaction.quantity && transaction.notes}
                                             </p>
                                             <p>
-                                                {new Date(transaction.date).toLocaleDateString('en-US', {
-                                                    month: 'short',
-                                                    day: 'numeric',
-                                                })}
+                                                {formatTransactionDate(transaction.date)}
                                             </p>
                                         </div>
                                     </div>
