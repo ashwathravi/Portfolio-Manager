@@ -22,3 +22,8 @@
 
 **Learning:** Combining filter and reduce into a single pass loop avoids multiple iterations (O(3N) -> O(N)) and array allocations, significantly improving performance for derived state from large lists.
 **Action:** Use single-pass loops for simultaneous filtering and aggregation when dealing with large datasets.
+
+## 2026-02-23 - Date & Currency Formatting in Render Loops
+
+**Learning:** Instantiating `new Date()` and calling `toLocaleDateString/toLocaleString` inside a list render loop is expensive and causes unnecessary object allocation per item. Manual string parsing (for fixed formats like YYYY-MM-DD) is significantly faster and avoids potential timezone hydration mismatches (server UTC vs client Local).
+**Action:** Extract `Intl` formatters to static constants and use manual string parsing for simple date formats in high-frequency lists.
