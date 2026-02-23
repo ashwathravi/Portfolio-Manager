@@ -107,13 +107,13 @@ export default function PerformancePage() {
                     <div className="flex items-center justify-between mb-2">
                         <div className="flex items-center gap-2">
                             <div className="h-8 bg-primary/20 rounded" style={{ width: '80px' }}></div>
-                            <span className="text-sm font-bold text-primary">+$2.2 L</span>
+                            <span className="text-sm font-bold text-primary">+$2.2k</span>
                         </div>
                     </div>
                     <div className="flex items-center justify-between mb-3">
                         <div className="flex items-center gap-2">
                             <div className="h-8 bg-destructive/20 rounded" style={{ width: '36px' }}></div>
-                            <span className="text-sm font-bold text-destructive">-$1.0 L</span>
+                            <span className="text-sm font-bold text-destructive">-$1.0k</span>
                         </div>
                     </div>
                 </MetricCard>
@@ -216,7 +216,7 @@ export default function PerformancePage() {
                             tickLine={false}
                             tickFormatter={(value) => {
                                 if (value === 0) return '$0';
-                                if (value >= 100000) return `$${(value / 100000).toFixed(1)} L`;
+                                if (value >= 1000) return `$${(value / 1000)}k`;
                                 return `$${value}`;
                             }}
                             domain={[0, 240000]}
@@ -274,9 +274,9 @@ export default function PerformancePage() {
                             axisLine={false}
                             tickLine={false}
                             tickFormatter={(value) => {
-                                if (value === 0) return '₹0';
-                                if (value >= 100000) return `₹${(value / 100000).toFixed(1)} L`;
-                                return `₹${value}`;
+                                if (value === 0) return '$0';
+                                if (value >= 1000) return `$${(value / 1000)}k`;
+                                return `$${value}`;
                             }}
                             domain={[0, 240000]}
                             ticks={[0, 60000, 120000, 180000, 240000]}
@@ -288,7 +288,7 @@ export default function PerformancePage() {
                                 borderRadius: '8px',
                             }}
                             labelStyle={{ color: 'hsl(var(--foreground))' }}
-                            formatter={(value: number | undefined) => [value !== undefined ? `₹${value.toLocaleString()}` : '', 'Equity']}
+                            formatter={(value: number | undefined) => [value !== undefined ? `$${value.toLocaleString()}` : '', 'Equity']}
                         />
                         <Area
                             type="monotone"
@@ -343,11 +343,11 @@ export default function PerformancePage() {
                             axisLine={false}
                             tickLine={false}
                             tickFormatter={(value) => {
-                                if (value === 0) return '₹0';
+                                if (value === 0) return '$0';
                                 const sign = value < 0 ? '-' : '+';
                                 const absValue = Math.abs(value);
-                                if (absValue >= 100000) return `${sign}₹${(absValue / 100000).toFixed(1)} L`;
-                                return `${sign}₹${absValue}`;
+                                if (absValue >= 1000) return `${sign}$${(absValue / 1000)}k`;
+                                return `${sign}$${absValue}`;
                             }}
                             domain={[-90000, 0]}
                             ticks={[-90000, -72000, -54000, -36000, -18000, 0]}
@@ -359,7 +359,7 @@ export default function PerformancePage() {
                                 borderRadius: '8px',
                             }}
                             labelStyle={{ color: 'hsl(var(--foreground))' }}
-                            formatter={(value: number | undefined) => [value !== undefined ? `₹${value.toLocaleString()}` : '', 'Balance']}
+                            formatter={(value: number | undefined) => [value !== undefined ? `$${value.toLocaleString()}` : '', 'Balance']}
                         />
                         <Line
                             type="monotone"
@@ -422,7 +422,7 @@ export default function PerformancePage() {
                         </div>
                         <div className="p-4 rounded-lg bg-accent/50">
                             <p className="text-xs text-muted-foreground mb-1">Net P&L</p>
-                            <h3 className="text-2xl font-bold text-primary">+₹2,22,704.00</h3>
+                            <h3 className="text-2xl font-bold text-primary">+$222,704.00</h3>
                             <p className="text-xs text-muted-foreground mt-1">Profit</p>
                         </div>
                         <div className="p-4 rounded-lg bg-accent/50">
@@ -432,7 +432,7 @@ export default function PerformancePage() {
                         </div>
                         <div className="p-4 rounded-lg bg-accent/50">
                             <p className="text-xs text-muted-foreground mb-1">Best Day</p>
-                            <h3 className="text-2xl font-bold text-primary">+₹2,22,704.00</h3>
+                            <h3 className="text-2xl font-bold text-primary">+$222,704.00</h3>
                             <p className="text-xs text-muted-foreground mt-1">Feb 06</p>
                         </div>
                         <div className="p-4 rounded-lg bg-accent/50">
@@ -471,7 +471,7 @@ export default function PerformancePage() {
                                         <div className="text-sm font-medium mb-1">{day}</div>
                                         {day === 6 && (
                                             <div className="mt-2">
-                                                <div className="text-xs font-bold text-primary">+₹2,22,704.00</div>
+                                                <div className="text-xs font-bold text-primary">+$222,704.00</div>
                                             </div>
                                         )}
                                     </div>
@@ -537,7 +537,7 @@ export default function PerformancePage() {
                                         <TrendingUp className="h-4 w-4 text-primary mt-0.5" />
                                         <div className="flex-1">
                                             <p className="text-xs text-muted-foreground">Best Day</p>
-                                            <p className="text-sm font-bold text-primary">₹2,22,704.00</p>
+                                            <p className="text-sm font-bold text-primary">$222,704.00</p>
                                             <p className="text-xs text-muted-foreground">Feb 06</p>
                                         </div>
                                     </div>
