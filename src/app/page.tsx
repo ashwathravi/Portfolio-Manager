@@ -7,7 +7,7 @@ import { ActivityFeed } from '@/components/dashboard/ActivityFeed';
 import { AssetAllocation, DEFAULT_ALLOCATION_COLORS } from '@/components/dashboard/AssetAllocation';
 import { PortfolioPerformance } from '@/components/dashboard/PortfolioPerformance';
 import { Wallet, TrendingUp, DollarSign, Activity, Calendar, Plus } from 'lucide-react';
-import { mockTransactions } from '@/lib/mockData'; // Keeping for now, or fetch from DB
+import { mockTransactions, mockPortfolios } from '@/lib/mockData'; // Keeping for now, or fetch from DB
 // We should fetch transactions from DB too
 
 import { desc, eq, sql } from 'drizzle-orm';
@@ -17,12 +17,18 @@ export const dynamic = 'force-dynamic'; // Ensure it doesn't cache stale data on
 export default async function Dashboard() {
   // 1. Fetch Portfolios
   // querying raw for now, or using query builder if relations work
-  const allPortfolios = await db.query.portfolios.findMany({
-    with: {
-      holdings: true,
-      // transactions: true // If we want to verify seed transactions
-    }
-  });
+  let allPortfolios;
+  try {
+    allPortfolios = await db.query.portfolios.findMany({
+      with: {
+        holdings: true,
+        // transactions: true // If we want to verify seed transactions
+      }
+    });
+  } catch (error) {
+    console.warn('Database fetch failed, using mock data:', error);
+    allPortfolios = mockPortfolios;
+  }
 
   // Calculate Aggregates
   let totalNetWorth = 0;
@@ -181,7 +187,6 @@ export default async function Dashboard() {
           </div>
           <div className="flex flex-col gap-3">
             {portfolioData.map((portfolio) => (
-              // @ts-expect-error - PortfolioCard expects mock type, but we pass DB type + calculated fields
               <PortfolioCard key={portfolio.id} portfolio={portfolio} />
             ))}
           </div>

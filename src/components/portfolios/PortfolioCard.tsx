@@ -2,11 +2,21 @@ import { memo } from 'react';
 import { Card } from '@/components/ui/card';
 import { TrendingUp, TrendingDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import type { Portfolio } from '@/lib/mockData';
 import { KeyboardEvent } from 'react';
 
+export interface PortfolioSummary {
+    id: string;
+    name: string;
+    description: string | null;
+    totalValue: number;
+    todayChange: number;
+    todayChangePercent: number;
+    returnDollar: number;
+    returnPercent: number;
+}
+
 interface PortfolioCardProps {
-    portfolio: Portfolio;
+    portfolio: PortfolioSummary;
     onClick?: () => void;
 }
 
