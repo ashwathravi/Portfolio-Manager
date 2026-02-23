@@ -47,6 +47,10 @@ export const transactions = pgTable("transactions", {
     amount: doublePrecision("amount").notNull(),
     notes: text("notes"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => {
+    return {
+        transactionsPortfolioIdIdx: index("transactions_portfolio_id_idx").on(table.portfolioId),
+    };
 });
 
 export const portfoliosRelations = relations(portfolios, ({ many }) => ({
