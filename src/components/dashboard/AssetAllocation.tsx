@@ -72,12 +72,14 @@ export const AssetAllocation = memo(function AssetAllocation({ accountData, them
                     <TabsList className="bg-accent rounded-lg p-1 border border-border h-auto">
                         <TabsTrigger
                             value="account"
+                            aria-label="View allocation by account"
                             className="h-auto px-2 py-1 text-xs rounded-md hover:text-foreground data-[state=active]:bg-primary/20 data-[state=active]:text-primary data-[state=active]:font-bold data-[state=active]:shadow-sm"
                         >
                             Account
                         </TabsTrigger>
                         <TabsTrigger
                             value="theme"
+                            aria-label="View allocation by theme"
                             className="h-auto px-2 py-1 text-xs rounded-md hover:text-foreground data-[state=active]:bg-primary/20 data-[state=active]:text-primary data-[state=active]:font-bold data-[state=active]:shadow-sm"
                         >
                             Theme
