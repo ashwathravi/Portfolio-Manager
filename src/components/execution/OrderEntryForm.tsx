@@ -61,6 +61,7 @@ export function OrderEntryForm() {
                 <CardDescription>Place manual trade orders to the broker.</CardDescription>
             </CardHeader>
             <CardContent>
+                {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
                 <form onSubmit={handleSubmit(onSubmit as any)} className="space-y-4">
 
                     <Controller
