@@ -31,22 +31,29 @@ export default async function Dashboard() {
   }
 
   // Fetch recent transactions
-  const dbTransactions = await db.query.transactions.findMany({
-    limit: 5,
-    orderBy: [desc(transactions.date)],
-  });
+  let recentTransactions: Transaction[];
+  try {
+    const dbTransactions = await db.query.transactions.findMany({
+      limit: 5,
+      orderBy: [desc(transactions.date)],
+    });
 
-  // Map DB transactions to UI Transaction interface
-  const recentTransactions: Transaction[] = dbTransactions.map(t => ({
-    id: t.id,
-    date: t.date.toISOString(), // Component expects string date
-    type: t.type as Transaction['type'], // assuming DB has valid types
-    ticker: t.ticker || undefined,
-    quantity: t.quantity || undefined,
-    price: t.price || undefined,
-    amount: t.amount,
-    notes: t.notes || undefined,
-  }));
+    // Map DB transactions to UI Transaction interface
+    recentTransactions = dbTransactions.map(t => ({
+      id: t.id,
+      date: t.date.toISOString(), // Component expects string date
+      type: t.type as Transaction['type'], // assuming DB has valid types
+      ticker: t.ticker || undefined,
+      quantity: t.quantity || undefined,
+      price: t.price || undefined,
+      amount: t.amount,
+      notes: t.notes || undefined,
+    }));
+  } catch (error) {
+    console.warn('Database fetch failed for transactions, using mock data:', error);
+    const { mockTransactions } = await import('@/lib/mockData');
+    recentTransactions = mockTransactions;
+  }
 
   // Calculate Aggregates
   let totalNetWorth = 0;
