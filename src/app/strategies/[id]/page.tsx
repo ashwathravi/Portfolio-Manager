@@ -187,23 +187,23 @@ export default function StrategyDetailPage() {
                                 <stop offset="95%" stopColor="#17cf54" stopOpacity={0} />
                             </linearGradient>
                         </defs>
-                        <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                        <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
                         <XAxis
                             dataKey="date"
-                            stroke="hsl(var(--muted-foreground))"
+                            stroke="var(--muted-foreground)"
                             fontSize={12}
                             tickLine={false}
                         />
                         <YAxis
-                            stroke="hsl(var(--muted-foreground))"
+                            stroke="var(--muted-foreground)"
                             fontSize={12}
                             tickLine={false}
                             tickFormatter={(value) => `$${(value / 1000).toFixed(0)}K`}
                         />
                         <Tooltip
                             contentStyle={{
-                                backgroundColor: 'hsl(var(--card))',
-                                border: '1px solid hsl(var(--border))',
+                                backgroundColor: 'var(--card)',
+                                border: '1px solid var(--border)',
                                 borderRadius: '8px',
                             }}
                             formatter={(value: number | undefined) => (value !== undefined ? `$${value.toLocaleString()}` : '')}
@@ -219,7 +219,7 @@ export default function StrategyDetailPage() {
                         <Line
                             type="monotone"
                             dataKey="benchmark"
-                            stroke="hsl(var(--muted-foreground))"
+                            stroke="var(--muted-foreground)"
                             strokeWidth={2}
                             dot={false}
                             name="Benchmark"
@@ -337,23 +337,23 @@ export default function StrategyDetailPage() {
                     </p>
                     <ResponsiveContainer width="100%" height={200}>
                         <BarChart data={strategy.regimeAnalysis}>
-                            <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                            <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
                             <XAxis
                                 dataKey="regime"
-                                stroke="hsl(var(--muted-foreground))"
+                                stroke="var(--muted-foreground)"
                                 fontSize={12}
                                 tickLine={false}
                             />
                             <YAxis
-                                stroke="hsl(var(--muted-foreground))"
+                                stroke="var(--muted-foreground)"
                                 fontSize={12}
                                 tickLine={false}
                                 tickFormatter={(value) => `${value}%`}
                             />
                             <Tooltip
                                 contentStyle={{
-                                    backgroundColor: 'hsl(var(--card))',
-                                    border: '1px solid hsl(var(--border))',
+                                    backgroundColor: 'var(--card)',
+                                    border: '1px solid var(--border)',
                                     borderRadius: '8px',
                                 }}
                                 formatter={(value: number | undefined) => (value !== undefined ? `${value.toFixed(1)}%` : '')}
