@@ -41,8 +41,12 @@ export const AssetAllocation = memo(function AssetAllocation({ accountData, them
         { name: 'Energy', value: 10, color: DEFAULT_ALLOCATION_COLORS[2] },
     ];
 
-    const currentAccountData = accountData || defaultAccountData;
-    const currentThemeData = themeData || defaultThemeData;
+    // Ensure every item has a color (server may not pass colors from 'use client' exports)
+    const ensureColors = (items: AllocationItem[]) =>
+        items.map((item, i) => item.color ? item : { ...item, color: DEFAULT_ALLOCATION_COLORS[i % DEFAULT_ALLOCATION_COLORS.length] });
+
+    const currentAccountData = ensureColors(accountData || defaultAccountData);
+    const currentThemeData = ensureColors(themeData || defaultThemeData);
 
     const allocationData = allocationView === 'account' ? currentAccountData : currentThemeData;
 
@@ -72,12 +76,14 @@ export const AssetAllocation = memo(function AssetAllocation({ accountData, them
                     <TabsList className="bg-accent rounded-lg p-1 border border-border h-auto">
                         <TabsTrigger
                             value="account"
+                            aria-label="View allocation by account"
                             className="h-auto px-2 py-1 text-xs rounded-md hover:text-foreground data-[state=active]:bg-primary/20 data-[state=active]:text-primary data-[state=active]:font-bold data-[state=active]:shadow-sm"
                         >
                             Account
                         </TabsTrigger>
                         <TabsTrigger
                             value="theme"
+                            aria-label="View allocation by theme"
                             className="h-auto px-2 py-1 text-xs rounded-md hover:text-foreground data-[state=active]:bg-primary/20 data-[state=active]:text-primary data-[state=active]:font-bold data-[state=active]:shadow-sm"
                         >
                             Theme

@@ -56,10 +56,10 @@ export function StatCard({
     return (
         <Card className={cn("overflow-hidden transition-all hover:shadow-md", className)}>
             <CardContent className="p-6 relative">
-                <div className="flex items-start justify-between">
-                    <div>
+                <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0 flex-1">
                         <p className="text-sm font-medium text-muted-foreground">{displayLabel}</p>
-                        <h3 className="mt-2 text-3xl font-bold tracking-tight">{value}</h3>
+                        <h3 className="mt-2 text-3xl font-bold tracking-tight truncate">{value}</h3>
                     </div>
                     {icon && (
                         <div className={cn("rounded-full p-2.5 bg-muted/50 text-muted-foreground", color === "primary" && "text-primary bg-primary/10")}>

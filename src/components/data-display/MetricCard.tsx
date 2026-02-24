@@ -39,9 +39,9 @@ export function MetricCard({
             </div>
 
             {value !== undefined && (
-                <div className="flex items-baseline gap-2 mb-2">
+                <div className="flex items-baseline gap-2 mb-2 min-w-0">
                     {typeof value === 'string' || typeof value === 'number' ? (
-                        <h3 className={cn("text-2xl font-bold", valueClassName)}>
+                        <h3 className={cn("text-2xl font-bold truncate", valueClassName)}>
                             {value}
                         </h3>
                     ) : (

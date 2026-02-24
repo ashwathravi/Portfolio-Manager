@@ -447,7 +447,7 @@ export default function ThesisDetailPage() {
                                         cx="64"
                                         cy="64"
                                         r="56"
-                                        stroke="hsl(var(--accent))"
+                                        stroke="var(--accent)"
                                         strokeWidth="12"
                                         fill="none"
                                     />

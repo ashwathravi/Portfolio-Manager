@@ -12,6 +12,14 @@ interface PerformanceData {
     benchmark: number;
 }
 
+const rangeLabels: Record<string, string> = {
+    '1D': '1 Day',
+    '1W': '1 Week',
+    '1M': '1 Month',
+    '1Y': '1 Year',
+    'ALL': 'All Time',
+};
+
 export function PortfolioPerformance({ data = mockEquityCurve }: { data?: PerformanceData[] }) {
     return (
         <div className="lg:col-span-2 rounded-2xl bg-card border border-border p-6 flex flex-col shadow-lg">
@@ -31,6 +39,7 @@ export function PortfolioPerformance({ data = mockEquityCurve }: { data?: Perfor
                         <TabsTrigger
                             key={period}
                             value={period}
+                            aria-label={rangeLabels[period]}
                             className="px-3 py-1 rounded-md text-xs font-medium text-muted-foreground hover:text-foreground transition-colors data-[state=active]:bg-primary/20 data-[state=active]:text-primary data-[state=active]:font-bold data-[state=active]:shadow-sm h-auto"
                         >
                             {period}

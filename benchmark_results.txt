@@ -1,0 +1,9 @@
+
+Benchmark Results:
+------------------
+Transactions: 100000
+Portfolios: 100
+
+Full Scan (No Index): 3002.16ms (1000 ops)
+Index Lookup (With Index): 0.04ms (1000 ops)
+Speedup: 68475.3x

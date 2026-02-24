@@ -11,5 +11,5 @@ if (!connectionString) {
 }
 
 // Disable prefetch as it is not supported for "Transaction" pool mode
-const client = postgres(connectionString || "postgres://localhost:5432/postgres", { prepare: false, ssl: 'require' });
+const client = postgres(connectionString || "postgres://DATABASE_URL_MISSING", { prepare: false, ssl: 'require' });
 export const db = drizzle(client, { schema });
