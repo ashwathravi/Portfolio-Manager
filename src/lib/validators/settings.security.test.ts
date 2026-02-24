@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
-import { profileSchema } from './settings';
+import { profileSchema, passwordChangeSchema } from './settings';
 
 describe('Security: Profile Schema Vulnerabilities', () => {
     it('should reject XSS payloads in phone number', () => {
@@ -15,9 +15,31 @@ describe('Security: Profile Schema Vulnerabilities', () => {
 
         const result = profileSchema.safeParse(maliciousProfile);
 
-        // This test should FAIL if the vulnerability exists (because schema accepts it)
-        // We want the result.success to be false for a secure schema.
-        // If result.success is true, we have a vulnerability.
         assert.strictEqual(result.success, false, 'Phone field accepted XSS payload');
+    });
+
+    it('should reject extremely long passwords to prevent hashing DoS', () => {
+        // Create a password that meets complexity requirements but is too long
+        // Needs: Uppercase, Lowercase, Number, Special char
+        const longPassword = 'A1!' + 'a'.repeat(10000);
+
+        const result = passwordChangeSchema.safeParse({
+            currentPassword: longPassword,
+            newPassword: longPassword,
+            confirmPassword: longPassword
+        });
+
+        assert.strictEqual(result.success, false, 'Schema accepted extremely long password');
+    });
+
+    it('should reject extremely long emails to prevent database truncation issues', () => {
+        const longEmail = 'a'.repeat(300) + '@example.com';
+        const result = profileSchema.safeParse({
+            fullName: 'John Doe',
+            email: longEmail,
+            phone: '1234567890'
+        });
+
+        assert.strictEqual(result.success, false, 'Schema accepted extremely long email');
     });
 });

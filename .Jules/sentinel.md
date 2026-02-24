@@ -43,3 +43,8 @@
 **Vulnerability:** The `phone` field in `profileSchema` was validated only for length (10-20 chars), allowing potential XSS payloads (e.g. `<script>1</script>`, `<b onclick=...>`) to be stored.
 **Learning:** Length validation alone is insufficient for security. XSS payloads can be very short.
 **Prevention:** Always apply `safeText` or strict regex validation to ALL user inputs, even those expected to be numeric or formatted like phone numbers.
+
+## 2026-03-01 - Input Length Limits (DoS Prevention)
+**Vulnerability:** Password and email fields lacked maximum length constraints, creating potential vectors for Hashing DoS (CPU exhaustion) and database truncation issues.
+**Learning:** Hashing functions (like bcrypt) can be computationally expensive on very long inputs. Unbounded string inputs can lead to Denial of Service.
+**Prevention:** Always enforce explicit `.max()` length limits on all user inputs in Zod schemas, especially for fields involving cryptographic operations or database storage.
