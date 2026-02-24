@@ -16,7 +16,7 @@ let useSettingsStore: any;
 describe('settingsStore', () => {
     before(async () => {
         // Dynamic import must happen after localStorage shim is in place
-        const mod = await import('./settingsStore.ts');
+        const mod = await import('./settingsStore');
         useSettingsStore = mod.useSettingsStore;
     });
 
@@ -131,7 +131,7 @@ describe('settingsStore', () => {
             useSettingsStore.getState().addTag({ name: 'A', color: '#111111' });
             useSettingsStore.getState().addTag({ name: 'B', color: '#222222' });
             const tags = useSettingsStore.getState().tags;
-            const ids = tags.map(t => t.id);
+            const ids = tags.map((t: any) => t.id);
             const unique = new Set(ids);
             assert.strictEqual(unique.size, ids.length, 'All tag IDs should be unique');
         });
@@ -142,7 +142,7 @@ describe('settingsStore', () => {
             const tags = useSettingsStore.getState().tags;
             const target = tags[0]; // 'Growth'
             useSettingsStore.getState().updateTag(target.id, { name: 'Renamed' });
-            const updated = useSettingsStore.getState().tags.find(t => t.id === target.id);
+            const updated = useSettingsStore.getState().tags.find((t: any) => t.id === target.id);
             assert.ok(updated);
             assert.strictEqual(updated!.name, 'Renamed');
             assert.strictEqual(updated!.color, target.color); // unchanged
@@ -163,7 +163,7 @@ describe('settingsStore', () => {
             const before = tags.length;
             useSettingsStore.getState().deleteTag(target.id);
             assert.strictEqual(useSettingsStore.getState().tags.length, before - 1);
-            assert.ok(!useSettingsStore.getState().tags.find(t => t.id === target.id));
+            assert.ok(!useSettingsStore.getState().tags.find((t: any) => t.id === target.id));
         });
 
         test('should leave list unchanged for unknown id', () => {
@@ -179,16 +179,16 @@ describe('settingsStore', () => {
 
     describe('syncAccount', () => {
         test('should update lastSynced for the given account id', () => {
-            const before = useSettingsStore.getState().accounts.find(a => a.id === 'fidelity')!.lastSynced;
+            const before = useSettingsStore.getState().accounts.find((a: any) => a.id === 'fidelity')!.lastSynced;
             useSettingsStore.getState().syncAccount('fidelity');
-            const after = useSettingsStore.getState().accounts.find(a => a.id === 'fidelity')!.lastSynced;
+            const after = useSettingsStore.getState().accounts.find((a: any) => a.id === 'fidelity')!.lastSynced;
             assert.notStrictEqual(before, after, 'lastSynced should have changed');
         });
 
         test('should not modify other accounts', () => {
-            const vanguardBefore = useSettingsStore.getState().accounts.find(a => a.id === 'vanguard')!.lastSynced;
+            const vanguardBefore = useSettingsStore.getState().accounts.find((a: any) => a.id === 'vanguard')!.lastSynced;
             useSettingsStore.getState().syncAccount('fidelity');
-            const vanguardAfter = useSettingsStore.getState().accounts.find(a => a.id === 'vanguard')!.lastSynced;
+            const vanguardAfter = useSettingsStore.getState().accounts.find((a: any) => a.id === 'vanguard')!.lastSynced;
             assert.strictEqual(vanguardBefore, vanguardAfter);
         });
     });
@@ -196,12 +196,12 @@ describe('settingsStore', () => {
     describe('reconnectAccount', () => {
         test('should set status to reconciled and clear errorMessage', () => {
             // ibkr starts with status 'needs-review' and an errorMessage
-            const before = useSettingsStore.getState().accounts.find(a => a.id === 'ibkr')!;
+            const before = useSettingsStore.getState().accounts.find((a: any) => a.id === 'ibkr')!;
             assert.strictEqual(before.status, 'needs-review');
             assert.ok(before.errorMessage);
 
             useSettingsStore.getState().reconnectAccount('ibkr');
-            const after = useSettingsStore.getState().accounts.find(a => a.id === 'ibkr')!;
+            const after = useSettingsStore.getState().accounts.find((a: any) => a.id === 'ibkr')!;
             assert.strictEqual(after.status, 'reconciled');
             assert.strictEqual(after.errorMessage, undefined);
         });
@@ -213,7 +213,7 @@ describe('settingsStore', () => {
             useSettingsStore.getState().removeAccount('ibkr');
             const after = useSettingsStore.getState().accounts;
             assert.strictEqual(after.length, before - 1);
-            assert.ok(!after.find(a => a.id === 'ibkr'));
+            assert.ok(!after.find((a: any) => a.id === 'ibkr'));
         });
 
         test('should leave list unchanged for unknown id', () => {
