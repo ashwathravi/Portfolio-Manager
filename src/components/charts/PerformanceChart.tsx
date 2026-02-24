@@ -82,17 +82,17 @@ export const PerformanceChart = memo(function PerformanceChart({ data, title = '
             )}
             <ResponsiveContainer width="100%" height={300}>
                 <LineChart data={data}>
-                    <CartesianGrid strokeDasharray="4 4" stroke="hsl(var(--border))" opacity={0.3} />
+                    <CartesianGrid strokeDasharray="4 4" stroke="var(--border)" opacity={0.3} />
                     <XAxis
                         dataKey="date"
                         tickFormatter={formatDateTick}
-                        stroke="hsl(var(--muted-foreground))"
+                        stroke="var(--muted-foreground)"
                         style={{ fontSize: '12px', fontWeight: 500 }}
                         tickLine={false}
                     />
                     <YAxis
                         tickFormatter={formatYAxisTick}
-                        stroke="hsl(var(--muted-foreground))"
+                        stroke="var(--muted-foreground)"
                         style={{ fontSize: '12px', fontWeight: 500 }}
                         tickLine={false}
                     />
@@ -100,13 +100,13 @@ export const PerformanceChart = memo(function PerformanceChart({ data, title = '
                         formatter={formatTooltipValue}
                         labelFormatter={formatDateLabel}
                         contentStyle={{
-                            backgroundColor: 'hsl(var(--card))',
-                            border: '1px solid hsl(var(--border))',
+                            backgroundColor: 'var(--card)',
+                            border: '1px solid var(--border)',
                             borderRadius: '0.75rem',
                             boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
                         }}
                         labelStyle={{
-                            color: 'hsl(var(--muted-foreground))',
+                            color: 'var(--muted-foreground)',
                             fontSize: '12px',
                             fontWeight: 600,
                         }}
@@ -114,7 +114,7 @@ export const PerformanceChart = memo(function PerformanceChart({ data, title = '
                     <Line
                         type="monotone"
                         dataKey="portfolio"
-                        stroke="hsl(var(--primary))"
+                        stroke="var(--primary)"
                         strokeWidth={3}
                         dot={false}
                         name="Portfolio"
@@ -123,7 +123,7 @@ export const PerformanceChart = memo(function PerformanceChart({ data, title = '
                     <Line
                         type="monotone"
                         dataKey="benchmark"
-                        stroke="hsl(var(--muted-foreground))"
+                        stroke="var(--muted-foreground)"
                         strokeWidth={2}
                         strokeDasharray="6 6"
                         dot={false}

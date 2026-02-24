@@ -167,26 +167,26 @@ export default function PortfolioDetailPage() {
                 </div>
                 <ResponsiveContainer width="100%" height={300}>
                     <LineChart data={priceHistory}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
+                        <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
                         <XAxis
                             dataKey="date"
-                            tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 12 }}
-                            axisLine={{ stroke: 'hsl(var(--border))' }}
+                            tick={{ fill: 'var(--muted-foreground)', fontSize: 12 }}
+                            axisLine={{ stroke: 'var(--border)' }}
                             tickLine={false}
                         />
                         <YAxis
-                            tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 12 }}
+                            tick={{ fill: 'var(--muted-foreground)', fontSize: 12 }}
                             axisLine={false}
                             tickLine={false}
                             domain={['dataMin - 5', 'dataMax + 5']}
                         />
                         <Tooltip
                             contentStyle={{
-                                backgroundColor: 'hsl(var(--card))',
-                                border: '1px solid hsl(var(--border))',
+                                backgroundColor: 'var(--card)',
+                                border: '1px solid var(--border)',
                                 borderRadius: '8px',
                             }}
-                            labelStyle={{ color: 'hsl(var(--foreground))' }}
+                            labelStyle={{ color: 'var(--foreground)' }}
                             formatter={(value: number | undefined) => (value !== undefined ? [`$${value.toFixed(2)}`, 'Price'] : ['-', 'Price'])}
                         />
                         <Line

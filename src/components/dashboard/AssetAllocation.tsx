@@ -41,8 +41,12 @@ export const AssetAllocation = memo(function AssetAllocation({ accountData, them
         { name: 'Energy', value: 10, color: DEFAULT_ALLOCATION_COLORS[2] },
     ];
 
-    const currentAccountData = accountData || defaultAccountData;
-    const currentThemeData = themeData || defaultThemeData;
+    // Ensure every item has a color (server may not pass colors from 'use client' exports)
+    const ensureColors = (items: AllocationItem[]) =>
+        items.map((item, i) => item.color ? item : { ...item, color: DEFAULT_ALLOCATION_COLORS[i % DEFAULT_ALLOCATION_COLORS.length] });
+
+    const currentAccountData = ensureColors(accountData || defaultAccountData);
+    const currentThemeData = ensureColors(themeData || defaultThemeData);
 
     const allocationData = allocationView === 'account' ? currentAccountData : currentThemeData;
 
