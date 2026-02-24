@@ -7,8 +7,6 @@ import { ActivityFeed } from '@/components/dashboard/ActivityFeed';
 import { AssetAllocation, DEFAULT_ALLOCATION_COLORS } from '@/components/dashboard/AssetAllocation';
 import { PortfolioPerformance } from '@/components/dashboard/PortfolioPerformance';
 import { Wallet, TrendingUp, DollarSign, Activity, Calendar, Plus } from 'lucide-react';
-import { mockPortfolios } from '@/lib/mockData';
-
 import { desc, eq, sql } from 'drizzle-orm';
 import { Transaction } from '@/lib/mockData';
 
@@ -17,18 +15,11 @@ export const dynamic = 'force-dynamic'; // Ensure it doesn't cache stale data on
 export default async function Dashboard() {
   // 1. Fetch Portfolios
   // querying raw for now, or using query builder if relations work
-  let allPortfolios;
-  try {
-    allPortfolios = await db.query.portfolios.findMany({
-      with: {
-        holdings: true,
-        // transactions: true // If we want to verify seed transactions
-      }
-    });
-  } catch (error) {
-    console.warn('Database fetch failed, using mock data:', error);
-    allPortfolios = mockPortfolios;
-  }
+  const allPortfolios = await db.query.portfolios.findMany({
+    with: {
+      holdings: true,
+    }
+  });
 
   // Fetch recent transactions
   const dbTransactions = await db.query.transactions.findMany({
