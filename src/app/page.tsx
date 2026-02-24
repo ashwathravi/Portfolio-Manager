@@ -1,16 +1,16 @@
 
 import { db } from '@/db';
-import { portfolios, holdings } from '@/db/schema';
+import { portfolios, holdings, transactions } from '@/db/schema';
 import { StatCard } from '@/components/data-display/StatCard';
 import { PortfolioCard } from '@/components/portfolios/PortfolioCard';
 import { ActivityFeed } from '@/components/dashboard/ActivityFeed';
 import { AssetAllocation, DEFAULT_ALLOCATION_COLORS } from '@/components/dashboard/AssetAllocation';
 import { PortfolioPerformance } from '@/components/dashboard/PortfolioPerformance';
 import { Wallet, TrendingUp, DollarSign, Activity, Calendar, Plus } from 'lucide-react';
-import { mockTransactions } from '@/lib/mockData'; // Keeping for now, or fetch from DB
-// We should fetch transactions from DB too
+// mockTransactions removed
 
 import { desc, eq, sql } from 'drizzle-orm';
+import { Transaction } from '@/lib/mockData';
 
 export const dynamic = 'force-dynamic'; // Ensure it doesn't cache stale data on build
 
@@ -23,6 +23,24 @@ export default async function Dashboard() {
       // transactions: true // If we want to verify seed transactions
     }
   });
+
+  // Fetch recent transactions
+  const dbTransactions = await db.query.transactions.findMany({
+    limit: 5,
+    orderBy: [desc(transactions.date)],
+  });
+
+  // Map DB transactions to UI Transaction interface
+  const recentTransactions: Transaction[] = dbTransactions.map(t => ({
+    id: t.id,
+    date: t.date.toISOString(), // Component expects string date
+    type: t.type as Transaction['type'], // assuming DB has valid types
+    ticker: t.ticker || undefined,
+    quantity: t.quantity || undefined,
+    price: t.price || undefined,
+    amount: t.amount,
+    notes: t.notes || undefined,
+  }));
 
   // Calculate Aggregates
   let totalNetWorth = 0;
@@ -189,7 +207,7 @@ export default async function Dashboard() {
 
         {/* Top Movers activity feed */}
         <div className="flex flex-col gap-4">
-          <ActivityFeed transactions={mockTransactions} />
+          <ActivityFeed transactions={recentTransactions} />
         </div>
       </div>
     </div>

@@ -31,7 +31,7 @@ const formatDateTick = (value: string) => {
 
 // Optimized: Manual date parsing avoids `new Date()` allocation.
 // Format: "YYYY-MM-DD" -> "MMM D, YYYY" (e.g., "Feb 5, 2024")
-const formatDateLabel = (value: string) => {
+const formatDateLabel = (value: any) => {
     if (typeof value === 'string' && value.length >= 10) {
         const y = parseInt(value.substring(0, 4), 10);
         const m = parseInt(value.substring(5, 7), 10);
