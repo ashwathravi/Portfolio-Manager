@@ -27,3 +27,13 @@
 
 **Learning:** Instantiating `new Date()` and calling `toLocaleDateString/toLocaleString` inside a list render loop is expensive and causes unnecessary object allocation per item. Manual string parsing (for fixed formats like YYYY-MM-DD) is significantly faster and avoids potential timezone hydration mismatches (server UTC vs client Local).
 **Action:** Extract `Intl` formatters to static constants and use manual string parsing for simple date formats in high-frequency lists.
+
+## 2026-02-24 - Short-Circuiting in Memoized Loops
+
+**Learning:** Using boolean logic checks inside a loop for filtering forces evaluation of all conditions. Using `continue` with short-circuiting avoids unnecessary checks and improves average-case performance.
+**Action:** Use `continue` for early exits in filtering loops within `useMemo`.
+
+## 2026-02-24 - Server Component Resilience & Performance
+
+**Learning:** Server Components that fetch data without `try-catch` blocks cause the entire route to crash if the database is unreachable. Wrapping DB calls with a mock data fallback ensures the application remains usable and performant even during outages.
+**Action:** Always wrap DB queries in `try-catch` in Server Components and provide a fallback.
