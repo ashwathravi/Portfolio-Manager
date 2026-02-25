@@ -26,7 +26,7 @@ export default async function Dashboard() {
       }
     });
   } catch (error) {
-    console.warn('Database fetch failed, using mock data:', error);
+    console.warn('Database fetch failed, using mock data:', error instanceof Error ? error.message : String(error));
     allPortfolios = mockPortfolios;
   }
 
@@ -50,7 +50,7 @@ export default async function Dashboard() {
       notes: t.notes || undefined,
     }));
   } catch (error) {
-    console.warn('Database fetch failed for transactions, using mock data:', error);
+    console.warn('Database fetch failed for transactions, using mock data:', error instanceof Error ? error.message : String(error));
     const { mockTransactions } = await import('@/lib/mockData');
     recentTransactions = mockTransactions;
   }
