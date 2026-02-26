@@ -120,15 +120,14 @@ export function HoldingsTable({ holdings }: { holdings: Holding[] }) {
         let ret = 0;
 
         for (const holding of holdings) {
-            const accountMatch = selectedAccount === 'All Accounts' || holding.account === selectedAccount;
-            const strategyMatch = selectedStrategy === 'All Strategies' || holding.strategy === selectedStrategy;
-            const tagMatch = selectedTag === 'All Tags' || holding.tags.includes(selectedTag);
+            // Optimized: Short-circuit checks to avoid unnecessary comparisons
+            if (selectedAccount !== 'All Accounts' && holding.account !== selectedAccount) continue;
+            if (selectedStrategy !== 'All Strategies' && holding.strategy !== selectedStrategy) continue;
+            if (selectedTag !== 'All Tags' && !holding.tags.includes(selectedTag)) continue;
 
-            if (accountMatch && strategyMatch && tagMatch) {
-                result.push(holding);
-                netValue += holding.totalValue;
-                ret += holding.totalReturn;
-            }
+            result.push(holding);
+            netValue += holding.totalValue;
+            ret += holding.totalReturn;
         }
 
         return {
@@ -144,21 +143,23 @@ export function HoldingsTable({ holdings }: { holdings: Holding[] }) {
         setSelectedTag('All Tags');
     };
 
-    const activeFiltersCount = [selectedAccount, selectedStrategy, selectedTag].filter(
-        (filter, index) => filter !== ['All Accounts', 'All Strategies', 'All Tags'][index]
-    ).length;
+    // Optimized: Calculate active filters without array allocation
+    let activeFiltersCount = 0;
+    if (selectedAccount !== 'All Accounts') activeFiltersCount++;
+    if (selectedStrategy !== 'All Strategies') activeFiltersCount++;
+    if (selectedTag !== 'All Tags') activeFiltersCount++;
 
     const handleHoldingDoubleClick = useCallback((symbol: string) => {
         router.push(`/portfolios/detail/${symbol}`);
     }, [router]);
 
     const hasActiveFilters = activeFiltersCount > 0;
-    const getFilterText = () => {
-        if (selectedAccount !== 'All Accounts') return selectedAccount;
-        if (selectedStrategy !== 'All Strategies') return selectedStrategy;
-        if (selectedTag !== 'All Tags') return selectedTag;
-        return '';
-    };
+
+    // Optimized: Calculate filter text directly to avoid function creation
+    let filterText = '';
+    if (selectedAccount !== 'All Accounts') filterText = selectedAccount;
+    else if (selectedStrategy !== 'All Strategies') filterText = selectedStrategy;
+    else if (selectedTag !== 'All Tags') filterText = selectedTag;
 
 
     return (
@@ -173,7 +174,7 @@ export function HoldingsTable({ holdings }: { holdings: Holding[] }) {
                         Portfolio
                     </button>
                     <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                    <span className="text-foreground font-medium">{getFilterText()}</span>
+                    <span className="text-foreground font-medium">{filterText}</span>
                 </div>
             )}
 
