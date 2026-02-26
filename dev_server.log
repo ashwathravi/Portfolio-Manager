@@ -1,0 +1,52 @@
+
+> atlas-wealth@0.1.0 dev /app
+> next dev
+
+▲ Next.js 16.1.6 (Turbopack)
+- Local:         http://localhost:3000
+- Network:       http://192.168.0.2:3000
+
+✓ Starting...
+✓ Ready in 1486ms
+⚠️ DATABASE_URL not found. Database features will not work.
+Database fetch failed, using mock data: Error: Failed query: select "portfolios"."id", "portfolios"."name", "portfolios"."description", "portfolios"."total_value", "portfolios"."cash_balance", "portfolios"."created_at", "portfolios"."updated_at", "portfolios_holdings"."data" as "holdings" from "portfolios" "portfolios" left join lateral (select coalesce(json_agg(json_build_array("portfolios_holdings"."id", "portfolios_holdings"."portfolio_id", "portfolios_holdings"."ticker", "portfolios_holdings"."name", "portfolios_holdings"."quantity", "portfolios_holdings"."avg_cost", "portfolios_holdings"."current_price", "portfolios_holdings"."market_value", "portfolios_holdings"."allocation", "portfolios_holdings"."created_at", "portfolios_holdings"."updated_at")), '[]'::json) as "data" from "holdings" "portfolios_holdings" where "portfolios_holdings"."portfolio_id" = "portfolios"."id") "portfolios_holdings" on true
+params:
+    at async Dashboard (src/app/page.tsx:22:21)
+  20 |   let allPortfolios;
+  21 |   try {
+> 22 |     allPortfolios = await db.query.portfolios.findMany({
+     |                     ^
+  23 |       with: {
+  24 |         holdings: true,
+  25 |         // transactions: true // If we want to verify seed transactions {
+  query: `select "portfolios"."id", "portfolios"."name", "portfolios"."description", "portfolios"."total_value", "portfolios"."cash_balance", "portfolios"."created_at", "portfolios"."updated_at", "portfolios_holdings"."data" as "holdings" from "portfolios" "portfolios" left join lateral (select coalesce(json_agg(json_build_array("portfolios_holdings"."id", "portfolios_holdings"."portfolio_id", "portfolios_holdings"."ticker", "portfolios_holdings"."name", "portfolios_holdings"."quantity", "portfolios_holdings"."avg_cost", "portfolios_holdings"."current_price", "portfolios_holdings"."market_value", "portfolios_holdings"."allocation", "portfolios_holdings"."created_at", "portfolios_holdings"."updated_at")), '[]'::json) as "data" from "holdings" "portfolios_holdings" where "portfolios_holdings"."portfolio_id" = "portfolios"."id") "portfolios_holdings" on true`,
+  params: [],
+  [cause]: Error: getaddrinfo ENOTFOUND DATABASE_URL_MISSING
+      at ignore-listed frames {
+    errno: -3008,
+    code: 'ENOTFOUND',
+    syscall: 'getaddrinfo',
+    hostname: 'DATABASE_URL_MISSING'
+  }
+}
+Database fetch failed for transactions, using mock data: Error: Failed query: select "id", "portfolio_id", "date", "type", "ticker", "quantity", "price", "amount", "notes", "created_at" from "transactions" "transactions" order by "transactions"."date" desc limit $1
+params: 5
+    at async Dashboard (src/app/page.tsx:36:28)
+  34 |   let recentTransactions: Transaction[];
+  35 |   try {
+> 36 |     const dbTransactions = await db.query.transactions.findMany({
+     |                            ^
+  37 |       limit: 5,
+  38 |       orderBy: [desc(transactions.date)],
+  39 |     }); {
+  query: 'select "id", "portfolio_id", "date", "type", "ticker", "quantity", "price", "amount", "notes", "created_at" from "transactions" "transactions" order by "transactions"."date" desc limit $1',
+  params: [Array],
+  [cause]: Error: getaddrinfo ENOTFOUND DATABASE_URL_MISSING
+      at ignore-listed frames {
+    errno: -3008,
+    code: 'ENOTFOUND',
+    syscall: 'getaddrinfo',
+    hostname: 'DATABASE_URL_MISSING'
+  }
+}
+ GET / 200 in 2.3s (compile: 1132ms, render: 1139ms)

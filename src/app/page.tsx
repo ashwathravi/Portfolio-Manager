@@ -149,22 +149,22 @@ export default async function Dashboard() {
       </header>
 
       {/* Market Status Chips */}
-      <div className="flex gap-3 overflow-x-auto pb-2">
-        <div className="flex h-8 shrink-0 items-center justify-center gap-x-2 rounded-lg bg-primary/10 border border-primary/20 pl-2 pr-4">
+      <ul className="flex gap-3 overflow-x-auto pb-2" aria-label="Market Status">
+        <li className="flex h-8 shrink-0 items-center justify-center gap-x-2 rounded-lg bg-primary/10 border border-primary/20 pl-2 pr-4">
           <span className="relative flex h-2 w-2">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
+            <span className="animate-ping motion-reduce:hidden absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
             <span className="relative inline-flex rounded-full h-2 w-2 bg-primary"></span>
           </span>
           <p className="text-primary text-xs font-bold uppercase tracking-wide">Market Open</p>
-        </div>
-        <div className="flex h-8 shrink-0 items-center justify-center gap-x-2 rounded-lg bg-card border border-border px-4">
+        </li>
+        <li className="flex h-8 shrink-0 items-center justify-center gap-x-2 rounded-lg bg-card border border-border px-4">
           <TrendingUp className="h-4 w-4 text-muted-foreground" />
           <p className="text-muted-foreground text-xs font-medium">S&P 500 <span className="text-primary ml-1">+0.45%</span></p>
-        </div>
-        <div className="flex h-8 shrink-0 items-center justify-center gap-x-2 rounded-lg bg-card border border-border px-4">
+        </li>
+        <li className="flex h-8 shrink-0 items-center justify-center gap-x-2 rounded-lg bg-card border border-border px-4">
           <span className="text-muted-foreground text-xs font-medium">BTC <span className="text-destructive ml-1">-1.2%</span></span>
-        </div>
-      </div>
+        </li>
+      </ul>
 
       {/* Stats Grid */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6">
