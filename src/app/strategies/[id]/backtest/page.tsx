@@ -35,8 +35,8 @@ const mockBacktest: BacktestResult = {
     trades: [], // Populated in a real app
     equityCurve: Array.from({ length: 12 }, (_, i) => ({
         date: new Date(2023, i, 1),
-        equity: 100000 * (1 + (i * 0.03 + Math.random() * 0.05)),
-        drawdown: Math.random() * -10
+        equity: 100000 * (1 + (i * 0.03 + (Math.sin(i) * 0.025 + 0.025))),
+        drawdown: (Math.cos(i) * 5 - 5)
     })),
     robustness: {
         monteCarloProbDrawdown: 95,
