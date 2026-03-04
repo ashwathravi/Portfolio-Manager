@@ -1,6 +1,6 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert';
-import { tagSchema, profileSchema, passwordChangeSchema } from './settings.ts';
+import { tagSchema, profileSchema, passwordChangeSchema } from './settings';
 
 // ---------------------------------------------------------------------------
 // tagSchema

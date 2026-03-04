@@ -7,8 +7,7 @@ import { ActivityFeed } from '@/components/dashboard/ActivityFeed';
 import { AssetAllocation, DEFAULT_ALLOCATION_COLORS } from '@/components/dashboard/AssetAllocation';
 import { PortfolioPerformance } from '@/components/dashboard/PortfolioPerformance';
 import { Wallet, TrendingUp, DollarSign, Activity, Calendar, Plus } from 'lucide-react';
-import { mockPortfolios } from '@/lib/mockData';
-
+import { mockPortfolios, mockTransactions } from '@/lib/mockData';
 import { desc, eq, sql } from 'drizzle-orm';
 import { Transaction } from '@/lib/mockData';
 
@@ -17,18 +16,11 @@ export const dynamic = 'force-dynamic'; // Ensure it doesn't cache stale data on
 export default async function Dashboard() {
   // 1. Fetch Portfolios
   // querying raw for now, or using query builder if relations work
-  let allPortfolios;
-  try {
-    allPortfolios = await db.query.portfolios.findMany({
-      with: {
-        holdings: true,
-        // transactions: true // If we want to verify seed transactions
-      }
-    });
-  } catch (error) {
-    console.warn('Database fetch failed, using mock data:', error instanceof Error ? error.message : String(error));
-    allPortfolios = mockPortfolios;
-  }
+  const allPortfolios = await db.query.portfolios.findMany({
+    with: {
+      holdings: true,
+    }
+  });
 
   // Fetch recent transactions
   let recentTransactions: Transaction[];
@@ -50,8 +42,7 @@ export default async function Dashboard() {
       notes: t.notes || undefined,
     }));
   } catch (error) {
-    console.warn('Database fetch failed for transactions, using mock data:', error instanceof Error ? error.message : String(error));
-    const { mockTransactions } = await import('@/lib/mockData');
+    console.warn('Database transactions fetch failed, using mock data:', error);
     recentTransactions = mockTransactions;
   }
 
@@ -151,18 +142,30 @@ export default async function Dashboard() {
       {/* Market Status Chips */}
       <ul className="flex gap-3 overflow-x-auto pb-2" aria-label="Market Status">
         <li className="flex h-8 shrink-0 items-center justify-center gap-x-2 rounded-lg bg-primary/10 border border-primary/20 pl-2 pr-4">
-          <span className="relative flex h-2 w-2">
+          <span className="relative flex h-2 w-2" aria-hidden="true">
             <span className="animate-ping motion-reduce:hidden absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
             <span className="relative inline-flex rounded-full h-2 w-2 bg-primary"></span>
           </span>
-          <p className="text-primary text-xs font-bold uppercase tracking-wide">Market Open</p>
+          <span className="text-primary text-xs font-bold uppercase tracking-wide">Market Open</span>
         </li>
         <li className="flex h-8 shrink-0 items-center justify-center gap-x-2 rounded-lg bg-card border border-border px-4">
-          <TrendingUp className="h-4 w-4 text-muted-foreground" />
-          <p className="text-muted-foreground text-xs font-medium">S&P 500 <span className="text-primary ml-1">+0.45%</span></p>
+          <TrendingUp className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+          <p className="text-muted-foreground text-xs font-medium">
+            S&P 500
+            <span className="text-primary ml-1">
+              <span className="sr-only">Up by </span>
+              +0.45%
+            </span>
+          </p>
         </li>
         <li className="flex h-8 shrink-0 items-center justify-center gap-x-2 rounded-lg bg-card border border-border px-4">
-          <span className="text-muted-foreground text-xs font-medium">BTC <span className="text-destructive ml-1">-1.2%</span></span>
+          <p className="text-muted-foreground text-xs font-medium">
+            BTC
+            <span className="text-destructive ml-1">
+              <span className="sr-only">Down by </span>
+              -1.2%
+            </span>
+          </p>
         </li>
       </ul>
 
