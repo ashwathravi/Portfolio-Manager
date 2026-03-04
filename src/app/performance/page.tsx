@@ -192,14 +192,20 @@ export default function PerformancePage() {
                 <ResponsiveContainer width="100%" height={200}>
                     <BarChart
                         data={[
-                            { month: '1/1/24', value: 0 },
-                            { month: '2/1/24', value: 0 },
-                            { month: '3/1/24', value: 0 },
-                            { month: '4/1/24', value: 0 },
-                            { month: '5/1/24', value: 0 },
-                            { month: '6/1/24', value: 0 },
-                            { month: '7/1/24', value: 0 },
-                            { month: '8/1/24', value: 220000 },
+                            { month: 'Jan 25', value: 1850 },
+                            { month: 'Feb 25', value: 3420 },
+                            { month: 'Mar 25', value: -1100 },
+                            { month: 'Apr 25', value: 2780 },
+                            { month: 'May 25', value: 4150 },
+                            { month: 'Jun 25', value: -680 },
+                            { month: 'Jul 25', value: 3900 },
+                            { month: 'Aug 25', value: 5210 },
+                            { month: 'Sep 25', value: 1630 },
+                            { month: 'Oct 25', value: -920 },
+                            { month: 'Nov 25', value: 4480 },
+                            { month: 'Dec 25', value: 6100 },
+                            { month: 'Jan 26', value: 2340 },
+                            { month: 'Feb 26', value: 3850 },
                         ]}
                         margin={{ top: 10, right: 10, left: 10, bottom: 20 }}
                     >
@@ -214,13 +220,7 @@ export default function PerformancePage() {
                             tick={{ fill: 'var(--muted-foreground)', fontSize: 12 }}
                             axisLine={false}
                             tickLine={false}
-                            tickFormatter={(value) => {
-                                if (value === 0) return '$0';
-                                if (value >= 1000) return `$${(value / 1000)}k`;
-                                return `$${value}`;
-                            }}
-                            domain={[0, 240000]}
-                            ticks={[0, 60000, 120000, 180000, 240000]}
+                            tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`}
                         />
                         <Tooltip
                             contentStyle={{
@@ -229,13 +229,13 @@ export default function PerformancePage() {
                                 borderRadius: '8px',
                             }}
                             labelStyle={{ color: 'var(--foreground)' }}
-                            formatter={(value: number | undefined) => [value !== undefined ? `$${value.toLocaleString()}` : '', 'P&L']}
+                            formatter={(value: number) => [`$${value.toLocaleString()}`, 'P&L']}
                         />
                         <Bar
                             dataKey="value"
-                            fill="#17cf54"
                             radius={[4, 4, 0, 0]}
                             maxBarSize={60}
+                            fill="#17cf54"
                         />
                     </BarChart>
                 </ResponsiveContainer>
@@ -250,9 +250,21 @@ export default function PerformancePage() {
                 <ResponsiveContainer width="100%" height={240}>
                     <AreaChart
                         data={[
-                            { date: '06 Feb', value: 0 },
-                            { date: '08 Feb', value: 220000 },
-                            { date: 'Initial Account Balance Feb', value: 220000 },
+                            { date: 'Jan 25', value: 100000 },
+                            { date: 'Feb 25', value: 101850 },
+                            { date: 'Mar 25', value: 105270 },
+                            { date: 'Apr 25', value: 104170 },
+                            { date: 'May 25', value: 106950 },
+                            { date: 'Jun 25', value: 111100 },
+                            { date: 'Jul 25', value: 110420 },
+                            { date: 'Aug 25', value: 114320 },
+                            { date: 'Sep 25', value: 119530 },
+                            { date: 'Oct 25', value: 121160 },
+                            { date: 'Nov 25', value: 120240 },
+                            { date: 'Dec 25', value: 124720 },
+                            { date: 'Jan 26', value: 131060 },
+                            { date: 'Feb 26', value: 133560 },
+                            { date: 'Mar 26', value: 137410 },
                         ]}
                         margin={{ top: 10, right: 30, left: 10, bottom: 30 }}
                     >
@@ -268,18 +280,14 @@ export default function PerformancePage() {
                             tick={{ fill: 'var(--muted-foreground)', fontSize: 11 }}
                             axisLine={{ stroke: 'var(--border)' }}
                             tickLine={false}
+                            interval={2}
                         />
                         <YAxis
                             tick={{ fill: 'var(--muted-foreground)', fontSize: 12 }}
                             axisLine={false}
                             tickLine={false}
-                            tickFormatter={(value) => {
-                                if (value === 0) return '$0';
-                                if (value >= 1000) return `$${(value / 1000)}k`;
-                                return `$${value}`;
-                            }}
-                            domain={[0, 240000]}
-                            ticks={[0, 60000, 120000, 180000, 240000]}
+                            tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`}
+                            domain={[95000, 145000]}
                         />
                         <Tooltip
                             contentStyle={{
@@ -288,7 +296,7 @@ export default function PerformancePage() {
                                 borderRadius: '8px',
                             }}
                             labelStyle={{ color: 'var(--foreground)' }}
-                            formatter={(value: number | undefined) => [value !== undefined ? `$${value.toLocaleString()}` : '', 'Equity']}
+                            formatter={(value: number) => [`$${value.toLocaleString()}`, 'Equity']}
                         />
                         <Area
                             type="monotone"
@@ -310,23 +318,20 @@ export default function PerformancePage() {
                 <ResponsiveContainer width="100%" height={240}>
                     <LineChart
                         data={[
-                            { date: '06 Feb, 2014', deployed: 0, account: 0 },
-                            { date: '25 Sep, 2024', deployed: 0, account: 0 },
-                            { date: '18 Oct, 2025', deployed: 0, account: 0 },
-                            { date: '22 Oct, 2025', deployed: 0, account: 0 },
-                            { date: '29 Oct, 2025', deployed: 0, account: 0 },
-                            { date: '03 Nov, 2025', deployed: 0, account: 0 },
-                            { date: '06 Nov, 2025', deployed: 0, account: 0 },
-                            { date: '20 Nov, 2025', deployed: 0, account: 0 },
-                            { date: '08 Dec, 2025', deployed: 0, account: 0 },
-                            { date: '11 Dec, 2025', deployed: 0, account: 0 },
-                            { date: '16 Dec, 2025', deployed: 0, account: 0 },
-                            { date: '28 Dec, 2025', deployed: 0, account: 0 },
-                            { date: '04 Jan, 2026', deployed: 0, account: 0 },
-                            { date: '21 Jan, 2026', deployed: 0, account: 0 },
-                            { date: '28 Jan, 2026', deployed: 0, account: 0 },
-                            { date: '02 Feb, 2026', deployed: -25000, account: -25000 },
-                            { date: '20 Feb, 2026', deployed: -90000, account: 0 },
+                            { date: 'Jan 25', deployed: 55000, account: 100000 },
+                            { date: 'Feb 25', deployed: 58000, account: 101850 },
+                            { date: 'Mar 25', deployed: 62000, account: 105270 },
+                            { date: 'Apr 25', deployed: 60000, account: 104170 },
+                            { date: 'May 25', deployed: 67000, account: 106950 },
+                            { date: 'Jun 25', deployed: 72000, account: 111100 },
+                            { date: 'Jul 25', deployed: 68000, account: 110420 },
+                            { date: 'Aug 25', deployed: 74000, account: 114320 },
+                            { date: 'Sep 25', deployed: 80000, account: 119530 },
+                            { date: 'Oct 25', deployed: 78000, account: 121160 },
+                            { date: 'Nov 25', deployed: 82000, account: 124720 },
+                            { date: 'Dec 25', deployed: 88000, account: 131060 },
+                            { date: 'Jan 26', deployed: 92000, account: 133560 },
+                            { date: 'Feb 26', deployed: 96820, account: 137410 },
                         ]}
                         margin={{ top: 10, right: 30, left: 10, bottom: 30 }}
                     >
@@ -336,21 +341,14 @@ export default function PerformancePage() {
                             tick={{ fill: 'var(--muted-foreground)', fontSize: 10 }}
                             axisLine={{ stroke: 'var(--border)' }}
                             tickLine={false}
-                            interval="preserveStartEnd"
+                            interval={2}
                         />
                         <YAxis
                             tick={{ fill: 'var(--muted-foreground)', fontSize: 12 }}
                             axisLine={false}
                             tickLine={false}
-                            tickFormatter={(value) => {
-                                if (value === 0) return '$0';
-                                const sign = value < 0 ? '-' : '+';
-                                const absValue = Math.abs(value);
-                                if (absValue >= 1000) return `${sign}$${(absValue / 1000)}k`;
-                                return `${sign}$${absValue}`;
-                            }}
-                            domain={[-90000, 0]}
-                            ticks={[-90000, -72000, -54000, -36000, -18000, 0]}
+                            tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`}
+                            domain={[40000, 150000]}
                         />
                         <Tooltip
                             contentStyle={{
@@ -359,14 +357,24 @@ export default function PerformancePage() {
                                 borderRadius: '8px',
                             }}
                             labelStyle={{ color: 'var(--foreground)' }}
-                            formatter={(value: number | undefined) => [value !== undefined ? `$${value.toLocaleString()}` : '', 'Balance']}
+                            formatter={(value: number) => [`$${value.toLocaleString()}`, '']}
                         />
                         <Line
                             type="monotone"
                             dataKey="account"
+                            stroke="#17cf54"
+                            strokeWidth={2}
+                            dot={false}
+                            name="Account Value"
+                        />
+                        <Line
+                            type="monotone"
+                            dataKey="deployed"
                             stroke="#06b6d4"
                             strokeWidth={2}
                             dot={false}
+                            strokeDasharray="5 3"
+                            name="Deployed Capital"
                         />
                     </LineChart>
                 </ResponsiveContainer>
