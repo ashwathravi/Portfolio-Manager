@@ -1,17 +1,13 @@
 
 import { db } from '@/db';
-import { portfolios, holdings } from '@/db/schema';
 import { StatCard } from '@/components/data-display/StatCard';
-import { PortfolioCard } from '@/components/portfolios/PortfolioCard';
+import { PortfolioCard, type PortfolioSummary } from '@/components/portfolios/PortfolioCard';
 import { ActivityFeed } from '@/components/dashboard/ActivityFeed';
 import { AssetAllocation } from '@/components/dashboard/AssetAllocation';
 import { PortfolioPerformance } from '@/components/dashboard/PortfolioPerformance';
 import { Wallet, TrendingUp, DollarSign, Activity, Calendar, Plus } from 'lucide-react';
 import { DashboardGreeting } from '@/components/dashboard/DashboardGreeting';
-import { mockTransactions } from '@/lib/mockData'; // Keeping for now, or fetch from DB
-// We should fetch transactions from DB too
-
-import { desc, eq, sql } from 'drizzle-orm';
+import { mockTransactions } from '@/lib/mockData';
 
 export const dynamic = 'force-dynamic'; // Ensure it doesn't cache stale data on build
 
@@ -25,24 +21,14 @@ export default async function Dashboard() {
     }
   });
 
-  // Calculate Aggregates
-  let totalNetWorth = 0;
-  let cashBalance = 0;
-  let totalReturnDollar = 0; // This might need better tracking in DB (snapshots)
-
-  // For MVP, we sum up current holdings value + cash
-  // Note: Holdings in DB have 'marketValue' seeded from mock. In real app, we'd calculate: quantity * currentPrice
-
-  const portfolioData = allPortfolios.map(p => {
+  const portfolioData: PortfolioSummary[] = allPortfolios.map(p => {
     const holdingsValue = p.holdings.reduce((sum, h) => sum + (h.marketValue || 0), 0);
-    const pTotal = (p.cashBalance || 0) + holdingsValue;
-
-    // We can update the 'totalValue' in the object for display, even if DB 'totalValue' is stale
+    const totalValue = (p.cashBalance || 0) + holdingsValue;
     return {
-      ...p,
-      totalValue: pTotal,
-      // We don't have 'returnDollar' in DB columns yet for Portfolios (only mocks had it)
-      // We'll use 0 or calculate if we had cost basis
+      id: p.id,
+      name: p.name,
+      description: p.description ?? null,
+      totalValue,
       returnDollar: 0,
       todayChange: 0,
       todayChangePercent: 0,
@@ -50,7 +36,7 @@ export default async function Dashboard() {
     };
   });
 
-  totalNetWorth = portfolioData.reduce((sum, p) => sum + p.totalValue, 0);
+  const totalNetWorth = portfolioData.reduce((sum, p) => sum + p.totalValue, 0);
 
   // Mocking change data for now since we don't have historical snapshots in DB yet
   const todayChange = 1240.50;
@@ -144,10 +130,13 @@ export default async function Dashboard() {
             <button className="text-primary text-sm font-medium hover:underline">Manage</button>
           </div>
           <div className="flex flex-col gap-3">
-            {portfolioData.map((portfolio) => (
-              // @ts-ignore - PortfolioCard expects mock type, but we pass DB type + calculated fields
-              <PortfolioCard key={portfolio.id} portfolio={portfolio} />
-            ))}
+            {portfolioData.length === 0 ? (
+              <p className="text-sm text-muted-foreground py-4 text-center">No portfolios found. Add one to get started.</p>
+            ) : (
+              portfolioData.map((portfolio) => (
+                <PortfolioCard key={portfolio.id} portfolio={portfolio} />
+              ))
+            )}
           </div>
         </div>
 
