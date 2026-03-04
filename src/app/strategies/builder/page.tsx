@@ -204,7 +204,7 @@ export default function StrategyBuilderPage() {
                                 Next <ArrowRight className="ml-2 h-4 w-4" />
                             </Button>
                         ) : (
-                            <Button className="bg-success-600 hover:bg-success-700">
+                            <Button className="bg-green-600 hover:bg-green-700">
                                 <Save className="mr-2 h-4 w-4" /> Save Strategy
                             </Button>
                         )}
@@ -215,11 +215,3 @@ export default function StrategyBuilderPage() {
     );
 }
 
-// Simple Label component since shadcn/ui label might be missing and I don't want to break the build if it is.
-// Actually, I should probably generate it properly or import it if I trust it exists. The user asked for "Label" in previous tasks context but I didn't see it explicitly installed.
-// Wait, I see "Input" uses Label usually. Let's check "src/components/ui/label.tsx" first?
-// To be safe I will just embed a simple Label here or rely on the import if I create it.
-// I will blindly import it assuming I might have it or I will create it.
-// Wait, in previous task I listed dir `src/components/ui` and `label.tsx` was NOT there.
-// I should create it.
-import { Plus } from "lucide-react";
