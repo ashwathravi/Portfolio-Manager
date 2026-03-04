@@ -22,6 +22,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useState, useEffect } from 'react';
 import { cn } from '@/lib/utils';
+import { useSettingsStore } from '@/lib/stores/settingsStore';
 
 interface NavItem {
     title: string;
@@ -128,6 +129,13 @@ const navigationItems: NavItem[] = [
 export function AppSidebar() {
     const pathname = usePathname();
     const [expandedItems, setExpandedItems] = useState<string[]>([]);
+    const fullName = useSettingsStore((s) => s.profile.fullName);
+    const initials = fullName
+        .split(' ')
+        .filter(Boolean)
+        .slice(0, 2)
+        .map((w) => w[0].toUpperCase())
+        .join('');
 
     // Auto-expand based on active route
     useEffect(() => {
@@ -247,10 +255,10 @@ export function AppSidebar() {
             <div className="border-t border-border p-4">
                 <div className="flex items-center gap-3 rounded-xl bg-primary/10 p-3">
                     <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary text-sm font-bold text-primary-foreground">
-                        JD
+                        {initials}
                     </div>
                     <div className="flex-1">
-                        <p className="text-sm font-bold">John Doe</p>
+                        <p className="text-sm font-bold">{fullName}</p>
                         <p className="text-xs text-muted-foreground">Pro Plan</p>
                     </div>
                 </div>

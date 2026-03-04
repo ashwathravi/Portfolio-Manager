@@ -7,6 +7,7 @@ import { ActivityFeed } from '@/components/dashboard/ActivityFeed';
 import { AssetAllocation } from '@/components/dashboard/AssetAllocation';
 import { PortfolioPerformance } from '@/components/dashboard/PortfolioPerformance';
 import { Wallet, TrendingUp, DollarSign, Activity, Calendar, Plus } from 'lucide-react';
+import { DashboardGreeting } from '@/components/dashboard/DashboardGreeting';
 import { mockTransactions } from '@/lib/mockData'; // Keeping for now, or fetch from DB
 // We should fetch transactions from DB too
 
@@ -68,7 +69,7 @@ export default async function Dashboard() {
             <Calendar className="h-4 w-4" />
             <span>{currentDate}</span>
           </div>
-          <h2 className="text-3xl md:text-4xl font-black tracking-tight">Good {greeting}, Alex</h2>
+          <DashboardGreeting greeting={greeting} />
           <p className="text-muted-foreground">
             Here&apos;s your portfolio overview for today.
           </p>

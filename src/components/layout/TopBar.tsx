@@ -1,8 +1,8 @@
 'use client';
 
 import { Search, Bell } from 'lucide-react';
-import { Button } from '@/components/ui/button'; // Assuming shadcn/ui components exist or I'll need to use standard
-import { Badge } from '@/components/ui/badge'; // Assuming shadcn/ui components exist
+import { Button } from '@/components/ui/button';
+
 
 interface TopBarProps {
     onSearchClick?: () => void;
@@ -35,10 +35,6 @@ export function TopBar({ onSearchClick }: TopBarProps) {
                     >
                         <span className="sr-only">Notifications</span>
                         <Bell className="h-5 w-5" aria-hidden="true" />
-                        <Badge className="absolute -right-1 -top-1 h-5 w-5 rounded-full bg-primary p-0 text-xs text-primary-foreground border-0 flex items-center justify-center">
-                            3
-                        </Badge>
-                        <span className="sr-only">unread</span>
                     </Button>
                 </div>
             </div>
