@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { useState, useMemo } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { AddTradeModal } from '@/components/trade-log/AddTradeModal';
+import { exportToCsv } from '@/lib/exportCsv';
 import {
     Select,
     SelectContent,
@@ -244,7 +245,25 @@ function TradeLogContent() {
                             <Filter className="h-4 w-4 mr-2" />
                             Filter
                         </Button>
-                        <Button variant="outline" size="sm">
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() =>
+                                exportToCsv('trade-log.csv', filteredTrades.map((t) => ({
+                                    Date: t.date,
+                                    Ticker: t.symbol,
+                                    Name: t.name,
+                                    Side: t.type,
+                                    Quantity: t.quantity,
+                                    Price: t.price,
+                                    'Total Value': t.totalValue,
+                                    Account: t.account,
+                                    Status: t.status,
+                                    Strategy: t.strategy,
+                                    Tags: t.tags.join('; '),
+                                })))
+                            }
+                        >
                             <Download className="h-4 w-4 mr-2" />
                             Export
                         </Button>
