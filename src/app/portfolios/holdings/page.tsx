@@ -4,6 +4,7 @@ import { db } from '@/db';
 import { holdings } from '@/db/schema';
 import { HoldingsTable, Holding } from '@/components/holdings/HoldingsTable';
 import { mockPortfolios } from '@/lib/mockData';
+import HoldingsLoading from './loading';
 
 export const dynamic = 'force-dynamic';
 
@@ -64,12 +65,24 @@ async function HoldingsContent() {
         };
     });
 
+    if (transformedHoldings.length === 0) {
+        return (
+            <div className="flex flex-col items-center justify-center py-24 gap-4 text-center">
+                <div className="text-4xl">📭</div>
+                <h3 className="text-xl font-semibold">No holdings yet</h3>
+                <p className="text-muted-foreground max-w-sm">
+                    Your holdings will appear here once you add positions to a portfolio.
+                </p>
+            </div>
+        );
+    }
+
     return <HoldingsTable holdings={transformedHoldings} />;
 }
 
 export default function CurrentHoldingsPage() {
     return (
-        <Suspense fallback={<div>Loading holdings...</div>}>
+        <Suspense fallback={<HoldingsLoading />}>
             <HoldingsContent />
         </Suspense>
     );
