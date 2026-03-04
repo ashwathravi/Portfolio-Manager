@@ -1,0 +1,2 @@
+CREATE INDEX "holdings_portfolio_id_idx" ON "holdings" USING btree ("portfolio_id");--> statement-breakpoint
+CREATE INDEX "transactions_portfolio_id_idx" ON "transactions" USING btree ("portfolio_id");

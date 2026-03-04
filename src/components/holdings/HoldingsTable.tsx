@@ -4,7 +4,7 @@
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Filter, Download, Plus, X, ChevronRight } from 'lucide-react';
-import { useState, useCallback, memo } from 'react';
+import { useState, useCallback, memo, useMemo } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
     Select,
@@ -113,12 +113,29 @@ export function HoldingsTable({ holdings }: { holdings: Holding[] }) {
         return !!(searchParams.get('account') || searchParams.get('strategy') || searchParams.get('tag'));
     });
 
-    const filteredHoldings = holdings.filter((holding) => {
-        const accountMatch = selectedAccount === 'All Accounts' || holding.account === selectedAccount;
-        const strategyMatch = selectedStrategy === 'All Strategies' || holding.strategy === selectedStrategy;
-        const tagMatch = selectedTag === 'All Tags' || holding.tags.includes(selectedTag);
-        return accountMatch && strategyMatch && tagMatch;
-    });
+    // Optimized: Combine filter and reduce into a single pass loop to avoid multiple iterations (O(N) vs O(3N))
+    const { filteredHoldings, totalNetValue, totalReturn } = useMemo(() => {
+        const result = [];
+        let netValue = 0;
+        let ret = 0;
+
+        for (const holding of holdings) {
+            // Optimized: Short-circuit checks to avoid unnecessary comparisons
+            if (selectedAccount !== 'All Accounts' && holding.account !== selectedAccount) continue;
+            if (selectedStrategy !== 'All Strategies' && holding.strategy !== selectedStrategy) continue;
+            if (selectedTag !== 'All Tags' && !holding.tags.includes(selectedTag)) continue;
+
+            result.push(holding);
+            netValue += holding.totalValue;
+            ret += holding.totalReturn;
+        }
+
+        return {
+            filteredHoldings: result,
+            totalNetValue: netValue,
+            totalReturn: ret
+        };
+    }, [holdings, selectedAccount, selectedStrategy, selectedTag]);
 
     const clearFilters = () => {
         setSelectedAccount('All Accounts');
@@ -126,25 +143,24 @@ export function HoldingsTable({ holdings }: { holdings: Holding[] }) {
         setSelectedTag('All Tags');
     };
 
-    const activeFiltersCount = [selectedAccount, selectedStrategy, selectedTag].filter(
-        (filter, index) => filter !== ['All Accounts', 'All Strategies', 'All Tags'][index]
-    ).length;
+    // Optimized: Calculate active filters without array allocation
+    let activeFiltersCount = 0;
+    if (selectedAccount !== 'All Accounts') activeFiltersCount++;
+    if (selectedStrategy !== 'All Strategies') activeFiltersCount++;
+    if (selectedTag !== 'All Tags') activeFiltersCount++;
 
     const handleHoldingDoubleClick = useCallback((symbol: string) => {
         router.push(`/portfolios/detail/${symbol}`);
     }, [router]);
 
     const hasActiveFilters = activeFiltersCount > 0;
-    const getFilterText = () => {
-        if (selectedAccount !== 'All Accounts') return selectedAccount;
-        if (selectedStrategy !== 'All Strategies') return selectedStrategy;
-        if (selectedTag !== 'All Tags') return selectedTag;
-        return '';
-    };
 
-    // Calculate totals for dynamic metrics
-    const totalNetValue = filteredHoldings.reduce((sum, h) => sum + h.totalValue, 0);
-    const totalReturn = filteredHoldings.reduce((sum, h) => sum + h.totalReturn, 0);
+    // Optimized: Calculate filter text directly to avoid function creation
+    let filterText = '';
+    if (selectedAccount !== 'All Accounts') filterText = selectedAccount;
+    else if (selectedStrategy !== 'All Strategies') filterText = selectedStrategy;
+    else if (selectedTag !== 'All Tags') filterText = selectedTag;
+
 
     return (
         <div className="space-y-6 p-6">
@@ -158,7 +174,7 @@ export function HoldingsTable({ holdings }: { holdings: Holding[] }) {
                         Portfolio
                     </button>
                     <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                    <span className="text-foreground font-medium">{getFilterText()}</span>
+                    <span className="text-foreground font-medium">{filterText}</span>
                 </div>
             )}
 

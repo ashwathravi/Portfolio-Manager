@@ -1,6 +1,7 @@
 'use client';
 
 import { StatCard } from '@/components/data-display/StatCard';
+import { MetricCard } from '@/components/data-display/MetricCard';
 import { Card } from '@/components/ui/card';
 import { TrendingUp, Activity, AlertTriangle, Award, Calendar, ChevronDown, Settings, Plus, ChevronLeft, ChevronRight, Share2 } from 'lucide-react';
 import {
@@ -55,43 +56,19 @@ export default function PerformancePage() {
 
             {/* Trading Performance Metrics */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                {/* Net Realized P&L */}
-                <div className="flex flex-col p-5 rounded-xl bg-card border border-border">
-                    <div className="flex items-center justify-between mb-3">
-                        <p className="text-muted-foreground text-xs font-medium">Net Realized P&L</p>
-                        <button
-                            className="text-muted-foreground hover:text-foreground transition-colors"
-                            title="Net Realized P&L = Total profits from closed positions minus total losses from closed positions"
-                        >
-                            <svg className="h-4 w-4" viewBox="0 0 16 16" fill="none">
-                                <circle cx="8" cy="8" r="7" stroke="currentColor" strokeWidth="1.5" />
-                                <path d="M8 7V11M8 5V5.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-                            </svg>
-                        </button>
-                    </div>
-                    <div className="flex items-baseline gap-2 mb-2">
-                        <h3 className="text-2xl font-bold text-primary">+$1,22,525.00</h3>
-                    </div>
-                    <p className="text-xs text-muted-foreground">2 trades</p>
-                </div>
+                <MetricCard
+                    title="Net Realized P&L"
+                    tooltip="Net Realized P&L = Total profits from closed positions minus total losses from closed positions"
+                    value="+$1,22,525.00"
+                    valueClassName="text-primary"
+                    description="2 trades"
+                />
 
-                {/* Win Rate */}
-                <div className="flex flex-col p-5 rounded-xl bg-card border border-border">
-                    <div className="flex items-center justify-between mb-3">
-                        <p className="text-muted-foreground text-xs font-medium">Win Rate</p>
-                        <button
-                            className="text-muted-foreground hover:text-foreground transition-colors"
-                            title="Win Rate = (Number of winning trades ÷ Total trades) × 100"
-                        >
-                            <svg className="h-4 w-4" viewBox="0 0 16 16" fill="none">
-                                <circle cx="8" cy="8" r="7" stroke="currentColor" strokeWidth="1.5" />
-                                <path d="M8 7V11M8 5V5.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-                            </svg>
-                        </button>
-                    </div>
-                    <div className="flex items-baseline gap-2 mb-2">
-                        <h3 className="text-2xl font-bold">50.0%</h3>
-                    </div>
+                <MetricCard
+                    title="Win Rate"
+                    tooltip="Win Rate = (Number of winning trades ÷ Total trades) × 100"
+                    value="50.0%"
+                >
                     <div className="flex items-center gap-2 text-xs">
                         <span className="px-2 py-0.5 rounded-md bg-primary/10 text-primary font-medium">1 win</span>
                         <span className="px-2 py-0.5 rounded-md bg-destructive/10 text-destructive font-medium">1 loss</span>
@@ -100,148 +77,79 @@ export default function PerformancePage() {
                     <div className="mt-3 h-2 bg-accent rounded-full overflow-hidden">
                         <div className="h-full bg-primary rounded-full" style={{ width: '50%' }}></div>
                     </div>
-                </div>
+                </MetricCard>
 
-                {/* Profit Factor */}
-                <div className="flex flex-col p-5 rounded-xl bg-card border border-border">
-                    <div className="flex items-center justify-between mb-3">
-                        <p className="text-muted-foreground text-xs font-medium">Profit Factor</p>
-                        <button
-                            className="text-muted-foreground hover:text-foreground transition-colors"
-                            title="Profit Factor = Gross profit ÷ Gross loss"
-                        >
-                            <svg className="h-4 w-4" viewBox="0 0 16 16" fill="none">
-                                <circle cx="8" cy="8" r="7" stroke="currentColor" strokeWidth="1.5" />
-                                <path d="M8 7V11M8 5V5.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-                            </svg>
-                        </button>
-                    </div>
-                    <div className="flex items-center gap-3 mb-2">
-                        <div className="relative w-12 h-12">
-                            <svg className="w-12 h-12 transform -rotate-90">
-                                <circle cx="24" cy="24" r="20" stroke="currentColor" strokeWidth="4" fill="none" className="text-accent" />
-                                <circle cx="24" cy="24" r="20" stroke="currentColor" strokeWidth="4" fill="none" className="text-primary" strokeDasharray="125.6" strokeDashoffset="31.4" strokeLinecap="round" />
-                            </svg>
-                            <div className="absolute inset-0 flex items-center justify-center">
-                                <span className="text-xs font-bold">2.2</span>
+                <MetricCard
+                    title="Profit Factor"
+                    tooltip="Profit Factor = Gross profit ÷ Gross loss"
+                    value={
+                        <div className="flex items-center gap-3 mb-2">
+                            <div className="relative w-12 h-12">
+                                <svg className="w-12 h-12 transform -rotate-90">
+                                    <circle cx="24" cy="24" r="20" stroke="currentColor" strokeWidth="4" fill="none" className="text-accent" />
+                                    <circle cx="24" cy="24" r="20" stroke="currentColor" strokeWidth="4" fill="none" className="text-primary" strokeDasharray="125.6" strokeDashoffset="31.4" strokeLinecap="round" />
+                                </svg>
+                                <div className="absolute inset-0 flex items-center justify-center">
+                                    <span className="text-xs font-bold">2.2</span>
+                                </div>
                             </div>
+                            <h3 className="text-2xl font-bold">2.23</h3>
                         </div>
-                        <h3 className="text-2xl font-bold">2.23</h3>
-                    </div>
-                    <p className="text-xs text-muted-foreground">Gross P&L: $2.2L / $1L</p>
-                </div>
+                    }
+                    description="Gross P&L: $2.2L / $1L"
+                />
 
-                {/* Avg win/loss trade */}
-                <div className="flex flex-col p-5 rounded-xl bg-card border border-border">
-                    <div className="flex items-center justify-between mb-3">
-                        <p className="text-muted-foreground text-xs font-medium">Avg win/loss trade</p>
-                        <button
-                            className="text-muted-foreground hover:text-foreground transition-colors"
-                            title="Avg Win/Loss Trade = Average gain ÷ |Average loss|"
-                        >
-                            <svg className="h-4 w-4" viewBox="0 0 16 16" fill="none">
-                                <circle cx="8" cy="8" r="7" stroke="currentColor" strokeWidth="1.5" />
-                                <path d="M8 7V11M8 5V5.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-                            </svg>
-                        </button>
-                    </div>
+                <MetricCard
+                    title="Avg win/loss trade"
+                    tooltip="Avg Win/Loss Trade = Average gain ÷ |Average loss|"
+                    description="Ratio: 2.23"
+                >
                     <div className="flex items-center justify-between mb-2">
                         <div className="flex items-center gap-2">
                             <div className="h-8 bg-primary/20 rounded" style={{ width: '80px' }}></div>
-                            <span className="text-sm font-bold text-primary">+$2.2 L</span>
+                            <span className="text-sm font-bold text-primary">+$2.2k</span>
                         </div>
                     </div>
                     <div className="flex items-center justify-between mb-3">
                         <div className="flex items-center gap-2">
                             <div className="h-8 bg-destructive/20 rounded" style={{ width: '36px' }}></div>
-                            <span className="text-sm font-bold text-destructive">-$1.0 L</span>
+                            <span className="text-sm font-bold text-destructive">-$1.0k</span>
                         </div>
                     </div>
-                    <p className="text-xs text-muted-foreground">Ratio: 2.23</p>
-                </div>
+                </MetricCard>
             </div>
 
             {/* Additional Financial Metrics */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                {/* Unrealized P&L */}
-                <div className="flex flex-col p-5 rounded-xl bg-card border border-border">
-                    <div className="flex items-center justify-between mb-3">
-                        <p className="text-muted-foreground text-xs font-medium">Unrealized P&L</p>
-                        <button
-                            className="text-muted-foreground hover:text-foreground transition-colors"
-                            title="Unrealized P&L = Current market value of open positions minus their cost basis"
-                        >
-                            <svg className="h-4 w-4" viewBox="0 0 16 16" fill="none">
-                                <circle cx="8" cy="8" r="7" stroke="currentColor" strokeWidth="1.5" />
-                                <path d="M8 7V11M8 5V5.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-                            </svg>
-                        </button>
-                    </div>
-                    <div className="flex items-baseline gap-2 mb-1">
-                        <h3 className="text-2xl font-bold text-primary">+$12,450.00</h3>
-                    </div>
-                    <p className="text-xs text-muted-foreground">Open positions</p>
-                </div>
+                <MetricCard
+                    title="Unrealized P&L"
+                    tooltip="Unrealized P&L = Current market value of open positions minus their cost basis"
+                    value="+$12,450.00"
+                    valueClassName="text-primary"
+                    description="Open positions"
+                />
 
-                {/* Available Cash */}
-                <div className="flex flex-col p-5 rounded-xl bg-card border border-border">
-                    <div className="flex items-center justify-between mb-3">
-                        <p className="text-muted-foreground text-xs font-medium">Available Cash</p>
-                        <button
-                            className="text-muted-foreground hover:text-foreground transition-colors"
-                            title="Available Cash = Liquid cash available for new trades or withdrawals"
-                        >
-                            <svg className="h-4 w-4" viewBox="0 0 16 16" fill="none">
-                                <circle cx="8" cy="8" r="7" stroke="currentColor" strokeWidth="1.5" />
-                                <path d="M8 7V11M8 5V5.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-                            </svg>
-                        </button>
-                    </div>
-                    <div className="flex items-baseline gap-2 mb-1">
-                        <h3 className="text-2xl font-bold">$45,230.50</h3>
-                    </div>
-                    <p className="text-xs text-muted-foreground">Ready to deploy</p>
-                </div>
+                <MetricCard
+                    title="Available Cash"
+                    tooltip="Available Cash = Liquid cash available for new trades or withdrawals"
+                    value="$45,230.50"
+                    description="Ready to deploy"
+                />
 
-                {/* Deployed Capital */}
-                <div className="flex flex-col p-5 rounded-xl bg-card border border-border">
-                    <div className="flex items-center justify-between mb-3">
-                        <p className="text-muted-foreground text-xs font-medium">Deployed Capital</p>
-                        <button
-                            className="text-muted-foreground hover:text-foreground transition-colors"
-                            title="Deployed Capital = Total capital currently invested in open positions"
-                        >
-                            <svg className="h-4 w-4" viewBox="0 0 16 16" fill="none">
-                                <circle cx="8" cy="8" r="7" stroke="currentColor" strokeWidth="1.5" />
-                                <path d="M8 7V11M8 5V5.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-                            </svg>
-                        </button>
-                    </div>
-                    <div className="flex items-baseline gap-2 mb-1">
-                        <h3 className="text-2xl font-bold">$96,820.00</h3>
-                    </div>
-                    <p className="text-xs text-muted-foreground">68% of total</p>
-                </div>
+                <MetricCard
+                    title="Deployed Capital"
+                    tooltip="Deployed Capital = Total capital currently invested in open positions"
+                    value="$96,820.00"
+                    description="68% of total"
+                />
 
-                {/* Total Open Risk */}
-                <div className="flex flex-col p-5 rounded-xl bg-card border border-border">
-                    <div className="flex items-center justify-between mb-3">
-                        <p className="text-muted-foreground text-xs font-medium">Total Open Risk</p>
-                        <button
-                            className="text-muted-foreground hover:text-foreground transition-colors"
-                            title="Total Open Risk = Sum of potential losses if all stop losses are hit on open positions"
-                        >
-                            <svg className="h-4 w-4" viewBox="0 0 16 16" fill="none">
-                                <circle cx="8" cy="8" r="7" stroke="currentColor" strokeWidth="1.5" />
-                                <path d="M8 7V11M8 5V5.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-                            </svg>
-                        </button>
-                    </div>
-                    <div className="flex items-baseline gap-2 mb-1">
-                        <h3 className="text-2xl font-bold text-destructive">$8,420.00</h3>
-                    </div>
-                    <p className="text-xs text-muted-foreground">8.7% exposure</p>
-                </div>
+                <MetricCard
+                    title="Total Open Risk"
+                    tooltip="Total Open Risk = Sum of potential losses if all stop losses are hit on open positions"
+                    value="$8,420.00"
+                    valueClassName="text-destructive"
+                    description="8.7% exposure"
+                />
             </div>
 
             {/* Key Performance Metrics */}
@@ -295,20 +203,20 @@ export default function PerformancePage() {
                         ]}
                         margin={{ top: 10, right: 10, left: 10, bottom: 20 }}
                     >
-                        <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
+                        <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
                         <XAxis
                             dataKey="month"
-                            tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 12 }}
-                            axisLine={{ stroke: 'hsl(var(--border))' }}
+                            tick={{ fill: 'var(--muted-foreground)', fontSize: 12 }}
+                            axisLine={{ stroke: 'var(--border)' }}
                             tickLine={false}
                         />
                         <YAxis
-                            tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 12 }}
+                            tick={{ fill: 'var(--muted-foreground)', fontSize: 12 }}
                             axisLine={false}
                             tickLine={false}
                             tickFormatter={(value) => {
                                 if (value === 0) return '$0';
-                                if (value >= 100000) return `$${(value / 100000).toFixed(1)} L`;
+                                if (value >= 1000) return `$${(value / 1000)}k`;
                                 return `$${value}`;
                             }}
                             domain={[0, 240000]}
@@ -316,11 +224,11 @@ export default function PerformancePage() {
                         />
                         <Tooltip
                             contentStyle={{
-                                backgroundColor: 'hsl(var(--card))',
-                                border: '1px solid hsl(var(--border))',
+                                backgroundColor: 'var(--card)',
+                                border: '1px solid var(--border)',
                                 borderRadius: '8px',
                             }}
-                            labelStyle={{ color: 'hsl(var(--foreground))' }}
+                            labelStyle={{ color: 'var(--foreground)' }}
                             formatter={(value: number | undefined) => [value !== undefined ? `$${value.toLocaleString()}` : '', 'P&L']}
                         />
                         <Bar
@@ -354,33 +262,33 @@ export default function PerformancePage() {
                                 <stop offset="95%" stopColor="#17cf54" stopOpacity={0.05} />
                             </linearGradient>
                         </defs>
-                        <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
+                        <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
                         <XAxis
                             dataKey="date"
-                            tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 11 }}
-                            axisLine={{ stroke: 'hsl(var(--border))' }}
+                            tick={{ fill: 'var(--muted-foreground)', fontSize: 11 }}
+                            axisLine={{ stroke: 'var(--border)' }}
                             tickLine={false}
                         />
                         <YAxis
-                            tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 12 }}
+                            tick={{ fill: 'var(--muted-foreground)', fontSize: 12 }}
                             axisLine={false}
                             tickLine={false}
                             tickFormatter={(value) => {
-                                if (value === 0) return '₹0';
-                                if (value >= 100000) return `₹${(value / 100000).toFixed(1)} L`;
-                                return `₹${value}`;
+                                if (value === 0) return '$0';
+                                if (value >= 1000) return `$${(value / 1000)}k`;
+                                return `$${value}`;
                             }}
                             domain={[0, 240000]}
                             ticks={[0, 60000, 120000, 180000, 240000]}
                         />
                         <Tooltip
                             contentStyle={{
-                                backgroundColor: 'hsl(var(--card))',
-                                border: '1px solid hsl(var(--border))',
+                                backgroundColor: 'var(--card)',
+                                border: '1px solid var(--border)',
                                 borderRadius: '8px',
                             }}
-                            labelStyle={{ color: 'hsl(var(--foreground))' }}
-                            formatter={(value: number | undefined) => [value !== undefined ? `₹${value.toLocaleString()}` : '', 'Equity']}
+                            labelStyle={{ color: 'var(--foreground)' }}
+                            formatter={(value: number | undefined) => [value !== undefined ? `$${value.toLocaleString()}` : '', 'Equity']}
                         />
                         <Area
                             type="monotone"
@@ -422,36 +330,36 @@ export default function PerformancePage() {
                         ]}
                         margin={{ top: 10, right: 30, left: 10, bottom: 30 }}
                     >
-                        <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
+                        <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
                         <XAxis
                             dataKey="date"
-                            tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 10 }}
-                            axisLine={{ stroke: 'hsl(var(--border))' }}
+                            tick={{ fill: 'var(--muted-foreground)', fontSize: 10 }}
+                            axisLine={{ stroke: 'var(--border)' }}
                             tickLine={false}
                             interval="preserveStartEnd"
                         />
                         <YAxis
-                            tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 12 }}
+                            tick={{ fill: 'var(--muted-foreground)', fontSize: 12 }}
                             axisLine={false}
                             tickLine={false}
                             tickFormatter={(value) => {
-                                if (value === 0) return '₹0';
+                                if (value === 0) return '$0';
                                 const sign = value < 0 ? '-' : '+';
                                 const absValue = Math.abs(value);
-                                if (absValue >= 100000) return `${sign}₹${(absValue / 100000).toFixed(1)} L`;
-                                return `${sign}₹${absValue}`;
+                                if (absValue >= 1000) return `${sign}$${(absValue / 1000)}k`;
+                                return `${sign}$${absValue}`;
                             }}
                             domain={[-90000, 0]}
                             ticks={[-90000, -72000, -54000, -36000, -18000, 0]}
                         />
                         <Tooltip
                             contentStyle={{
-                                backgroundColor: 'hsl(var(--card))',
-                                border: '1px solid hsl(var(--border))',
+                                backgroundColor: 'var(--card)',
+                                border: '1px solid var(--border)',
                                 borderRadius: '8px',
                             }}
-                            labelStyle={{ color: 'hsl(var(--foreground))' }}
-                            formatter={(value: number | undefined) => [value !== undefined ? `₹${value.toLocaleString()}` : '', 'Balance']}
+                            labelStyle={{ color: 'var(--foreground)' }}
+                            formatter={(value: number | undefined) => [value !== undefined ? `$${value.toLocaleString()}` : '', 'Balance']}
                         />
                         <Line
                             type="monotone"
@@ -507,29 +415,29 @@ export default function PerformancePage() {
 
                     {/* Calendar Metrics */}
                     <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
-                        <div className="p-4 rounded-lg bg-accent/50">
+                        <div className="p-4 rounded-lg bg-accent/50 min-w-0">
                             <p className="text-xs text-muted-foreground mb-1">Total Trades</p>
-                            <h3 className="text-2xl font-bold">3</h3>
+                            <h3 className="text-2xl font-bold truncate">3</h3>
                             <p className="text-xs text-muted-foreground mt-1">7 days</p>
                         </div>
-                        <div className="p-4 rounded-lg bg-accent/50">
+                        <div className="p-4 rounded-lg bg-accent/50 min-w-0">
                             <p className="text-xs text-muted-foreground mb-1">Net P&L</p>
-                            <h3 className="text-2xl font-bold text-primary">+₹2,22,704.00</h3>
+                            <h3 className="text-2xl font-bold text-primary truncate">+$222,704.00</h3>
                             <p className="text-xs text-muted-foreground mt-1">Profit</p>
                         </div>
-                        <div className="p-4 rounded-lg bg-accent/50">
+                        <div className="p-4 rounded-lg bg-accent/50 min-w-0">
                             <p className="text-xs text-muted-foreground mb-1">Win Rate</p>
-                            <h3 className="text-2xl font-bold">66.7%</h3>
+                            <h3 className="text-2xl font-bold truncate">66.7%</h3>
                             <p className="text-xs text-muted-foreground mt-1">Success rate</p>
                         </div>
-                        <div className="p-4 rounded-lg bg-accent/50">
+                        <div className="p-4 rounded-lg bg-accent/50 min-w-0">
                             <p className="text-xs text-muted-foreground mb-1">Best Day</p>
-                            <h3 className="text-2xl font-bold text-primary">+₹2,22,704.00</h3>
+                            <h3 className="text-2xl font-bold text-primary truncate">+$222,704.00</h3>
                             <p className="text-xs text-muted-foreground mt-1">Feb 06</p>
                         </div>
-                        <div className="p-4 rounded-lg bg-accent/50">
+                        <div className="p-4 rounded-lg bg-accent/50 min-w-0">
                             <p className="text-xs text-muted-foreground mb-1">Profit Factor</p>
-                            <h3 className="text-2xl font-bold">&gt; 10.00</h3>
+                            <h3 className="text-2xl font-bold truncate">&gt; 10.00</h3>
                             <p className="text-xs text-muted-foreground mt-1">Ratio</p>
                         </div>
                     </div>
@@ -563,7 +471,7 @@ export default function PerformancePage() {
                                         <div className="text-sm font-medium mb-1">{day}</div>
                                         {day === 6 && (
                                             <div className="mt-2">
-                                                <div className="text-xs font-bold text-primary">+₹2,22,704.00</div>
+                                                <div className="text-xs font-bold text-primary truncate">+$222,704.00</div>
                                             </div>
                                         )}
                                     </div>
@@ -629,7 +537,7 @@ export default function PerformancePage() {
                                         <TrendingUp className="h-4 w-4 text-primary mt-0.5" />
                                         <div className="flex-1">
                                             <p className="text-xs text-muted-foreground">Best Day</p>
-                                            <p className="text-sm font-bold text-primary">₹2,22,704.00</p>
+                                            <p className="text-sm font-bold text-primary">$222,704.00</p>
                                             <p className="text-xs text-muted-foreground">Feb 06</p>
                                         </div>
                                     </div>

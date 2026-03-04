@@ -157,29 +157,29 @@ export default function TradeAnalyticsPage() {
 
                 {/* Calendar Metrics */}
                 <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
-                    <div className="p-4 rounded-lg bg-accent/50">
+                    <div className="p-4 rounded-lg bg-accent/50 min-w-0">
                         <p className="text-xs text-muted-foreground mb-1">Total Trades</p>
-                        <h3 className="text-2xl font-bold">3</h3>
+                        <h3 className="text-2xl font-bold truncate">3</h3>
                         <p className="text-xs text-muted-foreground mt-1">7 days</p>
                     </div>
-                    <div className="p-4 rounded-lg bg-accent/50">
+                    <div className="p-4 rounded-lg bg-accent/50 min-w-0">
                         <p className="text-xs text-muted-foreground mb-1">Net P&L</p>
-                        <h3 className="text-2xl font-bold text-primary">+$2,22,704.00</h3>
+                        <h3 className="text-2xl font-bold text-primary truncate">+$2,22,704.00</h3>
                         <p className="text-xs text-muted-foreground mt-1">Profit</p>
                     </div>
-                    <div className="p-4 rounded-lg bg-accent/50">
+                    <div className="p-4 rounded-lg bg-accent/50 min-w-0">
                         <p className="text-xs text-muted-foreground mb-1">Win Rate</p>
-                        <h3 className="text-2xl font-bold">66.7%</h3>
+                        <h3 className="text-2xl font-bold truncate">66.7%</h3>
                         <p className="text-xs text-muted-foreground mt-1">Success rate</p>
                     </div>
-                    <div className="p-4 rounded-lg bg-accent/50">
+                    <div className="p-4 rounded-lg bg-accent/50 min-w-0">
                         <p className="text-xs text-muted-foreground mb-1">Best Day</p>
-                        <h3 className="text-2xl font-bold text-primary">+$2,22,704.00</h3>
+                        <h3 className="text-2xl font-bold text-primary truncate">+$2,22,704.00</h3>
                         <p className="text-xs text-muted-foreground mt-1">Feb 06</p>
                     </div>
-                    <div className="p-4 rounded-lg bg-accent/50">
+                    <div className="p-4 rounded-lg bg-accent/50 min-w-0">
                         <p className="text-xs text-muted-foreground mb-1">Profit Factor</p>
-                        <h3 className="text-2xl font-bold">&gt; 10.00</h3>
+                        <h3 className="text-2xl font-bold truncate">&gt; 10.00</h3>
                         <p className="text-xs text-muted-foreground mt-1">Ratio</p>
                     </div>
                 </div>
@@ -213,7 +213,7 @@ export default function TradeAnalyticsPage() {
                                     <div className="text-sm font-medium mb-1">{day}</div>
                                     {day === 6 && (
                                         <div className="mt-2">
-                                            <div className="text-xs font-bold text-primary">+$2,22,704.00</div>
+                                            <div className="text-xs font-bold text-primary truncate">+$2,22,704.00</div>
                                         </div>
                                     )}
                                 </div>
@@ -462,13 +462,13 @@ export default function TradeAnalyticsPage() {
                             ]}
                             margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
                         >
-                            <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                            <XAxis type="number" stroke="hsl(var(--muted-foreground))" />
-                            <YAxis dataKey="day" type="category" stroke="hsl(var(--muted-foreground))" />
+                            <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                            <XAxis type="number" stroke="var(--muted-foreground)" />
+                            <YAxis dataKey="day" type="category" stroke="var(--muted-foreground)" />
                             <Tooltip
                                 contentStyle={{
-                                    backgroundColor: 'hsl(var(--card))',
-                                    border: '1px solid hsl(var(--border))',
+                                    backgroundColor: 'var(--card)',
+                                    border: '1px solid var(--border)',
                                     borderRadius: '8px'
                                 }}
                             />
