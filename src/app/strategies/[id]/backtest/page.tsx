@@ -49,12 +49,14 @@ const mockBacktest: BacktestResult = {
     runDate: new Date()
 };
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const CustomTooltip = ({ active, payload, label }: any) => {
+const CustomTooltip = ({ active, payload, label }: TooltipProps<number, string>) => {
     if (active && payload && payload.length) {
+        const date = label ? new Date(label) : null;
         return (
             <div className="bg-background border rounded p-2 shadow-md">
-                <p className="label text-sm font-medium">{new Date(label).toLocaleDateString()}</p>
+                <p className="label text-sm font-medium">
+                    {date && !isNaN(date.getTime()) ? date.toLocaleDateString() : 'Invalid Date'}
+                </p>
                 <p className="text-sm text-primary">Equity: ${payload[0].value?.toFixed(2)}</p>
             </div>
         );
