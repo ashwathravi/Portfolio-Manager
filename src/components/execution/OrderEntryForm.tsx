@@ -1,30 +1,60 @@
 "use client"
 
 import { useState } from "react"
+import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { OrderSide, OrderType, TimeInForce } from "@/types/execution"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Order, OrderSide, OrderType, TimeInForce } from "@/types/execution"
 
-export function OrderEntryForm() {
+interface OrderEntryFormProps {
+    onOrderPlaced: (order: Order) => void
+}
+
+export function OrderEntryForm({ onOrderPlaced }: OrderEntryFormProps) {
     const [side, setSide] = useState<OrderSide>("buy")
     const [orderType, setOrderType] = useState<OrderType>("limit")
     const [ticker, setTicker] = useState("")
     const [quantity, setQuantity] = useState("")
     const [price, setPrice] = useState("")
+    const [tif, setTif] = useState<TimeInForce>("day")
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault()
-        // Mock submission - in real app would call API
-        console.log("Order Submitted:", { side, orderType, ticker, quantity, price })
-        alert(`Order Submitted: ${side.toUpperCase()} ${quantity} shares of ${ticker} @ ${orderType === 'market' ? 'MKT' : price}`)
+
+        const newOrder: Order = {
+            id: crypto.randomUUID(),
+            portfolioId: "p1",
+            ticker,
+            side,
+            type: orderType,
+            quantity: Number(quantity),
+            limitPrice: orderType !== "market" ? Number(price) : undefined,
+            status: "working",
+            filledQuantity: 0,
+            timeInForce: tif,
+            placedAt: new Date(),
+            updatedAt: new Date(),
+        }
+
+        onOrderPlaced(newOrder)
+
+        toast.success(
+            `${side === "buy" ? "Buy" : "Sell"} order placed`,
+            {
+                description: `${quantity} × ${ticker} @ ${orderType === "market" ? "MKT" : `$${Number(price).toFixed(2)}`}`,
+            }
+        )
+
         setTicker("")
         setQuantity("")
         setPrice("")
     }
+
+    const isBuy = side === "buy"
 
     return (
         <Card className="w-full">
@@ -37,8 +67,18 @@ export function OrderEntryForm() {
 
                     <Tabs value={side} onValueChange={(v) => setSide(v as OrderSide)} className="w-full">
                         <TabsList className="grid w-full grid-cols-2">
-                            <TabsTrigger value="buy" className="data-[state=active]:bg-success-600 data-[state=active]:text-white">Buy</TabsTrigger>
-                            <TabsTrigger value="sell" className="data-[state=active]:bg-danger-600 data-[state=active]:text-white">Sell</TabsTrigger>
+                            <TabsTrigger
+                                value="buy"
+                                className="data-[state=active]:bg-green-600 data-[state=active]:text-white"
+                            >
+                                Buy
+                            </TabsTrigger>
+                            <TabsTrigger
+                                value="sell"
+                                className="data-[state=active]:bg-red-600 data-[state=active]:text-white"
+                            >
+                                Sell
+                            </TabsTrigger>
                         </TabsList>
                     </Tabs>
 
@@ -100,7 +140,7 @@ export function OrderEntryForm() {
 
                     <div className="space-y-2">
                         <Label htmlFor="tif">Time in Force</Label>
-                        <Select defaultValue="day">
+                        <Select value={tif} onValueChange={(v) => setTif(v as TimeInForce)}>
                             <SelectTrigger id="tif">
                                 <SelectValue />
                             </SelectTrigger>
@@ -113,8 +153,11 @@ export function OrderEntryForm() {
                         </Select>
                     </div>
 
-                    <Button type="submit" className={`w-full ${side === 'buy' ? 'bg-success-600 hover:bg-success-700' : 'bg-danger-600 hover:bg-danger-700'}`}>
-                        {side === 'buy' ? 'Buy' : 'Sell'} {ticker || 'Stock'}
+                    <Button
+                        type="submit"
+                        className={`w-full text-white ${isBuy ? "bg-green-600 hover:bg-green-700" : "bg-red-600 hover:bg-red-700"}`}
+                    >
+                        {isBuy ? "Buy" : "Sell"} {ticker || "Stock"}
                     </Button>
 
                 </form>

@@ -15,73 +15,106 @@ import {
     TableHeader,
     TableRow,
 } from "@/components/ui/table"
+import { Button } from "@/components/ui/button"
 import { Order } from "@/types/execution"
 import { Badge } from "@/components/ui/badge"
+import { X } from "lucide-react"
 
 interface OrderBlotterProps {
     orders: Order[]
+    onCancel?: (id: string) => void
 }
 
-export const columns: ColumnDef<Order>[] = [
-    {
-        accessorKey: "placedAt",
-        header: "Time",
-        cell: ({ row }) => {
-            const date = row.getValue("placedAt") as Date
-            return date.toLocaleTimeString()
+function makeColumns(onCancel?: (id: string) => void): ColumnDef<Order>[] {
+    const cols: ColumnDef<Order>[] = [
+        {
+            accessorKey: "placedAt",
+            header: "Time",
+            cell: ({ row }) => {
+                const date = row.getValue("placedAt") as Date
+                return date.toLocaleTimeString()
+            },
         },
-    },
-    {
-        accessorKey: "ticker",
-        header: "Ticker",
-        cell: ({ row }) => <span className="font-semibold">{row.getValue("ticker")}</span>,
-    },
-    {
-        accessorKey: "side",
-        header: "Side",
-        cell: ({ row }) => {
-            const side = row.getValue("side") as string
-            return (
-                <span className={side === 'buy' ? 'text-success-600 font-medium' : 'text-danger-600 font-medium'}>
-                    {side.toUpperCase()}
-                </span>
-            )
-        }
-    },
-    {
-        accessorKey: "type",
-        header: "Type",
-        cell: ({ row }) => <span className="uppercase">{row.getValue("type")}</span>,
-    },
-    {
-        accessorKey: "quantity",
-        header: "Qty",
-    },
-    {
-        accessorKey: "limitPrice",
-        header: "Price",
-        cell: ({ row }) => {
-            const price = row.getValue("limitPrice") as number
-            return price ? `$${price.toFixed(2)}` : 'MKT'
-        }
-    },
-    {
-        accessorKey: "status",
-        header: "Status",
-        cell: ({ row }) => {
-            const status = row.getValue("status") as string
-            let variant: "default" | "secondary" | "destructive" | "outline" | "success" | "warning" = "outline"
-            if (status === 'filled') variant = 'success'
-            if (status === 'working') variant = 'warning'
-            if (status === 'cancelled') variant = 'secondary'
+        {
+            accessorKey: "ticker",
+            header: "Ticker",
+            cell: ({ row }) => <span className="font-semibold">{row.getValue("ticker")}</span>,
+        },
+        {
+            accessorKey: "side",
+            header: "Side",
+            cell: ({ row }) => {
+                const side = row.getValue("side") as string
+                return (
+                    <span className={side === "buy" ? "text-green-600 font-medium" : "text-red-600 font-medium"}>
+                        {side.toUpperCase()}
+                    </span>
+                )
+            },
+        },
+        {
+            accessorKey: "type",
+            header: "Type",
+            cell: ({ row }) => <span className="uppercase">{row.getValue("type")}</span>,
+        },
+        {
+            accessorKey: "quantity",
+            header: "Qty",
+        },
+        {
+            accessorKey: "limitPrice",
+            header: "Price",
+            cell: ({ row }) => {
+                const price = row.getValue("limitPrice") as number
+                return price ? `$${price.toFixed(2)}` : "MKT"
+            },
+        },
+        {
+            accessorKey: "status",
+            header: "Status",
+            cell: ({ row }) => {
+                const status = row.getValue("status") as string
+                let variant: "default" | "secondary" | "destructive" | "outline" = "outline"
+                if (status === "filled") variant = "default"
+                if (status === "cancelled") variant = "secondary"
+                if (status === "rejected") variant = "destructive"
 
-            return <Badge variant={variant} className="uppercase">{status}</Badge>
-        }
-    },
-]
+                return (
+                    <Badge variant={variant} className="uppercase">
+                        {status}
+                    </Badge>
+                )
+            },
+        },
+    ]
 
-export function OrderBlotter({ orders }: OrderBlotterProps) {
-    // eslint-disable-next-line react-hooks/incompatible-library
+    if (onCancel) {
+        cols.push({
+            id: "actions",
+            header: "",
+            cell: ({ row }) => {
+                if (row.original.status !== "working") return null
+                return (
+                    <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                        onClick={() => onCancel(row.original.id)}
+                        aria-label={`Cancel order for ${row.original.ticker}`}
+                    >
+                        <X className="h-4 w-4" />
+                    </Button>
+                )
+            },
+        })
+    }
+
+    return cols
+}
+
+export function OrderBlotter({ orders, onCancel }: OrderBlotterProps) {
+    const columns = makeColumns(onCancel)
+
     const table = useReactTable({
         data: orders,
         columns,
@@ -94,28 +127,20 @@ export function OrderBlotter({ orders }: OrderBlotterProps) {
                 <TableHeader>
                     {table.getHeaderGroups().map((headerGroup) => (
                         <TableRow key={headerGroup.id}>
-                            {headerGroup.headers.map((header) => {
-                                return (
-                                    <TableHead key={header.id}>
-                                        {header.isPlaceholder
-                                            ? null
-                                            : flexRender(
-                                                header.column.columnDef.header,
-                                                header.getContext()
-                                            )}
-                                    </TableHead>
-                                )
-                            })}
+                            {headerGroup.headers.map((header) => (
+                                <TableHead key={header.id}>
+                                    {header.isPlaceholder
+                                        ? null
+                                        : flexRender(header.column.columnDef.header, header.getContext())}
+                                </TableHead>
+                            ))}
                         </TableRow>
                     ))}
                 </TableHeader>
                 <TableBody>
                     {table.getRowModel().rows?.length ? (
                         table.getRowModel().rows.map((row) => (
-                            <TableRow
-                                key={row.id}
-                                data-state={row.getIsSelected() && "selected"}
-                            >
+                            <TableRow key={row.id} data-state={row.getIsSelected() && "selected"}>
                                 {row.getVisibleCells().map((cell) => (
                                     <TableCell key={cell.id}>
                                         {flexRender(cell.column.columnDef.cell, cell.getContext())}
@@ -125,8 +150,8 @@ export function OrderBlotter({ orders }: OrderBlotterProps) {
                         ))
                     ) : (
                         <TableRow>
-                            <TableCell colSpan={columns.length} className="h-24 text-center">
-                                No active orders.
+                            <TableCell colSpan={columns.length} className="h-24 text-center text-muted-foreground">
+                                No orders.
                             </TableCell>
                         </TableRow>
                     )}
