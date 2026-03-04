@@ -270,7 +270,7 @@ export const mockEquityCurve = Array.from({ length: 180 }, (_, i) => {
     date.setDate(date.getDate() - (180 - i));
     const baseValue = 400000;
     const trend = i * 450;
-    const volatility = Math.sin(i / 10) * 8000 + Math.random() * 5000;
+    const volatility = Math.sin(i / 10) * 8000 + (Math.sin(i * 1.5) * 2500 + 2500);
     return {
         date: date.toISOString().split('T')[0],
         portfolio: baseValue + trend + volatility,
