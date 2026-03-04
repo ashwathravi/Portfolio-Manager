@@ -1,7 +1,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert';
-import { calculateSparklinePoints } from './charts.ts';
+import { calculateSparklinePoints } from './charts';
 
 // ---------------------------------------------------------------------------
 // Existing tests
