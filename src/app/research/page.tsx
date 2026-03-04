@@ -14,7 +14,9 @@ import {
     Target,
     Clock,
 } from 'lucide-react';
+import { useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { NewThesisModal } from '@/components/research/NewThesisModal';
 
 interface Thesis {
     id: string;
@@ -190,6 +192,8 @@ function ResearchContent() {
     const router = useRouter();
     const searchParams = useSearchParams();
     const currentTab = searchParams.get('tab') || 'theses';
+    const [theses, setTheses] = useState(mockTheses);
+    const [showNewThesis, setShowNewThesis] = useState(false);
 
     const handleTabChange = (value: string) => {
         const params = new URLSearchParams(searchParams);
@@ -220,10 +224,12 @@ function ResearchContent() {
                         Develop and track your investment theses and decision log.
                     </p>
                 </div>
-                <Button>
-                    <Plus className="mr-2 h-4 w-4" />
-                    New {currentTab === 'theses' ? 'Thesis' : currentTab === 'watchlist' ? 'Watchlist Item' : 'Entry'}
-                </Button>
+                {currentTab === 'theses' && (
+                    <Button onClick={() => setShowNewThesis(true)}>
+                        <Plus className="mr-2 h-4 w-4" />
+                        New Thesis
+                    </Button>
+                )}
             </div>
 
             {/* Tabs */}
@@ -238,7 +244,7 @@ function ResearchContent() {
                 {/* Active Theses */}
                 <TabsContent value="theses" className="space-y-4">
                     <div className="grid gap-4 md:grid-cols-2">
-                        {mockTheses.map((thesis) => (
+                        {theses.map((thesis) => (
                             <Card key={thesis.id} className="p-6 transition-all hover:shadow-md">
                                 <div className="space-y-4">
                                     {/* Header */}
@@ -481,6 +487,22 @@ function ResearchContent() {
                     </div>
                 </TabsContent>
             </Tabs>
+
+            <NewThesisModal
+                open={showNewThesis}
+                onOpenChange={setShowNewThesis}
+                onSubmit={(data) => {
+                    setTheses((prev) => [
+                        {
+                            id: crypto.randomUUID(),
+                            status: 'active' as const,
+                            dateUpdated: new Date().toLocaleDateString('en-US'),
+                            ...data,
+                        },
+                        ...prev,
+                    ]);
+                }}
+            />
         </div>
     );
 }

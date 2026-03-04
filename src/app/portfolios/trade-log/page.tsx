@@ -6,6 +6,7 @@ import { Filter, Download, Plus, ArrowUpRight, ArrowDownRight, X, ChevronRight }
 import { Badge } from '@/components/ui/badge';
 import { useState, useMemo } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
+import { AddTradeModal } from '@/components/trade-log/AddTradeModal';
 import {
     Select,
     SelectContent,
@@ -111,6 +112,8 @@ import { Suspense } from 'react';
 function TradeLogContent() {
     const router = useRouter();
     const searchParams = useSearchParams();
+    const [trades, setTrades] = useState(mockTrades);
+    const [showAddTrade, setShowAddTrade] = useState(false);
     const [selectedAccount, setSelectedAccount] = useState<string>(() => {
         const accountParam = searchParams.get('account');
         return accountParam === '1' ? 'Fidelity Individual' : accountParam === '2' ? 'Vanguard Roth IRA' : accountParam === '3' ? 'Robinhood Trading' : 'All Accounts';
@@ -131,13 +134,13 @@ function TradeLogContent() {
     });
 
     const filteredTrades = useMemo(() => {
-        return mockTrades.filter((trade) => {
+        return trades.filter((trade) => {
             const accountMatch = selectedAccount === 'All Accounts' || trade.account === selectedAccount;
             const strategyMatch = selectedStrategy === 'All Strategies' || trade.strategy === selectedStrategy;
             const tagMatch = selectedTag === 'All Tags' || trade.tags.includes(selectedTag);
             return accountMatch && strategyMatch && tagMatch;
         });
-    }, [selectedAccount, selectedStrategy, selectedTag]);
+    }, [trades, selectedAccount, selectedStrategy, selectedTag]);
 
     const summaryStats = useMemo(() => {
         return filteredTrades.reduce(
@@ -196,7 +199,7 @@ function TradeLogContent() {
                         Record of all transactions across all accounts
                     </p>
                 </div>
-                <Button>
+                <Button onClick={() => setShowAddTrade(true)}>
                     <Plus className="h-4 w-4 mr-2" />
                     Add Trade
                 </Button>
@@ -385,6 +388,14 @@ function TradeLogContent() {
                     </table>
                 </div>
             </Card>
+
+            <AddTradeModal
+                open={showAddTrade}
+                onOpenChange={setShowAddTrade}
+                onSubmit={(trade) => {
+                    setTrades((prev) => [{ id: crypto.randomUUID(), ...trade }, ...prev]);
+                }}
+            />
         </div>
     );
 }
