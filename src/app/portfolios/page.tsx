@@ -314,6 +314,13 @@ export default function PortfoliosPage() {
                             </tr>
                         </thead>
                         <tbody>
+                            {sortedData.length === 0 && (
+                                <tr>
+                                    <td colSpan={7} className="py-16 text-center text-muted-foreground">
+                                        No portfolios match your search.
+                                    </td>
+                                </tr>
+                            )}
                             {sortedData.map((item) => (
                                 <tr
                                     key={item.id}

@@ -343,6 +343,13 @@ function TradeLogContent() {
                             </tr>
                         </thead>
                         <tbody>
+                            {filteredTrades.length === 0 && (
+                                <tr>
+                                    <td colSpan={8} className="py-16 text-center text-muted-foreground">
+                                        No trades match the selected filters.
+                                    </td>
+                                </tr>
+                            )}
                             {filteredTrades.map((trade) => (
                                 <tr
                                     key={trade.id}
