@@ -8,11 +8,22 @@ import { PortfolioPerformance } from '@/components/dashboard/PortfolioPerformanc
 import { Wallet, TrendingUp, DollarSign, Activity, Calendar, Plus } from 'lucide-react';
 import { DashboardGreeting } from '@/components/dashboard/DashboardGreeting';
 import { mockTransactions } from '@/lib/mockData';
+import { marketDataEngine } from '@/lib/api/market-data';
+import { schwabClient } from '@/lib/api/schwab/client';
 
 export const dynamic = 'force-dynamic'; // Ensure it doesn't cache stale data on build
 
 export default async function Dashboard() {
-  // 1. Fetch Portfolios
+  // 1. Try to fetch from Schwab if we have a token eventually (Mocked here)
+  let liveAccounts: any = null;
+  try {
+    // We would use an actual saved token here, but for now we fallback
+    // liveAccounts = await schwabClient.getAccounts('dummy_token');
+  } catch (e) {
+    console.warn('Schwab authentication missing, falling back to database', e);
+  }
+
+  // 2. Fetch Portfolios from DB as fallback/base
   // querying raw for now, or using query builder if relations work
   const allPortfolios = await db.query.portfolios.findMany({
     with: {
@@ -21,8 +32,25 @@ export default async function Dashboard() {
     }
   });
 
+  // Try to fetch live quotes for the dashboard
+  let liveQuotes: Record<string, any> = {};
+  if (!liveAccounts) {
+    try {
+      const symbols = Array.from(new Set<string>(allPortfolios.flatMap(p => p.holdings).map((h: any) => h.ticker).filter(Boolean)));
+      if (symbols.length > 0) {
+        liveQuotes = await marketDataEngine.getQuotes(symbols);
+      }
+    } catch (e) {
+      console.warn('Failed to fetch live quotes for dashboard', e);
+    }
+  }
+
   const portfolioData: PortfolioSummary[] = allPortfolios.map(p => {
-    const holdingsValue = p.holdings.reduce((sum, h) => sum + (h.marketValue || 0), 0);
+    const holdingsValue = p.holdings.reduce((sum, h) => {
+      const currentPrice = liveQuotes[h.ticker]?.price ?? h.currentPrice ?? 0;
+      const value = h.marketValue || (h.quantity * currentPrice);
+      return sum + value;
+    }, 0);
     const totalValue = (p.cashBalance || 0) + holdingsValue;
     return {
       id: p.id,
@@ -38,9 +66,21 @@ export default async function Dashboard() {
 
   const totalNetWorth = portfolioData.reduce((sum, p) => sum + p.totalValue, 0);
 
-  // Mocking change data for now since we don't have historical snapshots in DB yet
-  const todayChange = 1240.50;
-  const todayChangePercent = totalNetWorth > 0 ? (todayChange / totalNetWorth) * 100 : 0;
+  // Mocking change data since we don't have historical snapshots in DB
+  // But we could use `liveQuotes` daily change to calculate an accurate daily P&L.
+  let todayChange = 0;
+  if (Object.keys(liveQuotes).length > 0) {
+    todayChange = allPortfolios.flatMap(p => p.holdings).reduce((sum, h) => {
+      const quote = liveQuotes[h.ticker];
+      if (quote) {
+        return sum + (quote.change * h.quantity);
+      }
+      return sum;
+    }, 0);
+  } else {
+    todayChange = 1240.50; // default mock
+  }
+  const todayChangePercent = totalNetWorth > 0 ? (todayChange / (totalNetWorth - todayChange)) * 100 : 0;
 
   const currentHour = new Date().getHours();
   const greeting = currentHour < 12 ? 'Morning' : currentHour < 18 ? 'Afternoon' : 'Evening';

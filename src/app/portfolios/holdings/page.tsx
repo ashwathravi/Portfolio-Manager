@@ -4,6 +4,7 @@ import { db } from '@/db';
 import { holdings } from '@/db/schema';
 import { HoldingsTable, Holding } from '@/components/holdings/HoldingsTable';
 import { mockPortfolios } from '@/lib/mockData';
+import { marketDataEngine } from '@/lib/api/market-data';
 import HoldingsLoading from './loading';
 
 export const dynamic = 'force-dynamic';
@@ -38,11 +39,23 @@ async function HoldingsContent() {
         return <HoldingsTable holdings={mockHoldings} />;
     }
 
+    // Try to fetch live quotes for all symbols in the portfolio
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let liveQuotes: Record<string, any> = {};
+    try {
+        const symbols = Array.from(new Set<string>(dbHoldings.map((h: any) => h.ticker).filter(Boolean)));
+        if (symbols.length > 0) {
+            liveQuotes = await marketDataEngine.getQuotes(symbols);
+        }
+    } catch (e) {
+        console.warn('Failed to fetch live quotes, falling back to DB values', e);
+    }
+
     // Transform to component properties
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const transformedHoldings: Holding[] = dbHoldings.map((h: any) => {
-        // Calculate missing fields
-        const currentPrice = h.currentPrice || 0;
+        // Calculate missing fields, preferring live quote if available
+        const currentPrice = liveQuotes[h.ticker]?.price ?? h.currentPrice ?? 0;
         const marketValue = h.marketValue || (h.quantity * currentPrice);
         const costBasis = h.quantity * h.avgCost;
         const totalReturn = marketValue - costBasis;

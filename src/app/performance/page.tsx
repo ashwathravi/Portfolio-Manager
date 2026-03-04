@@ -229,7 +229,7 @@ export default function PerformancePage() {
                                 borderRadius: '8px',
                             }}
                             labelStyle={{ color: 'var(--foreground)' }}
-                            formatter={(value: number) => [`$${value.toLocaleString()}`, 'P&L']}
+                            formatter={(value: any) => [`$${Number(value).toLocaleString()}`, 'P&L']}
                         />
                         <Bar
                             dataKey="value"
@@ -296,7 +296,7 @@ export default function PerformancePage() {
                                 borderRadius: '8px',
                             }}
                             labelStyle={{ color: 'var(--foreground)' }}
-                            formatter={(value: number) => [`$${value.toLocaleString()}`, 'Equity']}
+                            formatter={(value: any) => [`$${Number(value).toLocaleString()}`, 'Equity']}
                         />
                         <Area
                             type="monotone"
@@ -357,7 +357,7 @@ export default function PerformancePage() {
                                 borderRadius: '8px',
                             }}
                             labelStyle={{ color: 'var(--foreground)' }}
-                            formatter={(value: number) => [`$${value.toLocaleString()}`, '']}
+                            formatter={(value: any) => [`$${Number(value).toLocaleString()}`, '']}
                         />
                         <Line
                             type="monotone"
