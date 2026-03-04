@@ -14,6 +14,7 @@ import {
     Award,
 } from 'lucide-react';
 import { useRouter, useParams } from 'next/navigation';
+import { exportToCsv } from '@/lib/exportCsv';
 import {
     AreaChart,
     Area,
@@ -87,7 +88,25 @@ export default function StrategyDetailPage() {
                         <Play className="h-4 w-4 mr-2" />
                         Re-run Backtest
                     </Button>
-                    <Button size="sm">
+                    <Button
+                        size="sm"
+                        onClick={() =>
+                            exportToCsv(`strategy-${strategy.name.replace(/\s+/g, '-').toLowerCase()}.csv`, [{
+                                Name: strategy.name,
+                                Status: strategy.status,
+                                Description: strategy.description,
+                                'Backtest Period': strategy.backtestPeriod,
+                                'Initial Capital': strategy.initialCapital,
+                                'Final Value': strategy.finalValue,
+                                'Total Return %': ((strategy.finalValue / strategy.initialCapital - 1) * 100).toFixed(2),
+                                'CAGR %': cagr,
+                                'Sharpe Ratio': strategy.sharpeRatio,
+                                'Max Drawdown %': strategy.maxDrawdown,
+                                'Win Rate %': strategy.winRate,
+                                'Total Trades': strategy.totalTrades,
+                            }])
+                        }
+                    >
                         <Download className="h-4 w-4 mr-2" />
                         Export Report
                     </Button>

@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { ArrowLeft, Download, RefreshCw } from "lucide-react";
 import Link from "next/link";
 import { BacktestResult } from "@/types/strategy";
+import { exportToCsv } from '@/lib/exportCsv';
 import { ResponsiveContainer, XAxis, YAxis, CartesianGrid, Tooltip, AreaChart, Area, TooltipProps } from 'recharts';
 
 // Mock Data
@@ -89,7 +90,35 @@ export default function BacktestPage() {
                         <RefreshCw className="mr-2 h-4 w-4" />
                         Re-run
                     </Button>
-                    <Button variant="outline">
+                    <Button
+                        variant="outline"
+                        onClick={() =>
+                            exportToCsv('backtest-report.csv', [
+                                {
+                                    'Start Date': results.startDate.toLocaleDateString(),
+                                    'End Date': results.endDate.toLocaleDateString(),
+                                    'Initial Capital': results.initialCapital,
+                                    'Final Capital': results.finalCapital,
+                                    'Total Return': results.totalReturn,
+                                    'Total Return %': results.totalReturnPercent,
+                                    'CAGR %': results.cagr,
+                                    'Sharpe Ratio': results.metrics.sharpeRatio,
+                                    'Sortino Ratio': results.metrics.sortinoRatio,
+                                    'Max Drawdown %': results.metrics.maxDrawdown,
+                                    'Win Rate %': results.metrics.winRate,
+                                    'Profit Factor': results.metrics.profitFactor,
+                                    'Beta': results.metrics.beta,
+                                    'Alpha %': results.metrics.alpha,
+                                    'Volatility %': results.metrics.volatility,
+                                },
+                                ...results.equityCurve.map((p) => ({
+                                    'Date': p.date.toLocaleDateString(),
+                                    'Equity': p.equity.toFixed(2),
+                                    'Drawdown %': p.drawdown.toFixed(2),
+                                })),
+                            ])
+                        }
+                    >
                         <Download className="mr-2 h-4 w-4" />
                         Export Report
                     </Button>
