@@ -35,8 +35,8 @@ const mockBacktest: BacktestResult = {
     trades: [], // Populated in a real app
     equityCurve: Array.from({ length: 12 }, (_, i) => ({
         date: new Date(2023, i, 1),
-        equity: 100000 * (1 + (i * 0.03 + Math.random() * 0.05)),
-        drawdown: Math.random() * -10
+        equity: 100000 * (1 + (i * 0.03 + (Math.sin(i) * 0.025 + 0.025))),
+        drawdown: (Math.cos(i) * 5 - 5)
     })),
     robustness: {
         monteCarloProbDrawdown: 95,
@@ -49,12 +49,14 @@ const mockBacktest: BacktestResult = {
     runDate: new Date()
 };
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const CustomTooltip = ({ active, payload, label }: any) => {
+const CustomTooltip = ({ active, payload, label }: TooltipProps<number, string>) => {
     if (active && payload && payload.length) {
+        const date = label ? new Date(label) : null;
         return (
             <div className="bg-background border rounded p-2 shadow-md">
-                <p className="label text-sm font-medium">{new Date(label).toLocaleDateString()}</p>
+                <p className="label text-sm font-medium">
+                    {date && !isNaN(date.getTime()) ? date.toLocaleDateString() : 'Invalid Date'}
+                </p>
                 <p className="text-sm text-primary">Equity: ${payload[0].value?.toFixed(2)}</p>
             </div>
         );

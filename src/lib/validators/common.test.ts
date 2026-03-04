@@ -1,6 +1,6 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert';
-import { safeText } from './common.ts';
+import { safeText } from './common';
 
 describe('safeText', () => {
     test('should accept valid text', () => {

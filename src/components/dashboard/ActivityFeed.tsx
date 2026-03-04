@@ -33,10 +33,18 @@ const currencyFormatter = new Intl.NumberFormat('en-US', {
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
+// Optimized: Cache for formatted dates to avoid redundant parsing.
+const dateCache = new Map<string, string>();
+
 // Optimized: Manual date parsing avoids `new Date()` allocation and potential timezone hydration mismatches.
 // Format: "YYYY-MM-DD" -> "MMM D" (e.g., "Feb 5")
 function formatTransactionDate(dateStr: string) {
     if (!dateStr) return '';
+
+    const cached = dateCache.get(dateStr);
+    if (cached) return cached;
+
+    let result: string;
     // Expected format: "YYYY-MM-DD" (10 chars)
     if (dateStr.length >= 10) {
         // Parse directly to avoid timezone issues with new Date()
@@ -45,11 +53,18 @@ function formatTransactionDate(dateStr: string) {
         const day = parseInt(dateStr.substring(8, 10), 10);
 
         if (monthIndex >= 0 && monthIndex < 12 && !isNaN(day)) {
-            return `${MONTHS[monthIndex]} ${day}`;
+            result = `${MONTHS[monthIndex]} ${day}`;
+        } else {
+            // Fallback
+            result = new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
         }
+    } else {
+        // Fallback
+        result = new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
     }
-    // Fallback
-    return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+
+    dateCache.set(dateStr, result);
+    return result;
 }
 
 // Optimized: Wrapped in React.memo to prevent unnecessary re-renders when parent state updates.
