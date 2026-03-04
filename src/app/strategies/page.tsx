@@ -207,7 +207,7 @@ export default function StrategiesPage() {
                 <p className="mt-2 text-muted-foreground">
                     Use our visual strategy builder to create custom trading algorithms
                 </p>
-                <Button className="mt-4">
+                <Button className="mt-4" onClick={() => router.push('/strategies/builder')}>
                     <Plus className="mr-2 h-4 w-4" />
                     Open Strategy Builder
                 </Button>
