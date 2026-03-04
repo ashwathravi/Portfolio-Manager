@@ -19,6 +19,36 @@ export const DEFAULT_ALLOCATION_COLORS = [
     '#ec4899', // Pink
 ];
 
+// Optimized: Moved static data outside component to prevent recreation on every render
+const DEFAULT_ACCOUNT_DATA = [
+    { name: 'Fidelity', value: 40, color: DEFAULT_ALLOCATION_COLORS[0] },
+    { name: 'Robinhood', value: 35, color: DEFAULT_ALLOCATION_COLORS[1] },
+    { name: 'Coinbase', value: 25, color: DEFAULT_ALLOCATION_COLORS[2] },
+];
+
+const DEFAULT_THEME_DATA = [
+    { name: 'Technology', value: 60, color: DEFAULT_ALLOCATION_COLORS[0] },
+    { name: 'Real Estate', value: 30, color: DEFAULT_ALLOCATION_COLORS[1] },
+    { name: 'Energy', value: 10, color: DEFAULT_ALLOCATION_COLORS[2] },
+];
+
+// Optimized: Pure function outside component to avoid recreation
+// Ensures every item has a color (server may not pass colors from 'use client' exports)
+const ensureColors = (items: AllocationItem[]) =>
+    items.map((item, i) => item.color ? item : { ...item, color: DEFAULT_ALLOCATION_COLORS[i % DEFAULT_ALLOCATION_COLORS.length] });
+
+// Optimized: Helper function for gradient calculation
+const computeGradient = (data: AllocationItem[]) => {
+    let currentSum = 0;
+    const stops: string[] = [];
+    for (const item of data) {
+        const start = currentSum;
+        currentSum += item.value;
+        stops.push(`${item.color} ${start}% ${currentSum}%`);
+    }
+    return `conic-gradient(${stops.join(', ')})`;
+};
+
 interface AssetAllocationProps {
     accountData?: AllocationItem[];
     themeData?: AllocationItem[];
@@ -28,40 +58,19 @@ interface AssetAllocationProps {
 export const AssetAllocation = memo(function AssetAllocation({ accountData, themeData }: AssetAllocationProps) {
     const [allocationView, setAllocationView] = useState<'account' | 'theme'>('account');
 
-    // Default static data if none provided
-    const defaultAccountData = [
-        { name: 'Fidelity', value: 40, color: DEFAULT_ALLOCATION_COLORS[0] },
-        { name: 'Robinhood', value: 35, color: DEFAULT_ALLOCATION_COLORS[1] },
-        { name: 'Coinbase', value: 25, color: DEFAULT_ALLOCATION_COLORS[2] },
-    ];
-
-    const defaultThemeData = [
-        { name: 'Technology', value: 60, color: DEFAULT_ALLOCATION_COLORS[0] },
-        { name: 'Real Estate', value: 30, color: DEFAULT_ALLOCATION_COLORS[1] },
-        { name: 'Energy', value: 10, color: DEFAULT_ALLOCATION_COLORS[2] },
-    ];
-
-    // Ensure every item has a color (server may not pass colors from 'use client' exports)
-    const ensureColors = (items: AllocationItem[]) =>
-        items.map((item, i) => item.color ? item : { ...item, color: DEFAULT_ALLOCATION_COLORS[i % DEFAULT_ALLOCATION_COLORS.length] });
-
-    const currentAccountData = ensureColors(accountData || defaultAccountData);
-    const currentThemeData = ensureColors(themeData || defaultThemeData);
+    // Optimized: Use useMemo to prevent recalculation and new array references when switching tabs (local state change).
+    // This ensures that 'ensureColors' logic (O(N) iteration) is skipped when just toggling views.
+    const currentAccountData = useMemo(() => ensureColors(accountData || DEFAULT_ACCOUNT_DATA), [accountData]);
+    const currentThemeData = useMemo(() => ensureColors(themeData || DEFAULT_THEME_DATA), [themeData]);
 
     const allocationData = allocationView === 'account' ? currentAccountData : currentThemeData;
 
-    // Optimized: Memoize gradient string to avoid O(N) string construction on every render.
-    // Also optimized loop from O(N^2) (nested reduce) to O(N) (single pass).
-    const gradientBackground = useMemo(() => {
-        let currentSum = 0;
-        const stops: string[] = [];
-        for (const item of allocationData) {
-            const start = currentSum;
-            currentSum += item.value;
-            stops.push(`${item.color} ${start}% ${currentSum}%`);
-        }
-        return `conic-gradient(${stops.join(', ')})`;
-    }, [allocationData]);
+    // Optimized: Memoize gradient strings separately so switching tabs is O(1) string selection
+    // rather than O(N) string construction.
+    const accountGradient = useMemo(() => computeGradient(currentAccountData), [currentAccountData]);
+    const themeGradient = useMemo(() => computeGradient(currentThemeData), [currentThemeData]);
+
+    const gradientBackground = allocationView === 'account' ? accountGradient : themeGradient;
 
     return (
         <div className="rounded-2xl bg-card border border-border p-6 flex flex-col shadow-lg h-full">

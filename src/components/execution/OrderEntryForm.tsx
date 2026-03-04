@@ -41,7 +41,6 @@ export function OrderEntryForm() {
 
     const onSubmit = (data: OrderFormValues) => {
         // Mock submission - in real app would call API
-        console.log("Order Submitted:", data)
         toast.success(`Order Submitted: ${data.side.toUpperCase()} ${data.quantity} shares of ${data.ticker}`)
         reset({
             side: data.side, // Keep the side
