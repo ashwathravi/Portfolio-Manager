@@ -1,10 +1,10 @@
 'use client';
 
+import { useState } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Plus, Play, Pause, TrendingUp, Activity } from 'lucide-react';
-import { StatCard } from '@/components/data-display/StatCard';
 import { useRouter } from 'next/navigation';
 
 interface Strategy {
@@ -18,7 +18,7 @@ interface Strategy {
     totalTrades: number;
 }
 
-const mockStrategies: Strategy[] = [
+const INITIAL_STRATEGIES: Strategy[] = [
     {
         id: '1',
         name: 'Momentum + Value',
@@ -53,6 +53,30 @@ const mockStrategies: Strategy[] = [
 
 export default function StrategiesPage() {
     const router = useRouter();
+    const [strategies, setStrategies] = useState<Strategy[]>(INITIAL_STRATEGIES);
+
+    // Computed stats from live state
+    const activeCount  = strategies.filter((s) => s.status === 'active').length;
+    const liveStrategies = strategies.filter((s) => s.returns > 0);
+    const avgReturn    = liveStrategies.length > 0
+        ? liveStrategies.reduce((sum, s) => sum + s.returns, 0) / liveStrategies.length
+        : 0;
+    const avgSharpe    = liveStrategies.length > 0
+        ? liveStrategies.reduce((sum, s) => sum + s.sharpe, 0) / liveStrategies.length
+        : 0;
+    const totalTrades  = strategies.reduce((sum, s) => sum + s.totalTrades, 0);
+
+    function toggleStatus(id: string) {
+        setStrategies((prev) =>
+            prev.map((s) => {
+                if (s.id !== id) return s;
+                if (s.status === 'active') return { ...s, status: 'paused' };
+                if (s.status === 'paused') return { ...s, status: 'active' };
+                // backtesting → simulate run starting
+                return { ...s, status: 'paused' };
+            })
+        );
+    }
 
     return (
         <div className="space-y-6 p-6">
@@ -72,12 +96,11 @@ export default function StrategiesPage() {
 
             {/* Overview Stats */}
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-                {/* Adjusted StatCard usage to match existing component signature if needed, or use inline cards */}
                 <Card className="p-6">
                     <div className="flex items-center justify-between">
                         <div>
                             <p className="text-sm font-medium text-muted-foreground">Active Strategies</p>
-                            <h2 className="text-2xl font-bold">1</h2>
+                            <h2 className="text-2xl font-bold">{activeCount}</h2>
                             <p className="text-xs text-muted-foreground">Currently running</p>
                         </div>
                         <div className="p-3 bg-primary/10 rounded-full">
@@ -90,7 +113,7 @@ export default function StrategiesPage() {
                     <div className="flex items-center justify-between">
                         <div>
                             <p className="text-sm font-medium text-muted-foreground">Avg Return</p>
-                            <h2 className="text-2xl font-bold text-green-600">+15.40%</h2>
+                            <h2 className="text-2xl font-bold text-green-600">+{avgReturn.toFixed(2)}%</h2>
                             <p className="text-xs text-muted-foreground">Across all strategies</p>
                         </div>
                         <div className="p-3 bg-green-100 rounded-full">
@@ -103,7 +126,7 @@ export default function StrategiesPage() {
                     <div className="flex items-center justify-between">
                         <div>
                             <p className="text-sm font-medium text-muted-foreground">Avg Sharpe Ratio</p>
-                            <h2 className="text-2xl font-bold">1.69</h2>
+                            <h2 className="text-2xl font-bold">{avgSharpe.toFixed(2)}</h2>
                             <p className="text-xs text-muted-foreground">Risk-adjusted</p>
                         </div>
                     </div>
@@ -113,7 +136,7 @@ export default function StrategiesPage() {
                     <div className="flex items-center justify-between">
                         <div>
                             <p className="text-sm font-medium text-muted-foreground">Total Trades</p>
-                            <h2 className="text-2xl font-bold">330</h2>
+                            <h2 className="text-2xl font-bold">{totalTrades}</h2>
                             <p className="text-xs text-muted-foreground">All time</p>
                         </div>
                     </div>
@@ -123,7 +146,7 @@ export default function StrategiesPage() {
             {/* Strategies List */}
             <div className="space-y-4">
                 <h2 className="text-xl font-semibold">Your Strategies</h2>
-                {mockStrategies.map((strategy) => (
+                {strategies.map((strategy) => (
                     <Card key={strategy.id} className="p-6">
                         <div className="flex items-start justify-between">
                             <div className="flex-1 space-y-4">
@@ -147,7 +170,7 @@ export default function StrategiesPage() {
                                     </p>
                                 </div>
 
-                                {strategy.status !== 'backtesting' && (
+                                {strategy.returns > 0 && (
                                     <div className="grid gap-4 sm:grid-cols-4">
                                         <div>
                                             <p className="text-sm text-muted-foreground">Total Return</p>
@@ -173,17 +196,17 @@ export default function StrategiesPage() {
 
                             <div className="ml-4 flex gap-2">
                                 {strategy.status === 'active' ? (
-                                    <Button variant="outline" size="sm">
+                                    <Button variant="outline" size="sm" onClick={() => toggleStatus(strategy.id)}>
                                         <Pause className="mr-2 h-4 w-4" />
                                         Pause
                                     </Button>
                                 ) : strategy.status === 'paused' ? (
-                                    <Button variant="outline" size="sm">
+                                    <Button variant="outline" size="sm" onClick={() => toggleStatus(strategy.id)}>
                                         <Play className="mr-2 h-4 w-4" />
                                         Resume
                                     </Button>
                                 ) : (
-                                    <Button variant="outline" size="sm">
+                                    <Button variant="outline" size="sm" onClick={() => router.push(`/strategies/${strategy.id}/backtest`)}>
                                         <Play className="mr-2 h-4 w-4" />
                                         Run Backtest
                                     </Button>
