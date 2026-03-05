@@ -506,7 +506,8 @@ function ResearchContent() {
                         {
                             id: crypto.randomUUID(),
                             status: 'active' as const,
-                            dateUpdated: new Date().toLocaleDateString('en-US'),
+                            dateUpdated: new Date().toISOString().split('T')[0],
+                            tags: [],
                             ...data,
                         },
                         ...prev,

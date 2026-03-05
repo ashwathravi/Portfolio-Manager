@@ -23,6 +23,18 @@ export class AlphaVantageProvider implements MarketDataProvider {
             }
 
             const data = await response.json();
+
+            // Handle rate limit/error messages that return 200 OK
+            if (data['Information'] && (data['Information'].includes('rate limit') || data['Information'].includes('API call frequency'))) {
+                throw new Error(`Alpha Vantage rate limit exceeded`);
+            }
+            if (data['Note'] && data['Note'].includes('API call frequency')) {
+                throw new Error(`Alpha Vantage rate limit exceeded`);
+            }
+            if (data['Error Message']) {
+                throw new Error(`Alpha Vantage API error: ${data['Error Message']}`);
+            }
+
             const quoteData = data['Global Quote'];
 
             if (quoteData && quoteData['01. symbol']) {
@@ -55,6 +67,18 @@ export class AlphaVantageProvider implements MarketDataProvider {
         }
 
         const data = await response.json();
+
+        // Handle rate limit/error messages that return 200 OK
+        if (data['Information'] && (data['Information'].includes('rate limit') || data['Information'].includes('API call frequency'))) {
+            throw new Error(`Alpha Vantage rate limit exceeded`);
+        }
+        if (data['Note'] && data['Note'].includes('API call frequency')) {
+            throw new Error(`Alpha Vantage rate limit exceeded`);
+        }
+        if (data['Error Message']) {
+            throw new Error(`Alpha Vantage API error: ${data['Error Message']}`);
+        }
+
         const timeSeries = data['Time Series (Daily)'];
 
         if (!timeSeries) return [];

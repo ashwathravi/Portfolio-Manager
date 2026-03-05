@@ -95,6 +95,29 @@ export class SchwabClient {
 
         return response.json();
     }
+
+    /**
+     * Places a trading order for a specific account.
+     * The order structure follows Schwab's specification.
+     */
+    async placeOrder(accessToken: string, accountId: string, orderPayload: any) {
+        const response = await fetch(`${this.baseUrl}/trader/v1/accounts/${accountId}/orders`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${accessToken}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(orderPayload)
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`Failed to place order: ${response.statusText} - ${errorText}`);
+        }
+
+        // POST /orders returns 201 Created headers typically, maybe empty body
+        return { success: true };
+    }
 }
 
 export const schwabClient = new SchwabClient();

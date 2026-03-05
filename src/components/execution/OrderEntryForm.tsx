@@ -21,8 +21,9 @@ export function OrderEntryForm({ onOrderPlaced }: OrderEntryFormProps) {
     const [quantity, setQuantity] = useState("")
     const [price, setPrice] = useState("")
     const [tif, setTif] = useState<TimeInForce>("day")
+    const [isSubmitting, setIsSubmitting] = useState(false)
 
-    const handleSubmit = (e: React.FormEvent) => {
+    const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
 
         const newOrder: Order = {
@@ -40,18 +41,37 @@ export function OrderEntryForm({ onOrderPlaced }: OrderEntryFormProps) {
             updatedAt: new Date(),
         }
 
-        onOrderPlaced(newOrder)
+        setIsSubmitting(true);
+        try {
+            const res = await fetch('/api/schwab/order', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ order: newOrder })
+            });
 
-        toast.success(
-            `${side === "buy" ? "Buy" : "Sell"} order placed`,
-            {
-                description: `${quantity} × ${ticker} @ ${orderType === "market" ? "MKT" : `$${Number(price).toFixed(2)}`}`,
+            if (!res.ok) {
+                throw new Error('Failed to submit order to broker');
             }
-        )
 
-        setTicker("")
-        setQuantity("")
-        setPrice("")
+            onOrderPlaced(newOrder)
+
+            toast.success(
+                `${side === "buy" ? "Buy" : "Sell"} order placed`,
+                {
+                    description: `${quantity} × ${ticker} @ ${orderType === "market" ? "MKT" : `$${Number(price).toFixed(2)}`}`,
+                }
+            )
+
+            setTicker("")
+            setQuantity("")
+            setPrice("")
+        } catch (error) {
+            toast.error('Order submission failed', {
+                description: error instanceof Error ? error.message : 'Unknown error occurred'
+            });
+        } finally {
+            setIsSubmitting(false);
+        }
     }
 
     const isBuy = side === "buy"
@@ -155,9 +175,10 @@ export function OrderEntryForm({ onOrderPlaced }: OrderEntryFormProps) {
 
                     <Button
                         type="submit"
-                        className={`w-full text-white ${isBuy ? "bg-green-600 hover:bg-green-700" : "bg-red-600 hover:bg-red-700"}`}
+                        disabled={isSubmitting}
+                        className={`w-full text-white ${isBuy ? "bg-green-600 hover:bg-green-700" : "bg-red-600 hover:bg-red-700"} ${isSubmitting ? "opacity-50 cursor-not-allowed" : ""}`}
                     >
-                        {isBuy ? "Buy" : "Sell"} {ticker || "Stock"}
+                        {isSubmitting ? "Submitting..." : `${isBuy ? "Buy" : "Sell"} ${ticker || "Stock"}`}
                     </Button>
 
                 </form>

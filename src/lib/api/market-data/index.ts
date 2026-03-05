@@ -1,3 +1,5 @@
+import { AlphaVantageProvider, alphaVantageProvider } from './alpha-vantage';
+
 export interface MarketQuote {
     symbol: string;
     price: number;
@@ -35,16 +37,49 @@ export interface MarketDataProvider {
  */
 export class MarketDataEngine {
     private primaryProvider?: MarketDataProvider;
-    private secondaryProvider?: MarketDataProvider;
+    private secondaryProvider: MarketDataProvider;
 
-    // We can inject SchwabClient or AlphaVantageClient into providers here
+    constructor(
+        primaryProvider?: MarketDataProvider,
+        secondaryProvider: MarketDataProvider = alphaVantageProvider
+    ) {
+        this.primaryProvider = primaryProvider;
+        this.secondaryProvider = secondaryProvider;
+    }
 
     async getQuotes(symbols: string[]): Promise<Record<string, MarketQuote>> {
-        // In a real implementation, we might try primary, and fallback to secondary.
-        throw new Error("Not implemented yet");
+        if (this.primaryProvider) {
+            try {
+                return await this.primaryProvider.getQuotes(symbols);
+            } catch (err) {
+                console.warn(`Primary provider failed to fetch quotes: ${err}. Falling back to secondary.`);
+            }
+        }
+
+        try {
+            return await this.secondaryProvider.getQuotes(symbols);
+        } catch (err) {
+            console.error(`Secondary provider failed to fetch quotes: ${err}. Returning empty quotes.`);
+            return {};
+        }
     }
 
     async getHistoricalData(symbol: string, timeframe: '1D' | '1H' | '1M'): Promise<HistoricalBar[]> {
-        throw new Error("Not implemented yet");
+        if (this.primaryProvider) {
+            try {
+                return await this.primaryProvider.getHistoricalData(symbol, timeframe);
+            } catch (err) {
+                console.warn(`Primary provider failed to fetch historical data: ${err}. Falling back to secondary.`);
+            }
+        }
+
+        try {
+            return await this.secondaryProvider.getHistoricalData(symbol, timeframe);
+        } catch (err) {
+            console.error(`Secondary provider failed to fetch historical data for ${symbol}: ${err}. Returning empty data.`);
+            return [];
+        }
     }
 }
+
+export const marketDataEngine = new MarketDataEngine();
