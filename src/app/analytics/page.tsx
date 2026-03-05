@@ -1,11 +1,64 @@
 'use client';
 
+import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { Card } from '@/components/ui/card';
 import { StatCard } from '@/components/data-display/StatCard';
 import { Settings, Plus, ChevronLeft, ChevronRight, Share2, TrendingUp, Calendar as CalendarIcon } from 'lucide-react';
-import { PieChart, Pie, Cell, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
+import { PieChart, Pie, Cell, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip } from 'recharts';
+
+// Trades keyed by month index (0=Jan 2026, 1=Feb 2026 …) then day-of-month
+const TRADE_DATA: Record<number, Record<number, { pnl: number; trades: number }>> = {
+    1: { // February 2026
+        6:  { pnl: 222704, trades: 2 },
+        20: { pnl: -3200,  trades: 1 },
+    },
+    0: { // January 2026
+        14: { pnl: 5400,  trades: 1 },
+        21: { pnl: -1200, trades: 1 },
+        28: { pnl: 8750,  trades: 2 },
+    },
+};
+
+const MONTH_LABELS = ['Jan 2026', 'Feb 2026', 'Mar 2026'];
+
+// Days in each month (index 0=Jan, 1=Feb, 2=Mar)
+const MONTH_DAYS = [31, 28, 31];
+
+// Which weekday the month starts on (0=Sun): Jan=4, Feb=0, Mar=0
+const MONTH_START_DAY = [4, 0, 0];
+
+function fmt(n: number) {
+    return (n >= 0 ? '+' : '-') + '$' + Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
 
 export default function TradeAnalyticsPage() {
+    const router = useRouter();
+    const [monthIndex, setMonthIndex] = useState(1); // Feb 2026
+    const [selectedDay, setSelectedDay] = useState<number | null>(6);
+
+    const monthTrades = TRADE_DATA[monthIndex] ?? {};
+    const totalPnl    = Object.values(monthTrades).reduce((s, t) => s + t.pnl, 0);
+    const totalTrades = Object.values(monthTrades).reduce((s, t) => s + t.trades, 0);
+    const tradingDays = Object.keys(monthTrades).length;
+    const winners     = Object.values(monthTrades).filter((t) => t.pnl > 0).length;
+    const winRate     = tradingDays > 0 ? ((winners / tradingDays) * 100).toFixed(1) : '0.0';
+    const bestDay     = Object.entries(monthTrades).sort((a, b) => b[1].pnl - a[1].pnl)[0];
+    const bestDayPnl  = bestDay ? bestDay[1].pnl : 0;
+    const bestDayNum  = bestDay ? Number(bestDay[0]) : null;
+    const selectedTrade = selectedDay !== null ? monthTrades[selectedDay] ?? null : null;
+
+    const daysInMonth  = MONTH_DAYS[monthIndex] ?? 30;
+    const startWeekday = MONTH_START_DAY[monthIndex] ?? 0;
+
+    // Build calendar cells: leading blanks + days
+    const calendarCells: (number | null)[] = [
+        ...Array(startWeekday).fill(null),
+        ...Array.from({ length: daysInMonth }, (_, i) => i + 1),
+    ];
+    // Pad to full weeks
+    while (calendarCells.length % 7 !== 0) calendarCells.push(null);
+
     return (
         <div className="space-y-6 p-6">
             {/* Header */}
@@ -34,24 +87,24 @@ export default function TradeAnalyticsPage() {
                             </button>
                         </div>
                     </div>
-                    <p className="text-sm text-muted-foreground">2 trades • 1 profitable days</p>
+                    <p className="text-sm text-muted-foreground">{totalTrades} trades • {winners} profitable days</p>
                 </div>
 
                 {/* Metrics Row */}
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
                     <StatCard
                         label="Total P&L"
-                        value="$2,22,525.00"
+                        value={totalPnl !== 0 ? fmt(totalPnl) : '$0.00'}
                         color="primary"
                     />
                     <StatCard
                         label="Win Rate"
-                        value="100.0%"
+                        value={`${winRate}%`}
                     />
                     <StatCard
                         label="Best Day"
-                        value="$2,22,525.00"
-                        changeLabel="Feb 6"
+                        value={bestDayPnl ? fmt(bestDayPnl) : '$0.00'}
+                        changeLabel={bestDayNum ? `${MONTH_LABELS[monthIndex].slice(0, 3)} ${bestDayNum}` : '—'}
                         color="primary"
                     />
                     <StatCard
@@ -64,21 +117,21 @@ export default function TradeAnalyticsPage() {
                 {/* Year Heatmap Calendar */}
                 <div className="space-y-3">
                     <div className="grid grid-cols-12 gap-4">
-                        {['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'].map((month, monthIndex) => (
+                        {['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'].map((month, mi) => (
                             <div key={month} className="space-y-1">
                                 <div className="text-xs text-muted-foreground text-center mb-2">{month}</div>
                                 <div className="grid grid-cols-7 gap-0.5">
                                     {Array.from({ length: 35 }).map((_, dayIndex) => {
-                                        // Show green on Feb 6th (month 1, around day 5-6)
-                                        const isActive = monthIndex === 1 && dayIndex === 5;
+                                        const isActive = mi === 1 && dayIndex === 5;
+                                        const isLoss   = mi === 1 && dayIndex === 19;
                                         return (
                                             <div
                                                 key={dayIndex}
                                                 className={`
                           h-2 w-2 rounded-sm cursor-pointer transition-colors
-                          ${isActive ? 'bg-primary hover:bg-primary/80' : 'bg-accent hover:bg-accent/70'}
+                          ${isActive ? 'bg-primary hover:bg-primary/80' : isLoss ? 'bg-destructive/60 hover:bg-destructive/80' : 'bg-accent hover:bg-accent/70'}
                         `}
-                                                title={isActive ? 'Feb 6: $2,22,525.00' : 'No trades'}
+                                                title={isActive ? 'Feb 6: +$222,704.00' : isLoss ? 'Feb 20: -$3,200.00' : 'No trades'}
                                             />
                                         );
                                     })}
@@ -131,7 +184,10 @@ export default function TradeAnalyticsPage() {
                         <button className="p-2 hover:bg-accent rounded-lg transition-colors">
                             <Settings className="h-4 w-4" />
                         </button>
-                        <button className="flex items-center gap-2 px-4 py-2 bg-foreground text-background rounded-lg hover:bg-foreground/90 transition-colors">
+                        <button
+                            className="flex items-center gap-2 px-4 py-2 bg-foreground text-background rounded-lg hover:bg-foreground/90 transition-colors"
+                            onClick={() => router.push('/portfolios/trade-log')}
+                        >
                             <Plus className="h-4 w-4" />
                             <span className="text-sm font-medium">Add Trade</span>
                         </button>
@@ -141,11 +197,19 @@ export default function TradeAnalyticsPage() {
                 {/* Month Navigation */}
                 <div className="flex items-center justify-between mb-6">
                     <div className="flex items-center gap-3">
-                        <button className="p-1 hover:bg-accent rounded transition-colors">
+                        <button
+                            className="p-1 hover:bg-accent rounded transition-colors disabled:opacity-40"
+                            disabled={monthIndex === 0}
+                            onClick={() => { setMonthIndex((i) => Math.max(0, i - 1)); setSelectedDay(null); }}
+                        >
                             <ChevronLeft className="h-5 w-5" />
                         </button>
-                        <h4 className="font-bold">February 2026</h4>
-                        <button className="p-1 hover:bg-accent rounded transition-colors">
+                        <h4 className="font-bold">{MONTH_LABELS[monthIndex]}</h4>
+                        <button
+                            className="p-1 hover:bg-accent rounded transition-colors disabled:opacity-40"
+                            disabled={monthIndex === MONTH_LABELS.length - 1}
+                            onClick={() => { setMonthIndex((i) => Math.min(MONTH_LABELS.length - 1, i + 1)); setSelectedDay(null); }}
+                        >
                             <ChevronRight className="h-5 w-5" />
                         </button>
                     </div>
@@ -159,23 +223,29 @@ export default function TradeAnalyticsPage() {
                 <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
                     <div className="p-4 rounded-lg bg-accent/50 min-w-0">
                         <p className="text-xs text-muted-foreground mb-1">Total Trades</p>
-                        <h3 className="text-2xl font-bold truncate">3</h3>
-                        <p className="text-xs text-muted-foreground mt-1">7 days</p>
+                        <h3 className="text-2xl font-bold truncate">{totalTrades}</h3>
+                        <p className="text-xs text-muted-foreground mt-1">{tradingDays} days</p>
                     </div>
                     <div className="p-4 rounded-lg bg-accent/50 min-w-0">
                         <p className="text-xs text-muted-foreground mb-1">Net P&L</p>
-                        <h3 className="text-2xl font-bold text-primary truncate">+$2,22,704.00</h3>
-                        <p className="text-xs text-muted-foreground mt-1">Profit</p>
+                        <h3 className={`text-2xl font-bold truncate ${totalPnl >= 0 ? 'text-primary' : 'text-destructive'}`}>
+                            {totalPnl !== 0 ? fmt(totalPnl) : '$0.00'}
+                        </h3>
+                        <p className="text-xs text-muted-foreground mt-1">{totalPnl >= 0 ? 'Profit' : 'Loss'}</p>
                     </div>
                     <div className="p-4 rounded-lg bg-accent/50 min-w-0">
                         <p className="text-xs text-muted-foreground mb-1">Win Rate</p>
-                        <h3 className="text-2xl font-bold truncate">66.7%</h3>
+                        <h3 className="text-2xl font-bold truncate">{winRate}%</h3>
                         <p className="text-xs text-muted-foreground mt-1">Success rate</p>
                     </div>
                     <div className="p-4 rounded-lg bg-accent/50 min-w-0">
                         <p className="text-xs text-muted-foreground mb-1">Best Day</p>
-                        <h3 className="text-2xl font-bold text-primary truncate">+$2,22,704.00</h3>
-                        <p className="text-xs text-muted-foreground mt-1">Feb 06</p>
+                        <h3 className={`text-2xl font-bold truncate ${bestDayPnl >= 0 ? 'text-primary' : 'text-destructive'}`}>
+                            {bestDayPnl ? fmt(bestDayPnl) : '$0.00'}
+                        </h3>
+                        <p className="text-xs text-muted-foreground mt-1">
+                            {bestDayNum ? `${MONTH_LABELS[monthIndex].slice(0, 3)} ${String(bestDayNum).padStart(2, '0')}` : '—'}
+                        </p>
                     </div>
                     <div className="p-4 rounded-lg bg-accent/50 min-w-0">
                         <p className="text-xs text-muted-foreground mb-1">Profit Factor</p>
@@ -199,73 +269,94 @@ export default function TradeAnalyticsPage() {
 
                         {/* Calendar Days */}
                         <div className="grid grid-cols-7 gap-2">
-                            {/* Week 1 */}
-                            {[1, 2, 3, 4, 5, 6, 7].map((day) => (
-                                <div
-                                    key={`week1-${day}`}
-                                    className={`
-                    min-h-[80px] p-3 rounded-lg border transition-colors
-                    ${day === 6 ? 'bg-primary/10 border-primary/30' : 'bg-card border-border hover:border-primary/40'}
-                    ${day === 7 ? 'border-2 border-foreground' : ''}
-                    cursor-pointer
+                            {calendarCells.map((day, idx) => {
+                                if (day === null) {
+                                    return <div key={`blank-${idx}`} className="min-h-[80px]" />;
+                                }
+                                const trade = monthTrades[day];
+                                const isSelected = day === selectedDay;
+                                const isToday = monthIndex === 1 && day === 7; // Feb 7 as "today" marker
+                                return (
+                                    <div
+                                        key={`day-${day}`}
+                                        onClick={() => setSelectedDay(day === selectedDay ? null : day)}
+                                        className={`
+                    min-h-[80px] p-3 rounded-lg border transition-colors cursor-pointer
+                    ${isSelected ? 'ring-2 ring-primary' : ''}
+                    ${trade && trade.pnl > 0 ? 'bg-primary/10 border-primary/30 hover:bg-primary/20' : ''}
+                    ${trade && trade.pnl < 0 ? 'bg-destructive/10 border-destructive/30 hover:bg-destructive/20' : ''}
+                    ${!trade ? 'bg-card border-border hover:border-primary/40' : ''}
+                    ${isToday ? 'border-2 border-foreground' : ''}
                   `}
-                                >
-                                    <div className="text-sm font-medium mb-1">{day}</div>
-                                    {day === 6 && (
-                                        <div className="mt-2">
-                                            <div className="text-xs font-bold text-primary truncate">+$2,22,704.00</div>
-                                        </div>
-                                    )}
-                                </div>
-                            ))}
-
-                            {/* Week 2 */}
-                            {[8, 9, 10, 11, 12, 13, 14].map((day) => (
-                                <div
-                                    key={`week2-${day}`}
-                                    className="min-h-[80px] p-3 rounded-lg border bg-card border-border hover:border-primary/40 transition-colors cursor-pointer"
-                                >
-                                    <div className="text-sm font-medium">{day}</div>
-                                </div>
-                            ))}
-
-                            {/* Week 3 */}
-                            {[15, 16, 17, 18, 19, 20, 21].map((day) => (
-                                <div
-                                    key={`week3-${day}`}
-                                    className="min-h-[80px] p-3 rounded-lg border bg-card border-border hover:border-primary/40 transition-colors cursor-pointer"
-                                >
-                                    <div className="text-sm font-medium">{day}</div>
-                                </div>
-                            ))}
-
-                            {/* Week 4 */}
-                            {[22, 23, 24, 25, 26, 27, 28].map((day) => (
-                                <div
-                                    key={`week4-${day}`}
-                                    className="min-h-[80px] p-3 rounded-lg border bg-card border-border hover:border-primary/40 transition-colors cursor-pointer"
-                                >
-                                    <div className="text-sm font-medium">{day}</div>
-                                </div>
-                            ))}
+                                    >
+                                        <div className="text-sm font-medium mb-1">{day}</div>
+                                        {trade && (
+                                            <div className="mt-2">
+                                                <div className={`text-xs font-bold truncate ${trade.pnl >= 0 ? 'text-primary' : 'text-destructive'}`}>
+                                                    {fmt(trade.pnl)}
+                                                </div>
+                                                <div className="text-xs text-muted-foreground">{trade.trades} trade{trade.trades !== 1 ? 's' : ''}</div>
+                                            </div>
+                                        )}
+                                    </div>
+                                );
+                            })}
                         </div>
                     </div>
 
                     {/* Sidebar */}
                     <div className="space-y-6">
                         {/* Trade Details */}
-                        <div className="p-4 rounded-lg bg-accent/30 text-center">
-                            <p className="text-sm text-muted-foreground">Select a day to view trade details</p>
-                        </div>
+                        {selectedTrade ? (
+                            <div className="p-4 rounded-lg bg-accent/30 space-y-3">
+                                <h4 className="font-bold text-sm">
+                                    {MONTH_LABELS[monthIndex].slice(0, 3)} {selectedDay} — Trade Details
+                                </h4>
+                                <div className="space-y-2">
+                                    <div className="flex justify-between text-sm">
+                                        <span className="text-muted-foreground">P&L</span>
+                                        <span className={`font-bold ${selectedTrade.pnl >= 0 ? 'text-primary' : 'text-destructive'}`}>
+                                            {fmt(selectedTrade.pnl)}
+                                        </span>
+                                    </div>
+                                    <div className="flex justify-between text-sm">
+                                        <span className="text-muted-foreground">Trades</span>
+                                        <span className="font-medium">{selectedTrade.trades}</span>
+                                    </div>
+                                    <div className="flex justify-between text-sm">
+                                        <span className="text-muted-foreground">Result</span>
+                                        <span className={`font-medium ${selectedTrade.pnl >= 0 ? 'text-primary' : 'text-destructive'}`}>
+                                            {selectedTrade.pnl >= 0 ? 'Profit' : 'Loss'}
+                                        </span>
+                                    </div>
+                                </div>
+                                <button
+                                    className="w-full text-center text-xs text-primary hover:underline"
+                                    onClick={() => router.push('/portfolios/trade-log')}
+                                >
+                                    View in Trade Log →
+                                </button>
+                            </div>
+                        ) : (
+                            <div className="p-4 rounded-lg bg-accent/30 text-center">
+                                <p className="text-sm text-muted-foreground">Select a day to view trade details</p>
+                            </div>
+                        )}
 
                         {/* Quick Actions */}
                         <div>
                             <h4 className="font-bold text-sm mb-3">Quick Actions</h4>
                             <div className="space-y-2">
-                                <button className="w-full text-left px-4 py-2 rounded-lg bg-card border border-border hover:border-primary/40 transition-colors">
+                                <button
+                                    className="w-full text-left px-4 py-2 rounded-lg bg-card border border-border hover:border-primary/40 transition-colors"
+                                    onClick={() => router.push('/portfolios/trade-log')}
+                                >
                                     <span className="text-sm">View All Trades</span>
                                 </button>
-                                <button className="w-full text-left px-4 py-2 rounded-lg bg-card border border-border hover:border-primary/40 transition-colors">
+                                <button
+                                    className="w-full text-left px-4 py-2 rounded-lg bg-card border border-border hover:border-primary/40 transition-colors"
+                                    onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+                                >
                                     <span className="text-sm">Analytics Dashboard</span>
                                 </button>
                             </div>
@@ -275,14 +366,22 @@ export default function TradeAnalyticsPage() {
                         <div>
                             <h4 className="font-bold text-sm mb-3">Month Highlights</h4>
                             <div className="p-4 rounded-lg bg-card border border-border">
-                                <div className="flex items-start gap-2 mb-2">
-                                    <TrendingUp className="h-4 w-4 text-primary mt-0.5" />
-                                    <div className="flex-1">
-                                        <p className="text-xs text-muted-foreground">Best Day</p>
-                                        <p className="text-sm font-bold text-primary">$2,22,704.00</p>
-                                        <p className="text-xs text-muted-foreground">Feb 06</p>
+                                {bestDayNum ? (
+                                    <div className="flex items-start gap-2 mb-2">
+                                        <TrendingUp className="h-4 w-4 text-primary mt-0.5" />
+                                        <div className="flex-1">
+                                            <p className="text-xs text-muted-foreground">Best Day</p>
+                                            <p className={`text-sm font-bold ${bestDayPnl >= 0 ? 'text-primary' : 'text-destructive'}`}>
+                                                {fmt(bestDayPnl)}
+                                            </p>
+                                            <p className="text-xs text-muted-foreground">
+                                                {MONTH_LABELS[monthIndex].slice(0, 3)} {String(bestDayNum).padStart(2, '0')}
+                                            </p>
+                                        </div>
                                     </div>
-                                </div>
+                                ) : (
+                                    <p className="text-xs text-muted-foreground text-center">No trades this month</p>
+                                )}
                                 <p className="text-xs text-muted-foreground mt-3 pt-3 border-t border-border">
                                     Trade more days to see highlights comparison
                                 </p>
@@ -291,33 +390,6 @@ export default function TradeAnalyticsPage() {
                     </div>
                 </div>
             </Card>
-
-            {/* Additional Trade Analytics sections can be added here */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <Card className="p-6">
-                    <div className="mb-4">
-                        <h3 className="font-bold text-lg">Trade Distribution</h3>
-                        <p className="text-muted-foreground text-sm">Analysis of your trading patterns</p>
-                    </div>
-                    <div className="space-y-4">
-                        <div className="flex items-center justify-between p-4 rounded-lg bg-accent/30">
-                            <span className="text-sm text-muted-foreground">Coming soon</span>
-                        </div>
-                    </div>
-                </Card>
-
-                <Card className="p-6">
-                    <div className="mb-4">
-                        <h3 className="font-bold text-lg">Win/Loss Analysis</h3>
-                        <p className="text-muted-foreground text-sm">Detailed breakdown of outcomes</p>
-                    </div>
-                    <div className="space-y-4">
-                        <div className="flex items-center justify-between p-4 rounded-lg bg-accent/30">
-                            <span className="text-sm text-muted-foreground">Coming soon</span>
-                        </div>
-                    </div>
-                </Card>
-            </div>
 
             {/* Behavioral Insights Section */}
             <div>
@@ -342,13 +414,13 @@ export default function TradeAnalyticsPage() {
                             </thead>
                             <tbody>
                                 {[
-                                    { day: 'Sunday', netProfits: '$0.00', winRate: 0, totalProfits: '$0.00', totalLoss: '$0.00', trades: 0 },
-                                    { day: 'Monday', netProfits: '$0.00', winRate: 0, totalProfits: '$0.00', totalLoss: '$0.00', trades: 0 },
-                                    { day: 'Tuesday', netProfits: '$0.00', winRate: 0, totalProfits: '$0.00', totalLoss: '$0.00', trades: 0 },
-                                    { day: 'Wednesday', netProfits: '$0.00', winRate: 0, totalProfits: '$0.00', totalLoss: '$0.00', trades: 0 },
-                                    { day: 'Thursday', netProfits: '$0.00', winRate: 0, totalProfits: '$0.00', totalLoss: '$0.00', trades: 0 },
-                                    { day: 'Friday', netProfits: '$2,22,525.00', winRate: 66.7, totalProfits: '$2,22,525.00', totalLoss: '$0.00', trades: 2 },
-                                    { day: 'Saturday', netProfits: '$0.00', winRate: 0, totalProfits: '$0.00', totalLoss: '$0.00', trades: 0 },
+                                    { day: 'Sunday',    netProfits: '$0.00',      winRate: 0,    totalProfits: '$0.00',      totalLoss: '$0.00', trades: 0 },
+                                    { day: 'Monday',    netProfits: '$0.00',      winRate: 0,    totalProfits: '$0.00',      totalLoss: '$0.00', trades: 0 },
+                                    { day: 'Tuesday',   netProfits: '$0.00',      winRate: 0,    totalProfits: '$0.00',      totalLoss: '$0.00', trades: 0 },
+                                    { day: 'Wednesday', netProfits: '$0.00',      winRate: 0,    totalProfits: '$0.00',      totalLoss: '$0.00', trades: 0 },
+                                    { day: 'Thursday',  netProfits: '$0.00',      winRate: 0,    totalProfits: '$0.00',      totalLoss: '$0.00', trades: 0 },
+                                    { day: 'Friday',    netProfits: '+$222,704.00', winRate: 66.7, totalProfits: '+$222,704.00', totalLoss: '$3,200.00', trades: 3 },
+                                    { day: 'Saturday',  netProfits: '$0.00',      winRate: 0,    totalProfits: '$0.00',      totalLoss: '$0.00', trades: 0 },
                                 ].map((row) => (
                                     <tr key={row.day} className="border-b border-border hover:bg-accent/30 transition-colors">
                                         <td className="py-4 px-4 text-sm">{row.day}</td>
@@ -457,7 +529,7 @@ export default function TradeAnalyticsPage() {
                                 { day: 'Tue', trades: 0 },
                                 { day: 'Wed', trades: 0 },
                                 { day: 'Thu', trades: 0 },
-                                { day: 'Fri', trades: 2 },
+                                { day: 'Fri', trades: totalTrades },
                                 { day: 'Sat', trades: 0 },
                             ]}
                             margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
