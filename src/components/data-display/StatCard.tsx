@@ -38,9 +38,9 @@ export function StatCard({
 
     const trendColor =
         calculatedTrend === "up"
-            ? "text-success-600 text-green-600"
+            ? "text-green-600"
             : calculatedTrend === "down"
-                ? "text-danger-600 text-red-600"
+                ? "text-red-600"
                 : "text-muted-foreground";
 
     const TrendIcon =
@@ -62,7 +62,14 @@ export function StatCard({
                         <h3 className="mt-2 text-3xl font-bold tracking-tight truncate">{value}</h3>
                     </div>
                     {icon && (
-                        <div className={cn("rounded-full p-2.5 bg-muted/50 text-muted-foreground", color === "primary" && "text-primary bg-primary/10")}>
+                        <div className={cn(
+                            "rounded-full p-2.5 bg-muted/50 text-muted-foreground",
+                            color === "primary" && "text-primary bg-primary/10",
+                            color === "success" && "text-green-600 bg-green-100",
+                            color === "danger"  && "text-red-600 bg-red-100",
+                            color === "warning" && "text-yellow-600 bg-yellow-100",
+                            color === "info"    && "text-blue-600 bg-blue-100",
+                        )}>
                             {icon}
                         </div>
                     )}

@@ -1,7 +1,6 @@
 "use client"
 
 import { useState } from "react";
-import { AppShell } from "@/components/layout/AppShell";
 import { OrderEntryForm } from "@/components/execution/OrderEntryForm";
 import { OrderBlotter } from "@/components/execution/OrderBlotter";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -78,7 +77,7 @@ export default function ExecutionPage() {
     }
 
     return (
-        <AppShell>
+        <div>
             <div className="flex flex-col lg:flex-row gap-6">
                 {/* Left Column: Order Entry */}
                 <div className="w-full lg:w-1/3">
@@ -110,6 +109,6 @@ export default function ExecutionPage() {
                     </Tabs>
                 </div>
             </div>
-        </AppShell>
+        </div>
     );
 }

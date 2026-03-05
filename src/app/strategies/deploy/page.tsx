@@ -1,6 +1,5 @@
 'use client';
 
-import { AppShell } from '@/components/layout/AppShell';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -39,7 +38,7 @@ const statusConfig = {
 
 export default function StrategyDeployPage() {
     return (
-        <AppShell>
+        <div>
             <div className="space-y-6">
                 <div className="flex items-center gap-4">
                     <Button variant="ghost" size="icon" asChild aria-label="Back to Strategies">
@@ -111,6 +110,6 @@ export default function StrategyDeployPage() {
                     </Button>
                 </Card>
             </div>
-        </AppShell>
+        </div>
     );
 }

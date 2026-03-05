@@ -6,6 +6,7 @@ import { ActivityFeed } from '@/components/dashboard/ActivityFeed';
 import { AssetAllocation } from '@/components/dashboard/AssetAllocation';
 import { PortfolioPerformance } from '@/components/dashboard/PortfolioPerformance';
 import { Wallet, TrendingUp, DollarSign, Activity, Calendar, Plus } from 'lucide-react';
+import Link from 'next/link';
 import { DashboardGreeting } from '@/components/dashboard/DashboardGreeting';
 import { mockTransactions } from '@/lib/mockData';
 import { marketDataEngine } from '@/lib/api/market-data';
@@ -103,10 +104,10 @@ export default async function Dashboard() {
 
         {/* Action Bar */}
         <div className="flex items-center gap-3 flex-wrap">
-          <button className="h-10 px-4 rounded-full bg-primary hover:bg-primary/90 text-primary-foreground font-bold text-sm flex items-center gap-2 transition-colors shadow-lg shadow-primary/20">
+          <Link href="/portfolios" className="h-10 px-4 rounded-full bg-primary hover:bg-primary/90 text-primary-foreground font-bold text-sm flex items-center gap-2 transition-colors shadow-lg shadow-primary/20">
             <Plus className="h-5 w-5" />
             <span>Add Asset</span>
-          </button>
+          </Link>
         </div>
       </header>
 
@@ -167,7 +168,7 @@ export default async function Dashboard() {
         <div className="flex flex-col gap-4">
           <div className="flex items-center justify-between">
             <h3 className="font-bold text-lg">Connected Accounts</h3>
-            <button className="text-primary text-sm font-medium hover:underline">Manage</button>
+            <Link href="/portfolios" className="text-primary text-sm font-medium hover:underline">Manage</Link>
           </div>
           <div className="flex flex-col gap-3">
             {portfolioData.length === 0 ? (

@@ -193,6 +193,7 @@ function ResearchContent() {
     const searchParams = useSearchParams();
     const currentTab = searchParams.get('tab') || 'theses';
     const [theses, setTheses] = useState(mockTheses);
+    const [archived, setArchived] = useState(archivedTheses);
     const [showNewThesis, setShowNewThesis] = useState(false);
 
     const handleTabChange = (value: string) => {
@@ -353,7 +354,7 @@ function ResearchContent() {
                                         <Badge variant="secondary" className="whitespace-nowrap">
                                             Added {item.dateAdded}
                                         </Badge>
-                                        <Button variant="outline" size="sm">
+                                        <Button variant="outline" size="sm" onClick={() => router.push(`/research/thesis/${item.ticker}`)}>
                                             <Eye className="h-4 w-4 mr-2" />
                                             View Details
                                         </Button>
@@ -427,7 +428,7 @@ function ResearchContent() {
                 {/* Archive */}
                 <TabsContent value="archive" className="space-y-4">
                     <div className="grid gap-4 md:grid-cols-2">
-                        {archivedTheses.map((thesis) => (
+                        {archived.map((thesis) => (
                             <Card key={thesis.id} className="p-6 transition-all hover:shadow-md opacity-75">
                                 <div className="space-y-4">
                                     {/* Header */}
@@ -477,7 +478,16 @@ function ResearchContent() {
                                         <span className="text-xs text-muted-foreground">
                                             Archived: {thesis.dateUpdated}
                                         </span>
-                                        <Button variant="link" size="sm" className="h-auto p-0">
+                                        <Button
+                                            variant="link"
+                                            size="sm"
+                                            className="h-auto p-0"
+                                            onClick={() => {
+                                                setArchived((prev) => prev.filter((t) => t.id !== thesis.id));
+                                                setTheses((prev) => [{ ...thesis, status: 'active' as const }, ...prev]);
+                                                handleTabChange('theses');
+                                            }}
+                                        >
                                             Restore
                                         </Button>
                                     </div>

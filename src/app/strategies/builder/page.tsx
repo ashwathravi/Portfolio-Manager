@@ -1,7 +1,6 @@
 "use client"
 
 import { useState } from "react";
-import { AppShell } from "@/components/layout/AppShell";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
@@ -28,7 +27,7 @@ export default function StrategyBuilderPage() {
     const prevStep = () => setCurrentStep((prev) => Math.max(prev - 1, 1));
 
     return (
-        <AppShell>
+        <div>
             <div className="max-w-3xl mx-auto">
                 <div className="mb-8">
                     <div className="flex items-center gap-4 mb-4">
@@ -211,7 +210,7 @@ export default function StrategyBuilderPage() {
                     </CardFooter>
                 </Card>
             </div>
-        </AppShell>
+        </div>
     );
 }
 
