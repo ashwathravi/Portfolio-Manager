@@ -1,6 +1,5 @@
 "use client"
 
-import { AppShell } from "@/components/layout/AppShell";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
@@ -60,7 +59,7 @@ const mockEntries: JournalEntry[] = [
 
 export default function JournalPage() {
     return (
-        <AppShell>
+        <div>
             <div className="flex items-center justify-between space-y-2 mb-8">
                 <div className="flex items-center gap-4">
                     <Button variant="ghost" size="icon" asChild aria-label="Back to Research">
@@ -137,6 +136,6 @@ export default function JournalPage() {
                     </div>
                 ))}
             </div>
-        </AppShell>
+        </div>
     );
 }

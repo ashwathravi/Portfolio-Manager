@@ -280,7 +280,7 @@ export default function PortfoliosPage() {
                                         <ArrowUpDown className="h-3 w-3" />
                                     </button>
                                 </th>
-                                <th className="text-right py-4 px-4">
+                                <th className="hidden sm:table-cell text-right py-4 px-4">
                                     <button
                                         onClick={() => handleSort('dayChange')}
                                         className="flex items-center gap-2 ml-auto text-xs text-muted-foreground font-medium hover:text-foreground transition-colors"
@@ -289,7 +289,7 @@ export default function PortfoliosPage() {
                                         <ArrowUpDown className="h-3 w-3" />
                                     </button>
                                 </th>
-                                <th className="text-right py-4 px-4">
+                                <th className="hidden sm:table-cell text-right py-4 px-4">
                                     <button
                                         onClick={() => handleSort('totalReturn')}
                                         className="flex items-center gap-2 ml-auto text-xs text-muted-foreground font-medium hover:text-foreground transition-colors"
@@ -298,7 +298,7 @@ export default function PortfoliosPage() {
                                         <ArrowUpDown className="h-3 w-3" />
                                     </button>
                                 </th>
-                                <th className="text-right py-4 px-4">
+                                <th className="hidden md:table-cell text-right py-4 px-4">
                                     <button
                                         onClick={() => handleSort('cashBalance')}
                                         className="flex items-center gap-2 ml-auto text-xs text-muted-foreground font-medium hover:text-foreground transition-colors"
@@ -307,7 +307,7 @@ export default function PortfoliosPage() {
                                         <ArrowUpDown className="h-3 w-3" />
                                     </button>
                                 </th>
-                                <th className="text-left py-4 px-4 text-xs text-muted-foreground font-medium">
+                                <th className="hidden md:table-cell text-left py-4 px-4 text-xs text-muted-foreground font-medium">
                                     LAST UPDATED
                                 </th>
                                 <th className="py-4 px-4"></th>
@@ -333,7 +333,7 @@ export default function PortfoliosPage() {
                                     <td className="py-4 px-4 text-right font-medium">
                                         ${item.value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                     </td>
-                                    <td className="py-4 px-4 text-right">
+                                    <td className="hidden sm:table-cell py-4 px-4 text-right">
                                         <div className="flex items-center justify-end gap-1">
                                             {item.dayChange >= 0 ? (
                                                 <TrendingUp className="h-3 w-3 text-primary" />
@@ -345,7 +345,7 @@ export default function PortfoliosPage() {
                                             </span>
                                         </div>
                                     </td>
-                                    <td className="py-4 px-4 text-right">
+                                    <td className="hidden sm:table-cell py-4 px-4 text-right">
                                         <div className="flex items-center justify-end gap-1">
                                             {item.totalReturn >= 0 ? (
                                                 <TrendingUp className="h-3 w-3 text-primary" />
@@ -357,10 +357,10 @@ export default function PortfoliosPage() {
                                             </span>
                                         </div>
                                     </td>
-                                    <td className="py-4 px-4 text-right">
+                                    <td className="hidden md:table-cell py-4 px-4 text-right">
                                         ${item.cashBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                     </td>
-                                    <td className="py-4 px-4 text-sm text-muted-foreground">
+                                    <td className="hidden md:table-cell py-4 px-4 text-sm text-muted-foreground">
                                         {item.lastUpdated}
                                     </td>
                                     <td className="py-4 px-4">

@@ -273,9 +273,9 @@ function TradeLogContent() {
                 {/* Filters */}
                 {showFilters && (
                     <div className="mb-4">
-                        <div className="flex items-center gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
                             <Select value={selectedAccount} onValueChange={setSelectedAccount}>
-                                <SelectTrigger className="w-40">
+                                <SelectTrigger className="w-40 min-w-[140px]">
                                     <SelectValue placeholder="Account">{selectedAccount}</SelectValue>
                                 </SelectTrigger>
                                 <SelectContent>

@@ -1,6 +1,5 @@
 "use client"
 
-import { AppShell } from "@/components/layout/AppShell";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -71,7 +70,7 @@ export default function BacktestPage() {
     const results = mockBacktest;
 
     return (
-        <AppShell>
+        <div>
             <div className="flex items-center justify-between space-y-2 mb-8">
                 <div className="flex items-center gap-4">
                     <Button variant="ghost" size="icon" asChild aria-label="Back to Strategies">
@@ -228,6 +227,6 @@ export default function BacktestPage() {
                     </CardContent>
                 </Card>
             </div>
-        </AppShell>
+        </div>
     );
 }
