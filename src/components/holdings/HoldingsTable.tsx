@@ -113,17 +113,37 @@ export function HoldingsTable({ holdings }: { holdings: Holding[] }) {
         return !!(searchParams.get('account') || searchParams.get('strategy') || searchParams.get('tag'));
     });
 
+    // Optimized: Build a reverse index of holdings by tag to allow O(1) source selection and avoid includes() in the loop.
+    // We deduplicate tags for each holding to prevent duplicate rows if the same tag is assigned twice.
+    const holdingsByTag = useMemo(() => {
+        const map = new Map<string, Holding[]>();
+        for (const holding of holdings) {
+            const uniqueTags = new Set(holding.tags);
+            for (const tag of uniqueTags) {
+                if (!map.has(tag)) {
+                    map.set(tag, []);
+                }
+                map.get(tag)!.push(holding);
+            }
+        }
+        return map;
+    }, [holdings]);
+
     // Optimized: Combine filter and reduce into a single pass loop to avoid multiple iterations (O(N) vs O(3N))
     const { filteredHoldings, totalNetValue, totalReturn } = useMemo(() => {
         const result = [];
         let netValue = 0;
         let ret = 0;
 
-        for (const holding of holdings) {
+        // Optimized: If a tag is selected, only iterate over holdings that have that tag
+        const source = selectedTag !== 'All Tags'
+            ? (holdingsByTag.get(selectedTag) || [])
+            : holdings;
+
+        for (const holding of source) {
             // Optimized: Short-circuit checks to avoid unnecessary comparisons
             if (selectedAccount !== 'All Accounts' && holding.account !== selectedAccount) continue;
             if (selectedStrategy !== 'All Strategies' && holding.strategy !== selectedStrategy) continue;
-            if (selectedTag !== 'All Tags' && !holding.tags.includes(selectedTag)) continue;
 
             result.push(holding);
             netValue += holding.totalValue;
@@ -135,7 +155,7 @@ export function HoldingsTable({ holdings }: { holdings: Holding[] }) {
             totalNetValue: netValue,
             totalReturn: ret
         };
-    }, [holdings, selectedAccount, selectedStrategy, selectedTag]);
+    }, [holdings, selectedAccount, selectedStrategy, selectedTag, holdingsByTag]);
 
     const clearFilters = () => {
         setSelectedAccount('All Accounts');
