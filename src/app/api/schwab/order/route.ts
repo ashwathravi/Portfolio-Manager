@@ -1,10 +1,17 @@
 import { NextResponse } from 'next/server';
 import { schwabClient } from '@/lib/api/schwab/client';
+import { orderSchema } from '@/lib/validators/execution';
 
 export async function POST(request: Request) {
     try {
         const body = await request.json();
-        const { order } = body;
+
+        const result = orderSchema.safeParse(body.order);
+        if (!result.success) {
+            return NextResponse.json({ error: 'Invalid order data', details: result.error.format() }, { status: 400 });
+        }
+
+        const order = result.data;
 
         // In a real application, we would retrieve the auth token from user session
         const mockAccessToken = 'mock_schwab_access_token';

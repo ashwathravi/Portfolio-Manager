@@ -1,16 +1,13 @@
 import { z } from 'zod';
 import { safeText } from './common';
+import { tickerSchema } from './market-data';
 
 export const orderSideSchema = z.enum(['buy', 'sell']);
 export const orderTypeSchema = z.enum(['market', 'limit', 'stop', 'stop_limit']);
 export const timeInForceSchema = z.enum(['day', 'gtc', 'ioc', 'fok']);
 
 export const orderSchema = z.object({
-    ticker: z.string()
-        .min(1, "Ticker is required")
-        .max(10, "Ticker symbol too long")
-        .regex(/^[A-Z0-9.]+$/, "Ticker must be uppercase alphanumeric")
-        .pipe(safeText),
+    ticker: tickerSchema,
     side: orderSideSchema,
     type: orderTypeSchema,
     quantity: z.preprocess(

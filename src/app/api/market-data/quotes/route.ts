@@ -1,15 +1,18 @@
 import { NextResponse } from 'next/server';
 import { marketDataEngine } from '@/lib/api/market-data';
+import { symbolsSchema } from '@/lib/validators/market-data';
 
 export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const symbolsParam = searchParams.get('symbols');
 
-    if (!symbolsParam) {
-        return NextResponse.json({ error: 'Missing symbols parameter' }, { status: 400 });
+    const result = symbolsSchema.safeParse(symbolsParam);
+
+    if (!result.success) {
+        return NextResponse.json({ error: 'Invalid symbols parameter', details: result.error.format() }, { status: 400 });
     }
 
-    const symbols = symbolsParam.split(',').map(s => s.trim().toUpperCase());
+    const symbols = result.data;
 
     try {
         const quotes = await marketDataEngine.getQuotes(symbols);
