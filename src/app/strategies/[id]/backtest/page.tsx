@@ -7,7 +7,7 @@ import { ArrowLeft, Download, RefreshCw } from "lucide-react";
 import Link from "next/link";
 import { BacktestResult } from "@/types/strategy";
 import { exportToCsv } from '@/lib/exportCsv';
-import { ResponsiveContainer, XAxis, YAxis, CartesianGrid, Tooltip, AreaChart, Area, TooltipProps } from 'recharts';
+import { ResponsiveContainer, XAxis, YAxis, CartesianGrid, Tooltip, AreaChart, Area } from 'recharts';
 
 // Mock Data
 const mockBacktest: BacktestResult = {
