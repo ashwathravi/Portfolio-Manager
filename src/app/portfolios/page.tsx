@@ -6,6 +6,14 @@ import { Button } from '@/components/ui/button';
 import { TrendingUp, TrendingDown, Plus, ArrowUpDown, MoreHorizontal, Search } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { useRouter } from 'next/navigation';
+import {
+    Dialog,
+    DialogContent,
+    DialogHeader,
+    DialogTitle,
+    DialogFooter,
+} from '@/components/ui/dialog';
+import { Label } from '@/components/ui/label';
 
 type SortField = 'name' | 'value' | 'dayChange' | 'totalReturn' | 'cashBalance' | 'lastUpdated';
 type SortOrder = 'asc' | 'desc';
@@ -16,9 +24,31 @@ export default function PortfoliosPage() {
     const [sortField, setSortField] = useState<SortField>('value');
     const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
     const [searchQuery, setSearchQuery] = useState('');
+    const [showNewPortfolioModal, setShowNewPortfolioModal] = useState(false);
+    const [newPortfolioName, setNewPortfolioName] = useState('');
+    const [newPortfolioDesc, setNewPortfolioDesc] = useState('');
+
+    const handleCreatePortfolio = () => {
+        if (!newPortfolioName.trim()) return;
+        const newEntry = {
+            id: String(Date.now()),
+            name: newPortfolioName.trim(),
+            value: 0,
+            dayChange: 0,
+            dayChangeValue: 0,
+            totalReturn: 0,
+            totalReturnValue: 0,
+            cashBalance: 0,
+            lastUpdated: new Date().toLocaleDateString('en-US'),
+        };
+        setAccountsData((prev) => [...prev, newEntry]);
+        setNewPortfolioName('');
+        setNewPortfolioDesc('');
+        setShowNewPortfolioModal(false);
+    };
 
     // Mock data for different views
-    const accountsData = [
+    const [accountsData, setAccountsData] = useState([
         {
             id: '1',
             name: 'Main Investment Account',
@@ -52,7 +82,7 @@ export default function PortfoliosPage() {
             cashBalance: 15000.00,
             lastUpdated: '2/7/2026',
         },
-    ];
+    ]);
 
     const strategiesData = [
         {
@@ -192,7 +222,7 @@ export default function PortfoliosPage() {
                         Manage your investment portfolios and track performance.
                     </p>
                 </div>
-                <Button className="bg-primary hover:bg-primary/90">
+                <Button className="bg-primary hover:bg-primary/90" onClick={() => setShowNewPortfolioModal(true)} aria-haspopup="dialog">
                     <Plus className="h-4 w-4 mr-2" />
                     New Portfolio
                 </Button>
@@ -265,6 +295,7 @@ export default function PortfoliosPage() {
                                 <th className="text-left py-4 px-4">
                                     <button
                                         onClick={() => handleSort('name')}
+                                        aria-sort={sortField === 'name' ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none'}
                                         className="flex items-center gap-2 text-xs text-muted-foreground font-medium hover:text-foreground transition-colors"
                                     >
                                         NAME
@@ -274,6 +305,7 @@ export default function PortfoliosPage() {
                                 <th className="text-right py-4 px-4">
                                     <button
                                         onClick={() => handleSort('value')}
+                                        aria-sort={sortField === 'value' ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none'}
                                         className="flex items-center gap-2 ml-auto text-xs text-muted-foreground font-medium hover:text-foreground transition-colors"
                                     >
                                         VALUE
@@ -283,6 +315,7 @@ export default function PortfoliosPage() {
                                 <th className="hidden sm:table-cell text-right py-4 px-4">
                                     <button
                                         onClick={() => handleSort('dayChange')}
+                                        aria-sort={sortField === 'dayChange' ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none'}
                                         className="flex items-center gap-2 ml-auto text-xs text-muted-foreground font-medium hover:text-foreground transition-colors"
                                     >
                                         DAY CHANGE
@@ -292,6 +325,7 @@ export default function PortfoliosPage() {
                                 <th className="hidden sm:table-cell text-right py-4 px-4">
                                     <button
                                         onClick={() => handleSort('totalReturn')}
+                                        aria-sort={sortField === 'totalReturn' ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none'}
                                         className="flex items-center gap-2 ml-auto text-xs text-muted-foreground font-medium hover:text-foreground transition-colors"
                                     >
                                         TOTAL RETURN
@@ -301,6 +335,7 @@ export default function PortfoliosPage() {
                                 <th className="hidden md:table-cell text-right py-4 px-4">
                                     <button
                                         onClick={() => handleSort('cashBalance')}
+                                        aria-sort={sortField === 'cashBalance' ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none'}
                                         className="flex items-center gap-2 ml-auto text-xs text-muted-foreground font-medium hover:text-foreground transition-colors"
                                     >
                                         CASH BALANCE
@@ -395,6 +430,39 @@ export default function PortfoliosPage() {
                     </div>
                 </div>
             </Card>
+            {/* New Portfolio Modal */}
+            <Dialog open={showNewPortfolioModal} onOpenChange={setShowNewPortfolioModal}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>New Portfolio</DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-4 py-2">
+                        <div className="space-y-1">
+                            <Label htmlFor="portfolio-name">Name</Label>
+                            <Input
+                                id="portfolio-name"
+                                placeholder="e.g. Retirement IRA"
+                                value={newPortfolioName}
+                                onChange={(e) => setNewPortfolioName(e.target.value)}
+                                onKeyDown={(e) => e.key === 'Enter' && handleCreatePortfolio()}
+                            />
+                        </div>
+                        <div className="space-y-1">
+                            <Label htmlFor="portfolio-desc">Description <span className="text-muted-foreground font-normal">(optional)</span></Label>
+                            <Input
+                                id="portfolio-desc"
+                                placeholder="Brief description..."
+                                value={newPortfolioDesc}
+                                onChange={(e) => setNewPortfolioDesc(e.target.value)}
+                            />
+                        </div>
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setShowNewPortfolioModal(false)}>Cancel</Button>
+                        <Button onClick={handleCreatePortfolio} disabled={!newPortfolioName.trim()}>Create</Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </div>
     );
 }
