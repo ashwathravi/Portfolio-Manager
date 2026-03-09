@@ -1,7 +1,9 @@
 'use client';
 
+import { useState, useEffect } from 'react';
 import { Search, Bell } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { toast } from 'sonner';
 
 
 interface TopBarProps {
@@ -9,6 +11,12 @@ interface TopBarProps {
 }
 
 export function TopBar({ onSearchClick }: TopBarProps) {
+    const [isMac, setIsMac] = useState(false);
+
+    useEffect(() => {
+        setIsMac(/Mac|iPhone|iPad|iPod/.test(navigator.platform));
+    }, []);
+
     return (
         <div className="sticky top-0 z-30 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
             <div className="flex h-16 items-center justify-between px-6">
@@ -22,7 +30,7 @@ export function TopBar({ onSearchClick }: TopBarProps) {
                         <span className="hidden sm:inline">Search or jump to...</span>
                         <span className="sm:hidden">Search...</span>
                         <kbd className="pointer-events-none ml-auto hidden h-5 select-none items-center gap-1 rounded border border-border bg-muted px-1.5 font-mono text-[10px] font-medium opacity-100 sm:flex">
-                            <span className="text-xs">⌘</span>K
+                            {isMac ? <><span className="text-xs">⌘</span>K</> : 'Ctrl+K'}
                         </kbd>
                     </Button>
                 </div>
@@ -32,6 +40,7 @@ export function TopBar({ onSearchClick }: TopBarProps) {
                         variant="ghost"
                         size="icon"
                         className="relative hover:bg-accent"
+                        onClick={() => toast('No new notifications')}
                     >
                         <span className="sr-only">Notifications</span>
                         <Bell className="h-5 w-5" aria-hidden="true" />

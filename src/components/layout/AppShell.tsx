@@ -2,7 +2,6 @@
 
 import { AppSidebar } from "./AppSidebar";
 import { TopBar } from "./TopBar";
-import { cn } from "@/lib/utils";
 
 interface AppShellProps {
     children: React.ReactNode;
