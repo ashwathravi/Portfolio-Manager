@@ -13,9 +13,12 @@ export async function POST(request: Request) {
 
         const order = result.data;
 
-        // In a real application, we would retrieve the auth token from user session
-        const mockAccessToken = 'mock_schwab_access_token';
-        const mockAccountId = 'mock_schwab_account_id';
+        const accessToken = process.env.SCHWAB_ACCESS_TOKEN;
+        const accountId = process.env.SCHWAB_ACCOUNT_ID;
+
+        if (!accessToken || !accountId) {
+            return NextResponse.json({ error: 'Schwab credentials not configured' }, { status: 401 });
+        }
 
         // We map our simplified app Order to Schwab's Order format
         const schwabOrderPayload: any = {
@@ -39,13 +42,7 @@ export async function POST(request: Request) {
             schwabOrderPayload.price = order.limitPrice;
         }
 
-        // Attempt to place order. If failing (because mock token is invalid), we catch it.
-        try {
-            await schwabClient.placeOrder(mockAccessToken, mockAccountId, schwabOrderPayload);
-        } catch (e) {
-            console.warn('Handling Schwab placeOrder error via graceful fallback for demo.', e);
-            // We simulate a success here since we don't have real credentials yet
-        }
+        await schwabClient.placeOrder(accessToken, accountId, schwabOrderPayload);
 
         return NextResponse.json({ success: true, message: 'Order submitted to broker' });
     } catch (error) {
