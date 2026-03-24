@@ -1,4 +1,4 @@
-import { MarketDataProvider, MarketQuote, HistoricalBar } from './index';
+import { type MarketDataProvider, type MarketQuote, type HistoricalBar } from './index';
 
 export class AlphaVantageProvider implements MarketDataProvider {
     name = 'AlphaVantage';

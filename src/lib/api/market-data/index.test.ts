@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test';
 import * as assert from 'node:assert';
-import { MarketDataEngine, MarketDataProvider, MarketQuote, HistoricalBar } from './index';
+import { MarketDataEngine } from './index';
+import type { MarketDataProvider, MarketQuote, HistoricalBar } from './index';
 
 // Helper to create a mock provider
 const createMockProvider = (name: string, price: number, shouldFail = false): MarketDataProvider => ({
