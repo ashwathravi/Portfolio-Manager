@@ -1,9 +1,12 @@
 'use client';
 
+import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { StatCard } from '@/components/data-display/StatCard';
 import { MetricCard } from '@/components/data-display/MetricCard';
 import { Card } from '@/components/ui/card';
 import { TrendingUp, Activity, AlertTriangle, Award, Calendar, ChevronDown, Settings, Plus, ChevronLeft, ChevronRight, Share2 } from 'lucide-react';
+import { toast } from 'sonner';
 import {
     mockPerformanceMetrics,
 } from '@/lib/mockData';
@@ -30,6 +33,13 @@ import {
 } from 'recharts';
 
 export default function PerformancePage() {
+    const router = useRouter();
+    const [calendarMonth, setCalendarMonth] = useState(() => new Date(2026, 1, 1)); // Feb 2026
+
+    const prevMonth = () => setCalendarMonth((d) => new Date(d.getFullYear(), d.getMonth() - 1, 1));
+    const nextMonth = () => setCalendarMonth((d) => new Date(d.getFullYear(), d.getMonth() + 1, 1));
+    const calendarLabel = calendarMonth.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+
     return (
         <div className="space-y-6 p-6">
             {/* Header */}
@@ -394,10 +404,16 @@ export default function PerformancePage() {
                     <div className="flex items-center justify-between mb-6">
                         <h3 className="font-bold text-lg">Trade Calendar</h3>
                         <div className="flex items-center gap-2">
-                            <button className="p-2 hover:bg-accent rounded-lg transition-colors">
+                            <button
+                                className="p-2 hover:bg-accent rounded-lg transition-colors"
+                                onClick={() => toast('Calendar settings coming soon')}
+                            >
                                 <Settings className="h-4 w-4" />
                             </button>
-                            <button className="flex items-center gap-2 px-4 py-2 bg-foreground text-background rounded-lg hover:bg-foreground/90 transition-colors">
+                            <button
+                                className="flex items-center gap-2 px-4 py-2 bg-foreground text-background rounded-lg hover:bg-foreground/90 transition-colors"
+                                onClick={() => router.push('/portfolios/trade-log')}
+                            >
                                 <Plus className="h-4 w-4" />
                                 <span className="text-sm font-medium">Add Trade</span>
                             </button>
@@ -407,15 +423,18 @@ export default function PerformancePage() {
                     {/* Month Navigation */}
                     <div className="flex items-center justify-between mb-6">
                         <div className="flex items-center gap-3">
-                            <button className="p-1 hover:bg-accent rounded transition-colors">
+                            <button className="p-1 hover:bg-accent rounded transition-colors" onClick={prevMonth}>
                                 <ChevronLeft className="h-5 w-5" />
                             </button>
-                            <h4 className="font-bold">February 2026</h4>
-                            <button className="p-1 hover:bg-accent rounded transition-colors">
+                            <h4 className="font-bold">{calendarLabel}</h4>
+                            <button className="p-1 hover:bg-accent rounded transition-colors" onClick={nextMonth}>
                                 <ChevronRight className="h-5 w-5" />
                             </button>
                         </div>
-                        <button className="flex items-center gap-2 px-4 py-2 bg-[#fbbf24] text-background rounded-lg hover:bg-[#fbbf24]/90 transition-colors">
+                        <button
+                            className="flex items-center gap-2 px-4 py-2 bg-[#fbbf24] text-background rounded-lg hover:bg-[#fbbf24]/90 transition-colors"
+                            onClick={() => toast('Share link copied to clipboard')}
+                        >
                             <Share2 className="h-4 w-4" />
                             <span className="text-sm font-medium">Share Calendar</span>
                         </button>

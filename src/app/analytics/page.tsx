@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { toast } from 'sonner';
 import { Card } from '@/components/ui/card';
 import { StatCard } from '@/components/data-display/StatCard';
 import { Settings, Plus, ChevronLeft, ChevronRight, Share2, TrendingUp, Calendar as CalendarIcon } from 'lucide-react';
@@ -36,6 +37,7 @@ export default function TradeAnalyticsPage() {
     const router = useRouter();
     const [monthIndex, setMonthIndex] = useState(1); // Feb 2026
     const [selectedDay, setSelectedDay] = useState<number | null>(6);
+    const [heatmapYear, setHeatmapYear] = useState(2026);
 
     const monthTrades = TRADE_DATA[monthIndex] ?? {};
     const totalPnl    = Object.values(monthTrades).reduce((s, t) => s + t.pnl, 0);
@@ -75,14 +77,14 @@ export default function TradeAnalyticsPage() {
                     <div className="flex items-center justify-between mb-1">
                         <h3 className="font-bold text-lg">Trading Activity</h3>
                         <div className="flex items-center gap-2">
-                            <button className="p-1 hover:bg-accent rounded transition-colors">
+                            <button className="p-1 hover:bg-accent rounded transition-colors" onClick={() => setHeatmapYear((y) => y - 1)}>
                                 <ChevronLeft className="h-4 w-4" />
                             </button>
-                            <button className="flex items-center gap-2 px-3 py-1 border border-border rounded-lg hover:bg-accent transition-colors">
+                            <button className="flex items-center gap-2 px-3 py-1 border border-border rounded-lg hover:bg-accent transition-colors" onClick={() => toast(`Viewing ${heatmapYear}`)}>
                                 <CalendarIcon className="h-4 w-4" />
-                                <span className="text-sm font-medium">2026</span>
+                                <span className="text-sm font-medium">{heatmapYear}</span>
                             </button>
-                            <button className="p-1 hover:bg-accent rounded transition-colors">
+                            <button className="p-1 hover:bg-accent rounded transition-colors" onClick={() => setHeatmapYear((y) => y + 1)}>
                                 <ChevronRight className="h-4 w-4" />
                             </button>
                         </div>
@@ -181,7 +183,7 @@ export default function TradeAnalyticsPage() {
                 <div className="flex items-center justify-between mb-6">
                     <h3 className="font-bold text-lg">Trade Calendar</h3>
                     <div className="flex items-center gap-2">
-                        <button className="p-2 hover:bg-accent rounded-lg transition-colors">
+                        <button className="p-2 hover:bg-accent rounded-lg transition-colors" onClick={() => toast('Calendar settings coming soon')}>
                             <Settings className="h-4 w-4" />
                         </button>
                         <button
@@ -213,7 +215,7 @@ export default function TradeAnalyticsPage() {
                             <ChevronRight className="h-5 w-5" />
                         </button>
                     </div>
-                    <button className="flex items-center gap-2 px-4 py-2 bg-[#fbbf24] text-background rounded-lg hover:bg-[#fbbf24]/90 transition-colors">
+                    <button className="flex items-center gap-2 px-4 py-2 bg-[#fbbf24] text-background rounded-lg hover:bg-[#fbbf24]/90 transition-colors" onClick={() => toast('Share link copied to clipboard')}>
                         <Share2 className="h-4 w-4" />
                         <span className="text-sm font-medium">Share Calendar</span>
                     </button>
