@@ -35,6 +35,46 @@ describe('AlphaVantageProvider', () => {
         }
     });
 
+    it('should throw error on non-ok fetch response for getQuotes', async () => {
+        const originalFetch = global.fetch;
+        global.fetch = async () => {
+            return {
+                ok: false,
+                statusText: 'Forbidden'
+            } as any;
+        };
+
+        try {
+            const provider = new AlphaVantageProvider('demo');
+            await assert.rejects(
+                async () => await provider.getQuotes(['AAPL']),
+                /Alpha Vantage API error: Forbidden/
+            );
+        } finally {
+            global.fetch = originalFetch;
+        }
+    });
+
+    it('should throw error on non-ok fetch response for getHistoricalData', async () => {
+        const originalFetch = global.fetch;
+        global.fetch = async () => {
+            return {
+                ok: false,
+                statusText: 'Service Unavailable'
+            } as any;
+        };
+
+        try {
+            const provider = new AlphaVantageProvider('demo');
+            await assert.rejects(
+                async () => await provider.getHistoricalData('AAPL', '1D'),
+                /Alpha Vantage API error: Service Unavailable/
+            );
+        } finally {
+            global.fetch = originalFetch;
+        }
+    });
+
     it('should throw error on rate limit (Information field)', async () => {
         const originalFetch = global.fetch;
         global.fetch = async () => {
