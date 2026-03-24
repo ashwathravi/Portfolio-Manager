@@ -115,15 +115,23 @@ export function HoldingsTable({ holdings }: { holdings: Holding[] }) {
 
     // Optimized: Build a reverse index of holdings by tag to allow O(1) source selection and avoid includes() in the loop.
     // We deduplicate tags for each holding to prevent duplicate rows if the same tag is assigned twice.
+    // Optimization: Avoid creating a new Set for every holding to reduce garbage collection pressure.
     const holdingsByTag = useMemo(() => {
         const map = new Map<string, Holding[]>();
-        for (const holding of holdings) {
-            const uniqueTags = new Set(holding.tags);
-            for (const tag of uniqueTags) {
-                if (!map.has(tag)) {
-                    map.set(tag, []);
+        for (let i = 0; i < holdings.length; i++) {
+            const holding = holdings[i];
+            const tags = holding.tags;
+            for (let j = 0; j < tags.length; j++) {
+                const tag = tags[j];
+                // Deduplicate: only handle first occurrence of tag in the tags array for this holding
+                if (tags.indexOf(tag) !== j) continue;
+
+                let list = map.get(tag);
+                if (list === undefined) {
+                    list = [];
+                    map.set(tag, list);
                 }
-                map.get(tag)!.push(holding);
+                list.push(holding);
             }
         }
         return map;
