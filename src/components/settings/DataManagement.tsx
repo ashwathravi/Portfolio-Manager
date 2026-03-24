@@ -26,7 +26,6 @@ export function DataManagement() {
 
     const handleExport = async () => {
         setIsExporting(true);
-        await new Promise((resolve) => setTimeout(resolve, 1000));
 
         const exportData = {
             exportedAt: new Date().toISOString(),
