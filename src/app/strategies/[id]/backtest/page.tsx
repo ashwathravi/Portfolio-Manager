@@ -7,7 +7,7 @@ import { ArrowLeft, Download, RefreshCw } from "lucide-react";
 import Link from "next/link";
 import { BacktestResult } from "@/types/strategy";
 import { exportToCsv } from '@/lib/exportCsv';
-import { ResponsiveContainer, XAxis, YAxis, CartesianGrid, Tooltip, AreaChart, Area } from 'recharts';
+import { ResponsiveContainer, XAxis, YAxis, CartesianGrid, Tooltip, AreaChart, Area, TooltipProps } from 'recharts';
 
 // Mock Data
 const mockBacktest: BacktestResult = {
@@ -49,8 +49,7 @@ const mockBacktest: BacktestResult = {
     runDate: new Date()
 };
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const CustomTooltip = ({ active, payload, label }: any) => {
+const CustomTooltip = ({ active, payload, label }: TooltipProps<number, string>) => {
     if (active && payload && payload.length) {
         const date = label ? new Date(label) : null;
         return (
