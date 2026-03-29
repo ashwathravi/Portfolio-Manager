@@ -40,12 +40,28 @@ export default function TradeAnalyticsPage() {
     const [heatmapYear, setHeatmapYear] = useState(2026);
 
     const monthTrades = TRADE_DATA[monthIndex] ?? {};
-    const totalPnl    = Object.values(monthTrades).reduce((s, t) => s + t.pnl, 0);
-    const totalTrades = Object.values(monthTrades).reduce((s, t) => s + t.trades, 0);
-    const tradingDays = Object.keys(monthTrades).length;
-    const winners     = Object.values(monthTrades).filter((t) => t.pnl > 0).length;
-    const winRate     = tradingDays > 0 ? ((winners / tradingDays) * 100).toFixed(1) : '0.0';
-    const bestDay     = Object.entries(monthTrades).sort((a, b) => b[1].pnl - a[1].pnl)[0];
+
+    // Performance optimization: Single pass over entries instead of multiple Object.values/keys/entries
+    const monthEntries = Object.entries(monthTrades);
+    const tradingDays  = monthEntries.length;
+    let totalPnl       = 0;
+    let totalTrades    = 0;
+    let winners        = 0;
+    let bestDayEntry: [string, { pnl: number; trades: number }] | null = null;
+
+    for (let i = 0; i < tradingDays; i++) {
+        const entry = monthEntries[i];
+        const t = entry[1];
+        totalPnl += t.pnl;
+        totalTrades += t.trades;
+        if (t.pnl > 0) winners++;
+        if (!bestDayEntry || t.pnl > bestDayEntry[1].pnl) {
+            bestDayEntry = entry as [string, { pnl: number; trades: number }];
+        }
+    }
+
+    const winRate    = tradingDays > 0 ? ((winners / tradingDays) * 100).toFixed(1) : '0.0';
+    const bestDay    = bestDayEntry;
     const bestDayPnl  = bestDay ? bestDay[1].pnl : 0;
     const bestDayNum  = bestDay ? Number(bestDay[0]) : null;
     const selectedTrade = selectedDay !== null ? monthTrades[selectedDay] ?? null : null;
