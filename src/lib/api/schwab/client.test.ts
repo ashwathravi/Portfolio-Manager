@@ -73,6 +73,98 @@ describe('SchwabClient', () => {
         }
     });
 
+    it('should fetch quotes successfully', async () => {
+        const originalFetch = global.fetch;
+        global.fetch = async (url, options) => {
+            assert.strictEqual(url, 'https://api.schwabapi.com/marketdata/v1/quotes?symbols=AAPL,MSFT');
+            assert.strictEqual((options?.headers as any)?.['Authorization'], 'Bearer mock-token');
+
+            return {
+                ok: true,
+                json: async () => ({
+                    AAPL: { symbol: 'AAPL', lastPrice: 150.00 },
+                    MSFT: { symbol: 'MSFT', lastPrice: 250.00 }
+                })
+            } as any;
+        };
+
+        try {
+            const client = new SchwabClient();
+            const quotes = await client.getQuotes('mock-token', ['AAPL', 'MSFT']);
+            assert.strictEqual(quotes.AAPL.lastPrice, 150.00);
+            assert.strictEqual(quotes.MSFT.lastPrice, 250.00);
+        } finally {
+            global.fetch = originalFetch;
+        }
+    });
+
+    it('should throw an error on quote fetch failure', async () => {
+        const originalFetch = global.fetch;
+        global.fetch = async () => {
+            return {
+                ok: false,
+                statusText: 'Internal Server Error'
+            } as any;
+        };
+
+        try {
+            const client = new SchwabClient();
+            await assert.rejects(
+                async () => await client.getQuotes('mock-token', ['AAPL']),
+                /Failed to fetch quotes: Internal Server Error/
+            );
+        } finally {
+            global.fetch = originalFetch;
+        }
+    });
+
+    it('should place an order successfully', async () => {
+        const originalFetch = global.fetch;
+        const mockPayload = { orderType: 'MARKET', session: 'NORMAL' };
+
+        global.fetch = async (url, options) => {
+            assert.strictEqual(url, 'https://api.schwabapi.com/trader/v1/accounts/acc-123/orders');
+            assert.strictEqual(options?.method, 'POST');
+            assert.strictEqual((options?.headers as any)?.['Authorization'], 'Bearer mock-token');
+            assert.strictEqual((options?.headers as any)?.['Content-Type'], 'application/json');
+            assert.strictEqual(options?.body, JSON.stringify(mockPayload));
+
+            return {
+                ok: true,
+                status: 201
+            } as any;
+        };
+
+        try {
+            const client = new SchwabClient();
+            const result = await client.placeOrder('mock-token', 'acc-123', mockPayload);
+            assert.deepStrictEqual(result, { success: true });
+        } finally {
+            global.fetch = originalFetch;
+        }
+    });
+
+    it('should throw an error on order placement failure', async () => {
+        const originalFetch = global.fetch;
+        global.fetch = async () => {
+            return {
+                ok: false,
+                statusText: 'Bad Request',
+                text: async () => 'invalid payload'
+            } as any;
+        };
+
+        try {
+            const client = new SchwabClient();
+            await assert.rejects(
+                async () => await client.placeOrder('mock-token', 'acc-123', {}),
+                /Failed to place order: Bad Request - invalid payload/
+            );
+        } finally {
+            global.fetch = originalFetch;
+        }
+    });
+
     it('should fetch accounts successfully', async () => {
         const originalFetch = global.fetch;
         global.fetch = async (url, options) => {
