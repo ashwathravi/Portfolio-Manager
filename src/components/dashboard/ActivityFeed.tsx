@@ -31,12 +31,17 @@ const currencyFormatter = new Intl.NumberFormat('en-US', {
     maximumFractionDigits: 2,
 });
 
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+// Optimized: Moved formatters outside to avoid re-creation on every render.
+const transactionDateFormatter = new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    day: 'numeric',
+    timeZone: 'UTC',
+});
 
 // Optimized: Cache for formatted dates to avoid redundant parsing.
 const dateCache = new Map<string, string>();
 
-// Optimized: Manual date parsing avoids `new Date()` allocation and potential timezone hydration mismatches.
+// Optimized: Uses Intl.DateTimeFormat for efficient and consistent date formatting.
 // Format: "YYYY-MM-DD" -> "MMM D" (e.g., "Feb 5")
 function formatTransactionDate(dateStr: string) {
     if (!dateStr) return '';
@@ -45,22 +50,13 @@ function formatTransactionDate(dateStr: string) {
     if (cached) return cached;
 
     let result: string;
-    // Expected format: "YYYY-MM-DD" (10 chars)
-    if (dateStr.length >= 10) {
-        // Parse directly to avoid timezone issues with new Date()
-        // Month is 0-indexed for array access, but date string is 1-based (01-12)
-        const monthIndex = parseInt(dateStr.substring(5, 7), 10) - 1;
-        const day = parseInt(dateStr.substring(8, 10), 10);
+    const date = new Date(dateStr);
 
-        if (monthIndex >= 0 && monthIndex < 12 && !isNaN(day)) {
-            result = `${MONTHS[monthIndex]} ${day}`;
-        } else {
-            // Fallback
-            result = new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-        }
+    if (isNaN(date.getTime())) {
+        // Fallback to original string if date is invalid
+        result = dateStr;
     } else {
-        // Fallback
-        result = new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        result = transactionDateFormatter.format(date);
     }
 
     dateCache.set(dateStr, result);
