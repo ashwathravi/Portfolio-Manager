@@ -15,7 +15,7 @@ export class AlphaVantageProvider implements MarketDataProvider {
         // Alpha Vantage free tier is heavily rate limited (e.g. 25 requests/day).
         // We fetch them sequentially or in batches if premium.
         for (const symbol of symbols) {
-            const url = `${this.baseUrl}?function=GLOBAL_QUOTE&symbol=${symbol}&apikey=${this.apiKey}`;
+            const url = `${this.baseUrl}?function=GLOBAL_QUOTE&symbol=${encodeURIComponent(symbol)}&apikey=${this.apiKey}`;
             const response = await fetch(url);
 
             if (!response.ok) {
@@ -59,7 +59,7 @@ export class AlphaVantageProvider implements MarketDataProvider {
         }
 
         // For simplicity, sticking to daily data in this skeleton
-        const url = `${this.baseUrl}?function=${functionName}&symbol=${symbol}&apikey=${this.apiKey}`;
+        const url = `${this.baseUrl}?function=${functionName}&symbol=${encodeURIComponent(symbol)}&apikey=${this.apiKey}`;
         const response = await fetch(url);
 
         if (!response.ok) {
