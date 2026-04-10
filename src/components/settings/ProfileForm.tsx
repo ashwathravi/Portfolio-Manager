@@ -31,9 +31,7 @@ export function ProfileForm() {
         reset(profile);
     }, [profile, reset]);
 
-    const onSubmit = async (data: ProfileFormValues) => {
-        // Simulate API call
-        await new Promise((resolve) => setTimeout(resolve, 800));
+    const onSubmit = (data: ProfileFormValues) => {
         updateProfile(data);
         toast.success("Profile updated successfully");
     };
