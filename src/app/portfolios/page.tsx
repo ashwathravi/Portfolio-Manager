@@ -209,8 +209,14 @@ export default function PortfoliosPage() {
         }
     };
 
-    const totalValue = sortedData.reduce((sum, item) => sum + item.value, 0);
-    const totalCash = sortedData.reduce((sum, item) => sum + item.cashBalance, 0);
+    const { totalValue, totalCash } = sortedData.reduce(
+        (acc, item) => {
+            acc.totalValue += item.value;
+            acc.totalCash += item.cashBalance;
+            return acc;
+        },
+        { totalValue: 0, totalCash: 0 }
+    );
 
     return (
         <div className="space-y-6 p-6">
