@@ -1,0 +1,22 @@
+# Architecture
+
+- Next.js App Router application with a shared shell in `src/app/layout.tsx`: fixed sidebar, top bar, theme provider, and global toaster.
+- Mixed rendering model:
+  - Server-rendered pages read from Postgres through Drizzle (`src/app/page.tsx`, `src/app/portfolios/holdings/page.tsx`).
+  - Many other feature pages are client components backed by in-file mock arrays and local React state.
+- Persistence layer is small and relational:
+  - `portfolios`
+  - `holdings`
+  - `transactions`
+  - Relations are portfolio -> holdings and portfolio -> transactions.
+- Database access is centralized in `src/db/index.ts` using `postgres` + `drizzle-orm`. If `DATABASE_URL` is missing, the app does not fail build, but database-backed features degrade at runtime.
+- Market data is routed through `MarketDataEngine`:
+  - optional primary provider
+  - Alpha Vantage secondary/fallback provider
+  - current singleton is instantiated without a primary provider, so runtime uses Alpha Vantage directly.
+- Schwab integration is server-side:
+  - OAuth callback route exchanges auth code for tokens
+  - order route validates an app-level order payload and maps it to Schwab's order format
+  - tokens are not persisted yet.
+- Client-only durable state is limited to the settings store in Zustand with `persist`; only appearance, notifications, and tags are written to local storage.
+- Initial database content is loaded from mock data via `scripts/seed.ts`.
