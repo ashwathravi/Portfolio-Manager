@@ -13,6 +13,8 @@ import { toast } from "sonner";
 export function SecuritySettings() {
     const twoFactorEnabled = useSettingsStore((s) => s.security.twoFactorEnabled);
     const toggleTwoFactor = useSettingsStore((s) => s.toggleTwoFactor);
+    const apiKey = useSettingsStore((s) => s.security.apiKey);
+    const setApiKey = useSettingsStore((s) => s.setApiKey);
 
     const {
         register,
@@ -111,6 +113,28 @@ export function SecuritySettings() {
                     >
                         {twoFactorEnabled ? "Disable 2FA" : "Enable 2FA"}
                     </Button>
+                </div>
+
+                <hr className="border-border" />
+
+                {/* API Key for Execution */}
+                <div>
+                    <h3 className="font-medium mb-2">Internal API Key</h3>
+                    <p className="text-sm text-muted-foreground mb-4">
+                        Required for placing orders during this session. This key is not persisted.
+                    </p>
+                    <div className="flex gap-4">
+                        <Input
+                            type="password"
+                            placeholder="Enter API Key"
+                            value={apiKey}
+                            onChange={(e) => setApiKey(e.target.value)}
+                            className="max-w-md"
+                        />
+                        <Button variant="outline" onClick={() => toast.success("API Key updated for this session")}>
+                            Update Key
+                        </Button>
+                    </div>
                 </div>
 
                 <hr className="border-border" />

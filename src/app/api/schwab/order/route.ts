@@ -4,6 +4,14 @@ import { orderSchema } from '@/lib/validators/execution';
 
 export async function POST(request: Request) {
     try {
+        // Security check: simple token-based authentication for the internal API
+        const apiKey = request.headers.get('X-API-Key');
+        const internalSecret = process.env.INTERNAL_API_SECRET;
+
+        if (!internalSecret || apiKey !== internalSecret) {
+            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+        }
+
         const body = await request.json();
 
         const result = orderSchema.safeParse(body.order);
@@ -24,7 +32,7 @@ export async function POST(request: Request) {
         const schwabOrderPayload: any = {
             orderType: order.type === 'market' ? 'MARKET' : 'LIMIT',
             session: 'NORMAL',
-            duration: order.timeInForce === 'gtc' ? 'GOOD_TILL_CANCEL' : 'DAY',
+            duration: order.type === 'market' ? 'DAY' : (order.timeInForce === 'gtc' ? 'GOOD_TILL_CANCEL' : 'DAY'),
             orderStrategyType: 'SINGLE',
             orderLegCollection: [
                 {

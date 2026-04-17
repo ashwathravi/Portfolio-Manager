@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Order, OrderSide, OrderType, TimeInForce } from "@/types/execution"
+import { useSettingsStore } from "@/lib/stores/settingsStore"
 
 interface OrderEntryFormProps {
     onOrderPlaced: (order: Order) => void
@@ -22,6 +23,7 @@ export function OrderEntryForm({ onOrderPlaced }: OrderEntryFormProps) {
     const [price, setPrice] = useState("")
     const [tif, setTif] = useState<TimeInForce>("day")
     const [isSubmitting, setIsSubmitting] = useState(false)
+    const apiKey = useSettingsStore((s) => s.security.apiKey)
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
@@ -45,7 +47,10 @@ export function OrderEntryForm({ onOrderPlaced }: OrderEntryFormProps) {
         try {
             const res = await fetch('/api/schwab/order', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-API-Key': apiKey || ''
+                },
                 body: JSON.stringify({ order: newOrder })
             });
 
