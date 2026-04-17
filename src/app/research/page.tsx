@@ -16,12 +16,16 @@ import {
     Pencil,
     Trash2,
     ArchiveRestore,
+    Link2,
 } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
 import { NewThesisModal } from '@/components/research/NewThesisModal';
+import { NewJournalEntryModal } from '@/components/research/NewJournalEntryModal';
 import { useThesisStore } from '@/lib/research/useThesisStore';
+import { useJournalStore } from '@/lib/research/useJournalStore';
 import type { Thesis } from '@/lib/research/thesis';
+import type { JournalEntry } from '@/lib/research/journal';
 
 interface WatchlistItem {
     id: string;
@@ -34,15 +38,6 @@ interface WatchlistItem {
     notes: string;
 }
 
-interface JournalEntry {
-    id: string;
-    date: string;
-    type: 'entry' | 'exit' | 'hold';
-    ticker: string;
-    decision: string;
-    rationale: string;
-    outcome?: 'win' | 'loss' | 'pending';
-}
 
 const mockWatchlist: WatchlistItem[] = [
     {
@@ -77,46 +72,6 @@ const mockWatchlist: WatchlistItem[] = [
     },
 ];
 
-const mockJournalEntries: JournalEntry[] = [
-    {
-        id: '1',
-        date: '2026-02-05',
-        type: 'entry',
-        ticker: 'AAPL',
-        decision: 'Increased position by 50 shares',
-        rationale:
-            'Strong iPhone sales data, expansion in services revenue. Vision Pro launch creating new product category with minimal competition.',
-        outcome: 'pending',
-    },
-    {
-        id: '2',
-        date: '2026-02-03',
-        type: 'exit',
-        ticker: 'TSLA',
-        decision: 'Reduced position by 25 shares',
-        rationale:
-            'Taking profits after 20% gain, valuation concerns. Increased competition from legacy automakers and margin pressure from price cuts.',
-        outcome: 'win',
-    },
-    {
-        id: '3',
-        date: '2026-01-28',
-        type: 'entry',
-        ticker: 'NVDA',
-        decision: 'Opened position with 20 shares',
-        rationale: 'AI data center demand exceeding expectations. CUDA moat remains strong. H100 supply constraints supporting ASPs.',
-        outcome: 'pending',
-    },
-    {
-        id: '4',
-        date: '2026-01-20',
-        type: 'hold',
-        ticker: 'MSFT',
-        decision: 'Maintaining position through earnings',
-        rationale: 'Azure AI services showing strong adoption. Copilot revenue ramping. Cloud margin expansion narrative intact.',
-        outcome: 'pending',
-    },
-];
 
 function getConvictionColor(conviction: string) {
     switch (conviction) {
@@ -141,9 +96,17 @@ function ResearchContent() {
     const router = useRouter();
     const searchParams = useSearchParams();
     const currentTab = searchParams.get('tab') || 'theses';
-    const { active, archived, create, update, archive, restore, remove } = useThesisStore();
+    const { active, archived, theses, create, update, archive, restore, remove } = useThesisStore();
+    const {
+        entries: journalEntries,
+        create: createJournal,
+        update: updateJournal,
+        remove: removeJournal,
+    } = useJournalStore();
     const [modalOpen, setModalOpen] = useState(false);
     const [editing, setEditing] = useState<Thesis | null>(null);
+    const [journalModalOpen, setJournalModalOpen] = useState(false);
+    const [editingJournal, setEditingJournal] = useState<JournalEntry | null>(null);
 
     const handleTabChange = (value: string) => {
         const params = new URLSearchParams(searchParams);
@@ -180,6 +143,26 @@ function ResearchContent() {
         handleTabChange('theses');
     };
 
+    const openCreateJournal = () => {
+        setEditingJournal(null);
+        setJournalModalOpen(true);
+    };
+
+    const openEditJournal = (entry: JournalEntry) => {
+        setEditingJournal(entry);
+        setJournalModalOpen(true);
+    };
+
+    const handleDeleteJournal = (entry: JournalEntry) => {
+        if (typeof window !== 'undefined' && !window.confirm(`Delete journal entry for ${entry.ticker}? This cannot be undone.`)) {
+            return;
+        }
+        removeJournal(entry.id);
+        toast.success(`Journal entry for ${entry.ticker} deleted.`);
+    };
+
+    const thesesById = new Map(theses.map((t) => [t.id, t] as const));
+
     return (
         <div className="space-y-6">
             {/* Header */}
@@ -194,6 +177,12 @@ function ResearchContent() {
                     <Button onClick={openCreate}>
                         <Plus className="mr-2 h-4 w-4" />
                         New Thesis
+                    </Button>
+                )}
+                {currentTab === 'journal' && (
+                    <Button onClick={openCreateJournal}>
+                        <Plus className="mr-2 h-4 w-4" />
+                        New Entry
                     </Button>
                 )}
             </div>
@@ -362,62 +351,104 @@ function ResearchContent() {
 
                 {/* Decision Journal */}
                 <TabsContent value="journal" className="space-y-4">
-                    <div className="space-y-4">
-                        {mockJournalEntries.map((entry) => (
-                            <Card key={entry.id} className="p-6">
-                                <div className="flex gap-4">
-                                    <div className="flex flex-col items-center">
-                                        <div className="rounded-lg bg-primary/10 p-3 text-primary">
-                                            <BookOpen className="h-5 w-5" />
-                                        </div>
-                                        <div className="mt-2 text-center">
-                                            <p className="text-xs text-muted-foreground">
-                                                {new Date(entry.date).toLocaleDateString('en-US', {
-                                                    month: 'short',
-                                                    day: 'numeric',
-                                                })}
-                                            </p>
-                                        </div>
-                                    </div>
-
-                                    <div className="flex-1 space-y-2">
-                                        <div className="flex items-start justify-between">
-                                            <div>
-                                                <div className="flex items-center gap-2">
-                                                    <h3 className="font-semibold">{entry.ticker}</h3>
-                                                    <Badge
-                                                        variant={
-                                                            entry.type === 'entry'
-                                                                ? 'default'
-                                                                : entry.type === 'exit'
-                                                                    ? 'destructive'
-                                                                    : 'secondary'
-                                                        }
-                                                    >
-                                                        {entry.type}
-                                                    </Badge>
-                                                    {entry.outcome && entry.outcome !== 'pending' && (
-                                                        <Badge
-                                                            variant={
-                                                                entry.outcome === 'win' ? 'default' : 'destructive'
-                                                            }
-                                                        >
-                                                            {entry.outcome}
-                                                        </Badge>
-                                                    )}
+                    {journalEntries.length === 0 ? (
+                        <Card className="p-10 text-center space-y-2">
+                            <p className="text-muted-foreground">No journal entries yet.</p>
+                            <Button variant="outline" onClick={openCreateJournal}>
+                                <Plus className="mr-2 h-4 w-4" /> Log your first decision
+                            </Button>
+                        </Card>
+                    ) : (
+                        <div className="space-y-4">
+                            {journalEntries.map((entry) => {
+                                const linkedThesis = entry.thesisId ? thesesById.get(entry.thesisId) : undefined;
+                                return (
+                                    <Card key={entry.id} className="p-6">
+                                        <div className="flex gap-4">
+                                            <div className="flex flex-col items-center">
+                                                <div className="rounded-lg bg-primary/10 p-3 text-primary">
+                                                    <BookOpen className="h-5 w-5" />
                                                 </div>
-                                                <p className="mt-1 font-medium">{entry.decision}</p>
+                                                <div className="mt-2 text-center">
+                                                    <p className="text-xs text-muted-foreground">
+                                                        {new Date(entry.date).toLocaleDateString('en-US', {
+                                                            month: 'short',
+                                                            day: 'numeric',
+                                                        })}
+                                                    </p>
+                                                </div>
+                                            </div>
+
+                                            <div className="flex-1 space-y-2">
+                                                <div className="flex items-start justify-between gap-2">
+                                                    <div className="flex-1">
+                                                        <div className="flex items-center gap-2 flex-wrap">
+                                                            <h3 className="font-semibold">{entry.ticker}</h3>
+                                                            <Badge
+                                                                variant={
+                                                                    entry.type === 'entry'
+                                                                        ? 'default'
+                                                                        : entry.type === 'exit'
+                                                                            ? 'destructive'
+                                                                            : 'secondary'
+                                                                }
+                                                            >
+                                                                {entry.type}
+                                                            </Badge>
+                                                            {entry.outcome !== 'pending' && (
+                                                                <Badge
+                                                                    variant={
+                                                                        entry.outcome === 'win' ? 'default' : 'destructive'
+                                                                    }
+                                                                >
+                                                                    {entry.outcome}
+                                                                </Badge>
+                                                            )}
+                                                            {linkedThesis && (
+                                                                <button
+                                                                    onClick={() =>
+                                                                        router.push(`/research/thesis/${linkedThesis.ticker}`)
+                                                                    }
+                                                                    className="inline-flex items-center gap-1 rounded-full border border-primary/30 bg-primary/5 px-2 py-0.5 text-xs text-primary hover:bg-primary/10 transition-colors"
+                                                                    aria-label={`View linked thesis ${linkedThesis.title}`}
+                                                                >
+                                                                    <Link2 className="h-3 w-3" />
+                                                                    {linkedThesis.title}
+                                                                </button>
+                                                            )}
+                                                        </div>
+                                                        <p className="mt-1 font-medium">{entry.decision}</p>
+                                                    </div>
+                                                    <div className="flex items-center gap-1">
+                                                        <Button
+                                                            variant="ghost"
+                                                            size="icon"
+                                                            aria-label="Edit journal entry"
+                                                            onClick={() => openEditJournal(entry)}
+                                                        >
+                                                            <Pencil className="h-4 w-4" />
+                                                        </Button>
+                                                        <Button
+                                                            variant="ghost"
+                                                            size="icon"
+                                                            aria-label="Delete journal entry"
+                                                            onClick={() => handleDeleteJournal(entry)}
+                                                        >
+                                                            <Trash2 className="h-4 w-4 text-destructive" />
+                                                        </Button>
+                                                    </div>
+                                                </div>
+
+                                                <p className="text-sm text-muted-foreground">
+                                                    {entry.rationale}
+                                                </p>
                                             </div>
                                         </div>
-
-                                        <p className="text-sm text-muted-foreground">
-                                            {entry.rationale}
-                                        </p>
-                                    </div>
-                                </div>
-                            </Card>
-                        ))}
-                    </div>
+                                    </Card>
+                                );
+                            })}
+                        </div>
+                    )}
                 </TabsContent>
 
                 {/* Archive */}
@@ -513,6 +544,23 @@ function ResearchContent() {
                         update(editing.id, draft);
                     } else {
                         create(draft);
+                    }
+                }}
+            />
+
+            <NewJournalEntryModal
+                open={journalModalOpen}
+                onOpenChange={(open) => {
+                    setJournalModalOpen(open);
+                    if (!open) setEditingJournal(null);
+                }}
+                editing={editingJournal}
+                theses={theses}
+                onSubmit={(draft) => {
+                    if (editingJournal) {
+                        updateJournal(editingJournal.id, draft);
+                    } else {
+                        createJournal(draft);
                     }
                 }}
             />
