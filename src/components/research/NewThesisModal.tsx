@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
     Dialog,
     DialogContent,
@@ -19,6 +19,7 @@ import {
     SelectValue,
 } from '@/components/ui/select';
 import { toast } from 'sonner';
+import type { Thesis, ThesisDraft } from '@/lib/research/thesis';
 
 interface ThesisFormData {
     ticker: string;
@@ -42,23 +43,35 @@ const defaultForm: ThesisFormData = {
     timeHorizon: '12 months',
 };
 
+function toFormData(thesis: Thesis): ThesisFormData {
+    return {
+        ticker: thesis.ticker,
+        companyName: thesis.companyName,
+        title: thesis.title,
+        description: thesis.description,
+        type: thesis.type,
+        conviction: thesis.conviction,
+        targetPrice: String(thesis.targetPrice),
+        timeHorizon: thesis.timeHorizon,
+    };
+}
+
 interface NewThesisModalProps {
     open: boolean;
     onOpenChange: (open: boolean) => void;
-    onSubmit: (thesis: {
-        ticker: string;
-        companyName: string;
-        title: string;
-        description: string;
-        type: 'bull' | 'bear';
-        conviction: 'HIGH' | 'MEDIUM' | 'LOW';
-        targetPrice: number;
-        timeHorizon: string;
-    }) => void;
+    onSubmit: (thesis: ThesisDraft) => void;
+    /** When provided, the modal operates in edit mode and pre-fills fields. */
+    editing?: Thesis | null;
 }
 
-export function NewThesisModal({ open, onOpenChange, onSubmit }: NewThesisModalProps) {
+export function NewThesisModal({ open, onOpenChange, onSubmit, editing }: NewThesisModalProps) {
     const [form, setForm] = useState<ThesisFormData>(defaultForm);
+
+    // Reset the form when the modal opens so edits and creates don't bleed into each other.
+    useEffect(() => {
+        if (!open) return;
+        setForm(editing ? toFormData(editing) : defaultForm);
+    }, [open, editing]);
 
     const set = (field: keyof ThesisFormData) => (value: string) =>
         setForm((prev) => ({ ...prev, [field]: value }));
@@ -68,8 +81,9 @@ export function NewThesisModal({ open, onOpenChange, onSubmit }: NewThesisModalP
             toast.error('Please fill in all required fields.');
             return;
         }
+        const ticker = form.ticker.toUpperCase();
         onSubmit({
-            ticker: form.ticker.toUpperCase(),
+            ticker,
             companyName: form.companyName,
             title: form.title,
             description: form.description,
@@ -80,14 +94,14 @@ export function NewThesisModal({ open, onOpenChange, onSubmit }: NewThesisModalP
         });
         setForm(defaultForm);
         onOpenChange(false);
-        toast.success(`Thesis for ${form.ticker.toUpperCase()} created.`);
+        toast.success(editing ? `Thesis for ${ticker} updated.` : `Thesis for ${ticker} created.`);
     };
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
             <DialogContent className="sm:max-w-lg">
                 <DialogHeader>
-                    <DialogTitle>New Investment Thesis</DialogTitle>
+                    <DialogTitle>{editing ? 'Edit Investment Thesis' : 'New Investment Thesis'}</DialogTitle>
                 </DialogHeader>
 
                 <div className="space-y-4 py-2">
@@ -180,7 +194,7 @@ export function NewThesisModal({ open, onOpenChange, onSubmit }: NewThesisModalP
 
                 <DialogFooter>
                     <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-                    <Button onClick={handleSubmit}>Create Thesis</Button>
+                    <Button onClick={handleSubmit}>{editing ? 'Save Changes' : 'Create Thesis'}</Button>
                 </DialogFooter>
             </DialogContent>
         </Dialog>
