@@ -19,6 +19,7 @@ export interface NotificationSettings {
 
 export interface SecuritySettings {
     twoFactorEnabled: boolean;
+    apiKey?: string;
 }
 
 export interface AppearanceSettings {
@@ -62,6 +63,7 @@ export interface SettingsState {
 
     // Actions - Security
     toggleTwoFactor: () => void;
+    setApiKey: (key: string) => void;
 
     // Actions - Appearance
     setTheme: (theme: 'light' | 'dark' | 'system') => void;
@@ -100,6 +102,7 @@ const defaultNotifications: NotificationSettings = {
 
 const defaultSecurity: SecuritySettings = {
     twoFactorEnabled: false,
+    apiKey: '',
 };
 
 const defaultAppearance: AppearanceSettings = {
@@ -177,6 +180,11 @@ export const useSettingsStore = create<SettingsState>()(
             toggleTwoFactor: () =>
                 set((state) => ({
                     security: { ...state.security, twoFactorEnabled: !state.security.twoFactorEnabled },
+                })),
+
+            setApiKey: (apiKey) =>
+                set((state) => ({
+                    security: { ...state.security, apiKey },
                 })),
 
             // Appearance
