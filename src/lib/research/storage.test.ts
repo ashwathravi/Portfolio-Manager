@@ -25,9 +25,17 @@ const sample: Thesis = {
     status: 'active',
     conviction: 'HIGH',
     targetPrice: 250,
+    currentPrice: 210,
     timeHorizon: '12 months',
+    dateCreated: '2026-04-10',
     dateUpdated: '2026-04-17',
-    tags: [],
+    tags: ['services'],
+    hypothesis: 'Services will drive margin expansion.',
+    bullCase: ['Subscription attach rates rising.'],
+    bearCase: ['China volume risk.'],
+    catalysts: [{ id: 'c1', title: 'Earnings', date: '2026-05-01', impact: 'high' }],
+    linkedEvidence: [{ id: 'e1', title: 'Q2 call', type: 'earnings', date: '2026-04-25' }],
+    healthScore: 80,
 };
 
 describe('saveThesesToStorage', () => {
@@ -37,7 +45,7 @@ describe('saveThesesToStorage', () => {
         const raw = storage.getItem(THESIS_STORAGE_KEY);
         assert.ok(raw);
         const parsed = JSON.parse(raw!);
-        assert.strictEqual(parsed.version, 1);
+        assert.strictEqual(parsed.version, 2);
         assert.strictEqual(parsed.theses.length, 1);
     });
 
@@ -73,9 +81,42 @@ describe('loadThesesFromStorage', () => {
     test('returns null when any stored thesis fails schema check', () => {
         storage.setItem(
             THESIS_STORAGE_KEY,
-            JSON.stringify({ version: 1, theses: [sample, { broken: true }] }),
+            JSON.stringify({ version: 2, theses: [sample, { broken: true }] }),
         );
         assert.strictEqual(loadThesesFromStorage(storage), null);
+    });
+
+    test('migrates v1 envelopes by filling in defaults for the detail fields', () => {
+        const v1 = {
+            version: 1,
+            theses: [
+                {
+                    id: '1',
+                    ticker: 'AAPL',
+                    companyName: 'Apple Inc.',
+                    title: 'Services',
+                    description: 'x',
+                    type: 'bull',
+                    status: 'active',
+                    conviction: 'HIGH',
+                    targetPrice: 250,
+                    timeHorizon: '12 months',
+                    dateUpdated: '2026-04-17',
+                    tags: [],
+                },
+            ],
+        };
+        storage.setItem(THESIS_STORAGE_KEY, JSON.stringify(v1));
+        const loaded = loadThesesFromStorage(storage);
+        assert.strictEqual(loaded?.length, 1);
+        const thesis = loaded![0];
+        assert.strictEqual(thesis.hypothesis, '');
+        assert.deepStrictEqual(thesis.bullCase, []);
+        assert.deepStrictEqual(thesis.bearCase, []);
+        assert.deepStrictEqual(thesis.catalysts, []);
+        assert.deepStrictEqual(thesis.linkedEvidence, []);
+        assert.strictEqual(thesis.healthScore, 50);
+        assert.strictEqual(thesis.dateCreated, '2026-04-17');
     });
 
     test('is a no-op when storage is null (SSR)', () => {
