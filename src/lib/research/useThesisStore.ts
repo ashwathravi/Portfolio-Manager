@@ -2,15 +2,20 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+    addCatalyst,
+    addEvidence,
     archiveThesis,
     createThesis,
     deleteThesis,
     DEFAULT_THESES,
+    findThesisByTicker,
     partitionTheses,
     restoreThesis,
     updateThesis,
     type Thesis,
+    type ThesisCatalyst,
     type ThesisDraft,
+    type ThesisEvidence,
 } from './thesis';
 import { getBrowserStorage, loadThesesFromStorage, saveThesesToStorage } from './storage';
 
@@ -58,6 +63,19 @@ export function useThesisStore() {
         setTheses((prev) => deleteThesis(prev, id));
     }, []);
 
+    const addCatalystTo = useCallback((thesisId: string, catalyst: Omit<ThesisCatalyst, 'id'>) => {
+        setTheses((prev) => addCatalyst(prev, thesisId, catalyst));
+    }, []);
+
+    const addEvidenceTo = useCallback((thesisId: string, evidence: Omit<ThesisEvidence, 'id'>) => {
+        setTheses((prev) => addEvidence(prev, thesisId, evidence));
+    }, []);
+
+    const findByTicker = useCallback(
+        (ticker: string) => findThesisByTicker(theses, ticker),
+        [theses],
+    );
+
     const { active, archived } = useMemo(() => partitionTheses(theses), [theses]);
 
     return {
@@ -70,5 +88,8 @@ export function useThesisStore() {
         archive,
         restore,
         remove,
+        addCatalyst: addCatalystTo,
+        addEvidence: addEvidenceTo,
+        findByTicker,
     };
 }
