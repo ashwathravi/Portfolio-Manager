@@ -20,7 +20,12 @@ function mockFetch(response: { ok: boolean; status?: number; json: unknown }) {
         return {
             ok: response.ok,
             status: response.status ?? (response.ok ? 200 : 500),
-            json: async () => response.json,
+            json: async () => {
+                if (typeof response.json === 'function') {
+                    return response.json();
+                }
+                return response.json;
+            },
         };
     };
 }
@@ -81,6 +86,15 @@ describe('fetchQuotes', () => {
         await assert.rejects(fetchQuotes(['AAPL']), /Failed to fetch quotes/);
     });
 
+    test('uses fallback error message when JSON parsing fails on error response', async () => {
+        mockFetch({
+            ok: false,
+            status: 500,
+            json: () => Promise.reject(new Error('Invalid JSON')),
+        });
+        await assert.rejects(fetchQuotes(['AAPL']), /Failed to fetch quotes \(500\)/);
+    });
+
     test('returns the parsed quote map on success', async () => {
         mockFetch({
             ok: true,
@@ -127,5 +141,17 @@ describe('fetchHistorical', () => {
     test('throws with server error message on failure', async () => {
         mockFetch({ ok: false, status: 429, json: { error: 'rate limited' } });
         await assert.rejects(fetchHistorical('AAPL', '1D'), /rate limited/);
+    });
+
+    test('uses fallback error message when JSON parsing fails on error response', async () => {
+        mockFetch({
+            ok: false,
+            status: 500,
+            json: () => Promise.reject(new Error('Invalid JSON')),
+        });
+        await assert.rejects(
+            fetchHistorical('AAPL', '1D'),
+            /Failed to fetch historical data \(500\)/,
+        );
     });
 });
