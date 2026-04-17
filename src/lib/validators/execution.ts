@@ -1,5 +1,4 @@
 import { z } from 'zod';
-import { safeText } from './common';
 import { tickerSchema } from './market-data';
 
 export const orderSideSchema = z.enum(['buy', 'sell']);
