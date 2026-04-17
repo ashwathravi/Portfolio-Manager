@@ -25,7 +25,8 @@ export async function GET(req: NextRequest) {
         return NextResponse.redirect(new URL("/settings?schwab_connected=true", req.url));
 
     } catch (err) {
-        console.error("Schwab OAuth Error:", err);
+        const errorMessage = err instanceof Error ? err.message : String(err);
+        console.error("Schwab OAuth Error:", errorMessage);
         return NextResponse.json({ error: "Failed to exchange authorization code for tokens." }, { status: 500 });
     }
 }
