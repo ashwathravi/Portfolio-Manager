@@ -1,15 +1,12 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { StatCard } from '@/components/data-display/StatCard';
 import { MetricCard } from '@/components/data-display/MetricCard';
 import { Card } from '@/components/ui/card';
 import { TrendingUp, Activity, AlertTriangle, Award, Calendar, ChevronDown, Settings, Plus, ChevronLeft, ChevronRight, Share2 } from 'lucide-react';
 import { toast } from 'sonner';
-import {
-    mockPerformanceMetrics,
-} from '@/lib/mockData';
 import {
     Table,
     TableBody,
@@ -31,6 +28,31 @@ import {
     LineChart,
     Line,
 } from 'recharts';
+import {
+    computePeriodMetrics,
+    computeRiskSnapshot,
+    type PeriodKey,
+} from '@/lib/performance/periodSummary';
+import {
+    accountBalanceData,
+    benchmarkMonthlySeries,
+    equityCurveData,
+    monthlyPnLData,
+    portfolioMonthlySeries,
+} from '@/lib/performance/series';
+
+const PERIOD_KEYS: readonly PeriodKey[] = ['1M', '3M', '6M', 'YTD', '1Y', 'ALL'];
+
+function formatPercent(value: number, fractionDigits = 2) {
+    const pct = value * 100;
+    const sign = pct > 0 ? '+' : '';
+    return `${sign}${pct.toFixed(fractionDigits)}%`;
+}
+
+function formatCurrency(value: number) {
+    const sign = value < 0 ? '-' : '';
+    return `${sign}$${Math.abs(value).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+}
 
 export default function PerformancePage() {
     const router = useRouter();
@@ -39,6 +61,16 @@ export default function PerformancePage() {
     const prevMonth = () => setCalendarMonth((d) => new Date(d.getFullYear(), d.getMonth() - 1, 1));
     const nextMonth = () => setCalendarMonth((d) => new Date(d.getFullYear(), d.getMonth() + 1, 1));
     const calendarLabel = calendarMonth.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+
+    const periodMetrics = useMemo(
+        () => computePeriodMetrics(portfolioMonthlySeries, benchmarkMonthlySeries, PERIOD_KEYS),
+        [],
+    );
+    const riskSnapshot = useMemo(
+        () => computeRiskSnapshot(portfolioMonthlySeries, benchmarkMonthlySeries),
+        [],
+    );
+    const oneYear = periodMetrics.find((m) => m.period === '1Y') ?? periodMetrics[0];
 
     return (
         <div className="space-y-6 p-6">
@@ -83,7 +115,6 @@ export default function PerformancePage() {
                         <span className="px-2 py-0.5 rounded-md bg-primary/10 text-primary font-medium">1 win</span>
                         <span className="px-2 py-0.5 rounded-md bg-destructive/10 text-destructive font-medium">1 loss</span>
                     </div>
-                    {/* Progress bar */}
                     <div className="mt-3 h-2 bg-accent rounded-full overflow-hidden">
                         <div className="h-full bg-primary rounded-full" style={{ width: '50%' }}></div>
                     </div>
@@ -162,34 +193,34 @@ export default function PerformancePage() {
                 />
             </div>
 
-            {/* Key Performance Metrics */}
+            {/* Key Performance Metrics — driven by the calculation engine */}
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
                 <StatCard
                     title="Total Return (1Y)"
-                    value="+24.67%"
-                    changeLabel="vs 18.92% benchmark"
+                    value={formatPercent(oneYear.return)}
+                    changeLabel={`vs ${formatPercent(oneYear.benchmark)} benchmark`}
                     icon={<TrendingUp className="h-6 w-6" />}
-                    trend="up"
+                    trend={oneYear.return >= 0 ? 'up' : 'down'}
                 />
                 <StatCard
                     title="Sharpe Ratio"
-                    value="1.88"
-                    subtitle="Risk-adjusted return"
+                    value={oneYear.sharpe.toFixed(2)}
+                    subtitle="Risk-adjusted return (annualized)"
                     icon={<Activity className="h-6 w-6" />}
                 />
                 <StatCard
                     title="Max Drawdown"
-                    value="-12.34%"
+                    value={formatPercent(oneYear.maxDrawdown)}
                     subtitle="Largest peak-to-trough"
                     icon={<AlertTriangle className="h-6 w-6" />}
                     trend="down"
                 />
                 <StatCard
-                    title="Alpha"
-                    value="+5.75%"
-                    subtitle="Excess return"
+                    title="Alpha (1Y)"
+                    value={formatPercent(oneYear.alpha)}
+                    subtitle="Excess return vs benchmark"
                     icon={<Award className="h-6 w-6" />}
-                    trend="up"
+                    trend={oneYear.alpha >= 0 ? 'up' : 'down'}
                 />
             </div>
 
@@ -201,22 +232,7 @@ export default function PerformancePage() {
                 </div>
                 <ResponsiveContainer width="100%" height={200}>
                     <BarChart
-                        data={[
-                            { month: 'Jan 25', value: 1850 },
-                            { month: 'Feb 25', value: 3420 },
-                            { month: 'Mar 25', value: -1100 },
-                            { month: 'Apr 25', value: 2780 },
-                            { month: 'May 25', value: 4150 },
-                            { month: 'Jun 25', value: -680 },
-                            { month: 'Jul 25', value: 3900 },
-                            { month: 'Aug 25', value: 5210 },
-                            { month: 'Sep 25', value: 1630 },
-                            { month: 'Oct 25', value: -920 },
-                            { month: 'Nov 25', value: 4480 },
-                            { month: 'Dec 25', value: 6100 },
-                            { month: 'Jan 26', value: 2340 },
-                            { month: 'Feb 26', value: 3850 },
-                        ]}
+                        data={monthlyPnLData}
                         margin={{ top: 10, right: 10, left: 10, bottom: 20 }}
                     >
                         <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
@@ -239,7 +255,7 @@ export default function PerformancePage() {
                                 borderRadius: '8px',
                             }}
                             labelStyle={{ color: 'var(--foreground)' }}
-                            formatter={(value: any) => [`$${Number(value).toLocaleString()}`, 'P&L']}
+                            formatter={(value: number | string) => [`$${Number(value).toLocaleString()}`, 'P&L']}
                         />
                         <Bar
                             dataKey="value"
@@ -259,23 +275,7 @@ export default function PerformancePage() {
                 </div>
                 <ResponsiveContainer width="100%" height={240}>
                     <AreaChart
-                        data={[
-                            { date: 'Jan 25', value: 100000 },
-                            { date: 'Feb 25', value: 101850 },
-                            { date: 'Mar 25', value: 105270 },
-                            { date: 'Apr 25', value: 104170 },
-                            { date: 'May 25', value: 106950 },
-                            { date: 'Jun 25', value: 111100 },
-                            { date: 'Jul 25', value: 110420 },
-                            { date: 'Aug 25', value: 114320 },
-                            { date: 'Sep 25', value: 119530 },
-                            { date: 'Oct 25', value: 121160 },
-                            { date: 'Nov 25', value: 120240 },
-                            { date: 'Dec 25', value: 124720 },
-                            { date: 'Jan 26', value: 131060 },
-                            { date: 'Feb 26', value: 133560 },
-                            { date: 'Mar 26', value: 137410 },
-                        ]}
+                        data={equityCurveData}
                         margin={{ top: 10, right: 30, left: 10, bottom: 30 }}
                     >
                         <defs>
@@ -306,7 +306,7 @@ export default function PerformancePage() {
                                 borderRadius: '8px',
                             }}
                             labelStyle={{ color: 'var(--foreground)' }}
-                            formatter={(value: any) => [`$${Number(value).toLocaleString()}`, 'Equity']}
+                            formatter={(value: number | string) => [`$${Number(value).toLocaleString()}`, 'Equity']}
                         />
                         <Area
                             type="monotone"
@@ -327,22 +327,7 @@ export default function PerformancePage() {
                 </div>
                 <ResponsiveContainer width="100%" height={240}>
                     <LineChart
-                        data={[
-                            { date: 'Jan 25', deployed: 55000, account: 100000 },
-                            { date: 'Feb 25', deployed: 58000, account: 101850 },
-                            { date: 'Mar 25', deployed: 62000, account: 105270 },
-                            { date: 'Apr 25', deployed: 60000, account: 104170 },
-                            { date: 'May 25', deployed: 67000, account: 106950 },
-                            { date: 'Jun 25', deployed: 72000, account: 111100 },
-                            { date: 'Jul 25', deployed: 68000, account: 110420 },
-                            { date: 'Aug 25', deployed: 74000, account: 114320 },
-                            { date: 'Sep 25', deployed: 80000, account: 119530 },
-                            { date: 'Oct 25', deployed: 78000, account: 121160 },
-                            { date: 'Nov 25', deployed: 82000, account: 124720 },
-                            { date: 'Dec 25', deployed: 88000, account: 131060 },
-                            { date: 'Jan 26', deployed: 92000, account: 133560 },
-                            { date: 'Feb 26', deployed: 96820, account: 137410 },
-                        ]}
+                        data={accountBalanceData}
                         margin={{ top: 10, right: 30, left: 10, bottom: 30 }}
                     >
                         <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
@@ -367,7 +352,7 @@ export default function PerformancePage() {
                                 borderRadius: '8px',
                             }}
                             labelStyle={{ color: 'var(--foreground)' }}
-                            formatter={(value: any) => [`$${Number(value).toLocaleString()}`, '']}
+                            formatter={(value: number | string) => [`$${Number(value).toLocaleString()}`, '']}
                         />
                         <Line
                             type="monotone"
@@ -471,9 +456,7 @@ export default function PerformancePage() {
 
                     {/* Calendar Grid with Sidebar */}
                     <div className="grid grid-cols-1 lg:grid-cols-[1fr_280px] gap-6">
-                        {/* Calendar */}
                         <div>
-                            {/* Day Headers */}
                             <div className="grid grid-cols-7 gap-2 mb-2">
                                 {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day) => (
                                     <div key={day} className="text-center text-sm text-muted-foreground py-2">
@@ -482,9 +465,7 @@ export default function PerformancePage() {
                                 ))}
                             </div>
 
-                            {/* Calendar Days */}
                             <div className="grid grid-cols-7 gap-2">
-                                {/* Week 1 */}
                                 {[1, 2, 3, 4, 5, 6, 7].map((day) => (
                                     <div
                                         key={`week1-${day}`}
@@ -504,7 +485,6 @@ export default function PerformancePage() {
                                     </div>
                                 ))}
 
-                                {/* Week 2 */}
                                 {[8, 9, 10, 11, 12, 13, 14].map((day) => (
                                     <div
                                         key={`week2-${day}`}
@@ -514,7 +494,6 @@ export default function PerformancePage() {
                                     </div>
                                 ))}
 
-                                {/* Week 3 */}
                                 {[15, 16, 17, 18, 19, 20, 21].map((day) => (
                                     <div
                                         key={`week3-${day}`}
@@ -524,7 +503,6 @@ export default function PerformancePage() {
                                     </div>
                                 ))}
 
-                                {/* Week 4 */}
                                 {[22, 23, 24, 25, 26, 27, 28].map((day) => (
                                     <div
                                         key={`week4-${day}`}
@@ -536,14 +514,11 @@ export default function PerformancePage() {
                             </div>
                         </div>
 
-                        {/* Sidebar */}
                         <div className="space-y-6">
-                            {/* Trade Details */}
                             <div className="p-4 rounded-lg bg-accent/30 text-center">
                                 <p className="text-sm text-muted-foreground">Select a day to view trade details</p>
                             </div>
 
-                            {/* Quick Actions */}
                             <div>
                                 <h4 className="font-bold text-sm mb-3">Quick Actions</h4>
                                 <div className="space-y-2">
@@ -556,7 +531,6 @@ export default function PerformancePage() {
                                 </div>
                             </div>
 
-                            {/* Month Highlights */}
                             <div>
                                 <h4 className="font-bold text-sm mb-3">Month Highlights</h4>
                                 <div className="p-4 rounded-lg bg-card border border-border">
@@ -578,7 +552,7 @@ export default function PerformancePage() {
                 </Card>
             </div>
 
-            {/* Performance Table */}
+            {/* Performance Table — driven by computePeriodMetrics */}
             <Card className="p-6">
                 <h3 className="mb-4 font-semibold">Performance by Period</h3>
                 <div className="rounded-md border">
@@ -594,21 +568,21 @@ export default function PerformancePage() {
                             </TableRow>
                         </TableHeader>
                         <TableBody>
-                            {mockPerformanceMetrics.map((metric) => (
+                            {periodMetrics.map((metric) => (
                                 <TableRow key={metric.period}>
                                     <TableCell className="font-medium">{metric.period}</TableCell>
-                                    <TableCell className="text-right text-green-600">
-                                        {metric.return > 0 ? '+' : ''}{metric.return.toFixed(2)}%
+                                    <TableCell className={`text-right ${metric.return >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                        {formatPercent(metric.return)}
                                     </TableCell>
                                     <TableCell className="text-right text-muted-foreground">
-                                        {metric.benchmark > 0 ? '+' : ''}{metric.benchmark.toFixed(2)}%
+                                        {formatPercent(metric.benchmark)}
                                     </TableCell>
-                                    <TableCell className="text-right text-green-600">
-                                        {metric.alpha > 0 ? '+' : ''}{metric.alpha.toFixed(2)}%
+                                    <TableCell className={`text-right ${metric.alpha >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                        {formatPercent(metric.alpha)}
                                     </TableCell>
                                     <TableCell className="text-right">{metric.sharpe.toFixed(2)}</TableCell>
                                     <TableCell className="text-right text-red-600">
-                                        {metric.maxDrawdown.toFixed(2)}%
+                                        {formatPercent(metric.maxDrawdown)}
                                     </TableCell>
                                 </TableRow>
                             ))}
@@ -624,19 +598,19 @@ export default function PerformancePage() {
                     <div className="space-y-3">
                         <div className="flex justify-between">
                             <span className="text-muted-foreground">Volatility (Annual)</span>
-                            <span className="font-medium">14.32%</span>
+                            <span className="font-medium">{formatPercent(riskSnapshot.volatility)}</span>
                         </div>
                         <div className="flex justify-between">
                             <span className="text-muted-foreground">Beta</span>
-                            <span className="font-medium">1.08</span>
+                            <span className="font-medium">{riskSnapshot.beta.toFixed(2)}</span>
                         </div>
                         <div className="flex justify-between">
                             <span className="text-muted-foreground">Value at Risk (95%)</span>
-                            <span className="font-medium text-red-600">-$12,450</span>
+                            <span className="font-medium text-red-600">{formatCurrency(riskSnapshot.valueAtRisk95)}</span>
                         </div>
                         <div className="flex justify-between">
                             <span className="text-muted-foreground">Sortino Ratio</span>
-                            <span className="font-medium">2.14</span>
+                            <span className="font-medium">{riskSnapshot.sortinoRatio.toFixed(2)}</span>
                         </div>
                     </div>
                 </Card>
