@@ -1,10 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { PerformanceChart } from '@/components/charts/PerformanceChart';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-
-// Import mock data locally if needed, but preferably accept as props
+import { useHistoricalQuery, type Timeframe } from '@/lib/api/market-data/queries';
 import { mockEquityCurve } from '@/lib/mockData';
 
 interface PerformanceData {
@@ -21,55 +20,33 @@ const rangeLabels: Record<string, string> = {
     'ALL': 'All Time',
 };
 
+function periodToTimeframe(period: string): Timeframe {
+    if (period === '1D') return '1M';
+    if (period === '1W') return '1H';
+    return '1D';
+}
+
 export function PortfolioPerformance({ data }: { data?: PerformanceData[] }) {
-    const [chartData, setChartData] = useState<PerformanceData[]>(data || mockEquityCurve);
     const [period, setPeriod] = useState<string>('1M');
-    const [isLoading, setIsLoading] = useState(false);
+    const timeframe = periodToTimeframe(period);
 
-    useEffect(() => {
-        if (data) {
-            setChartData(data);
-            return;
-        }
+    const { data: bars, isFetching, isError } = useHistoricalQuery('SPY', timeframe, {
+        enabled: !data,
+    });
 
-        async function fetchMarketData() {
-            setIsLoading(true);
-            try {
-                // Map UI period to API timeframe
-                let timeframe = '1D';
-                if (period === '1D') timeframe = '1M'; // intra-day
-                if (period === '1W') timeframe = '1H'; // hourly
-
-                // Fetch SPY to simulate a benchmark curve and maybe another for portfolio
-                const res = await fetch(`/api/market-data/historical?symbol=SPY&timeframe=${timeframe}`);
-                if (!res.ok) throw new Error('API fetching error');
-
-                const json = await res.json();
-
-                if (Array.isArray(json) && json.length > 0) {
-                    const formatted: PerformanceData[] = json.map((bar: any) => ({
-                        date: new Date(bar.time).toLocaleDateString(undefined, {
-                            month: 'short',
-                            day: 'numeric',
-                            hour: timeframe !== '1D' ? 'numeric' : undefined
-                        }),
-                        portfolio: bar.close * 125, // Mock scaling to look like a portfolio value
-                        benchmark: bar.close * 100
-                    }));
-                    setChartData(formatted);
-                } else if (!json.error) {
-                    setChartData(mockEquityCurve);
-                }
-            } catch (err) {
-                console.warn('Failed to fetch historical data, falling back to mock: ', err);
-                setChartData(mockEquityCurve);
-            } finally {
-                setIsLoading(false);
-            }
-        }
-
-        fetchMarketData();
-    }, [period, data]);
+    const chartData = useMemo<PerformanceData[]>(() => {
+        if (data) return data;
+        if (isError || !bars || bars.length === 0) return mockEquityCurve;
+        return bars.map((bar) => ({
+            date: new Date(bar.time).toLocaleDateString(undefined, {
+                month: 'short',
+                day: 'numeric',
+                hour: timeframe !== '1D' ? 'numeric' : undefined,
+            }),
+            portfolio: bar.close * 125,
+            benchmark: bar.close * 100,
+        }));
+    }, [data, bars, isError, timeframe]);
 
     return (
         <div className="lg:col-span-2 rounded-2xl bg-card border border-border p-6 flex flex-col shadow-lg">
@@ -98,7 +75,7 @@ export function PortfolioPerformance({ data }: { data?: PerformanceData[] }) {
                 </TabsList>
 
                 <div className="flex-1 min-h-[300px] relative">
-                    {isLoading && (
+                    {isFetching && (
                         <div className="absolute inset-0 z-10 flex items-center justify-center bg-background/50 rounded-lg backdrop-blur-sm">
                             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
                         </div>
