@@ -593,17 +593,17 @@ export default function PerformancePage() {
                             {periodMetrics.map((metric) => (
                                 <TableRow key={metric.period}>
                                     <TableCell className="font-medium">{metric.period}</TableCell>
-                                    <TableCell className={`text-right ${metric.return >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                    <TableCell className={`text-right ${metric.return >= 0 ? 'text-primary' : 'text-destructive'}`}>
                                         {formatPercent(metric.return)}
                                     </TableCell>
                                     <TableCell className="text-right text-muted-foreground">
                                         {formatPercent(metric.benchmark)}
                                     </TableCell>
-                                    <TableCell className={`text-right ${metric.alpha >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                    <TableCell className={`text-right ${metric.alpha >= 0 ? 'text-primary' : 'text-destructive'}`}>
                                         {formatPercent(metric.alpha)}
                                     </TableCell>
                                     <TableCell className="text-right">{metric.sharpe.toFixed(2)}</TableCell>
-                                    <TableCell className="text-right text-red-600">
+                                    <TableCell className="text-right text-destructive">
                                         {formatPercent(metric.maxDrawdown)}
                                     </TableCell>
                                 </TableRow>
@@ -628,7 +628,7 @@ export default function PerformancePage() {
                         </div>
                         <div className="flex justify-between">
                             <span className="text-muted-foreground">Value at Risk (95%)</span>
-                            <span className="font-medium text-red-600">{formatCurrency(riskSnapshot.valueAtRisk95)}</span>
+                            <span className="font-medium text-destructive">{formatCurrency(riskSnapshot.valueAtRisk95)}</span>
                         </div>
                         <div className="flex justify-between">
                             <span className="text-muted-foreground">Sortino Ratio</span>
@@ -642,11 +642,11 @@ export default function PerformancePage() {
                     <div className="space-y-3">
                         <div className="flex justify-between">
                             <span className="text-muted-foreground">Stock Selection</span>
-                            <span className="font-medium text-green-600">+3.42%</span>
+                            <span className="font-medium text-primary">+3.42%</span>
                         </div>
                         <div className="flex justify-between">
                             <span className="text-muted-foreground">Asset Allocation</span>
-                            <span className="font-medium text-green-600">+1.89%</span>
+                            <span className="font-medium text-primary">+1.89%</span>
                         </div>
                         <div className="flex justify-between">
                             <span className="text-muted-foreground">Timing</span>

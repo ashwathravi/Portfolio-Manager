@@ -18,11 +18,11 @@ const transactionIcons = {
 } as const;
 
 const transactionColors = {
-    buy: 'text-blue-600 bg-blue-100',
-    sell: 'text-green-600 bg-green-100',
-    dividend: 'text-purple-600 bg-purple-100',
-    deposit: 'text-green-600 bg-green-100',
-    withdrawal: 'text-red-600 bg-red-100',
+    buy: 'text-blue-500 bg-blue-500/10',
+    sell: 'text-primary bg-primary/10',
+    dividend: 'text-purple-500 bg-purple-500/10',
+    deposit: 'text-primary bg-primary/10',
+    withdrawal: 'text-destructive bg-destructive/10',
 } as const;
 
 // Optimized: Moved formatters outside to avoid re-creation on every render.
@@ -100,7 +100,7 @@ export const ActivityFeed = memo(function ActivityFeed({ transactions, title = '
                                             <div
                                                 className={cn(
                                                     'font-medium flex items-center gap-1',
-                                                    transaction.amount > 0 ? 'text-green-600' : 'text-red-600'
+                                                    transaction.amount > 0 ? 'text-primary' : 'text-destructive'
                                                 )}
                                             >
                                                 <span className="sr-only">

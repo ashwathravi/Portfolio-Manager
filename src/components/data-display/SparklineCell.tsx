@@ -34,8 +34,8 @@ export function SparklineCell({
     const isPositive = last >= first;
 
     let strokeColorClass = "text-muted-foreground";
-    if (color === "success" || (color === "neutral" && isPositive)) strokeColorClass = "text-emerald-500";
-    if (color === "danger" || (color === "neutral" && !isPositive)) strokeColorClass = "text-red-500";
+    if (color === "success" || (color === "neutral" && isPositive)) strokeColorClass = "text-primary";
+    if (color === "danger" || (color === "neutral" && !isPositive)) strokeColorClass = "text-destructive";
     if (color === "primary") strokeColorClass = "text-primary";
 
     return (

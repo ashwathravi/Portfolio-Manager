@@ -38,9 +38,9 @@ export function StatCard({
 
     const trendColor =
         calculatedTrend === "up"
-            ? "text-green-600"
+            ? "text-primary"
             : calculatedTrend === "down"
-                ? "text-red-600"
+                ? "text-destructive"
                 : "text-muted-foreground";
 
     const TrendIcon =
@@ -65,10 +65,10 @@ export function StatCard({
                         <div className={cn(
                             "rounded-full p-2.5 bg-muted/50 text-muted-foreground",
                             color === "primary" && "text-primary bg-primary/10",
-                            color === "success" && "text-green-600 bg-green-100",
-                            color === "danger"  && "text-red-600 bg-red-100",
-                            color === "warning" && "text-yellow-600 bg-yellow-100",
-                            color === "info"    && "text-blue-600 bg-blue-100",
+                            color === "success" && "text-primary bg-primary/10",
+                            color === "danger"  && "text-destructive bg-destructive/10",
+                            color === "warning" && "text-yellow-500 bg-yellow-500/10",
+                            color === "info"    && "text-blue-500 bg-blue-500/10",
                         )}>
                             {icon}
                         </div>

@@ -113,11 +113,11 @@ export default function StrategiesPage() {
                     <div className="flex items-center justify-between">
                         <div>
                             <p className="text-sm font-medium text-muted-foreground">Avg Return</p>
-                            <h2 className="text-2xl font-bold text-green-600">+{avgReturn.toFixed(2)}%</h2>
+                            <h2 className="text-2xl font-bold text-primary">+{avgReturn.toFixed(2)}%</h2>
                             <p className="text-xs text-muted-foreground">Across all strategies</p>
                         </div>
-                        <div className="p-3 bg-green-100 rounded-full">
-                            <TrendingUp className="h-6 w-6 text-green-600" />
+                        <div className="p-3 bg-primary/10 rounded-full">
+                            <TrendingUp className="h-6 w-6 text-primary" />
                         </div>
                     </div>
                 </Card>
@@ -174,7 +174,7 @@ export default function StrategiesPage() {
                                     <div className="grid gap-4 sm:grid-cols-4">
                                         <div>
                                             <p className="text-sm text-muted-foreground">Total Return</p>
-                                            <p className="text-lg font-semibold text-green-600">
+                                            <p className="text-lg font-semibold text-primary">
                                                 +{strategy.returns.toFixed(2)}%
                                             </p>
                                         </div>

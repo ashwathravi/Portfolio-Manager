@@ -46,7 +46,7 @@ function makeColumns(onCancel?: (id: string) => void): ColumnDef<Order>[] {
             cell: ({ row }) => {
                 const side = row.getValue("side") as string
                 return (
-                    <span className={side === "buy" ? "text-green-600 font-medium" : "text-red-600 font-medium"}>
+                    <span className={side === "buy" ? "text-primary font-medium" : "text-destructive font-medium"}>
                         {side.toUpperCase()}
                     </span>
                 )
