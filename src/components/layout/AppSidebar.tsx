@@ -17,12 +17,14 @@ import {
     Briefcase,
     FolderOpen,
     List,
+    X,
 } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useState, useEffect } from 'react';
 import { cn } from '@/lib/utils';
 import { useSettingsStore } from '@/lib/stores/settingsStore';
+import { useUiStore } from '@/lib/stores/uiStore';
 
 interface NavItem {
     title: string;
@@ -129,6 +131,8 @@ const navigationItems: NavItem[] = [
 export function AppSidebar() {
     const pathname = usePathname();
     const [expandedItems, setExpandedItems] = useState<string[]>([]);
+    const sidebarOpen = useUiStore((s) => s.sidebarOpen);
+    const closeSidebar = useUiStore((s) => s.closeSidebar);
     const fullName = useSettingsStore((s) => s.profile.fullName);
     const initials = fullName
         .split(' ')
@@ -147,6 +151,11 @@ export function AppSidebar() {
             }
         });
     }, [pathname]);
+
+    // Close the mobile drawer on route change
+    useEffect(() => {
+        closeSidebar();
+    }, [pathname, closeSidebar]);
 
     const toggleExpanded = (title: string) => {
         setExpandedItems((prev) =>
@@ -240,16 +249,40 @@ export function AppSidebar() {
     };
 
     return (
-        <div className="flex h-screen w-64 flex-col border-r border-border bg-card/50 backdrop-blur-xl fixed left-0 top-0 z-40">
+        <>
+            {/* Mobile backdrop */}
+            {sidebarOpen && (
+                <button
+                    type="button"
+                    aria-label="Close navigation"
+                    onClick={closeSidebar}
+                    className="fixed inset-0 z-30 bg-background/60 backdrop-blur-sm md:hidden"
+                />
+            )}
+            <div
+                className={cn(
+                    'flex h-screen w-64 flex-col border-r border-border bg-card/50 backdrop-blur-xl fixed left-0 top-0 z-40 transition-transform duration-300 ease-in-out',
+                    'md:translate-x-0',
+                    sidebarOpen ? 'translate-x-0' : '-translate-x-full',
+                )}
+            >
             <div className="border-b border-border p-6">
                 <div className="flex items-center gap-3">
                     <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-green-800 shadow-lg shadow-primary/20">
                         <TrendingUp className="h-6 w-6 text-primary-foreground" />
                     </div>
-                    <div>
+                    <div className="flex-1">
                         <h2 className="text-xl font-bold tracking-tight">Atlas Wealth</h2>
                         <p className="text-xs text-muted-foreground">Investment OS</p>
                     </div>
+                    <button
+                        type="button"
+                        aria-label="Close navigation"
+                        className="md:hidden -mr-2 p-2 rounded-lg hover:bg-accent transition-colors"
+                        onClick={closeSidebar}
+                    >
+                        <X className="h-5 w-5" />
+                    </button>
                 </div>
             </div>
             <nav className="flex-1 overflow-y-auto p-4" aria-label="Main navigation">
@@ -268,6 +301,7 @@ export function AppSidebar() {
                     </div>
                 </div>
             </div>
-        </div>
+            </div>
+        </>
     );
 }

@@ -1,9 +1,10 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Search, Bell } from 'lucide-react';
+import { Search, Bell, Menu } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
+import { useUiStore } from '@/lib/stores/uiStore';
 
 
 interface TopBarProps {
@@ -12,6 +13,7 @@ interface TopBarProps {
 
 export function TopBar({ onSearchClick }: TopBarProps) {
     const [isMac, setIsMac] = useState(false);
+    const toggleSidebar = useUiStore((s) => s.toggleSidebar);
 
     useEffect(() => {
         setIsMac(/Mac|iPhone|iPad|iPod/.test(navigator.platform));
@@ -19,8 +21,17 @@ export function TopBar({ onSearchClick }: TopBarProps) {
 
     return (
         <div className="sticky top-0 z-30 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-            <div className="flex h-16 items-center justify-between px-6">
-                <div className="flex-1 max-w-2xl">
+            <div className="flex h-16 items-center justify-between gap-3 px-4 sm:px-6">
+                <Button
+                    variant="ghost"
+                    size="icon"
+                    className="md:hidden"
+                    onClick={toggleSidebar}
+                    aria-label="Open navigation"
+                >
+                    <Menu className="h-5 w-5" />
+                </Button>
+                <div className="flex-1 max-w-2xl min-w-0">
                     <Button
                         variant="outline"
                         className="w-full max-w-md justify-start text-muted-foreground border-border hover:border-primary/50 transition-colors"
