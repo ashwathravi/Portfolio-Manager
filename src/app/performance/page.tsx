@@ -41,6 +41,11 @@ import {
     monthlyPnLData,
     portfolioMonthlySeries,
 } from '@/lib/performance/series';
+import {
+    defaultAssetClassBreakdown,
+    defaultSectorBreakdown,
+} from '@/lib/performance/attribution';
+import { AttributionBreakdown } from '@/components/performance/AttributionBreakdown';
 
 const PERIOD_KEYS: readonly PeriodKey[] = ['1M', '3M', '6M', 'YTD', '1Y', 'ALL'];
 
@@ -614,51 +619,33 @@ export default function PerformancePage() {
             </Card>
 
             {/* Risk Metrics */}
-            <div className="grid gap-4 md:grid-cols-2">
-                <Card className="p-6">
-                    <h3 className="mb-4 font-semibold">Risk Metrics</h3>
-                    <div className="space-y-3">
-                        <div className="flex justify-between">
-                            <span className="text-muted-foreground">Volatility (Annual)</span>
-                            <span className="font-medium">{formatPercent(riskSnapshot.volatility)}</span>
-                        </div>
-                        <div className="flex justify-between">
-                            <span className="text-muted-foreground">Beta</span>
-                            <span className="font-medium">{riskSnapshot.beta.toFixed(2)}</span>
-                        </div>
-                        <div className="flex justify-between">
-                            <span className="text-muted-foreground">Value at Risk (95%)</span>
-                            <span className="font-medium text-destructive">{formatCurrency(riskSnapshot.valueAtRisk95)}</span>
-                        </div>
-                        <div className="flex justify-between">
-                            <span className="text-muted-foreground">Sortino Ratio</span>
-                            <span className="font-medium">{riskSnapshot.sortinoRatio.toFixed(2)}</span>
-                        </div>
+            <Card className="p-6">
+                <h3 className="mb-4 font-semibold">Risk Metrics</h3>
+                <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="flex justify-between">
+                        <span className="text-muted-foreground">Volatility (Annual)</span>
+                        <span className="font-medium">{formatPercent(riskSnapshot.volatility)}</span>
                     </div>
-                </Card>
+                    <div className="flex justify-between">
+                        <span className="text-muted-foreground">Beta</span>
+                        <span className="font-medium">{riskSnapshot.beta.toFixed(2)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                        <span className="text-muted-foreground">Value at Risk (95%)</span>
+                        <span className="font-medium text-destructive">{formatCurrency(riskSnapshot.valueAtRisk95)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                        <span className="text-muted-foreground">Sortino Ratio</span>
+                        <span className="font-medium">{riskSnapshot.sortinoRatio.toFixed(2)}</span>
+                    </div>
+                </div>
+            </Card>
 
-                <Card className="p-6">
-                    <h3 className="mb-4 font-semibold">Attribution Analysis</h3>
-                    <div className="space-y-3">
-                        <div className="flex justify-between">
-                            <span className="text-muted-foreground">Stock Selection</span>
-                            <span className="font-medium text-primary">+3.42%</span>
-                        </div>
-                        <div className="flex justify-between">
-                            <span className="text-muted-foreground">Asset Allocation</span>
-                            <span className="font-medium text-primary">+1.89%</span>
-                        </div>
-                        <div className="flex justify-between">
-                            <span className="text-muted-foreground">Timing</span>
-                            <span className="font-medium">+0.44%</span>
-                        </div>
-                        <div className="flex justify-between">
-                            <span className="text-muted-foreground">Interaction Effect</span>
-                            <span className="font-medium">-0.12%</span>
-                        </div>
-                    </div>
-                </Card>
-            </div>
+            {/* Attribution Breakdown (Brinson decomposition) */}
+            <AttributionBreakdown
+                sectors={defaultSectorBreakdown}
+                assetClasses={defaultAssetClassBreakdown}
+            />
         </div>
     );
 }
