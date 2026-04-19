@@ -6,9 +6,11 @@ import { IntegrationsList } from "@/components/settings/IntegrationsList";
 import { NotificationPreferences } from "@/components/settings/NotificationPreferences";
 import { SecuritySettings } from "@/components/settings/SecuritySettings";
 import { DataManagement } from "@/components/settings/DataManagement";
-import { User, Bell, Shield, Database, Palette, Link as LinkIcon, Tag } from "lucide-react";
+import { User, Bell, Shield, Database, Palette, Link as LinkIcon, Tag, Key, Sliders } from "lucide-react";
 import { AppearanceSettings } from "@/components/settings/AppearanceSettings";
 import { TagsManager } from "@/components/settings/TagsManager";
+import { ApiKeysSettings } from "@/components/settings/ApiKeysSettings";
+import { PreferencesSettings } from "@/components/settings/PreferencesSettings";
 
 export default function SettingsPage() {
     return (
@@ -21,13 +23,20 @@ export default function SettingsPage() {
             </div>
 
             <Tabs defaultValue="profile" className="space-y-6">
-                <TabsList className="flex h-auto w-full justify-start gap-2 bg-transparent p-0">
+                <TabsList className="flex h-auto w-full flex-wrap justify-start gap-2 bg-transparent p-0">
                     <TabsTrigger
                         value="profile"
                         className="data-[state=active]:bg-muted data-[state=active]:text-foreground rounded-full px-4 py-2 gap-2"
                     >
                         <User className="h-4 w-4" />
                         Profile
+                    </TabsTrigger>
+                    <TabsTrigger
+                        value="preferences"
+                        className="data-[state=active]:bg-muted data-[state=active]:text-foreground rounded-full px-4 py-2 gap-2"
+                    >
+                        <Sliders className="h-4 w-4" />
+                        Preferences
                     </TabsTrigger>
                     <TabsTrigger
                         value="notifications"
@@ -42,6 +51,13 @@ export default function SettingsPage() {
                     >
                         <Shield className="h-4 w-4" />
                         Security
+                    </TabsTrigger>
+                    <TabsTrigger
+                        value="api-keys"
+                        className="data-[state=active]:bg-muted data-[state=active]:text-foreground rounded-full px-4 py-2 gap-2"
+                    >
+                        <Key className="h-4 w-4" />
+                        API Keys
                     </TabsTrigger>
                     <TabsTrigger
                         value="data"
@@ -77,12 +93,20 @@ export default function SettingsPage() {
                     <ProfileForm />
                 </TabsContent>
 
+                <TabsContent value="preferences" className="space-y-6">
+                    <PreferencesSettings />
+                </TabsContent>
+
                 <TabsContent value="notifications" className="space-y-6">
                     <NotificationPreferences />
                 </TabsContent>
 
                 <TabsContent value="security" className="space-y-6">
                     <SecuritySettings />
+                </TabsContent>
+
+                <TabsContent value="api-keys" className="space-y-6">
+                    <ApiKeysSettings />
                 </TabsContent>
 
                 <TabsContent value="data" className="space-y-6">

@@ -28,6 +28,25 @@ export interface AppearanceSettings {
     animationsEnabled: boolean;
 }
 
+export interface ApiKeysSettings {
+    polygon: string;
+    alphaVantage: string;
+    schwab: string;
+}
+
+export type CurrencyCode = 'USD' | 'EUR' | 'GBP' | 'CAD' | 'AUD' | 'JPY' | 'CHF' | 'INR';
+export type DateFormat = 'MM/DD/YYYY' | 'DD/MM/YYYY' | 'YYYY-MM-DD';
+export type NumberFormat = 'en-US' | 'en-GB' | 'de-DE' | 'fr-FR';
+export type DefaultLandingPage = '/' | '/performance' | '/analytics' | '/portfolios' | '/research' | '/strategies';
+
+export interface PreferencesSettings {
+    baseCurrency: CurrencyCode;
+    dateFormat: DateFormat;
+    numberFormat: NumberFormat;
+    defaultLandingPage: DefaultLandingPage;
+    marketDataRefreshSeconds: number;
+}
+
 export interface Tag {
     id: string;
     name: string;
@@ -52,6 +71,8 @@ export interface SettingsState {
     notifications: NotificationSettings;
     security: SecuritySettings;
     appearance: AppearanceSettings;
+    apiKeys: ApiKeysSettings;
+    preferences: PreferencesSettings;
     tags: Tag[];
     accounts: ConnectedAccount[];
 
@@ -69,6 +90,13 @@ export interface SettingsState {
     setTheme: (theme: 'light' | 'dark' | 'system') => void;
     toggleCompactMode: () => void;
     toggleAnimations: () => void;
+
+    // Actions - API Keys
+    setProviderKey: (provider: keyof ApiKeysSettings, value: string) => void;
+    clearProviderKey: (provider: keyof ApiKeysSettings) => void;
+
+    // Actions - Preferences
+    updatePreferences: (updates: Partial<PreferencesSettings>) => void;
 
     // Actions - Tags (CRUD)
     addTag: (tag: Omit<Tag, 'id'>) => void;
@@ -109,6 +137,20 @@ const defaultAppearance: AppearanceSettings = {
     theme: 'light',
     compactMode: false,
     animationsEnabled: true,
+};
+
+const defaultApiKeys: ApiKeysSettings = {
+    polygon: '',
+    alphaVantage: '',
+    schwab: '',
+};
+
+const defaultPreferences: PreferencesSettings = {
+    baseCurrency: 'USD',
+    dateFormat: 'MM/DD/YYYY',
+    numberFormat: 'en-US',
+    defaultLandingPage: '/',
+    marketDataRefreshSeconds: 60,
 };
 
 const defaultTags: Tag[] = [
@@ -161,6 +203,8 @@ export const useSettingsStore = create<SettingsState>()(
             notifications: defaultNotifications,
             security: defaultSecurity,
             appearance: defaultAppearance,
+            apiKeys: defaultApiKeys,
+            preferences: defaultPreferences,
             tags: defaultTags,
             accounts: defaultAccounts,
 
@@ -201,6 +245,23 @@ export const useSettingsStore = create<SettingsState>()(
             toggleAnimations: () =>
                 set((state) => ({
                     appearance: { ...state.appearance, animationsEnabled: !state.appearance.animationsEnabled },
+                })),
+
+            // API Keys
+            setProviderKey: (provider, value) =>
+                set((state) => ({
+                    apiKeys: { ...state.apiKeys, [provider]: value },
+                })),
+
+            clearProviderKey: (provider) =>
+                set((state) => ({
+                    apiKeys: { ...state.apiKeys, [provider]: '' },
+                })),
+
+            // Preferences
+            updatePreferences: (updates) =>
+                set((state) => ({
+                    preferences: { ...state.preferences, ...updates },
                 })),
 
             // Tags
@@ -252,16 +313,20 @@ export const useSettingsStore = create<SettingsState>()(
                     notifications: defaultNotifications,
                     security: defaultSecurity,
                     appearance: defaultAppearance,
+                    apiKeys: defaultApiKeys,
+                    preferences: defaultPreferences,
                     tags: defaultTags,
                     accounts: defaultAccounts,
                 }),
         }),
         {
             name: 'atlas-settings',
-            // Sentinel: Only persist non-sensitive preferences
+            // Sentinel: Only persist non-sensitive preferences. API keys are
+            // intentionally excluded so they don't end up in localStorage.
             partialize: (state) => ({
                 appearance: state.appearance,
                 notifications: state.notifications,
+                preferences: state.preferences,
                 tags: state.tags,
             }),
         }

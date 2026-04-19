@@ -1,6 +1,6 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert';
-import { tagSchema, profileSchema, passwordChangeSchema } from './settings';
+import { tagSchema, profileSchema, passwordChangeSchema, apiKeySchema, preferencesSchema } from './settings';
 
 // ---------------------------------------------------------------------------
 // tagSchema
@@ -317,5 +317,107 @@ describe('passwordChangeSchema', () => {
             confirmPassword: minValid,
         });
         assert.strictEqual(result.success, true, `Password "${minValid}" should be valid`);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// apiKeySchema
+// ---------------------------------------------------------------------------
+
+describe('apiKeySchema', () => {
+    test('accepts an empty string (cleared key)', () => {
+        const result = apiKeySchema.safeParse('');
+        assert.strictEqual(result.success, true);
+    });
+
+    test('accepts typical provider key formats', () => {
+        const valid = [
+            'abcDEF123',
+            'pk_live_abc-def_123',
+            'AV.ALPHA.1234',
+            'K-1_a.b.c-d',
+        ];
+        for (const k of valid) {
+            const result = apiKeySchema.safeParse(k);
+            assert.strictEqual(result.success, true, `"${k}" should be valid`);
+        }
+    });
+
+    test('trims surrounding whitespace', () => {
+        const result = apiKeySchema.safeParse('  poly-key-123  ');
+        assert.strictEqual(result.success, true);
+        if (result.success) {
+            assert.strictEqual(result.data, 'poly-key-123');
+        }
+    });
+
+    test('rejects keys containing spaces or special characters', () => {
+        const invalid = ['key with space', 'key/with/slash', 'key$with$dollar', 'key<script>'];
+        for (const k of invalid) {
+            const result = apiKeySchema.safeParse(k);
+            assert.strictEqual(result.success, false, `"${k}" should be invalid`);
+        }
+    });
+
+    test('rejects keys longer than 256 characters', () => {
+        const result = apiKeySchema.safeParse('a'.repeat(257));
+        assert.strictEqual(result.success, false);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// preferencesSchema
+// ---------------------------------------------------------------------------
+
+describe('preferencesSchema', () => {
+    const validPrefs = {
+        baseCurrency: 'USD' as const,
+        dateFormat: 'MM/DD/YYYY' as const,
+        numberFormat: 'en-US' as const,
+        defaultLandingPage: '/' as const,
+        marketDataRefreshSeconds: 60,
+    };
+
+    test('accepts valid preferences', () => {
+        const result = preferencesSchema.safeParse(validPrefs);
+        assert.strictEqual(result.success, true);
+    });
+
+    test('rejects unknown currency codes', () => {
+        const result = preferencesSchema.safeParse({ ...validPrefs, baseCurrency: 'ZZZ' });
+        assert.strictEqual(result.success, false);
+    });
+
+    test('rejects unknown date format', () => {
+        const result = preferencesSchema.safeParse({ ...validPrefs, dateFormat: 'MMMM-DD' });
+        assert.strictEqual(result.success, false);
+    });
+
+    test('rejects refresh interval below 15 seconds', () => {
+        const result = preferencesSchema.safeParse({ ...validPrefs, marketDataRefreshSeconds: 5 });
+        assert.strictEqual(result.success, false);
+        if (!result.success) {
+            assert.strictEqual(result.error.issues[0].message, 'Minimum 15 seconds');
+        }
+    });
+
+    test('rejects refresh interval above one hour', () => {
+        const result = preferencesSchema.safeParse({ ...validPrefs, marketDataRefreshSeconds: 7200 });
+        assert.strictEqual(result.success, false);
+        if (!result.success) {
+            assert.strictEqual(result.error.issues[0].message, 'Maximum 60 minutes');
+        }
+    });
+
+    test('accepts refresh at boundaries', () => {
+        const low = preferencesSchema.safeParse({ ...validPrefs, marketDataRefreshSeconds: 15 });
+        assert.strictEqual(low.success, true);
+        const high = preferencesSchema.safeParse({ ...validPrefs, marketDataRefreshSeconds: 3600 });
+        assert.strictEqual(high.success, true);
+    });
+
+    test('rejects non-integer refresh seconds', () => {
+        const result = preferencesSchema.safeParse({ ...validPrefs, marketDataRefreshSeconds: 30.5 });
+        assert.strictEqual(result.success, false);
     });
 });

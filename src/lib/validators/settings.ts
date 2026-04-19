@@ -27,6 +27,22 @@ export const tagSchema = z.object({
     color: z.string().regex(/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/, "Must be a valid hex color"),
 });
 
+// API key: allow blank (cleared) or a reasonable token length.
+// Most providers use alphanumeric + a few special characters.
+export const apiKeySchema = z.string()
+    .trim()
+    .max(256, "API key is too long")
+    .regex(/^[A-Za-z0-9_.\-]*$/, "API key contains invalid characters");
+
+export const preferencesSchema = z.object({
+    baseCurrency: z.enum(['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'JPY', 'CHF', 'INR']),
+    dateFormat: z.enum(['MM/DD/YYYY', 'DD/MM/YYYY', 'YYYY-MM-DD']),
+    numberFormat: z.enum(['en-US', 'en-GB', 'de-DE', 'fr-FR']),
+    defaultLandingPage: z.enum(['/', '/performance', '/analytics', '/portfolios', '/research', '/strategies']),
+    marketDataRefreshSeconds: z.number().int().min(15, "Minimum 15 seconds").max(3600, "Maximum 60 minutes"),
+});
+
 export type ProfileFormValues = z.infer<typeof profileSchema>;
 export type PasswordChangeValues = z.infer<typeof passwordChangeSchema>;
 export type TagFormValues = z.infer<typeof tagSchema>;
+export type PreferencesFormValues = z.infer<typeof preferencesSchema>;

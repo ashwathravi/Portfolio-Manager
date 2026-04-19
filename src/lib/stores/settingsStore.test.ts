@@ -224,6 +224,60 @@ describe('settingsStore', () => {
     });
 
     // -----------------------------------------------------------------------
+    // API Keys
+    // -----------------------------------------------------------------------
+
+    describe('setProviderKey', () => {
+        test('should set a provider key without touching others', () => {
+            useSettingsStore.getState().setProviderKey('polygon', 'poly-abc-123');
+            const keys = useSettingsStore.getState().apiKeys;
+            assert.strictEqual(keys.polygon, 'poly-abc-123');
+            assert.strictEqual(keys.alphaVantage, '');
+            assert.strictEqual(keys.schwab, '');
+        });
+
+        test('should overwrite an existing key for the same provider', () => {
+            useSettingsStore.getState().setProviderKey('alphaVantage', 'first');
+            useSettingsStore.getState().setProviderKey('alphaVantage', 'second');
+            assert.strictEqual(useSettingsStore.getState().apiKeys.alphaVantage, 'second');
+        });
+    });
+
+    describe('clearProviderKey', () => {
+        test('should reset a provider key to empty string', () => {
+            useSettingsStore.getState().setProviderKey('polygon', 'poly-abc-123');
+            useSettingsStore.getState().clearProviderKey('polygon');
+            assert.strictEqual(useSettingsStore.getState().apiKeys.polygon, '');
+        });
+    });
+
+    // -----------------------------------------------------------------------
+    // Preferences
+    // -----------------------------------------------------------------------
+
+    describe('updatePreferences', () => {
+        test('should merge partial preference updates', () => {
+            useSettingsStore.getState().updatePreferences({ baseCurrency: 'EUR' });
+            const prefs = useSettingsStore.getState().preferences;
+            assert.strictEqual(prefs.baseCurrency, 'EUR');
+            assert.strictEqual(prefs.dateFormat, 'MM/DD/YYYY'); // default preserved
+            assert.strictEqual(prefs.marketDataRefreshSeconds, 60); // default preserved
+        });
+
+        test('should update multiple preference fields at once', () => {
+            useSettingsStore.getState().updatePreferences({
+                dateFormat: 'YYYY-MM-DD',
+                numberFormat: 'de-DE',
+                marketDataRefreshSeconds: 30,
+            });
+            const prefs = useSettingsStore.getState().preferences;
+            assert.strictEqual(prefs.dateFormat, 'YYYY-MM-DD');
+            assert.strictEqual(prefs.numberFormat, 'de-DE');
+            assert.strictEqual(prefs.marketDataRefreshSeconds, 30);
+        });
+    });
+
+    // -----------------------------------------------------------------------
     // Reset
     // -----------------------------------------------------------------------
 
@@ -234,6 +288,8 @@ describe('settingsStore', () => {
             useSettingsStore.getState().updateNotification('portfolioUpdates', false);
             useSettingsStore.getState().toggleTwoFactor();
             useSettingsStore.getState().setTheme('dark');
+            useSettingsStore.getState().setProviderKey('polygon', 'secret');
+            useSettingsStore.getState().updatePreferences({ baseCurrency: 'EUR' });
             useSettingsStore.getState().deleteTag(useSettingsStore.getState().tags[0].id);
             useSettingsStore.getState().removeAccount('fidelity');
 
@@ -245,6 +301,8 @@ describe('settingsStore', () => {
             assert.strictEqual(state.notifications.portfolioUpdates, true);
             assert.strictEqual(state.security.twoFactorEnabled, false);
             assert.strictEqual(state.appearance.theme, 'light');
+            assert.strictEqual(state.apiKeys.polygon, '');
+            assert.strictEqual(state.preferences.baseCurrency, 'USD');
             assert.strictEqual(state.tags.length, 3);
             assert.strictEqual(state.accounts.length, 3);
         });
