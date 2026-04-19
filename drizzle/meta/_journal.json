@@ -15,6 +15,13 @@
       "when": 1771857889178,
       "tag": "0001_damp_the_professor",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1776583459227,
+      "tag": "0002_ar44_sync_schema_to_drizzle",
+      "breakpoints": true
     }
   ]
 }

@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "bash -O globstar -c 'node --import tsx --test src/**/*.test.ts'",
+    "test": "find src -name '*.test.ts' -print0 | xargs -0 node --import tsx --test",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui"
   },

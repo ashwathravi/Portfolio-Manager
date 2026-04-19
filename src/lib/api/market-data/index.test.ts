@@ -69,8 +69,8 @@ describe('MarketDataEngine', () => {
             assert.strictEqual(quotes['AAPL'].price, 200);
         });
 
-        it('should return empty object and log error if both fail', async (t) => {
-            const errorMock = t.mock.method(console, 'error', () => {});
+        it('should return empty object and warn if both fail', async (t) => {
+            const warnMock = t.mock.method(console, 'warn', () => {});
             const primary = createMockProvider('primary', 100, true);
             const secondary = createMockProvider('secondary', 200, true);
             const engine = new MarketDataEngine(primary, secondary);
@@ -78,8 +78,9 @@ describe('MarketDataEngine', () => {
             const quotes = await engine.getQuotes(['AAPL']);
             assert.deepStrictEqual(quotes, {});
 
-            assert.strictEqual(errorMock.mock.callCount(), 1);
-            assert.match(errorMock.mock.calls[0].arguments[0], /Secondary provider failed to fetch quotes: Error: secondary failed/);
+            assert.strictEqual(warnMock.mock.callCount(), 2);
+            assert.match(warnMock.mock.calls[0].arguments[0], /Primary provider failed to fetch quotes: Error: primary failed/);
+            assert.match(warnMock.mock.calls[1].arguments[0], /Secondary provider failed to fetch quotes: Error: secondary failed/);
         });
     });
 
@@ -117,8 +118,8 @@ describe('MarketDataEngine', () => {
             assert.strictEqual(data[0].close, 205); // 200 + 5
         });
 
-        it('should return empty array and log error if both fail', async (t) => {
-            const errorMock = t.mock.method(console, 'error', () => {});
+        it('should return empty array and warn if both fail', async (t) => {
+            const warnMock = t.mock.method(console, 'warn', () => {});
             const primary = createMockProvider('primary', 100, true);
             const secondary = createMockProvider('secondary', 200, true);
             const engine = new MarketDataEngine(primary, secondary);
@@ -126,8 +127,9 @@ describe('MarketDataEngine', () => {
             const data = await engine.getHistoricalData('AAPL', '1D');
             assert.deepStrictEqual(data, []);
 
-            assert.strictEqual(errorMock.mock.callCount(), 1);
-            assert.match(errorMock.mock.calls[0].arguments[0], /Secondary provider failed to fetch historical data for AAPL: Error: secondary failed/);
+            assert.strictEqual(warnMock.mock.callCount(), 2);
+            assert.match(warnMock.mock.calls[0].arguments[0], /Primary provider failed to fetch historical data: Error: primary failed/);
+            assert.match(warnMock.mock.calls[1].arguments[0], /Secondary provider failed to fetch historical data for AAPL: Error: secondary failed/);
         });
     });
 });
