@@ -1,8 +1,7 @@
 /**
- * GET /api/market-data/historical?symbol=AAPL&timeframe=1D
+ * GET /api/market-data/history?symbol=AAPL&range=1M
  *
- * Legacy historical endpoint — delegates to MarketDataService.
- * Prefer /api/market-data/history going forward.
+ * Returns historical OHLC bars via MarketDataService.
  * Linear: AR-48
  */
 
@@ -11,9 +10,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getMarketDataService } from '@/lib/services/market-data-service';
 import { PolygonRateLimitError } from '@/lib/providers/polygon-massive-adapter';
 
+const VALID_RANGES = ['1D', '5D', '1M', '3M', '6M', '1Y', '5Y', 'MAX'];
+
 export async function GET(request: NextRequest) {
   const symbol = request.nextUrl.searchParams.get('symbol');
-  const timeframe = request.nextUrl.searchParams.get('timeframe') || '1D';
+  const range = request.nextUrl.searchParams.get('range');
 
   if (!symbol) {
     return NextResponse.json(
@@ -22,12 +23,24 @@ export async function GET(request: NextRequest) {
     );
   }
 
+  if (!range) {
+    return NextResponse.json(
+      { error: 'Missing required query parameter: range' },
+      { status: 400 },
+    );
+  }
+
+  const upperRange = range.toUpperCase();
+  if (!VALID_RANGES.includes(upperRange)) {
+    return NextResponse.json(
+      { error: `Invalid range. Valid values: ${VALID_RANGES.join(', ')}` },
+      { status: 400 },
+    );
+  }
+
   try {
     const service = getMarketDataService();
-    const bars = await service.getHistoricalPrices(
-      symbol.toUpperCase(),
-      timeframe.toUpperCase(),
-    );
+    const bars = await service.getHistoricalPrices(symbol.toUpperCase(), upperRange);
     return NextResponse.json({ data: bars });
   } catch (err) {
     if (err instanceof PolygonRateLimitError) {

@@ -1,57 +1,62 @@
 
-import { pgTable, text, doublePrecision, timestamp, uuid, index } from "drizzle-orm/pg-core";
+import { pgTable, text, numeric, doublePrecision, timestamp, uuid, index } from "drizzle-orm/pg-core";
 import { sql, relations } from "drizzle-orm";
 
-// Portfolios Table
+// ---------------------------------------------------------------------------
+// Portfolios
+// ---------------------------------------------------------------------------
 export const portfolios = pgTable("portfolios", {
     id: uuid("id").default(sql`gen_random_uuid()`).primaryKey(),
+    userId: uuid("user_id"),
     name: text("name").notNull(),
     description: text("description"),
-    // Snapshot fields (denormalized for quick access, similar to mock)
+    // Snapshot fields (denormalized for quick dashboard access)
     totalValue: doublePrecision("total_value").default(0),
     cashBalance: doublePrecision("cash_balance").default(0),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
-// Holdings Table
+// ---------------------------------------------------------------------------
+// Holdings
+// ---------------------------------------------------------------------------
 export const holdings = pgTable("holdings", {
     id: uuid("id").default(sql`gen_random_uuid()`).primaryKey(),
     portfolioId: uuid("portfolio_id").references(() => portfolios.id, { onDelete: 'cascade' }).notNull(),
-    ticker: text("ticker").notNull(),
+    symbol: text("symbol").notNull(),
     name: text("name").notNull(),
-    quantity: doublePrecision("quantity").notNull(),
-    avgCost: doublePrecision("avg_cost").notNull(),
-    // Current price and market value would typically be fetched live or cached
-    // We store them here to match the 'snapshot' nature of the mock data for now
+    quantity: numeric("quantity").notNull(),
+    avgCost: numeric("avg_cost").notNull(),
+    // Snapshot / cache columns — live values fetched at read-time
     currentPrice: doublePrecision("current_price"),
     marketValue: doublePrecision("market_value"),
     allocation: doublePrecision("allocation"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
-}, (table) => {
-    return {
-        portfolioIdIdx: index("holdings_portfolio_id_idx").on(table.portfolioId),
-    };
-});
+}, (table) => ({
+    portfolioIdIdx: index("holdings_portfolio_id_idx").on(table.portfolioId),
+    symbolIdx: index("holdings_symbol_idx").on(table.symbol),
+}));
 
-// Transactions Table
+// ---------------------------------------------------------------------------
+// Transactions
+// ---------------------------------------------------------------------------
 export const transactions = pgTable("transactions", {
     id: uuid("id").default(sql`gen_random_uuid()`).primaryKey(),
     portfolioId: uuid("portfolio_id").references(() => portfolios.id, { onDelete: 'cascade' }).notNull(),
-    date: timestamp("date").notNull(),
-    type: text("type").notNull(), // 'buy' | 'sell' | 'dividend' | 'deposit' | 'withdrawal'
-    ticker: text("ticker"),
-    quantity: doublePrecision("quantity"),
-    price: doublePrecision("price"),
-    amount: doublePrecision("amount").notNull(),
+    symbol: text("symbol"),
+    type: text("type").notNull(), // 'BUY' | 'SELL' (extensible: 'dividend' | 'deposit' | 'withdrawal')
+    quantity: numeric("quantity"),
+    price: numeric("price"),
+    timestamp: timestamp("timestamp").notNull(),
+    // Legacy / convenience columns kept for backward compat
+    amount: doublePrecision("amount"),
     notes: text("notes"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (table) => {
-    return {
-        transactionsPortfolioIdIdx: index("transactions_portfolio_id_idx").on(table.portfolioId),
-    };
-});
+}, (table) => ({
+    portfolioIdIdx: index("transactions_portfolio_id_idx").on(table.portfolioId),
+    symbolIdx: index("transactions_symbol_idx").on(table.symbol),
+}));
 
 export const portfoliosRelations = relations(portfolios, ({ many }) => ({
     holdings: many(holdings),

@@ -12,6 +12,10 @@ export class AlphaVantageProvider implements MarketDataProvider {
     async getQuotes(symbols: string[]): Promise<Record<string, MarketQuote>> {
         const quotes: Record<string, MarketQuote> = {};
 
+        // No key configured — behave as a no-op provider instead of burning
+        // requests that AV will reject with "apikey is invalid or missing".
+        if (!this.apiKey) return quotes;
+
         // Alpha Vantage free tier is heavily rate limited (e.g. 25 requests/day).
         // We fetch them sequentially or in batches if premium.
         for (const symbol of symbols) {
@@ -53,6 +57,8 @@ export class AlphaVantageProvider implements MarketDataProvider {
     }
 
     async getHistoricalData(symbol: string, timeframe: '1D' | '1H' | '1M', limit: number = 100): Promise<HistoricalBar[]> {
+        if (!this.apiKey) return [];
+
         let functionName = 'TIME_SERIES_DAILY';
         if (timeframe === '1H' || timeframe === '1M') {
             functionName = 'TIME_SERIES_INTRADAY';

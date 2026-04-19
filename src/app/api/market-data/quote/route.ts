@@ -1,8 +1,7 @@
 /**
- * GET /api/market-data/historical?symbol=AAPL&timeframe=1D
+ * GET /api/market-data/quote?symbol=AAPL
  *
- * Legacy historical endpoint — delegates to MarketDataService.
- * Prefer /api/market-data/history going forward.
+ * Returns a single real-time quote via MarketDataService.
  * Linear: AR-48
  */
 
@@ -13,7 +12,6 @@ import { PolygonRateLimitError } from '@/lib/providers/polygon-massive-adapter';
 
 export async function GET(request: NextRequest) {
   const symbol = request.nextUrl.searchParams.get('symbol');
-  const timeframe = request.nextUrl.searchParams.get('timeframe') || '1D';
 
   if (!symbol) {
     return NextResponse.json(
@@ -24,11 +22,8 @@ export async function GET(request: NextRequest) {
 
   try {
     const service = getMarketDataService();
-    const bars = await service.getHistoricalPrices(
-      symbol.toUpperCase(),
-      timeframe.toUpperCase(),
-    );
-    return NextResponse.json({ data: bars });
+    const quote = await service.getQuote(symbol.toUpperCase());
+    return NextResponse.json({ data: quote });
   } catch (err) {
     if (err instanceof PolygonRateLimitError) {
       return NextResponse.json(

@@ -23,10 +23,10 @@ async function HoldingsContent() {
         // Fallback to mock data
         const mockHoldings: Holding[] = mockPortfolios.flatMap(p => (p.holdings || []).map(h => ({
             id: h.id,
-            symbol: h.ticker,
+            symbol: h.symbol ?? h.ticker,
             name: h.name,
             price: h.currentPrice,
-            quantity: h.quantity,
+            quantity: Number(h.quantity),
             totalValue: h.marketValue,
             avgCost: h.avgCost,
             totalReturn: h.totalReturn,
@@ -43,7 +43,7 @@ async function HoldingsContent() {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let liveQuotes: Record<string, any> = {};
     try {
-        const symbols = Array.from(new Set<string>(dbHoldings.map((h: any) => h.ticker).filter(Boolean)));
+        const symbols = Array.from(new Set<string>(dbHoldings.map((h: any) => h.symbol).filter(Boolean)));
         if (symbols.length > 0) {
             liveQuotes = await marketDataEngine.getQuotes(symbols);
         }
@@ -55,20 +55,22 @@ async function HoldingsContent() {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const transformedHoldings: Holding[] = dbHoldings.map((h: any) => {
         // Calculate missing fields, preferring live quote if available
-        const currentPrice = liveQuotes[h.ticker]?.price ?? h.currentPrice ?? 0;
-        const marketValue = h.marketValue || (h.quantity * currentPrice);
-        const costBasis = h.quantity * h.avgCost;
+        const qty = Number(h.quantity);
+        const avg = Number(h.avgCost);
+        const currentPrice = liveQuotes[h.symbol]?.price ?? h.currentPrice ?? 0;
+        const marketValue = h.marketValue || (qty * currentPrice);
+        const costBasis = qty * avg;
         const totalReturn = marketValue - costBasis;
         const returnPercentage = costBasis !== 0 ? (totalReturn / costBasis) * 100 : 0;
 
         return {
             id: h.id,
-            symbol: h.ticker,
+            symbol: h.symbol,
             name: h.name,
             price: currentPrice,
-            quantity: h.quantity,
+            quantity: qty,
             totalValue: marketValue,
-            avgCost: h.avgCost,
+            avgCost: avg,
             totalReturn: totalReturn,
             returnPercentage: returnPercentage,
             trend: [currentPrice * 0.9, currentPrice * 0.95, currentPrice * 1.05, currentPrice], // Mock trend

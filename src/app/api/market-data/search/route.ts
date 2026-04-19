@@ -1,8 +1,7 @@
 /**
- * GET /api/market-data/historical?symbol=AAPL&timeframe=1D
+ * GET /api/market-data/search?query=apple
  *
- * Legacy historical endpoint — delegates to MarketDataService.
- * Prefer /api/market-data/history going forward.
+ * Returns symbol search results via MarketDataService.
  * Linear: AR-48
  */
 
@@ -12,23 +11,19 @@ import { getMarketDataService } from '@/lib/services/market-data-service';
 import { PolygonRateLimitError } from '@/lib/providers/polygon-massive-adapter';
 
 export async function GET(request: NextRequest) {
-  const symbol = request.nextUrl.searchParams.get('symbol');
-  const timeframe = request.nextUrl.searchParams.get('timeframe') || '1D';
+  const query = request.nextUrl.searchParams.get('query');
 
-  if (!symbol) {
+  if (!query) {
     return NextResponse.json(
-      { error: 'Missing required query parameter: symbol' },
+      { error: 'Missing required query parameter: query' },
       { status: 400 },
     );
   }
 
   try {
     const service = getMarketDataService();
-    const bars = await service.getHistoricalPrices(
-      symbol.toUpperCase(),
-      timeframe.toUpperCase(),
-    );
-    return NextResponse.json({ data: bars });
+    const results = await service.searchSymbol(query);
+    return NextResponse.json({ data: results });
   } catch (err) {
     if (err instanceof PolygonRateLimitError) {
       return NextResponse.json(

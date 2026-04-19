@@ -37,7 +37,7 @@ export default async function Dashboard() {
   let liveQuotes: Record<string, any> = {};
   if (!liveAccounts) {
     try {
-      const symbols = Array.from(new Set<string>(allPortfolios.flatMap(p => p.holdings).map((h: any) => h.ticker).filter(Boolean)));
+      const symbols = Array.from(new Set<string>(allPortfolios.flatMap(p => p.holdings).map((h: any) => h.symbol).filter(Boolean)));
       if (symbols.length > 0) {
         liveQuotes = await marketDataEngine.getQuotes(symbols);
       }
@@ -48,8 +48,8 @@ export default async function Dashboard() {
 
   const portfolioData: PortfolioSummary[] = allPortfolios.map(p => {
     const holdingsValue = p.holdings.reduce((sum, h) => {
-      const currentPrice = liveQuotes[h.ticker]?.price ?? h.currentPrice ?? 0;
-      const value = h.marketValue || (h.quantity * currentPrice);
+      const currentPrice = liveQuotes[h.symbol]?.price ?? h.currentPrice ?? 0;
+      const value = h.marketValue || (Number(h.quantity) * currentPrice);
       return sum + value;
     }, 0);
     const totalValue = (p.cashBalance || 0) + holdingsValue;
@@ -72,9 +72,9 @@ export default async function Dashboard() {
   let todayChange = 0;
   if (Object.keys(liveQuotes).length > 0) {
     todayChange = allPortfolios.flatMap(p => p.holdings).reduce((sum, h) => {
-      const quote = liveQuotes[h.ticker];
+      const quote = liveQuotes[h.symbol];
       if (quote) {
-        return sum + (quote.change * h.quantity);
+        return sum + (quote.change * Number(h.quantity));
       }
       return sum;
     }, 0);

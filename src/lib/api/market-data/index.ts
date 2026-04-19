@@ -59,7 +59,10 @@ export class MarketDataEngine {
         try {
             return await this.secondaryProvider.getQuotes(symbols);
         } catch (err) {
-            console.error(`Secondary provider failed to fetch quotes: ${err}. Returning empty quotes.`);
+            // Warn, not error: the secondary provider is a best-effort fallback
+            // (rate-limited free tiers are expected) and returning empty is the
+            // documented graceful-degradation path — don't trip the dev overlay.
+            console.warn(`Secondary provider failed to fetch quotes: ${err}. Returning empty quotes.`);
             return {};
         }
     }
@@ -76,7 +79,7 @@ export class MarketDataEngine {
         try {
             return await this.secondaryProvider.getHistoricalData(symbol, timeframe);
         } catch (err) {
-            console.error(`Secondary provider failed to fetch historical data for ${symbol}: ${err}. Returning empty data.`);
+            console.warn(`Secondary provider failed to fetch historical data for ${symbol}: ${err}. Returning empty data.`);
             return [];
         }
     }

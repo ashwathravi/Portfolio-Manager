@@ -1,0 +1,42 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__MCP_DOCKER__browser_take_screenshot",
+      "mcp__MCP_DOCKER__browser_click",
+      "mcp__MCP_DOCKER__browser_evaluate",
+      "Bash(npm run build:*)",
+      "mcp__MCP_DOCKER__browser_navigate",
+      "Bash(kill:*)",
+      "Bash(npx vercel:*)",
+      "Bash(lsof:*)",
+      "Bash(xargs kill:*)",
+      "Bash(docker stop:*)",
+      "Bash(docker rm:*)",
+      "Bash(docker compose:*)",
+      "Bash(open:*)",
+      "Bash(curl:*)",
+      "Bash(brew install:*)",
+      "Bash(npm install:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(gh auth setup-git:*)",
+      "Bash(gh pr view:*)",
+      "Bash(gh pr merge:*)",
+      "Bash(git fetch:*)",
+      "Bash(git checkout:*)",
+      "Bash(git merge:*)",
+      "Bash(git pull:*)",
+      "Bash(git branch:*)",
+      "Bash(gh pr create:*)",
+      "Bash(gh pr checkout:*)",
+      "mcp__Claude_Preview__preview_start",
+      "mcp__09d206f9-22e4-4c2c-ba2e-c802c6583a93__list_projects",
+      "mcp__09d206f9-22e4-4c2c-ba2e-c802c6583a93__list_issues",
+      "Bash(gh pr *)",
+      "Bash(npm run *)",
+      "Bash(npx eslint *)",
+      "Bash(npm test *)"
+    ]
+  }
+}

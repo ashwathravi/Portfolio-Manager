@@ -119,6 +119,34 @@ describe('AlphaVantageProvider', () => {
         }
     });
 
+    it('returns empty quotes without fetching when no api key is configured', async () => {
+        const originalFetch = global.fetch;
+        let fetchCalled = false;
+        global.fetch = async () => { fetchCalled = true; return { ok: true, json: async () => ({}) } as any; };
+        try {
+            const provider = new AlphaVantageProvider('');
+            const quotes = await provider.getQuotes(['AAPL', 'MSFT']);
+            assert.deepStrictEqual(quotes, {});
+            assert.strictEqual(fetchCalled, false);
+        } finally {
+            global.fetch = originalFetch;
+        }
+    });
+
+    it('returns empty bars without fetching when no api key is configured', async () => {
+        const originalFetch = global.fetch;
+        let fetchCalled = false;
+        global.fetch = async () => { fetchCalled = true; return { ok: true, json: async () => ({}) } as any; };
+        try {
+            const provider = new AlphaVantageProvider('');
+            const bars = await provider.getHistoricalData('AAPL', '1D');
+            assert.deepStrictEqual(bars, []);
+            assert.strictEqual(fetchCalled, false);
+        } finally {
+            global.fetch = originalFetch;
+        }
+    });
+
     it('should parse success response for getHistoricalData', async () => {
         const originalFetch = global.fetch;
         global.fetch = async () => {
