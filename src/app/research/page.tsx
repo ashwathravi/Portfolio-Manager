@@ -9,7 +9,6 @@ import {
     Plus,
     TrendingUp,
     BookOpen,
-    Eye,
     Archive,
     Target,
     Clock,
@@ -22,21 +21,11 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
 import { NewThesisModal } from '@/components/research/NewThesisModal';
 import { NewJournalEntryModal } from '@/components/research/NewJournalEntryModal';
+import { WatchlistSection, type WatchlistItem } from '@/components/research/WatchlistSection';
 import { useThesisStore } from '@/lib/research/useThesisStore';
 import { useJournalStore } from '@/lib/research/useJournalStore';
 import type { Thesis } from '@/lib/research/thesis';
 import type { JournalEntry } from '@/lib/research/journal';
-
-interface WatchlistItem {
-    id: string;
-    ticker: string;
-    companyName: string;
-    reason: string;
-    dateAdded: string;
-    currentPrice: number;
-    targetEntry: number;
-    notes: string;
-}
 
 
 const mockWatchlist: WatchlistItem[] = [
@@ -296,57 +285,7 @@ function ResearchContent() {
 
                 {/* Watchlists */}
                 <TabsContent value="watchlist" className="space-y-4">
-                    <div className="space-y-3">
-                        {mockWatchlist.map((item) => (
-                            <Card key={item.id} className="p-6 transition-all hover:shadow-md">
-                                <div className="flex items-start justify-between">
-                                    <div className="flex-1 space-y-3">
-                                        <div className="flex items-center gap-3">
-                                            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
-                                                <span className="text-sm font-bold">{item.ticker.slice(0, 2)}</span>
-                                            </div>
-                                            <div>
-                                                <h3 className="font-bold text-lg">{item.ticker}</h3>
-                                                <p className="text-sm text-muted-foreground">{item.companyName}</p>
-                                            </div>
-                                        </div>
-
-                                        <div>
-                                            <p className="font-medium mb-1">{item.reason}</p>
-                                            <p className="text-sm text-muted-foreground">{item.notes}</p>
-                                        </div>
-
-                                        <div className="grid grid-cols-3 gap-4 pt-2">
-                                            <div>
-                                                <p className="text-xs text-muted-foreground mb-1">Current Price</p>
-                                                <p className="font-bold">${item.currentPrice.toFixed(2)}</p>
-                                            </div>
-                                            <div>
-                                                <p className="text-xs text-muted-foreground mb-1">Target Entry</p>
-                                                <p className="font-bold text-primary">${item.targetEntry.toFixed(2)}</p>
-                                            </div>
-                                            <div>
-                                                <p className="text-xs text-muted-foreground mb-1">Distance</p>
-                                                <p className={`font-bold ${item.currentPrice > item.targetEntry ? 'text-destructive' : 'text-primary'}`}>
-                                                    {(((item.targetEntry - item.currentPrice) / item.currentPrice) * 100).toFixed(1)}%
-                                                </p>
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    <div className="flex flex-col items-end gap-2">
-                                        <Badge variant="secondary" className="whitespace-nowrap">
-                                            Added {item.dateAdded}
-                                        </Badge>
-                                        <Button variant="outline" size="sm" onClick={() => router.push(`/research/thesis/${item.ticker}`)}>
-                                            <Eye className="h-4 w-4 mr-2" />
-                                            View Details
-                                        </Button>
-                                    </div>
-                                </div>
-                            </Card>
-                        ))}
-                    </div>
+                    <WatchlistSection items={mockWatchlist} />
                 </TabsContent>
 
                 {/* Decision Journal */}
