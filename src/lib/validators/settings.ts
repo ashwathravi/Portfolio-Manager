@@ -42,7 +42,28 @@ export const preferencesSchema = z.object({
     marketDataRefreshSeconds: z.number().int().min(15, "Minimum 15 seconds").max(3600, "Maximum 60 minutes"),
 });
 
+export const alertRuleSchema = z.object({
+    name: z.string().trim().min(1, "Name is required").max(60, "Name is too long").pipe(safeText),
+    metric: z.enum(['price', 'price_change_pct', 'portfolio_value', 'portfolio_day_change_pct']),
+    symbol: z.string().trim().toUpperCase().max(10, "Symbol is too long").regex(/^[A-Z.\-]*$/, "Invalid symbol").optional().or(z.literal('')),
+    comparator: z.enum(['gte', 'lte', 'gt', 'lt', 'eq']),
+    threshold: z.number().finite(),
+    enabled: z.boolean(),
+    rearm: z.enum(['once', 'always', 'daily']),
+    note: z.string().trim().max(200, "Note is too long").optional().or(z.literal('')),
+}).superRefine((data, ctx) => {
+    const needsSymbol = data.metric === 'price' || data.metric === 'price_change_pct';
+    if (needsSymbol && !data.symbol) {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "Symbol is required for this metric",
+            path: ['symbol'],
+        });
+    }
+});
+
 export type ProfileFormValues = z.infer<typeof profileSchema>;
 export type PasswordChangeValues = z.infer<typeof passwordChangeSchema>;
 export type TagFormValues = z.infer<typeof tagSchema>;
 export type PreferencesFormValues = z.infer<typeof preferencesSchema>;
+export type AlertRuleFormValues = z.infer<typeof alertRuleSchema>;

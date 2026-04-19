@@ -2,12 +2,14 @@
 
 import { AppSidebar } from "./AppSidebar";
 import { TopBar } from "./TopBar";
+import { useAlertEngine } from "@/lib/alerts/useAlertEngine";
 
 interface AppShellProps {
     children: React.ReactNode;
 }
 
 export function AppShell({ children }: AppShellProps) {
+    useAlertEngine();
     return (
         <div className="min-h-screen bg-background text-foreground">
             <AppSidebar />

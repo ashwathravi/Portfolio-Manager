@@ -1,10 +1,10 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Search, Bell, Menu } from 'lucide-react';
+import { Search, Menu } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { toast } from 'sonner';
 import { useUiStore } from '@/lib/stores/uiStore';
+import { NotificationBell } from '@/components/layout/NotificationBell';
 
 
 interface TopBarProps {
@@ -47,15 +47,7 @@ export function TopBar({ onSearchClick }: TopBarProps) {
                 </div>
 
                 <div className="flex items-center gap-3">
-                    <Button
-                        variant="ghost"
-                        size="icon"
-                        className="relative hover:bg-accent"
-                        onClick={() => toast('No new notifications')}
-                    >
-                        <span className="sr-only">Notifications</span>
-                        <Bell className="h-5 w-5" aria-hidden="true" />
-                    </Button>
+                    <NotificationBell />
                 </div>
             </div>
         </div>

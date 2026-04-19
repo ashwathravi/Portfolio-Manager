@@ -1,28 +1,40 @@
 "use client";
 
+import { useSearchParams } from "next/navigation";
+import { Suspense } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ProfileForm } from "@/components/settings/ProfileForm";
 import { IntegrationsList } from "@/components/settings/IntegrationsList";
 import { NotificationPreferences } from "@/components/settings/NotificationPreferences";
 import { SecuritySettings } from "@/components/settings/SecuritySettings";
 import { DataManagement } from "@/components/settings/DataManagement";
-import { User, Bell, Shield, Database, Palette, Link as LinkIcon, Tag, Key, Sliders } from "lucide-react";
+import { User, Bell, Shield, Database, Palette, Link as LinkIcon, Tag, Key, Sliders, BellRing } from "lucide-react";
 import { AppearanceSettings } from "@/components/settings/AppearanceSettings";
 import { TagsManager } from "@/components/settings/TagsManager";
 import { ApiKeysSettings } from "@/components/settings/ApiKeysSettings";
 import { PreferencesSettings } from "@/components/settings/PreferencesSettings";
+import { AlertRulesManager } from "@/components/settings/AlertRulesManager";
 
-export default function SettingsPage() {
+const VALID_TABS = new Set([
+    "profile",
+    "preferences",
+    "notifications",
+    "alerts",
+    "security",
+    "api-keys",
+    "data",
+    "appearance",
+    "accounts",
+    "tags",
+]);
+
+function SettingsTabs() {
+    const searchParams = useSearchParams();
+    const requestedTab = searchParams?.get("tab");
+    const defaultTab = requestedTab && VALID_TABS.has(requestedTab) ? requestedTab : "profile";
+
     return (
-        <div className="space-y-6 p-10 pb-16 block">
-            <div className="space-y-0.5">
-                <h2 className="text-2xl font-bold tracking-tight">Settings</h2>
-                <p className="text-muted-foreground">
-                    Manage your account preferences and application settings
-                </p>
-            </div>
-
-            <Tabs defaultValue="profile" className="space-y-6">
+        <Tabs defaultValue={defaultTab} className="space-y-6">
                 <TabsList className="flex h-auto w-full flex-wrap justify-start gap-2 bg-transparent p-0">
                     <TabsTrigger
                         value="profile"
@@ -44,6 +56,13 @@ export default function SettingsPage() {
                     >
                         <Bell className="h-4 w-4" />
                         Notifications
+                    </TabsTrigger>
+                    <TabsTrigger
+                        value="alerts"
+                        className="data-[state=active]:bg-muted data-[state=active]:text-foreground rounded-full px-4 py-2 gap-2"
+                    >
+                        <BellRing className="h-4 w-4" />
+                        Alerts
                     </TabsTrigger>
                     <TabsTrigger
                         value="security"
@@ -101,6 +120,10 @@ export default function SettingsPage() {
                     <NotificationPreferences />
                 </TabsContent>
 
+                <TabsContent value="alerts" className="space-y-6">
+                    <AlertRulesManager />
+                </TabsContent>
+
                 <TabsContent value="security" className="space-y-6">
                     <SecuritySettings />
                 </TabsContent>
@@ -125,6 +148,22 @@ export default function SettingsPage() {
                     <TagsManager />
                 </TabsContent>
             </Tabs>
+    );
+}
+
+export default function SettingsPage() {
+    return (
+        <div className="space-y-6 p-10 pb-16 block">
+            <div className="space-y-0.5">
+                <h2 className="text-2xl font-bold tracking-tight">Settings</h2>
+                <p className="text-muted-foreground">
+                    Manage your account preferences and application settings
+                </p>
+            </div>
+
+            <Suspense fallback={null}>
+                <SettingsTabs />
+            </Suspense>
         </div>
     );
 }
