@@ -5,8 +5,9 @@ import { useRouter } from 'next/navigation';
 import { StatCard } from '@/components/data-display/StatCard';
 import { MetricCard } from '@/components/data-display/MetricCard';
 import { Card } from '@/components/ui/card';
-import { TrendingUp, Activity, AlertTriangle, Award, Calendar, ChevronDown, Settings, Plus, ChevronLeft, ChevronRight, Share2 } from 'lucide-react';
+import { TrendingUp, Activity, AlertTriangle, Award, Calendar, ChevronDown, Settings, Plus, ChevronLeft, ChevronRight, Share2, Download } from 'lucide-react';
 import { toast } from 'sonner';
+import { exportToCsv } from '@/lib/exportCsv';
 import {
     Table,
     TableBody,
@@ -554,7 +555,28 @@ export default function PerformancePage() {
 
             {/* Performance Table — driven by computePeriodMetrics */}
             <Card className="p-6">
-                <h3 className="mb-4 font-semibold">Performance by Period</h3>
+                <div className="flex items-center justify-between mb-4">
+                    <h3 className="font-semibold">Performance by Period</h3>
+                    <button
+                        onClick={() =>
+                            exportToCsv(
+                                'performance-by-period.csv',
+                                periodMetrics.map((m) => ({
+                                    Period: m.period,
+                                    Return: formatPercent(m.return),
+                                    Benchmark: formatPercent(m.benchmark),
+                                    Alpha: formatPercent(m.alpha),
+                                    Sharpe: m.sharpe.toFixed(2),
+                                    MaxDrawdown: formatPercent(m.maxDrawdown),
+                                })),
+                            )
+                        }
+                        className="flex items-center gap-2 px-3 py-1.5 text-sm rounded-lg border border-border hover:border-primary/40 transition-colors"
+                    >
+                        <Download className="h-4 w-4" />
+                        Export CSV
+                    </button>
+                </div>
                 <div className="rounded-md border">
                     <Table>
                         <TableHeader>
