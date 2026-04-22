@@ -3,6 +3,7 @@ import { Suspense } from 'react';
 import { db } from '@/db';
 import { holdings } from '@/db/schema';
 import { HoldingsTable, Holding } from '@/components/holdings/HoldingsTable';
+import { HoldingsTableLive } from '@/components/holdings/HoldingsTableLive';
 import { mockPortfolios } from '@/lib/mockData';
 import { marketDataEngine } from '@/lib/api/market-data';
 import HoldingsLoading from './loading';
@@ -92,7 +93,17 @@ async function HoldingsContent() {
         );
     }
 
-    return <HoldingsTable holdings={transformedHoldings} />;
+    const costBasisBySymbol: Record<string, { quantity: number; avgCost: number }> = {};
+    for (const h of transformedHoldings) {
+        costBasisBySymbol[h.symbol] = { quantity: h.quantity, avgCost: h.avgCost };
+    }
+
+    return (
+        <HoldingsTableLive
+            initialHoldings={transformedHoldings}
+            costBasisBySymbol={costBasisBySymbol}
+        />
+    );
 }
 
 export default function CurrentHoldingsPage() {

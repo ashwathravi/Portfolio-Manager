@@ -1,49 +1,35 @@
 
 import { db } from '@/db';
-import { StatCard } from '@/components/data-display/StatCard';
 import { PortfolioCard, type PortfolioSummary } from '@/components/portfolios/PortfolioCard';
 import { ActivityFeed } from '@/components/dashboard/ActivityFeed';
 import { AssetAllocation } from '@/components/dashboard/AssetAllocation';
 import { PortfolioPerformance } from '@/components/dashboard/PortfolioPerformance';
-import { Wallet, TrendingUp, DollarSign, Activity, Calendar, Plus } from 'lucide-react';
+import { TrendingUp, Calendar, Plus } from 'lucide-react';
 import Link from 'next/link';
 import { DashboardGreeting } from '@/components/dashboard/DashboardGreeting';
+import { DashboardLiveStats, type DashboardHoldingSeed } from '@/components/dashboard/DashboardLiveStats';
 import { mockTransactions } from '@/lib/mockData';
 import { marketDataEngine } from '@/lib/api/market-data';
-import { schwabClient } from '@/lib/api/schwab/client';
 
 export const dynamic = 'force-dynamic'; // Ensure it doesn't cache stale data on build
 
 export default async function Dashboard() {
-  // 1. Try to fetch from Schwab if we have a token eventually (Mocked here)
-  let liveAccounts: any = null;
-  try {
-    // We would use an actual saved token here, but for now we fallback
-    // liveAccounts = await schwabClient.getAccounts('dummy_token');
-  } catch (e) {
-    console.warn('Schwab authentication missing, falling back to database', e);
-  }
-
-  // 2. Fetch Portfolios from DB as fallback/base
-  // querying raw for now, or using query builder if relations work
   const allPortfolios = await db.query.portfolios.findMany({
     with: {
       holdings: true,
-      // transactions: true // If we want to verify seed transactions
     }
   });
 
-  // Try to fetch live quotes for the dashboard
+  // Fetch live quotes once server-side so the initial paint has current prices.
+  // Client-side auto-refresh continues via DashboardLiveStats.
   let liveQuotes: Record<string, any> = {};
-  if (!liveAccounts) {
-    try {
-      const symbols = Array.from(new Set<string>(allPortfolios.flatMap(p => p.holdings).map((h: any) => h.symbol).filter(Boolean)));
-      if (symbols.length > 0) {
-        liveQuotes = await marketDataEngine.getQuotes(symbols);
-      }
-    } catch (e) {
-      console.warn('Failed to fetch live quotes for dashboard', e);
+  try {
+    const symbols = Array.from(new Set<string>(allPortfolios.flatMap(p => p.holdings).map((h: any) => h.symbol).filter(Boolean)));
+    if (symbols.length > 0) {
+      liveQuotes = await marketDataEngine.getQuotes(symbols);
     }
+  } catch (e) {
+    console.warn('Failed to fetch live quotes for dashboard', e);
   }
 
   const portfolioData: PortfolioSummary[] = allPortfolios.map(p => {
@@ -65,10 +51,8 @@ export default async function Dashboard() {
     };
   });
 
-  const totalNetWorth = portfolioData.reduce((sum, p) => sum + p.totalValue, 0);
-
-  // Mocking change data since we don't have historical snapshots in DB
-  // But we could use `liveQuotes` daily change to calculate an accurate daily P&L.
+  // Compute a server-side fallback for today's P&L so initial paint isn't blank
+  // before the client-side refresh lands.
   let todayChange = 0;
   if (Object.keys(liveQuotes).length > 0) {
     todayChange = allPortfolios.flatMap(p => p.holdings).reduce((sum, h) => {
@@ -81,7 +65,18 @@ export default async function Dashboard() {
   } else {
     todayChange = 1240.50; // default mock
   }
-  const todayChangePercent = totalNetWorth > 0 ? (todayChange / (totalNetWorth - todayChange)) * 100 : 0;
+
+  const cashTotal = allPortfolios.reduce((sum, p) => sum + (p.cashBalance || 0), 0);
+  const dashboardHoldings: DashboardHoldingSeed[] = allPortfolios.flatMap((p) =>
+    p.holdings
+      .filter((h: any) => !!h.symbol)
+      .map((h: any) => ({
+        symbol: h.symbol,
+        quantity: Number(h.quantity) || 0,
+        currentPrice: Number(liveQuotes[h.symbol]?.price ?? h.currentPrice ?? 0),
+        marketValue: Number(h.marketValue) || 0,
+      })),
+  );
 
   const currentHour = new Date().getHours();
   const greeting = currentHour < 12 ? 'Morning' : currentHour < 18 ? 'Afternoon' : 'Evening';
@@ -129,32 +124,12 @@ export default async function Dashboard() {
         </div>
       </div>
 
-      {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6">
-        <StatCard
-          label="Total Net Worth"
-          value={`$${totalNetWorth.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
-          change={1.2}
-          changeLabel="vs last month"
-          trend="up"
-          icon={<Wallet className="h-6 w-6" />}
-        />
-        <StatCard
-          label="Today's P&L ($)"
-          value={`+$${todayChange.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
-          subtitle="Updated 5 min ago"
-          changeLabel="Good day"
-          trend="up"
-          change={undefined}
-          icon={<DollarSign className="h-6 w-6" />}
-        />
-        <StatCard
-          label="Today's P&L (%)"
-          value={`+${todayChangePercent.toFixed(2)}%`}
-          subtitle="Outperforming S&P 500 by 0.8%"
-          icon={<Activity className="h-6 w-6" />}
-        />
-      </div>
+      {/* Stats Grid — live, auto-refreshing */}
+      <DashboardLiveStats
+        cashTotal={cashTotal}
+        holdings={dashboardHoldings}
+        fallbackTodayChange={todayChange}
+      />
 
       {/* Charts Section */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
