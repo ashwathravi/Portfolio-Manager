@@ -4,15 +4,19 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Switch } from "@/components/ui/switch";
-import { useSettingsStore, type ThemeMode } from "@/lib/stores/settingsStore";
+import {
+    useSettingsStore,
+    type DensityMode,
+    type ThemeMode,
+} from "@/lib/stores/settingsStore";
 import { toast } from "sonner";
 
 export function AppearanceSettings() {
     const theme = useSettingsStore((s) => s.appearance.theme);
-    const compactMode = useSettingsStore((s) => s.appearance.compactMode);
+    const density = useSettingsStore((s) => s.appearance.density);
     const animationsEnabled = useSettingsStore((s) => s.appearance.animationsEnabled);
     const setTheme = useSettingsStore((s) => s.setTheme);
-    const toggleCompactMode = useSettingsStore((s) => s.toggleCompactMode);
+    const setDensity = useSettingsStore((s) => s.setDensity);
     const toggleAnimations = useSettingsStore((s) => s.toggleAnimations);
 
     const handleThemeChange = (value: string) => {
@@ -24,9 +28,11 @@ export function AppearanceSettings() {
         toast.success(`Theme set to ${label}`);
     };
 
-    const handleCompactToggle = () => {
-        toggleCompactMode();
-        toast.success(compactMode ? "Compact mode disabled" : "Compact mode enabled");
+    const handleDensityChange = (next: DensityMode) => {
+        setDensity(next);
+        toast.success(
+            next === "compact" ? "Compact density enabled" : "Comfortable density enabled"
+        );
     };
 
     const handleAnimationsToggle = () => {
@@ -137,19 +143,30 @@ export function AppearanceSettings() {
 
                 <hr className="border-border" />
 
-                {/* Compact Mode */}
-                <div className="flex items-center justify-between space-x-2">
-                    <Label htmlFor="compact-mode" className="flex flex-col space-y-1">
-                        <span>Compact Mode</span>
-                        <span className="font-normal text-xs text-muted-foreground">
-                            Reduce spacing and padding for more content density
-                        </span>
-                    </Label>
-                    <Switch
-                        id="compact-mode"
-                        checked={compactMode}
-                        onCheckedChange={handleCompactToggle}
-                    />
+                {/* Density (AR-64) */}
+                <div>
+                    <h3 className="font-medium mb-3">Density</h3>
+                    <p className="text-xs text-muted-foreground mb-3">
+                        Tighten card padding, table rows, and font sizes across the app.
+                    </p>
+                    <div
+                        role="radiogroup"
+                        aria-label="Interface density"
+                        className="pm-seg pm-seg-full max-w-sm"
+                    >
+                        {(["comfortable", "compact"] as const).map((d) => (
+                            <button
+                                key={d}
+                                role="radio"
+                                aria-checked={density === d}
+                                type="button"
+                                onClick={() => handleDensityChange(d)}
+                                className={`pm-seg-btn ${density === d ? "is-active" : ""}`}
+                            >
+                                {d}
+                            </button>
+                        ))}
+                    </div>
                 </div>
 
                 <hr className="border-border" />

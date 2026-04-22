@@ -18,13 +18,17 @@ export function resolveTheme(
 /**
  * ThemeProvider — writes the Ledger design tokens to the document:
  *   - `<body data-theme>`   → light | dim | dark  (AR-63)
+ *   - `<body data-density>` → comfortable | compact  (AR-64)
  *   - `<html class="dark">` → kept in sync with resolved theme for legacy
  *     Tailwind `dark:` variants
+ *   - `data-compact` on `<html>` stays mirrored for back-compat with
+ *     pre-Ledger callers.
  *
  * Writes happen inside useEffect so SSR output is unaffected.
  */
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
     const theme = useSettingsStore((state) => state.appearance.theme);
+    const density = useSettingsStore((state) => state.appearance.density);
     const compactMode = useSettingsStore((state) => state.appearance.compactMode);
 
     // Theme (light / dim / dark / system)
@@ -55,14 +59,21 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
         apply(resolveTheme(theme, false));
     }, [theme]);
 
-    // Apply compact mode (legacy `data-compact` on <html>)
+    // Density (comfortable / compact)
     useEffect(() => {
-        if (compactMode) {
-            document.documentElement.setAttribute("data-compact", "true");
+        const root = document.documentElement;
+        const body = document.body;
+
+        body.setAttribute("data-density", density);
+
+        // Back-compat: pre-Ledger selectors still read `data-compact` on the
+        // <html> element. Mirror the density flag so both coexist.
+        if (density === "compact" || compactMode) {
+            root.setAttribute("data-compact", "true");
         } else {
-            document.documentElement.removeAttribute("data-compact");
+            root.removeAttribute("data-compact");
         }
-    }, [compactMode]);
+    }, [density, compactMode]);
 
     return <>{children}</>;
 }

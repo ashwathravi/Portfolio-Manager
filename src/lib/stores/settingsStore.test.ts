@@ -100,11 +100,37 @@ describe('settingsStore', () => {
         });
     });
 
+    describe('setDensity (AR-64)', () => {
+        test('defaults to comfortable', () => {
+            assert.strictEqual(
+                useSettingsStore.getState().appearance.density,
+                'comfortable'
+            );
+        });
+
+        test('sets density to compact and mirrors compactMode', () => {
+            useSettingsStore.getState().setDensity('compact');
+            const { density, compactMode } = useSettingsStore.getState().appearance;
+            assert.strictEqual(density, 'compact');
+            assert.strictEqual(compactMode, true);
+        });
+
+        test('setting density back to comfortable clears compactMode mirror', () => {
+            useSettingsStore.getState().setDensity('compact');
+            useSettingsStore.getState().setDensity('comfortable');
+            const { density, compactMode } = useSettingsStore.getState().appearance;
+            assert.strictEqual(density, 'comfortable');
+            assert.strictEqual(compactMode, false);
+        });
+    });
+
     describe('toggleCompactMode', () => {
-        test('should flip compactMode', () => {
+        test('should flip compactMode and sync density', () => {
             assert.strictEqual(useSettingsStore.getState().appearance.compactMode, false);
+            assert.strictEqual(useSettingsStore.getState().appearance.density, 'comfortable');
             useSettingsStore.getState().toggleCompactMode();
             assert.strictEqual(useSettingsStore.getState().appearance.compactMode, true);
+            assert.strictEqual(useSettingsStore.getState().appearance.density, 'compact');
         });
     });
 

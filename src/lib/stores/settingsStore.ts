@@ -23,9 +23,15 @@ export interface SecuritySettings {
 }
 
 export type ThemeMode = 'light' | 'dim' | 'dark' | 'system';
+export type DensityMode = 'comfortable' | 'compact';
 
 export interface AppearanceSettings {
     theme: ThemeMode;
+    /** Source of truth for density (AR-64). `compactMode` stays mirrored
+     *  for back-compat with pre-Ledger callers. */
+    density: DensityMode;
+    /** @deprecated Prefer `density === 'compact'`. Kept in sync so existing
+     *  Tailwind `data-compact="true"` selectors continue to work. */
     compactMode: boolean;
     animationsEnabled: boolean;
 }
@@ -90,6 +96,7 @@ export interface SettingsState {
 
     // Actions - Appearance
     setTheme: (theme: ThemeMode) => void;
+    setDensity: (density: DensityMode) => void;
     toggleCompactMode: () => void;
     toggleAnimations: () => void;
 
@@ -137,6 +144,7 @@ const defaultSecurity: SecuritySettings = {
 
 const defaultAppearance: AppearanceSettings = {
     theme: 'light',
+    density: 'comfortable',
     compactMode: false,
     animationsEnabled: true,
 };
@@ -239,10 +247,27 @@ export const useSettingsStore = create<SettingsState>()(
                     appearance: { ...state.appearance, theme },
                 })),
 
-            toggleCompactMode: () =>
+            setDensity: (density) =>
                 set((state) => ({
-                    appearance: { ...state.appearance, compactMode: !state.appearance.compactMode },
+                    appearance: {
+                        ...state.appearance,
+                        density,
+                        // Keep the legacy boolean mirror in sync
+                        compactMode: density === 'compact',
+                    },
                 })),
+
+            toggleCompactMode: () =>
+                set((state) => {
+                    const nextCompact = !state.appearance.compactMode;
+                    return {
+                        appearance: {
+                            ...state.appearance,
+                            compactMode: nextCompact,
+                            density: nextCompact ? 'compact' : 'comfortable',
+                        },
+                    };
+                }),
 
             toggleAnimations: () =>
                 set((state) => ({
