@@ -94,43 +94,60 @@ describe('settingsStore', () => {
             assert.strictEqual(useSettingsStore.getState().appearance.theme, 'system');
         });
 
-        test('should set theme to dim (AR-63)', () => {
+        test('should set theme to dim (AR-63 Ledger three-way theme)', () => {
             useSettingsStore.getState().setTheme('dim');
             assert.strictEqual(useSettingsStore.getState().appearance.theme, 'dim');
         });
     });
 
     describe('setDensity (AR-64)', () => {
-        test('defaults to comfortable', () => {
-            assert.strictEqual(
-                useSettingsStore.getState().appearance.density,
-                'comfortable'
-            );
+        test('should default to comfortable', () => {
+            assert.strictEqual(useSettingsStore.getState().appearance.density, 'comfortable');
+            assert.strictEqual(useSettingsStore.getState().appearance.compactMode, false);
         });
 
-        test('sets density to compact and mirrors compactMode', () => {
+        test('should switch to compact and mirror compactMode', () => {
             useSettingsStore.getState().setDensity('compact');
-            const { density, compactMode } = useSettingsStore.getState().appearance;
-            assert.strictEqual(density, 'compact');
-            assert.strictEqual(compactMode, true);
+            assert.strictEqual(useSettingsStore.getState().appearance.density, 'compact');
+            assert.strictEqual(useSettingsStore.getState().appearance.compactMode, true);
         });
 
-        test('setting density back to comfortable clears compactMode mirror', () => {
+        test('should switch back to comfortable and clear compactMode', () => {
             useSettingsStore.getState().setDensity('compact');
             useSettingsStore.getState().setDensity('comfortable');
-            const { density, compactMode } = useSettingsStore.getState().appearance;
-            assert.strictEqual(density, 'comfortable');
-            assert.strictEqual(compactMode, false);
+            assert.strictEqual(useSettingsStore.getState().appearance.density, 'comfortable');
+            assert.strictEqual(useSettingsStore.getState().appearance.compactMode, false);
         });
     });
 
     describe('toggleCompactMode', () => {
-        test('should flip compactMode and sync density', () => {
+        test('should flip compactMode and keep density in sync', () => {
             assert.strictEqual(useSettingsStore.getState().appearance.compactMode, false);
-            assert.strictEqual(useSettingsStore.getState().appearance.density, 'comfortable');
             useSettingsStore.getState().toggleCompactMode();
             assert.strictEqual(useSettingsStore.getState().appearance.compactMode, true);
             assert.strictEqual(useSettingsStore.getState().appearance.density, 'compact');
+            useSettingsStore.getState().toggleCompactMode();
+            assert.strictEqual(useSettingsStore.getState().appearance.compactMode, false);
+            assert.strictEqual(useSettingsStore.getState().appearance.density, 'comfortable');
+        });
+    });
+
+    describe('setAccent (AR-65)', () => {
+        test('should default to Forest green', () => {
+            assert.strictEqual(useSettingsStore.getState().appearance.accent, '#17cf54');
+        });
+
+        test('should accept a preset accent hex', () => {
+            useSettingsStore.getState().setAccent('#6366f1');
+            assert.strictEqual(useSettingsStore.getState().appearance.accent, '#6366f1');
+        });
+
+        test('should not mutate unrelated appearance fields', () => {
+            useSettingsStore.getState().setTheme('dim');
+            useSettingsStore.getState().setAccent('#f59e0b');
+            const a = useSettingsStore.getState().appearance;
+            assert.strictEqual(a.theme, 'dim');
+            assert.strictEqual(a.accent, '#f59e0b');
         });
     });
 
@@ -319,6 +336,8 @@ describe('settingsStore', () => {
             useSettingsStore.getState().updateNotification('portfolioUpdates', false);
             useSettingsStore.getState().toggleTwoFactor();
             useSettingsStore.getState().setTheme('dark');
+            useSettingsStore.getState().setDensity('compact');
+            useSettingsStore.getState().setAccent('#6366f1');
             useSettingsStore.getState().setProviderKey('polygon', 'secret');
             useSettingsStore.getState().updatePreferences({ baseCurrency: 'EUR' });
             useSettingsStore.getState().deleteTag(useSettingsStore.getState().tags[0].id);
@@ -332,6 +351,8 @@ describe('settingsStore', () => {
             assert.strictEqual(state.notifications.portfolioUpdates, true);
             assert.strictEqual(state.security.twoFactorEnabled, false);
             assert.strictEqual(state.appearance.theme, 'light');
+            assert.strictEqual(state.appearance.density, 'comfortable');
+            assert.strictEqual(state.appearance.accent, '#17cf54');
             assert.strictEqual(state.apiKeys.polygon, '');
             assert.strictEqual(state.preferences.baseCurrency, 'USD');
             assert.strictEqual(state.tags.length, 3);

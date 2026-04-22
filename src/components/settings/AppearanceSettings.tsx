@@ -5,6 +5,7 @@ import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Switch } from "@/components/ui/switch";
 import {
+    ACCENT_PRESETS,
     useSettingsStore,
     type DensityMode,
     type ThemeMode,
@@ -15,9 +16,11 @@ export function AppearanceSettings() {
     const theme = useSettingsStore((s) => s.appearance.theme);
     const density = useSettingsStore((s) => s.appearance.density);
     const animationsEnabled = useSettingsStore((s) => s.appearance.animationsEnabled);
+    const accent = useSettingsStore((s) => s.appearance.accent);
     const setTheme = useSettingsStore((s) => s.setTheme);
     const setDensity = useSettingsStore((s) => s.setDensity);
     const toggleAnimations = useSettingsStore((s) => s.toggleAnimations);
+    const setAccent = useSettingsStore((s) => s.setAccent);
 
     const handleThemeChange = (value: string) => {
         setTheme(value as ThemeMode);
@@ -38,6 +41,11 @@ export function AppearanceSettings() {
     const handleAnimationsToggle = () => {
         toggleAnimations();
         toast.success(animationsEnabled ? "Animations disabled" : "Animations enabled");
+    };
+
+    const handleAccentChange = (value: string, name: string) => {
+        setAccent(value);
+        toast.success(`Accent set to ${name}`);
     };
 
     return (
@@ -166,6 +174,50 @@ export function AppearanceSettings() {
                                 {d}
                             </button>
                         ))}
+                    </div>
+                </div>
+
+                <hr className="border-border" />
+
+                {/* Accent (AR-65) */}
+                <div>
+                    <h3 className="font-medium mb-3">Accent</h3>
+                    <p className="text-xs text-muted-foreground mb-3">
+                        Drives the active-nav highlight, primary buttons, and chart lines.
+                    </p>
+                    <div
+                        role="radiogroup"
+                        aria-label="Accent color"
+                        className="flex items-center gap-3"
+                    >
+                        {ACCENT_PRESETS.map((a) => {
+                            const active = accent === a.value;
+                            return (
+                                <button
+                                    key={a.value}
+                                    type="button"
+                                    role="radio"
+                                    aria-checked={active}
+                                    aria-label={a.name}
+                                    onClick={() => handleAccentChange(a.value, a.name)}
+                                    className="pm-accent-dot"
+                                    style={{
+                                        background: a.value,
+                                        width: 28,
+                                        height: 28,
+                                        borderRadius: "50%",
+                                        border: active
+                                            ? "2px solid var(--pm-fg)"
+                                            : "2px solid var(--pm-border)",
+                                        boxShadow: active
+                                            ? "0 0 0 2px var(--pm-card), 0 0 0 4px " + a.value
+                                            : "none",
+                                        cursor: "pointer",
+                                        transition: "box-shadow 120ms ease-out, border-color 120ms ease-out",
+                                    }}
+                                />
+                            );
+                        })}
                     </div>
                 </div>
 

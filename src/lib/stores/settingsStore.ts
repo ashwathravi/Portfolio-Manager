@@ -25,6 +25,22 @@ export interface SecuritySettings {
 export type ThemeMode = 'light' | 'dim' | 'dark' | 'system';
 export type DensityMode = 'comfortable' | 'compact';
 
+/**
+ * Five brand-sanctioned accents surfaced to users in Settings / Tweaks.
+ * Consumers should treat `accent` as an opaque color string — it feeds
+ * straight into `--pm-accent` via the ThemeProvider — but new presets should
+ * be added to this constant so the UI can offer the full list.
+ */
+export const ACCENT_PRESETS = [
+    { name: 'Forest', value: '#17cf54' },
+    { name: 'Indigo', value: '#6366f1' },
+    { name: 'Amber',  value: '#f59e0b' },
+    { name: 'Slate',  value: '#334155' },
+    { name: 'Teal',   value: '#0d9488' },
+] as const;
+
+export type AccentValue = (typeof ACCENT_PRESETS)[number]['value'];
+
 export interface AppearanceSettings {
     theme: ThemeMode;
     /** Source of truth for density (AR-64). `compactMode` stays mirrored
@@ -34,6 +50,8 @@ export interface AppearanceSettings {
      *  Tailwind `data-compact="true"` selectors continue to work. */
     compactMode: boolean;
     animationsEnabled: boolean;
+    /** Brand accent color, hex string. Drives `--pm-accent` at runtime. */
+    accent: string;
 }
 
 export interface ApiKeysSettings {
@@ -99,6 +117,7 @@ export interface SettingsState {
     setDensity: (density: DensityMode) => void;
     toggleCompactMode: () => void;
     toggleAnimations: () => void;
+    setAccent: (accent: string) => void;
 
     // Actions - API Keys
     setProviderKey: (provider: keyof ApiKeysSettings, value: string) => void;
@@ -147,6 +166,7 @@ const defaultAppearance: AppearanceSettings = {
     density: 'comfortable',
     compactMode: false,
     animationsEnabled: true,
+    accent: ACCENT_PRESETS[0].value, // Forest #17cf54
 };
 
 const defaultApiKeys: ApiKeysSettings = {
@@ -272,6 +292,11 @@ export const useSettingsStore = create<SettingsState>()(
             toggleAnimations: () =>
                 set((state) => ({
                     appearance: { ...state.appearance, animationsEnabled: !state.appearance.animationsEnabled },
+                })),
+
+            setAccent: (accent) =>
+                set((state) => ({
+                    appearance: { ...state.appearance, accent },
                 })),
 
             // API Keys
