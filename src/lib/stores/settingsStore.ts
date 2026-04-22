@@ -22,8 +22,10 @@ export interface SecuritySettings {
     apiKey?: string;
 }
 
+export type ThemeMode = 'light' | 'dim' | 'dark' | 'system';
+
 export interface AppearanceSettings {
-    theme: 'light' | 'dark' | 'system';
+    theme: ThemeMode;
     compactMode: boolean;
     animationsEnabled: boolean;
 }
@@ -87,7 +89,7 @@ export interface SettingsState {
     setApiKey: (key: string) => void;
 
     // Actions - Appearance
-    setTheme: (theme: 'light' | 'dark' | 'system') => void;
+    setTheme: (theme: ThemeMode) => void;
     toggleCompactMode: () => void;
     toggleAnimations: () => void;
 

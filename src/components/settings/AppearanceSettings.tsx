@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Switch } from "@/components/ui/switch";
-import { useSettingsStore } from "@/lib/stores/settingsStore";
+import { useSettingsStore, type ThemeMode } from "@/lib/stores/settingsStore";
 import { toast } from "sonner";
 
 export function AppearanceSettings() {
@@ -16,8 +16,11 @@ export function AppearanceSettings() {
     const toggleAnimations = useSettingsStore((s) => s.toggleAnimations);
 
     const handleThemeChange = (value: string) => {
-        setTheme(value as "light" | "dark" | "system");
-        const label = value === "system" ? "Auto" : value.charAt(0).toUpperCase() + value.slice(1);
+        setTheme(value as ThemeMode);
+        const label =
+            value === "system"
+                ? "Auto"
+                : value.charAt(0).toUpperCase() + value.slice(1);
         toast.success(`Theme set to ${label}`);
     };
 
@@ -43,7 +46,7 @@ export function AppearanceSettings() {
                     <RadioGroup
                         value={theme}
                         onValueChange={handleThemeChange}
-                        className="grid grid-cols-3 gap-4"
+                        className="grid grid-cols-4 gap-3"
                     >
                         {/* Light */}
                         <label
@@ -62,6 +65,26 @@ export function AppearanceSettings() {
                             <div className="flex items-center gap-2">
                                 <RadioGroupItem value="light" id="theme-light" />
                                 <span className="text-sm font-medium">Light</span>
+                            </div>
+                        </label>
+
+                        {/* Dim */}
+                        <label
+                            htmlFor="theme-dim"
+                            className={`flex flex-col items-center gap-3 p-4 border rounded-lg cursor-pointer transition-colors ${
+                                theme === "dim"
+                                    ? "border-primary bg-primary/5 ring-2 ring-primary/20"
+                                    : "border-border hover:border-muted-foreground/30"
+                            }`}
+                        >
+                            <div className="w-full aspect-[4/3] rounded-md border flex flex-col p-2 gap-1" style={{ background: "#f0f2ee", borderColor: "#dfe3dd" }}>
+                                <div className="h-1.5 w-8 rounded" style={{ background: "#dfe3dd" }} />
+                                <div className="h-1.5 w-12 rounded" style={{ background: "#e7eae6" }} />
+                                <div className="flex-1 rounded" style={{ background: "#fafbf8" }} />
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <RadioGroupItem value="dim" id="theme-dim" />
+                                <span className="text-sm font-medium">Dim</span>
                             </div>
                         </label>
 

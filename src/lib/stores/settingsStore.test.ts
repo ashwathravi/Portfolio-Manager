@@ -93,6 +93,11 @@ describe('settingsStore', () => {
             useSettingsStore.getState().setTheme('system');
             assert.strictEqual(useSettingsStore.getState().appearance.theme, 'system');
         });
+
+        test('should set theme to dim (AR-63)', () => {
+            useSettingsStore.getState().setTheme('dim');
+            assert.strictEqual(useSettingsStore.getState().appearance.theme, 'dim');
+        });
     });
 
     describe('toggleCompactMode', () => {
