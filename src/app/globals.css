@@ -2069,3 +2069,203 @@
   color: var(--pm-fg-muted);
   white-space: nowrap;
 }
+
+/* -------------------------------------------------------------------------
+ * Phase 4 (AR-75/76/77) Performance page — equity curve, attribution,
+ * metrics-by-period, monthly heatmap.
+ * ------------------------------------------------------------------------- */
+
+.pm-perf-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 24px;
+}
+
+.pm-perf-topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.pm-perf-equity-card {
+  gap: 16px;
+}
+
+.pm-perf-equity-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.pm-perf-equity-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.pm-perf-bench-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pm-perf-bench-label {
+  font-size: 11px;
+  color: var(--pm-fg-subtle);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 600;
+}
+
+.pm-perf-readouts {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 8px;
+  padding: 12px;
+  background: color-mix(in oklab, var(--pm-bg-2) 55%, transparent);
+  border: 1px solid var(--pm-border);
+  border-radius: 12px;
+}
+
+@media (max-width: 900px) {
+  .pm-perf-readouts {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+@media (max-width: 560px) {
+  .pm-perf-readouts {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.pm-perf-readout {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 10px;
+}
+
+.pm-perf-readout-label {
+  font-size: 11px;
+  color: var(--pm-fg-subtle);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 600;
+}
+
+.pm-perf-readout-val {
+  font-size: 18px;
+  font-weight: 700;
+  font-family: var(--pm-font-mono, monospace);
+  color: var(--pm-fg);
+}
+
+.pm-perf-split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+}
+
+@media (max-width: 1100px) {
+  .pm-perf-split {
+    grid-template-columns: 1fr;
+  }
+}
+
+.pm-perf-attr-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.pm-perf-attr-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.pm-perf-attr-totals {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--pm-border);
+}
+
+@media (max-width: 560px) {
+  .pm-perf-attr-totals {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.pm-perf-attr-total {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 2px 4px;
+}
+
+.pm-perf-attr-total-hi .pm-perf-readout-val {
+  font-size: 20px;
+}
+
+.pm-heatmap-wrap {
+  overflow-x: auto;
+}
+
+.pm-heatmap {
+  border-collapse: separate;
+  border-spacing: 4px;
+  width: 100%;
+  font-family: var(--pm-font-mono, monospace);
+  font-size: 12px;
+}
+
+.pm-heatmap thead th {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--pm-fg-subtle);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 4px 6px;
+  text-align: center;
+}
+
+.pm-heatmap tbody th {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--pm-fg);
+  text-align: right;
+  padding: 4px 8px 4px 4px;
+  white-space: nowrap;
+}
+
+.pm-heatmap-cell {
+  padding: 10px 6px;
+  min-width: 44px;
+  text-align: center;
+  border-radius: 6px;
+  font-variant-numeric: tabular-nums;
+  color: var(--pm-fg);
+}
+
+.pm-heatmap-yr-col {
+  border-left: 2px solid var(--pm-border);
+  padding-left: 10px;
+  min-width: 56px;
+}
+
+.pm-heatmap thead .pm-heatmap-yr-col {
+  border-left: 0;
+  border-bottom: 1px solid var(--pm-border);
+}
