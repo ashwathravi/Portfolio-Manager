@@ -4831,3 +4831,872 @@
     display: none;
   }
 }
+
+/* =========================================================================
+   Phase 7 · AR-85 — Execution Checkout variant
+   =========================================================================
+   Stripe-Checkout-style wizard. Four steps at the top (Security, Sizing,
+   Thesis, Review), a split below: left form card with step body, right
+   receipt card always visible. A compact blotter sits under the split.
+
+   The receipt is the star of the show — it's the trader's "am I sure"
+   surface. Impact bar + locked-price countdown + green-dot checks all
+   recompute live as the user edits qty / limit above. No modal, no
+   confirm screen; the Review step is just a summary of what the
+   receipt already told you.
+   ========================================================================= */
+
+.pm-exec-checkout {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* --------------------------------------------------------------------- */
+/* Stepper                                                                */
+/* --------------------------------------------------------------------- */
+
+.pm-co-stepper {
+  list-style: none;
+  margin: 0;
+  padding: 16px 20px;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  background: var(--pm-card);
+  border: 1px solid var(--pm-border);
+  border-radius: 12px;
+  position: relative;
+}
+
+.pm-co-step {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.pm-co-step-btn {
+  appearance: none;
+  background: transparent;
+  border: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 0;
+  cursor: pointer;
+  color: var(--pm-fg-subtle);
+  transition: color 120ms ease;
+  min-width: 0;
+}
+
+.pm-co-step-btn:disabled {
+  cursor: default;
+}
+
+.pm-co-step-btn:hover:not(:disabled) {
+  color: var(--pm-fg);
+}
+
+.pm-co-step.is-active .pm-co-step-btn,
+.pm-co-step.is-done .pm-co-step-btn {
+  color: var(--pm-fg);
+}
+
+.pm-co-step-dot {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--pm-bg-2);
+  border: 1.5px solid var(--pm-border);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--pm-fg-muted);
+  transition: background 150ms ease, color 150ms ease, border-color 150ms ease,
+    box-shadow 150ms ease;
+}
+
+.pm-co-step.is-active .pm-co-step-dot {
+  background: color-mix(in oklab, var(--pm-accent) 18%, var(--pm-card));
+  border-color: var(--pm-accent);
+  color: var(--pm-accent);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--pm-accent) 18%, transparent);
+}
+
+.pm-co-step.is-done .pm-co-step-dot {
+  background: var(--pm-success);
+  border-color: var(--pm-success);
+  color: #fff;
+}
+
+.pm-co-step-check {
+  width: 14px;
+  height: 14px;
+}
+
+.pm-co-step-label {
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pm-co-step-line {
+  position: absolute;
+  top: 50%;
+  left: calc(100% - 4px);
+  right: calc(-100% + 28px);
+  height: 1.5px;
+  background: var(--pm-border);
+  z-index: 0;
+}
+
+.pm-co-step.is-done .pm-co-step-line {
+  background: var(--pm-success);
+}
+
+@media (max-width: 720px) {
+  .pm-co-step-label {
+    display: none;
+  }
+  .pm-co-stepper {
+    padding: 12px 14px;
+  }
+}
+
+/* --------------------------------------------------------------------- */
+/* Split (form + receipt)                                                 */
+/* --------------------------------------------------------------------- */
+
+.pm-exec-checkout-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 360px);
+  gap: 20px;
+  align-items: start;
+}
+
+@media (max-width: 1024px) {
+  .pm-exec-checkout-split {
+    grid-template-columns: 1fr;
+  }
+}
+
+.pm-co-form {
+  padding: 28px 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.pm-co-step-body {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.pm-co-kicker {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--pm-accent);
+}
+
+.pm-co-title {
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  color: var(--pm-fg);
+  margin: 0;
+  line-height: 1.2;
+}
+
+.pm-co-helper {
+  font-size: 13px;
+  color: var(--pm-fg-muted);
+  line-height: 1.5;
+  margin: 0;
+  max-width: 56ch;
+}
+
+.pm-co-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pm-co-field-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--pm-fg-subtle);
+}
+
+.pm-co-form-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 8px;
+  border-top: 1px solid var(--pm-border);
+}
+
+.pm-co-foot-icon {
+  width: 14px;
+  height: 14px;
+}
+
+.pm-co-form-foot > .pm-btn {
+  gap: 6px;
+}
+
+/* Side toggle inside security step — reuses the Focus pill classes but
+   needs a little grid wrapper here since the form gap is larger. */
+.pm-co-side {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  background: var(--pm-bg-2);
+  border: 1px solid var(--pm-border);
+  border-radius: 10px;
+  padding: 3px;
+  gap: 2px;
+  max-width: 260px;
+}
+
+/* Security grid — ticker card radios, 3-col at desktop. */
+.pm-co-security-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+@media (max-width: 560px) {
+  .pm-co-security-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.pm-co-security {
+  appearance: none;
+  background: var(--pm-card);
+  border: 1.5px solid var(--pm-border);
+  border-radius: 10px;
+  padding: 14px 14px 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.pm-co-security:hover {
+  border-color: color-mix(in oklab, var(--pm-accent) 35%, var(--pm-border));
+  background: color-mix(in oklab, var(--pm-accent) 4%, var(--pm-card));
+}
+
+.pm-co-security.is-active {
+  border-color: var(--pm-accent);
+  background: color-mix(in oklab, var(--pm-accent) 10%, var(--pm-card));
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--pm-accent) 18%, transparent);
+}
+
+.pm-co-security-symbol {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--pm-fg);
+}
+
+.pm-co-security-price {
+  font-size: 12px;
+  color: var(--pm-fg-muted);
+}
+
+/* Ticker card in sizing step — a single panel showing chosen symbol + live price */
+.pm-co-ticker-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  background: var(--pm-bg-2);
+  border: 1px solid var(--pm-border);
+  border-radius: 12px;
+}
+
+.pm-co-ticker-symbol {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--pm-fg);
+}
+
+.pm-co-ticker-price {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--pm-fg);
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.pm-co-ticker-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--pm-success);
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: color-mix(in oklab, var(--pm-success) 14%, transparent);
+}
+
+/* Qty row — step buttons + input */
+.pm-co-qty-row {
+  display: grid;
+  grid-template-columns: 44px 1fr 44px;
+  align-items: stretch;
+  border: 1px solid var(--pm-border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.pm-co-qty-step {
+  appearance: none;
+  background: var(--pm-bg-2);
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--pm-fg-muted);
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.pm-co-qty-step:hover {
+  background: color-mix(in oklab, var(--pm-accent) 10%, var(--pm-bg-2));
+  color: var(--pm-fg);
+}
+
+.pm-co-qty-icon {
+  width: 16px;
+  height: 16px;
+}
+
+.pm-co-qty-input {
+  appearance: none;
+  background: var(--pm-card);
+  border: none;
+  border-left: 1px solid var(--pm-border);
+  border-right: 1px solid var(--pm-border);
+  padding: 12px 16px;
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--pm-fg);
+  text-align: center;
+  letter-spacing: -0.005em;
+}
+
+.pm-co-qty-input:focus {
+  outline: none;
+  background: color-mix(in oklab, var(--pm-accent) 4%, var(--pm-card));
+}
+
+/* Shortcut chips */
+.pm-co-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.pm-co-chip {
+  appearance: none;
+  background: var(--pm-bg-2);
+  border: 1px solid var(--pm-border);
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--pm-fg-muted);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.pm-co-chip:hover {
+  color: var(--pm-fg);
+  border-color: color-mix(in oklab, var(--pm-accent) 35%, var(--pm-border));
+}
+
+.pm-co-chip.is-active {
+  background: color-mix(in oklab, var(--pm-accent) 16%, var(--pm-card));
+  border-color: var(--pm-accent);
+  color: var(--pm-fg);
+}
+
+.pm-co-anchor-icon {
+  width: 12px;
+  height: 12px;
+  color: var(--pm-accent);
+}
+
+/* Limit slider */
+.pm-co-limit {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px;
+  background: var(--pm-bg-2);
+  border: 1px solid var(--pm-border);
+  border-radius: 10px;
+}
+
+.pm-co-limit-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.pm-co-limit-value {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--pm-fg);
+}
+
+.pm-co-slider {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 100%;
+  height: 6px;
+  background: linear-gradient(
+    90deg,
+    color-mix(in oklab, var(--pm-danger) 30%, transparent) 0%,
+    color-mix(in oklab, var(--pm-border) 60%, transparent) 50%,
+    color-mix(in oklab, var(--pm-success) 30%, transparent) 100%
+  );
+  border-radius: 999px;
+  outline: none;
+  cursor: pointer;
+}
+
+.pm-co-slider::-webkit-slider-thumb {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: var(--pm-accent);
+  border: 3px solid var(--pm-card);
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--pm-accent) 50%, transparent),
+    0 2px 6px -2px rgba(0, 0, 0, 0.35);
+  cursor: grab;
+}
+
+.pm-co-slider::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: var(--pm-accent);
+  border: 3px solid var(--pm-card);
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--pm-accent) 50%, transparent),
+    0 2px 6px -2px rgba(0, 0, 0, 0.35);
+  cursor: grab;
+}
+
+.pm-co-limit-ticks {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--pm-fg-subtle);
+}
+
+.pm-co-limit-hint {
+  font-size: 11.5px;
+  color: var(--pm-fg-muted);
+}
+
+/* Thesis */
+.pm-co-thesis-anchors {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.pm-co-textarea {
+  width: 100%;
+  background: var(--pm-bg-2);
+  border: 1px solid var(--pm-border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  font-size: 13px;
+  color: var(--pm-fg);
+  font-family: inherit;
+  line-height: 1.55;
+  resize: vertical;
+  min-height: 96px;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.pm-co-textarea:focus {
+  outline: none;
+  border-color: color-mix(in oklab, var(--pm-accent) 55%, var(--pm-border));
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--pm-accent) 18%, transparent);
+}
+
+/* Review grid */
+.pm-co-review-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border: 1px solid var(--pm-border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.pm-co-review-row {
+  display: grid;
+  grid-template-columns: 160px 1fr;
+  gap: 12px;
+  padding: 12px 16px;
+  background: var(--pm-card);
+  border-bottom: 1px solid color-mix(in oklab, var(--pm-border) 60%, transparent);
+}
+
+.pm-co-review-row:last-child {
+  border-bottom: none;
+}
+
+.pm-co-review-label {
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--pm-fg-subtle);
+  align-self: center;
+}
+
+.pm-co-review-val-col {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.pm-co-review-value {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--pm-fg);
+}
+
+.pm-co-review-sub {
+  font-size: 12px;
+  color: var(--pm-fg-muted);
+}
+
+/* --------------------------------------------------------------------- */
+/* Receipt                                                                */
+/* --------------------------------------------------------------------- */
+
+.pm-co-receipt {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  position: sticky;
+  top: 120px;
+}
+
+.pm-co-receipt-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--pm-border);
+}
+
+.pm-co-receipt-ticker {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--pm-fg);
+  flex: 1;
+}
+
+.pm-co-receipt-lock {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--pm-warn);
+  font-variant-numeric: tabular-nums;
+  padding: 3px 8px;
+  background: color-mix(in oklab, var(--pm-warn) 12%, transparent);
+  border: 1px solid color-mix(in oklab, var(--pm-warn) 35%, transparent);
+  border-radius: 999px;
+}
+
+.pm-co-lock-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--pm-warn);
+  animation: pm-co-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes pm-co-pulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
+
+.pm-co-receipt-notional {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.pm-co-receipt-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--pm-fg-subtle);
+}
+
+.pm-co-receipt-big {
+  font-size: 26px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  color: var(--pm-fg);
+}
+
+.pm-co-receipt-params {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 12px;
+  margin: 0;
+  padding: 12px 0;
+  border-top: 1px solid var(--pm-border);
+  border-bottom: 1px solid var(--pm-border);
+}
+
+.pm-co-receipt-pkey {
+  font-size: 11.5px;
+  color: var(--pm-fg-subtle);
+  letter-spacing: 0.02em;
+}
+
+.pm-co-receipt-pval {
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--pm-fg);
+  text-align: right;
+}
+
+/* Impact bar — stacks the before/after fills with the "cap" tick at 30% */
+.pm-co-impact {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pm-co-impact-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.pm-co-impact-delta {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--pm-fg);
+}
+
+.pm-co-impact-bar {
+  position: relative;
+  height: 10px;
+  background: var(--pm-bg-2);
+  border: 1px solid var(--pm-border);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.pm-co-impact-fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  border-radius: 999px;
+  transition: width 220ms ease;
+}
+
+.pm-co-impact-fill.is-before {
+  background: color-mix(in oklab, var(--pm-fg-muted) 30%, transparent);
+  z-index: 1;
+}
+
+.pm-co-impact-fill.is-after {
+  background: color-mix(in oklab, var(--pm-accent) 70%, transparent);
+  z-index: 2;
+  mix-blend-mode: normal;
+  opacity: 0.85;
+}
+
+.pm-co-impact-cap {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  right: 0;
+  width: 2px;
+  background: color-mix(in oklab, var(--pm-danger) 60%, transparent);
+  z-index: 3;
+}
+
+.pm-co-impact-scale {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10.5px;
+  color: var(--pm-fg-subtle);
+  letter-spacing: 0.02em;
+}
+
+/* Checks list */
+.pm-co-checks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.pm-co-check {
+  display: grid;
+  grid-template-columns: 18px 100px 1fr;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+}
+
+.pm-co-check-dot {
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.pm-co-check.is-ok .pm-co-check-dot {
+  background: var(--pm-success);
+}
+
+.pm-co-check.is-fail .pm-co-check-dot {
+  background: var(--pm-danger);
+}
+
+.pm-co-check-icon {
+  width: 11px;
+  height: 11px;
+}
+
+.pm-co-check-label {
+  font-weight: 600;
+  color: var(--pm-fg);
+}
+
+.pm-co-check-hint {
+  color: var(--pm-fg-muted);
+}
+
+.pm-co-check.is-fail .pm-co-check-hint {
+  color: var(--pm-danger);
+  font-weight: 500;
+}
+
+/* --------------------------------------------------------------------- */
+/* Recent orders                                                          */
+/* --------------------------------------------------------------------- */
+
+.pm-co-recent {
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.pm-co-recent-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--pm-border);
+}
+
+.pm-co-recent-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  margin: 0;
+  color: var(--pm-fg);
+}
+
+.pm-co-recent-sub {
+  font-size: 11.5px;
+  color: var(--pm-fg-subtle);
+}
+
+.pm-co-recent-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pm-co-recent-row {
+  display: grid;
+  grid-template-columns: auto 60px 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  transition: background 120ms ease;
+}
+
+.pm-co-recent-row:hover {
+  background: color-mix(in oklab, var(--pm-accent) 4%, transparent);
+}
+
+.pm-co-recent-ticker {
+  font-weight: 600;
+  letter-spacing: 0.005em;
+  color: var(--pm-fg);
+}
+
+.pm-co-recent-qty {
+  color: var(--pm-fg-muted);
+}
+
+@media (max-width: 560px) {
+  .pm-co-recent-row {
+    grid-template-columns: auto 1fr auto;
+  }
+  .pm-co-recent-qty {
+    display: none;
+  }
+}

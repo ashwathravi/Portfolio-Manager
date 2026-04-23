@@ -11,6 +11,7 @@ import {
 } from "@/lib/execution/variant";
 import { VariantSwitcher } from "./VariantSwitcher";
 import { FocusVariant } from "./FocusVariant";
+import { CheckoutVariant } from "./CheckoutVariant";
 
 /**
  * Phase 7 (AR-83) Execution page client wrapper.
@@ -71,27 +72,15 @@ export function ExecutionPageClient() {
     return (
         <div className="pm-exec-page" data-variant={variant} aria-busy={!hydrated}>
             {variant === "focus" && <FocusVariant />}
-            {variant === "checkout" && <CheckoutVariantStub />}
+            {variant === "checkout" && <CheckoutVariant />}
             {variant === "terminal" && <TerminalVariantStub />}
         </div>
     );
 }
 
 // --------------------------------------------------------------------- //
-// Variant stubs — replaced by AR-85/86.
+// Variant stubs — replaced by AR-86.
 // --------------------------------------------------------------------- //
-
-function CheckoutVariantStub() {
-    return (
-        <div className="pm-card pm-exec-stub">
-            <div className="pm-exec-stub-eyebrow">Checkout</div>
-            <div className="pm-exec-stub-title">Guided wizard</div>
-            <p className="pm-exec-stub-desc">
-                Security → Sizing → Thesis → Review. Compact blotter below. Lands in AR-85.
-            </p>
-        </div>
-    );
-}
 
 function TerminalVariantStub() {
     return (
