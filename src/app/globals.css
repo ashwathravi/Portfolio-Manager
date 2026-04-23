@@ -2785,3 +2785,430 @@
   padding: 40px 24px;
   color: var(--pm-fg-subtle);
 }
+
+/* ==========================================================================
+   Phase 5 (AR-79) Research thesis detail pane
+   ==========================================================================
+   The right column when a thesis is selected. Five stacked sections share a
+   common "eyebrow + body" pattern; the price chart and the 2-col HF / FOR-
+   AGAINST grids are the only exceptions. Keeps visual rhythm steady and
+   leans on existing primitives (.pm-readout, .pm-chip-conv, .pm-btn) instead
+   of reinventing them per section.
+   ========================================================================== */
+
+/* -- Header row -- */
+.pm-thesis-detail-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.pm-thesis-detail-head-main {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.pm-thesis-detail-titlerow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.pm-thesis-detail-sym {
+  font-family: var(--pm-font-mono, monospace);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--pm-fg);
+}
+
+.pm-thesis-detail-title {
+  margin: 0;
+  font-size: 18px;
+  line-height: 1.3;
+}
+
+.pm-thesis-detail-archived-chip {
+  background: color-mix(in oklab, var(--pm-fg-subtle) 14%, transparent);
+  color: var(--pm-fg-muted);
+  border-color: color-mix(in oklab, var(--pm-fg-subtle) 30%, transparent);
+}
+
+/* -- Lede (one-line description) -- */
+.pm-thesis-detail-lede {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--pm-fg-muted);
+}
+
+/* -- Generic section scaffolding -- */
+.pm-thesis-detail-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.pm-thesis-detail-section-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.pm-thesis-detail-section-hint {
+  font-size: 11px;
+  color: var(--pm-fg-subtle);
+}
+
+.pm-thesis-detail-eyebrow {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--pm-fg-subtle);
+}
+
+.pm-thesis-detail-empty {
+  margin: 0;
+  padding: 14px 16px;
+  border: 1px dashed var(--pm-border);
+  border-radius: 10px;
+  font-size: 12px;
+  color: var(--pm-fg-subtle);
+}
+
+/* -- Price chart section -- */
+.pm-thesis-detail-chart-section {
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--pm-border);
+  border-radius: 12px;
+  background: color-mix(in oklab, var(--pm-bg-2) 60%, transparent);
+}
+
+.pm-thesis-detail-readouts {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+@media (max-width: 680px) {
+  .pm-thesis-detail-readouts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* -- Hypothesis + Falsify IF grid -- */
+.pm-thesis-detail-hfgrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 14px;
+}
+
+@media (max-width: 960px) {
+  .pm-thesis-detail-hfgrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.pm-thesis-detail-hf-col {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px;
+  border: 1px solid var(--pm-border);
+  border-radius: 12px;
+  background: var(--pm-bg-2);
+}
+
+.pm-thesis-detail-hf-col-falsify {
+  border-color: color-mix(in oklab, var(--pm-warn, var(--pm-danger)) 28%, var(--pm-border));
+  background: color-mix(in oklab, var(--pm-warn, var(--pm-danger)) 5%, var(--pm-bg-2));
+}
+
+.pm-thesis-detail-hf-body {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--pm-fg);
+}
+
+.pm-thesis-detail-hf-list {
+  margin: 0;
+  padding: 0 0 0 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--pm-fg);
+}
+
+.pm-thesis-detail-hf-list li::marker {
+  color: var(--pm-fg-subtle);
+}
+
+.pm-thesis-detail-hf-empty {
+  margin: 0;
+  font-size: 12px;
+  color: var(--pm-fg-subtle);
+  font-style: italic;
+}
+
+/* -- Evidence FOR / AGAINST grid -- */
+.pm-thesis-detail-evidence-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 14px;
+}
+
+@media (max-width: 960px) {
+  .pm-thesis-detail-evidence-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.pm-thesis-detail-ev-col {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px;
+  border: 1px solid var(--pm-border);
+  border-radius: 12px;
+  background: var(--pm-bg-2);
+}
+
+.pm-thesis-detail-ev-col-for {
+  border-color: color-mix(in oklab, var(--pm-success) 32%, var(--pm-border));
+  background: color-mix(in oklab, var(--pm-success) 6%, var(--pm-bg-2));
+}
+
+.pm-thesis-detail-ev-col-against {
+  border-color: color-mix(in oklab, var(--pm-danger) 32%, var(--pm-border));
+  background: color-mix(in oklab, var(--pm-danger) 6%, var(--pm-bg-2));
+}
+
+.pm-thesis-detail-ev-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.pm-thesis-detail-ev-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-family: var(--pm-font-mono, monospace);
+  font-size: 11px;
+  font-weight: 600;
+  background: color-mix(in oklab, var(--pm-fg) 10%, transparent);
+  color: var(--pm-fg);
+}
+
+.pm-thesis-detail-ev-col-for .pm-thesis-detail-ev-count {
+  background: color-mix(in oklab, var(--pm-success) 20%, transparent);
+  color: var(--pm-success);
+}
+
+.pm-thesis-detail-ev-col-against .pm-thesis-detail-ev-count {
+  background: color-mix(in oklab, var(--pm-danger) 20%, transparent);
+  color: var(--pm-danger);
+}
+
+.pm-thesis-detail-ev-list {
+  margin: 0;
+  padding: 0 0 0 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--pm-fg);
+}
+
+.pm-thesis-detail-ev-col-for .pm-thesis-detail-ev-list li::marker {
+  color: var(--pm-success);
+}
+
+.pm-thesis-detail-ev-col-against .pm-thesis-detail-ev-list li::marker {
+  color: var(--pm-danger);
+}
+
+/* -- Catalysts list -- */
+.pm-thesis-detail-catalysts {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pm-thesis-detail-catalyst {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--pm-border);
+  border-radius: 10px;
+  background: var(--pm-bg-2);
+  font-size: 13px;
+}
+
+.pm-thesis-detail-catalyst-date {
+  font-family: var(--pm-font-mono, monospace);
+  font-size: 12px;
+  color: var(--pm-fg-subtle);
+}
+
+.pm-thesis-detail-catalyst-title {
+  color: var(--pm-fg);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pm-thesis-detail-impact {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  border: 1px solid transparent;
+}
+
+.pm-thesis-detail-impact-high {
+  background: color-mix(in oklab, var(--pm-danger) 14%, transparent);
+  color: var(--pm-danger);
+  border-color: color-mix(in oklab, var(--pm-danger) 32%, transparent);
+}
+
+.pm-thesis-detail-impact-med {
+  background: color-mix(in oklab, var(--pm-warn, var(--pm-accent)) 14%, transparent);
+  color: var(--pm-warn, var(--pm-accent));
+  border-color: color-mix(in oklab, var(--pm-warn, var(--pm-accent)) 32%, transparent);
+}
+
+.pm-thesis-detail-impact-low {
+  background: color-mix(in oklab, var(--pm-fg-subtle) 12%, transparent);
+  color: var(--pm-fg-muted);
+  border-color: color-mix(in oklab, var(--pm-fg-subtle) 28%, transparent);
+}
+
+/* -- Linked sources list -- */
+.pm-thesis-detail-sources {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pm-thesis-detail-source {
+  padding: 0;
+  border: 1px solid var(--pm-border);
+  border-radius: 10px;
+  background: var(--pm-bg-2);
+  overflow: hidden;
+}
+
+.pm-thesis-detail-source-link {
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  text-decoration: none;
+  color: inherit;
+  font-size: 13px;
+  transition: background-color 120ms ease;
+}
+
+.pm-thesis-detail-source-link:hover {
+  background: color-mix(in oklab, var(--pm-accent) 6%, transparent);
+}
+
+.pm-thesis-detail-source-link-plain {
+  cursor: default;
+}
+
+.pm-thesis-detail-source-link-plain:hover {
+  background: transparent;
+}
+
+.pm-thesis-detail-source-type {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  background: color-mix(in oklab, var(--pm-accent) 12%, transparent);
+  color: var(--pm-accent);
+}
+
+.pm-thesis-detail-source-type-article {
+  background: color-mix(in oklab, var(--pm-accent) 14%, transparent);
+  color: var(--pm-accent);
+}
+
+.pm-thesis-detail-source-type-report {
+  background: color-mix(in oklab, var(--pm-success) 14%, transparent);
+  color: var(--pm-success);
+}
+
+.pm-thesis-detail-source-type-earnings {
+  background: color-mix(in oklab, var(--pm-warn, var(--pm-accent)) 14%, transparent);
+  color: var(--pm-warn, var(--pm-accent));
+}
+
+.pm-thesis-detail-source-type-note {
+  background: color-mix(in oklab, var(--pm-fg-subtle) 14%, transparent);
+  color: var(--pm-fg-muted);
+}
+
+.pm-thesis-detail-source-title {
+  color: var(--pm-fg);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pm-thesis-detail-source-date {
+  font-family: var(--pm-font-mono, monospace);
+  font-size: 11px;
+  color: var(--pm-fg-subtle);
+}
+
+.pm-thesis-detail-source-icon {
+  color: var(--pm-fg-subtle);
+}
+
+.pm-thesis-detail-source-link:hover .pm-thesis-detail-source-icon {
+  color: var(--pm-accent);
+}

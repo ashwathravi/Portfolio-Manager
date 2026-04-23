@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Archive, ArchiveRestore, Plus, Search, Trash2 } from "lucide-react";
+import { Plus, Search, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useQuotesQuery } from "@/lib/api/market-data/queries";
 import { useThesisStore } from "@/lib/research/useThesisStore";
@@ -12,16 +12,17 @@ import type { JournalEntry } from "@/lib/research/journal";
 import { NewThesisModal } from "./NewThesisModal";
 import { NewJournalEntryModal } from "./NewJournalEntryModal";
 import { ThesisListCard } from "./ThesisListCard";
+import { ThesisDetailPane } from "./ThesisDetailPane";
 
 /**
  * Phase 5 (AR-78) Research workspace wrapper.
  *
  * Master-detail layout. The left column hosts four tabs (Theses, Watchlist,
  * Journal, Archive) with counts + a filter input, then scrolls through the
- * matching list. The right column is a detail pane — AR-78 ships a
- * selection-aware placeholder so we can wire keyboard focus and selection
- * state, then AR-79 replaces the placeholder with the full hypothesis /
- * falsify-if / evidence / mini-chart breakdown.
+ * matching list. The right column is the detail pane — `ThesisDetailPane`
+ * (AR-79) renders the full hypothesis / falsify-if / FOR-AGAINST evidence /
+ * catalysts / linked sources breakdown plus a mini price-since-open chart
+ * with a target benchmark line for selected theses.
  *
  * Writes (create, edit, archive, restore, delete) round-trip through the
  * existing `useThesisStore` / `useJournalStore` hooks so localStorage-backed
@@ -342,13 +343,13 @@ export function ResearchPageClient() {
                 <section className="pm-research-pane pm-card pm-card-stack">
                     {tab === "theses" || tab === "archive" ? (
                         selectedThesis ? (
-                            <ThesisPlaceholderPane
+                            <ThesisDetailPane
                                 thesis={selectedThesis}
+                                isArchived={tab === "archive"}
                                 onEdit={() => openEdit(selectedThesis)}
                                 onArchive={() => handleArchive(selectedThesis)}
                                 onRestore={() => handleRestore(selectedThesis)}
                                 onDelete={() => handleDelete(selectedThesis)}
-                                isArchived={tab === "archive"}
                             />
                         ) : (
                             <EmptyPane
@@ -358,13 +359,13 @@ export function ResearchPageClient() {
                         )
                     ) : tab === "watchlist" ? (
                         <EmptyPane
-                            title="Watchlist"
-                            body="Track tickers you're considering before they become full theses. Detail view lands in AR-79."
+                            title="Watchlist detail"
+                            body="Select a watchlist ticker to see its entry rationale, notes, and suggested target. (Dedicated pane coming in Phase 6.)"
                         />
                     ) : (
                         <EmptyPane
                             title="Decision journal"
-                            body="Every trade's rationale in one place. Detail view lands in AR-79."
+                            body="Every trade's rationale lives on the left. Select an entry to surface the linked thesis and rationale side-by-side. (Dedicated pane coming in Phase 6.)"
                         />
                     )}
                 </section>
@@ -569,74 +570,6 @@ function JournalColumn({
                     </article>
                 );
             })}
-        </>
-    );
-}
-
-function ThesisPlaceholderPane({
-    thesis,
-    onEdit,
-    onArchive,
-    onRestore,
-    onDelete,
-    isArchived,
-}: {
-    thesis: Thesis;
-    onEdit: () => void;
-    onArchive: () => void;
-    onRestore: () => void;
-    onDelete: () => void;
-    isArchived: boolean;
-}) {
-    return (
-        <>
-            <header className="pm-research-pane-head">
-                <div>
-                    <h2 className="pm-card-title">
-                        {thesis.ticker} · {thesis.title}
-                    </h2>
-                    <p className="pm-card-subtitle">
-                        {thesis.companyName} · {thesis.timeHorizon}
-                    </p>
-                </div>
-                <div className="pm-research-pane-actions">
-                    <Link
-                        href={`/research/thesis/${thesis.ticker}`}
-                        className="pm-btn pm-btn-ghost"
-                    >
-                        Open full view
-                    </Link>
-                    {isArchived ? (
-                        <button type="button" className="pm-btn pm-btn-ghost" onClick={onRestore}>
-                            <ArchiveRestore size={14} aria-hidden="true" />
-                            <span>Restore</span>
-                        </button>
-                    ) : (
-                        <button type="button" className="pm-btn pm-btn-ghost" onClick={onArchive}>
-                            <Archive size={14} aria-hidden="true" />
-                            <span>Archive</span>
-                        </button>
-                    )}
-                    <button type="button" className="pm-btn pm-btn-ghost" onClick={onEdit}>
-                        Edit
-                    </button>
-                    <button
-                        type="button"
-                        className="pm-btn pm-btn-ghost pm-btn-danger"
-                        onClick={onDelete}
-                        aria-label="Delete thesis"
-                    >
-                        <Trash2 size={14} aria-hidden="true" />
-                    </button>
-                </div>
-            </header>
-
-            <div className="pm-research-pane-body">
-                <p className="pm-research-pane-lede">{thesis.description}</p>
-                <div className="pm-research-pane-hint">
-                    Full hypothesis · falsify-if · evidence · price chart coming in AR-79.
-                </div>
-            </div>
         </>
     );
 }
