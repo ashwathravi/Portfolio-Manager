@@ -10,6 +10,7 @@ import { DashboardGreeting } from '@/components/dashboard/DashboardGreeting';
 import { DashboardLiveStats, type DashboardHoldingSeed } from '@/components/dashboard/DashboardLiveStats';
 import { mockTransactions } from '@/lib/mockData';
 import { marketDataEngine } from '@/lib/api/market-data';
+import { PageHeaderSync } from '@/components/layout/TopBar';
 
 export const dynamic = 'force-dynamic'; // Ensure it doesn't cache stale data on build
 
@@ -84,6 +85,11 @@ export default async function Dashboard() {
 
   return (
     <div className="space-y-8 p-6">
+      <PageHeaderSync
+        title="Dashboard"
+        subtitle={`${greeting}, ${currentDate}`}
+        crumbs={["Workspace", "Dashboard"]}
+      />
       {/* Header */}
       <header className="flex flex-col md:flex-row md:items-end justify-between gap-4">
         <div className="flex flex-col gap-1">

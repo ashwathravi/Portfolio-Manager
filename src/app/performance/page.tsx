@@ -46,6 +46,7 @@ import {
     defaultSectorBreakdown,
 } from '@/lib/performance/attribution';
 import { AttributionBreakdown } from '@/components/performance/AttributionBreakdown';
+import { usePageHeader } from '@/components/layout/PageHeaderContext';
 
 const PERIOD_KEYS: readonly PeriodKey[] = ['1M', '3M', '6M', 'YTD', '1Y', 'ALL'];
 
@@ -61,6 +62,16 @@ function formatCurrency(value: number) {
 }
 
 export default function PerformancePage() {
+    // Declare the Topbar header. The page still renders its own detailed
+    // header section below (date-range selector etc.), but the Topbar now
+    // carries the title/subtitle/crumbs so it's consistent with every
+    // other route after AR-67.
+    usePageHeader({
+        title: 'Performance',
+        subtitle: 'Deep dive into returns and risk metrics',
+        crumbs: ['Workspace', 'Performance'],
+    });
+
     const router = useRouter();
     const [calendarMonth, setCalendarMonth] = useState(() => new Date(2026, 1, 1)); // Feb 2026
 

@@ -3,254 +3,119 @@
 import {
     LayoutDashboard,
     TrendingUp,
+    Briefcase,
     FileText,
-    BookOpen,
     Cpu,
-    BarChart3,
     PlayCircle,
     Settings,
-    ChevronRight,
-    Calendar,
-    Eye,
-    Archive,
-    Rocket,
-    Briefcase,
-    FolderOpen,
-    List,
     X,
 } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useState, useEffect } from 'react';
+import { useEffect } from 'react';
 import { cn } from '@/lib/utils';
-import { useSettingsStore } from '@/lib/stores/settingsStore';
 import { useUiStore } from '@/lib/stores/uiStore';
+import { SidebarMarketCard } from './SidebarMarketCard';
+import { SidebarUserFooter } from './SidebarUserFooter';
+
+/**
+ * AppSidebar (AR-66)
+ *
+ * Handoff reference: `components/Sidebar.jsx` + `styles.css` `.pm-sidebar*`.
+ *
+ * Structure:
+ *   ┌─ Brand block ─────────────────────────────┐
+ *   │  [mark]  Atlas Wealth                     │
+ *   │          Personal Investment OS           │
+ *   ├─ Nav ──────────────────────────────────────┤
+ *   │  WORKSPACE                                 │
+ *   │   · Dashboard                              │
+ *   │   · Performance                            │
+ *   │   · Holdings                               │
+ *   │   · Research                               │
+ *   │   · Strategies                             │
+ *   │   · Execution [badge]                      │
+ *   │                                            │
+ *   │  SYSTEM                                    │
+ *   │   · Settings                               │
+ *   ├─ Market card ──────────────────────────────┤
+ *   │  ● Market open     9:42 AM ET              │
+ *   │  S&P  +0.42%                               │
+ *   │  NDX  +0.18%                               │
+ *   │  BTC  +1.30%                               │
+ *   ├─ User footer ──────────────────────────────┤
+ *   │  [AR]  Ashwath Ravichandran   ⋯           │
+ *   │        Pro · 3 accounts                    │
+ *   └────────────────────────────────────────────┘
+ *
+ * The nav is deliberately flatter than the pre-Phase-1 sidebar (no more
+ * expandable submenus for Portfolio/Research/Strategies). Sub-pages are
+ * reached through the landing page of each section — which is closer to
+ * how every other financial product ships and reduces cognitive load.
+ */
 
 interface NavItem {
     title: string;
     icon: React.ComponentType<{ className?: string }>;
     href: string;
-    badge?: string;
-    children?: NavItem[];
+    /** Badge count, or undefined to hide. Currently only Execution uses
+     *  this; wire-up for a global working-orders store lands with the
+     *  Execution rework (Phase 7). */
+    badge?: number;
 }
 
-const navigationItems: NavItem[] = [
+interface NavSection {
+    label: string;
+    items: readonly NavItem[];
+}
+
+const NAV_SECTIONS: readonly NavSection[] = [
     {
-        title: 'Dashboard',
-        icon: LayoutDashboard,
-        href: '/',
-    },
-    {
-        title: 'Performance',
-        icon: TrendingUp,
-        href: '/performance',
-    },
-    {
-        title: 'Trade Analytics',
-        icon: Calendar,
-        href: '/analytics',
-    },
-    {
-        title: 'Portfolio',
-        icon: Briefcase,
-        href: '/portfolios',
-        children: [
-            {
-                title: 'Overview',
-                icon: Briefcase,
-                href: '/portfolios',
-            },
-            {
-                title: 'Current Holdings',
-                icon: FolderOpen,
-                href: '/portfolios/holdings',
-            },
-            {
-                title: 'Trade Log',
-                icon: List,
-                href: '/portfolios/trade-log',
-            },
+        label: 'Workspace',
+        items: [
+            { title: 'Dashboard', icon: LayoutDashboard, href: '/' },
+            { title: 'Performance', icon: TrendingUp, href: '/performance' },
+            { title: 'Holdings', icon: Briefcase, href: '/portfolios/holdings' },
+            { title: 'Research', icon: FileText, href: '/research' },
+            { title: 'Strategies', icon: Cpu, href: '/strategies' },
+            { title: 'Execution', icon: PlayCircle, href: '/execution' },
         ],
     },
     {
-        title: 'Research',
-        icon: FileText,
-        href: '/research',
-        children: [
-            {
-                title: 'Theses',
-                icon: FileText,
-                href: '/research?tab=theses',
-            },
-            {
-                title: 'Watchlists',
-                icon: Eye,
-                href: '/research?tab=watchlist',
-            },
-            {
-                title: 'Journal',
-                icon: BookOpen,
-                href: '/research?tab=journal',
-            },
-            {
-                title: 'Archive',
-                icon: Archive,
-                href: '/research?tab=archive',
-            },
-        ],
-    },
-    {
-        title: 'Strategies',
-        icon: Cpu,
-        href: '/strategies',
-        children: [
-            {
-                title: 'Builder',
-                icon: BarChart3,
-                href: '/strategies/builder',
-            },
-            {
-                title: 'Backtests',
-                icon: PlayCircle,
-                href: '/strategies',
-            },
-            {
-                title: 'Deploy',
-                icon: Rocket,
-                href: '/strategies/deploy',
-            },
-        ],
-    },
-    {
-        title: 'Settings',
-        icon: Settings,
-        href: '/settings',
+        label: 'System',
+        items: [{ title: 'Settings', icon: Settings, href: '/settings' }],
     },
 ];
 
+/** Route-match helper.
+ *
+ *   `/`                matches ONLY exact `/` (dashboard home, no prefix)
+ *   `/portfolios/holdings` matches `/portfolios/holdings` + deeper
+ *   `/research`        matches `/research` + `/research/...`
+ *
+ * This keeps Holdings active on `/portfolios/holdings/AAPL` while Dashboard
+ * is only active on `/` itself. */
+function isActive(href: string, pathname: string): boolean {
+    if (href === '/') return pathname === '/';
+    return pathname === href || pathname.startsWith(`${href}/`);
+}
+
 export function AppSidebar() {
     const pathname = usePathname();
-    const [expandedItems, setExpandedItems] = useState<string[]>([]);
     const sidebarOpen = useUiStore((s) => s.sidebarOpen);
     const closeSidebar = useUiStore((s) => s.closeSidebar);
-    const fullName = useSettingsStore((s) => s.profile.fullName);
-    const initials = fullName
-        .split(' ')
-        .filter(Boolean)
-        .slice(0, 2)
-        .map((w) => w[0].toUpperCase())
-        .join('');
 
-    // Auto-expand based on active route
-    useEffect(() => {
-        navigationItems.forEach((item) => {
-            if (item.children && item.children.some((child) => pathname.startsWith(child.href))) {
-                setExpandedItems((prev) =>
-                    prev.includes(item.title) ? prev : [...prev, item.title]
-                );
-            }
-        });
-    }, [pathname]);
-
-    // Close the mobile drawer on route change
+    // Close the mobile drawer on route change. The layout keeps the sidebar
+    // always-visible on md+ screens via CSS `translate-x-0`, so this effect
+    // only matters for the mobile drawer.
     useEffect(() => {
         closeSidebar();
     }, [pathname, closeSidebar]);
 
-    const toggleExpanded = (title: string) => {
-        setExpandedItems((prev) =>
-            prev.includes(title)
-                ? prev.filter((item) => item !== title)
-                : [...prev, title]
-        );
-    };
-
-    const renderNavItem = (item: NavItem) => {
-        // Check if active or if any child is active
-        const isActive = pathname === item.href || (item.href !== '/' && pathname.startsWith(item.href));
-        const isExpanded = expandedItems.includes(item.title);
-        const hasChildren = item.children && item.children.length > 0;
-        const submenuId = hasChildren ? `submenu-${item.title.toLowerCase().replace(/\s+/g, '-')}` : undefined;
-
-        return (
-            <li key={item.title}>
-                {hasChildren ? (
-                    <button
-                        type="button"
-                        className={cn(
-                            'flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors cursor-pointer',
-                            'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
-                        )}
-                        onClick={() => toggleExpanded(item.title)}
-                        aria-expanded={isExpanded}
-                        aria-controls={submenuId}
-                    >
-                        <item.icon className="h-4 w-4" />
-                        <span className="flex-1 text-left select-none">{item.title}</span>
-                        {item.badge && (
-                            <span className="rounded-full bg-primary px-2 py-0.5 text-xs text-primary-foreground">
-                                {item.badge}
-                            </span>
-                        )}
-                        <ChevronRight
-                            className={cn(
-                                'h-4 w-4 transition-transform',
-                                isExpanded && 'rotate-90'
-                            )}
-                        />
-                    </button>
-                ) : (
-                    <Link
-                        href={item.href}
-                        aria-current={pathname === item.href ? 'page' : undefined}
-                        className={cn(
-                            'flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors',
-                            isActive
-                                ? 'bg-primary text-primary-foreground'
-                                : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
-                        )}
-                    >
-                        <item.icon className="h-4 w-4" />
-                        <span className="flex-1 text-left">{item.title}</span>
-                        {item.badge && (
-                            <span className="rounded-full bg-primary px-2 py-0.5 text-xs text-primary-foreground">
-                                {item.badge}
-                            </span>
-                        )}
-                    </Link>
-                )}
-
-                {hasChildren && isExpanded && (
-                    <ul
-                        id={submenuId}
-                        className="ml-4 mt-1 space-y-1 border-l border-border pl-2"
-                    >
-                        {item.children?.map((child) => (
-                            <li key={child.title}>
-                                <Link
-                                    href={child.href}
-                                    aria-current={pathname === child.href ? 'page' : undefined}
-                                    className={cn(
-                                        'flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors',
-                                        pathname === child.href
-                                            ? 'bg-primary/10 text-primary font-medium'
-                                            : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
-                                    )}
-                                >
-                                    <child.icon className="h-4 w-4" />
-                                    <span>{child.title}</span>
-                                </Link>
-                            </li>
-                        ))}
-                    </ul>
-                )}
-            </li>
-        );
-    };
-
     return (
         <>
-            {/* Mobile backdrop */}
+            {/* Mobile backdrop — covers content behind the drawer and closes
+                the sidebar when tapped. Hidden on md+. */}
             {sidebarOpen && (
                 <button
                     type="button"
@@ -259,49 +124,123 @@ export function AppSidebar() {
                     className="fixed inset-0 z-30 bg-background/60 backdrop-blur-sm md:hidden"
                 />
             )}
-            <div
+            <aside
                 className={cn(
-                    'flex h-screen w-64 flex-col border-r border-border bg-card/50 backdrop-blur-xl fixed left-0 top-0 z-40 transition-transform duration-300 ease-in-out',
-                    'md:translate-x-0',
-                    sidebarOpen ? 'translate-x-0' : '-translate-x-full',
+                    'pm-sidebar',
+                    sidebarOpen ? 'is-open' : undefined
                 )}
+                aria-label="Primary navigation"
             >
-            <div className="border-b border-border p-6">
-                <div className="flex items-center gap-3">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-green-800 shadow-lg shadow-primary/20">
-                        <TrendingUp className="h-6 w-6 text-primary-foreground" />
+                {/* Brand block */}
+                <div className="pm-sidebar-brand">
+                    <div className="pm-sidebar-mark" aria-hidden="true">
+                        <BrandMark />
                     </div>
-                    <div className="flex-1">
-                        <h2 className="text-xl font-bold tracking-tight">Atlas Wealth</h2>
-                        <p className="text-xs text-muted-foreground">Investment OS</p>
+                    <div className="pm-sidebar-wordmark">
+                        <p className="pm-sidebar-title">Atlas Wealth</p>
+                        <p className="pm-sidebar-sub">
+                            Personal Investment OS
+                        </p>
                     </div>
                     <button
                         type="button"
                         aria-label="Close navigation"
-                        className="md:hidden -mr-2 p-2 rounded-lg hover:bg-accent transition-colors"
+                        className="pm-sidebar-close md:hidden"
                         onClick={closeSidebar}
                     >
                         <X className="h-5 w-5" />
                     </button>
                 </div>
-            </div>
-            <nav className="flex-1 overflow-y-auto p-4" aria-label="Main navigation">
-                <ul className="space-y-2">
-                    {navigationItems.map(renderNavItem)}
-                </ul>
-            </nav>
-            <div className="border-t border-border p-4">
-                <div className="flex items-center gap-3 rounded-xl bg-primary/10 p-3">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary text-sm font-bold text-primary-foreground">
-                        {initials}
-                    </div>
-                    <div className="flex-1">
-                        <p className="text-sm font-bold">{fullName}</p>
-                        <p className="text-xs text-muted-foreground">Pro Plan</p>
-                    </div>
-                </div>
-            </div>
-            </div>
+
+                {/* Nav */}
+                <nav className="pm-sidebar-nav" aria-label="Main navigation">
+                    {NAV_SECTIONS.map((section) => (
+                        <div key={section.label} className="pm-nav-section">
+                            <p
+                                className="pm-nav-label"
+                                // Uppercase-styled section label; using a span
+                                // role="heading" aria-level="3" hurts more than
+                                // it helps since each section's items are
+                                // already in a <ul> — screen readers announce
+                                // the label as list context. Leave it as <p>.
+                            >
+                                {section.label}
+                            </p>
+                            <ul className="pm-nav-list">
+                                {section.items.map((item) => {
+                                    const active = isActive(item.href, pathname);
+                                    const Icon = item.icon;
+                                    return (
+                                        <li key={item.href}>
+                                            <Link
+                                                href={item.href}
+                                                aria-current={active ? 'page' : undefined}
+                                                className={cn(
+                                                    'pm-nav-item',
+                                                    active && 'is-active'
+                                                )}
+                                            >
+                                                <Icon
+                                                    className="pm-nav-icon"
+                                                    aria-hidden="true"
+                                                />
+                                                <span className="pm-nav-title">
+                                                    {item.title}
+                                                </span>
+                                                {item.badge !== undefined &&
+                                                    item.badge > 0 && (
+                                                        <span
+                                                            className="pm-nav-badge"
+                                                            aria-label={`${item.badge} pending`}
+                                                        >
+                                                            {item.badge > 99
+                                                                ? '99+'
+                                                                : item.badge}
+                                                        </span>
+                                                    )}
+                                            </Link>
+                                        </li>
+                                    );
+                                })}
+                            </ul>
+                        </div>
+                    ))}
+                </nav>
+
+                {/* Market card */}
+                <SidebarMarketCard />
+
+                {/* User footer */}
+                <SidebarUserFooter />
+            </aside>
         </>
+    );
+}
+
+/**
+ * Tiny SVG brand mark — a line chart with a ping dot at the end. Keeping
+ * it inline (rather than an `/public/brand.svg`) avoids an extra network
+ * request on first paint and lets the colors follow `--pm-accent` via
+ * `currentColor`.
+ */
+function BrandMark() {
+    return (
+        <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            xmlns="http://www.w3.org/2000/svg"
+            width="22"
+            height="22"
+            className="pm-brand-svg"
+        >
+            <path
+                d="M3 17 L8 12 L12 14 L16 8 L21 10"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+            />
+            <circle cx="21" cy="10" r="2.5" fill="currentColor" />
+        </svg>
     );
 }

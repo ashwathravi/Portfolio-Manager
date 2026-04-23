@@ -7,6 +7,7 @@ import { HoldingsTableLive } from '@/components/holdings/HoldingsTableLive';
 import { mockPortfolios } from '@/lib/mockData';
 import { marketDataEngine } from '@/lib/api/market-data';
 import HoldingsLoading from './loading';
+import { PageHeaderSync } from '@/components/layout/TopBar';
 
 export const dynamic = 'force-dynamic';
 
@@ -108,8 +109,15 @@ async function HoldingsContent() {
 
 export default function CurrentHoldingsPage() {
     return (
-        <Suspense fallback={<HoldingsLoading />}>
-            <HoldingsContent />
-        </Suspense>
+        <>
+            <PageHeaderSync
+                title="Holdings"
+                subtitle="Every position across every account"
+                crumbs={["Workspace", "Holdings"]}
+            />
+            <Suspense fallback={<HoldingsLoading />}>
+                <HoldingsContent />
+            </Suspense>
+        </>
     );
 }

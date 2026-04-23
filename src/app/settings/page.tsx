@@ -14,6 +14,7 @@ import { TagsManager } from "@/components/settings/TagsManager";
 import { ApiKeysSettings } from "@/components/settings/ApiKeysSettings";
 import { PreferencesSettings } from "@/components/settings/PreferencesSettings";
 import { AlertRulesManager } from "@/components/settings/AlertRulesManager";
+import { usePageHeader } from "@/components/layout/PageHeaderContext";
 
 const VALID_TABS = new Set([
     "profile",
@@ -152,6 +153,12 @@ function SettingsTabs() {
 }
 
 export default function SettingsPage() {
+    usePageHeader({
+        title: 'Settings',
+        subtitle: 'Manage account preferences and integrations',
+        crumbs: ['System', 'Settings'],
+    });
+
     return (
         <div className="space-y-6 p-10 pb-16 block">
             <div className="space-y-0.5">

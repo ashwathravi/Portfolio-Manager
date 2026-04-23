@@ -1,6 +1,5 @@
 "use client";
 
-import type React from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
@@ -12,51 +11,13 @@ import {
     type ThemeMode,
 } from "@/lib/stores/settingsStore";
 import { toast } from "sonner";
+import { handleRovingRadioKey } from "@/lib/a11y/rovingRadio";
 
 const DENSITY_ORDER: readonly DensityMode[] = ["comfortable", "compact"] as const;
 const DENSITY_LABEL: Record<DensityMode, string> = {
     comfortable: "Comfortable",
     compact: "Compact",
 };
-
-/**
- * Roving-radiogroup keyboard handler. Implements the ARIA 1.2 radio pattern:
- *   ArrowRight/Down → next (wraps)
- *   ArrowLeft/Up   → previous (wraps)
- *   Home           → first
- *   End            → last
- * Focus is moved to the newly-selected sibling so only one element per group
- * is in the tab order (roving tabindex is handled via `tabIndex={active ? 0 : -1}`
- * on each button).
- */
-function handleRovingRadioKey<T>(
-    e: React.KeyboardEvent<HTMLElement>,
-    order: readonly T[],
-    current: T,
-    onSelect: (next: T) => void
-) {
-    const advance: Record<string, (i: number) => number> = {
-        ArrowRight: (i) => (i + 1) % order.length,
-        ArrowDown: (i) => (i + 1) % order.length,
-        ArrowLeft: (i) => (i - 1 + order.length) % order.length,
-        ArrowUp: (i) => (i - 1 + order.length) % order.length,
-        Home: () => 0,
-        End: () => order.length - 1,
-    };
-    const fn = advance[e.key];
-    if (!fn) return;
-    e.preventDefault();
-    const currentIdx = order.indexOf(current);
-    const nextIdx = fn(currentIdx < 0 ? 0 : currentIdx);
-    const next = order[nextIdx];
-    const parent = e.currentTarget.parentElement;
-    onSelect(next);
-    // React re-renders synchronously but we need to wait for the
-    // tabIndex={active ? 0 : -1} update to land before focusing.
-    requestAnimationFrame(() => {
-        (parent?.children[nextIdx] as HTMLElement | undefined)?.focus();
-    });
-}
 
 export function AppearanceSettings() {
     const theme = useSettingsStore((s) => s.appearance.theme);

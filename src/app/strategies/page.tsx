@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Plus, Play, Pause, TrendingUp, Activity } from 'lucide-react';
 import { useRouter } from 'next/navigation';
+import { usePageHeader } from '@/components/layout/PageHeaderContext';
 
 interface Strategy {
     id: string;
@@ -52,6 +53,12 @@ const INITIAL_STRATEGIES: Strategy[] = [
 ];
 
 export default function StrategiesPage() {
+    usePageHeader({
+        title: 'Strategies',
+        subtitle: 'Build, backtest, and monitor trading strategies',
+        crumbs: ['Workspace', 'Strategies'],
+    });
+
     const router = useRouter();
     const [strategies, setStrategies] = useState<Strategy[]>(INITIAL_STRATEGIES);
 

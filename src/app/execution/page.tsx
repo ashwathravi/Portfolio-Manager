@@ -5,6 +5,7 @@ import { OrderEntryForm } from "@/components/execution/OrderEntryForm";
 import { OrderBlotter } from "@/components/execution/OrderBlotter";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Order } from "@/types/execution";
+import { usePageHeader } from "@/components/layout/PageHeaderContext";
 
 const initialWorkingOrders: Order[] = [
     {
@@ -55,6 +56,12 @@ const initialFilledOrders: Order[] = [
 ]
 
 export default function ExecutionPage() {
+    usePageHeader({
+        title: 'Execution',
+        subtitle: 'Place, manage, and audit your orders',
+        crumbs: ['Workspace', 'Execution'],
+    });
+
     const [workingOrders, setWorkingOrders] = useState<Order[]>(initialWorkingOrders)
     const [filledOrders] = useState<Order[]>(initialFilledOrders)
     const [cancelledOrders, setCancelledOrders] = useState<Order[]>([])

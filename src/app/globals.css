@@ -579,3 +579,618 @@
   outline: 2px solid var(--pm-accent);
   outline-offset: 2px;
 }
+
+/* =====================================================================
+   Phase 1 — App shell (AR-66 / AR-67 / AR-68)
+
+   Sidebar · Topbar · Tweaks panel. Grouped so future greps for `pm-sidebar`
+   / `pm-topbar` / `pm-tweaks` land in one place. If you add a new shell
+   surface (e.g. a right-side inspector), slot it here.
+
+   Positioning model:
+     - `.pm-sidebar` is `position: fixed` on md+ so the main content can
+       pin against `--pm-sidebar-w` via `md:ml-[var(--pm-sidebar-w)]` in
+       `app/layout.tsx` without the sidebar participating in flex layout.
+     - On mobile it slides in from the left (`transform: translateX(-100%)`
+       → `translateX(0)` when `.is-open`). The backdrop lives inside
+       `<AppSidebar/>` itself (React-side), not CSS-only, so touch-tap
+       closes it.
+   ===================================================================== */
+
+/* ---------- Sidebar (AR-66) ---------- */
+
+.pm-sidebar {
+  position: fixed;
+  inset: 0 auto 0 0;              /* top:0 right:auto bottom:0 left:0 */
+  width: var(--pm-sidebar-w);
+  background: var(--pm-card);
+  border-right: 1px solid var(--pm-border);
+  display: flex;
+  flex-direction: column;
+  z-index: 40;
+  /* Mobile: offscreen by default. `md:` handled below. */
+  transform: translateX(-100%);
+  transition: transform 200ms ease-out;
+}
+.pm-sidebar.is-open {
+  transform: translateX(0);
+  box-shadow: var(--pm-shadow-lg);
+}
+@media (min-width: 768px) {
+  /* md breakpoint — always visible, no slide animation needed. */
+  .pm-sidebar {
+    transform: translateX(0);
+    box-shadow: none;
+  }
+}
+
+/* Brand block */
+.pm-sidebar-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--pm-border);
+  flex-shrink: 0;
+}
+.pm-sidebar-mark {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: var(--pm-accent-tint);
+  color: var(--pm-accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.pm-brand-svg {
+  width: 22px;
+  height: 22px;
+}
+.pm-sidebar-wordmark {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.15;
+  min-width: 0;
+  flex: 1;
+}
+.pm-sidebar-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--pm-fg);
+  letter-spacing: -0.01em;
+  margin: 0;
+}
+.pm-sidebar-sub {
+  font-size: 11px;
+  color: var(--pm-fg-muted);
+  margin: 2px 0 0 0;
+}
+.pm-sidebar-close {
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--pm-fg-muted);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.pm-sidebar-close:hover {
+  background: var(--pm-neutral-100);
+  color: var(--pm-fg);
+}
+.pm-sidebar-close:focus-visible {
+  outline: 2px solid var(--pm-accent);
+  outline-offset: 2px;
+}
+
+/* Nav */
+.pm-sidebar-nav {
+  flex: 1;
+  overflow-y: auto;
+  padding: 14px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.pm-nav-section {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.pm-nav-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--pm-fg-subtle);
+  padding: 4px 10px 6px;
+  margin: 0;
+}
+.pm-nav-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.pm-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--pm-fg-muted);
+  text-decoration: none;
+  transition: background 120ms ease-out, color 120ms ease-out;
+  min-height: 36px;
+}
+.pm-nav-item:hover {
+  background: var(--pm-neutral-100);
+  color: var(--pm-fg);
+}
+.pm-nav-item.is-active {
+  background: var(--pm-accent-tint);
+  color: var(--pm-accent);
+  font-weight: 600;
+}
+.pm-nav-item:focus-visible {
+  outline: 2px solid var(--pm-accent);
+  outline-offset: 2px;
+}
+.pm-nav-icon {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+.pm-nav-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pm-nav-badge {
+  background: var(--pm-danger);
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 10px;
+  line-height: 1.5;
+  min-width: 18px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+/* Sidebar market card */
+.pm-market-card {
+  margin: 0 14px 14px;
+  padding: 12px;
+  background: var(--pm-bg-2);
+  border: 1px solid var(--pm-border);
+  border-radius: var(--pm-radius-sm);
+  flex-shrink: 0;
+}
+.pm-market-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.pm-live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--pm-success);
+  position: relative;
+  flex-shrink: 0;
+}
+.pm-live-dot::after {
+  content: "";
+  position: absolute;
+  inset: -2px;
+  border-radius: 50%;
+  background: var(--pm-success);
+  opacity: 0.4;
+  animation: pm-ping 1.6s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+.pm-live-dot.is-closed {
+  background: var(--pm-fg-subtle);
+}
+.pm-live-dot.is-closed::after {
+  display: none;
+}
+@keyframes pm-ping {
+  0% { transform: scale(1); opacity: 0.5; }
+  80%, 100% { transform: scale(2.2); opacity: 0; }
+}
+.pm-market-status {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--pm-fg);
+  flex: 1;
+  min-width: 0;
+}
+.pm-market-clock {
+  font-size: 11px;
+  color: var(--pm-fg-muted);
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+.pm-market-indices {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.pm-market-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+}
+.pm-market-label {
+  color: var(--pm-fg-muted);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.pm-market-delta {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--pm-fg-muted);
+}
+.pm-market-delta.pos {
+  color: var(--pm-success);
+}
+.pm-market-delta.neg {
+  color: var(--pm-danger);
+}
+
+/* Sidebar user footer */
+.pm-user-footer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border-top: 1px solid var(--pm-border);
+  flex-shrink: 0;
+}
+.pm-user-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--pm-accent);
+  color: var(--pm-accent-foreground);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.pm-user-info {
+  flex: 1;
+  min-width: 0;
+  line-height: 1.2;
+}
+.pm-user-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--pm-fg);
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pm-user-plan {
+  font-size: 11px;
+  color: var(--pm-fg-muted);
+  margin: 2px 0 0 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pm-user-menu-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--pm-fg-muted);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.pm-user-menu-btn:hover {
+  background: var(--pm-neutral-100);
+  color: var(--pm-fg);
+}
+
+/* ---------- Topbar (AR-67) ---------- */
+
+.pm-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  background: color-mix(in srgb, var(--pm-card) 88%, transparent);
+  backdrop-filter: saturate(140%) blur(8px);
+  -webkit-backdrop-filter: saturate(140%) blur(8px);
+  border-bottom: 1px solid var(--pm-border);
+  padding: 10px 20px 12px;
+}
+.pm-topbar-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 36px;
+}
+.pm-topbar-row-bottom {
+  margin-top: 6px;
+  align-items: flex-end;
+}
+.pm-topbar-menu {
+  flex-shrink: 0;
+}
+.pm-topbar-crumbs {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+.pm-crumb-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--pm-fg-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pm-crumb-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 500;
+}
+.pm-crumb-item.is-current {
+  color: var(--pm-fg);
+  font-weight: 600;
+}
+.pm-crumb-sep {
+  width: 12px;
+  height: 12px;
+  color: var(--pm-fg-subtle);
+  flex-shrink: 0;
+}
+.pm-topbar-utils {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.pm-topbar-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  min-width: 240px;
+  max-width: 320px;
+  height: 34px;
+  background: var(--pm-bg-2);
+  border: 1px solid var(--pm-border);
+  border-radius: var(--pm-radius-sm);
+  color: var(--pm-fg-muted);
+  font-size: 12px;
+  cursor: text;
+  transition: border-color 120ms ease-out, background 120ms ease-out;
+}
+.pm-topbar-search:hover {
+  background: var(--pm-neutral-100);
+  border-color: var(--pm-border-strong);
+}
+.pm-topbar-search:focus-visible {
+  outline: 2px solid var(--pm-accent);
+  outline-offset: 2px;
+}
+@media (max-width: 640px) {
+  .pm-topbar-search { min-width: 0; max-width: none; flex: 1; }
+  .pm-topbar-search-text { display: none; }
+}
+.pm-topbar-search-icon {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+.pm-topbar-search-text {
+  flex: 1;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pm-topbar-kbd {
+  font-family: var(--font-jetbrains-mono), ui-monospace, monospace;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 5px;
+  border: 1px solid var(--pm-border);
+  background: var(--pm-card);
+  border-radius: 4px;
+  color: var(--pm-fg-muted);
+  flex-shrink: 0;
+}
+.pm-topbar-clock {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--pm-fg-muted);
+  font-variant-numeric: tabular-nums;
+  padding: 0 6px;
+  flex-shrink: 0;
+}
+@media (max-width: 900px) {
+  /* Hide the Topbar clock on narrower screens — the sidebar market card
+     already shows it, and the top row gets crowded. */
+  .pm-topbar-clock { display: none; }
+}
+.pm-topbar-gear {
+  flex-shrink: 0;
+}
+
+.pm-topbar-heading {
+  flex: 1;
+  min-width: 0;
+}
+.pm-topbar-title {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--pm-fg);
+  margin: 0;
+  line-height: 1.2;
+}
+.pm-topbar-sub {
+  font-size: 13px;
+  color: var(--pm-fg-muted);
+  margin: 2px 0 0 0;
+  line-height: 1.4;
+}
+.pm-topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+/* ---------- Tweaks panel (AR-68) ---------- */
+
+.pm-tweaks-panel {
+  position: fixed;
+  top: 64px;                          /* Slot just under the Topbar */
+  right: 16px;
+  width: 280px;
+  max-width: calc(100vw - 32px);
+  background: var(--pm-card);
+  border: 1px solid var(--pm-border);
+  border-radius: var(--pm-radius);
+  box-shadow: var(--pm-shadow-lg);
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  /* Slide-in entrance. `forwards` keeps the end state so nothing pops
+     back when the animation finishes. */
+  animation: pm-tweaks-in 180ms cubic-bezier(0.2, 0, 0, 1) forwards;
+  outline: none;
+}
+@keyframes pm-tweaks-in {
+  from { opacity: 0; transform: translateY(-4px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+.pm-tweaks-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px 10px;
+  border-bottom: 1px solid var(--pm-border);
+}
+.pm-tweaks-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.pm-tweaks-icon {
+  width: 16px;
+  height: 16px;
+  color: var(--pm-fg-muted);
+}
+.pm-tweaks-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--pm-fg);
+  margin: 0;
+}
+.pm-tweaks-close {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--pm-fg-muted);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+.pm-tweaks-close:hover {
+  background: var(--pm-neutral-100);
+  color: var(--pm-fg);
+}
+.pm-tweaks-close:focus-visible {
+  outline: 2px solid var(--pm-accent);
+  outline-offset: 2px;
+}
+.pm-tweaks-body {
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.pm-tweaks-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.pm-tweaks-section-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--pm-fg-muted);
+  margin: 0;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+.pm-tweaks-accent-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.pm-tweaks-footer {
+  padding: 10px 16px 12px;
+  border-top: 1px solid var(--pm-border);
+}
+.pm-tweaks-link {
+  font-size: 12px;
+  color: var(--pm-accent-dark);
+  font-weight: 600;
+  text-decoration: none;
+}
+.pm-tweaks-link:hover { text-decoration: underline; }
+.pm-tweaks-link:focus-visible {
+  outline: 2px solid var(--pm-accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Respect `prefers-reduced-motion` — if the user opted out of motion,
+   skip the market-dot ping and the Tweaks panel slide-in. Still visible,
+   just not animated. */
+@media (prefers-reduced-motion: reduce) {
+  .pm-live-dot::after,
+  .pm-tweaks-panel {
+    animation: none !important;
+  }
+}

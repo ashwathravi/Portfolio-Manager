@@ -4,8 +4,10 @@ import "./globals.css";
 import { cn } from "@/lib/utils";
 import { AppSidebar } from "@/components/layout/AppSidebar";
 import { TopBar } from "@/components/layout/TopBar";
+import { TweaksPanel } from "@/components/layout/TweaksPanel";
 import { ThemeProvider } from "@/components/providers/ThemeProvider";
 import { QueryProvider } from "@/components/providers/QueryProvider";
+import { PageHeaderProvider } from "@/components/layout/PageHeaderContext";
 import { Toaster } from "@/components/ui/sonner";
 
 const inter = Inter({
@@ -23,6 +25,27 @@ export const metadata: Metadata = {
   description: "Comprehensive wealth management platform",
 };
 
+/**
+ * Root layout (AR-66 / AR-67 / AR-68).
+ *
+ * Provider stack from outside in:
+ *   QueryProvider       — TanStack Query for server state
+ *     ThemeProvider     — hydrates `data-theme`/`data-density`/`--pm-accent`
+ *       PageHeaderProvider — pushes per-route title/crumbs/actions up to Topbar
+ *
+ * PageHeaderProvider must wrap BOTH `<AppSidebar/>` and `<TopBar/>` plus
+ * `{children}` because:
+ *   - the Topbar is the consumer (reads the header)
+ *   - the pages are the producers (set the header via usePageHeader)
+ * Hoisting the provider to the layout root keeps the API declarative and
+ * avoids threading a context through every page.
+ *
+ * Sidebar width is driven by `--pm-sidebar-w` (defined in globals.css) so
+ * we can tweak the width in one place without touching the layout shell.
+ * Using `md:ml-[var(--pm-sidebar-w)]` keeps Tailwind happy and matches
+ * the sidebar's actual fixed width of 248px — 8px tighter than the old
+ * 256px (md:ml-64) to buy back a bit of content width on 13" laptops.
+ */
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -39,15 +62,20 @@ export default function RootLayout({
       >
         <QueryProvider>
           <ThemeProvider>
-            <div className="flex h-screen w-full bg-muted/40">
-              <AppSidebar />
-              <div className="flex-1 flex flex-col h-full md:ml-64 transition-all duration-300 ease-in-out">
-                <TopBar />
-                <main className="flex-1 overflow-y-auto">
-                  {children}
-                </main>
+            <PageHeaderProvider>
+              <div className="flex h-screen w-full bg-muted/40">
+                <AppSidebar />
+                <div className="flex-1 flex flex-col h-full md:ml-[var(--pm-sidebar-w)] transition-all duration-300 ease-in-out">
+                  <TopBar />
+                  <main className="flex-1 overflow-y-auto">
+                    {children}
+                  </main>
+                </div>
               </div>
-            </div>
+              {/* Floating Tweaks panel — lives outside the flex row so it can
+                  float over the whole viewport without affecting layout. */}
+              <TweaksPanel />
+            </PageHeaderProvider>
           </ThemeProvider>
         </QueryProvider>
         <Toaster />

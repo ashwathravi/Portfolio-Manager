@@ -26,6 +26,7 @@ import { useThesisStore } from '@/lib/research/useThesisStore';
 import { useJournalStore } from '@/lib/research/useJournalStore';
 import type { Thesis } from '@/lib/research/thesis';
 import type { JournalEntry } from '@/lib/research/journal';
+import { usePageHeader } from '@/components/layout/PageHeaderContext';
 
 
 const mockWatchlist: WatchlistItem[] = [
@@ -82,6 +83,15 @@ function formatDate(iso: string): string {
 }
 
 function ResearchContent() {
+    // Topbar header declaration (AR-67). The title is stable across the three
+    // tabs (Theses / Journal / Watchlist) — users expect one "Research"
+    // location and the tabs below subdivide it.
+    usePageHeader({
+        title: 'Research',
+        subtitle: 'Theses, journal entries, and your watchlist',
+        crumbs: ['Workspace', 'Research'],
+    });
+
     const router = useRouter();
     const searchParams = useSearchParams();
     const currentTab = searchParams.get('tab') || 'theses';
