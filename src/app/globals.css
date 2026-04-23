@@ -1218,3 +1218,629 @@
   60%  { transform: scale(1.8); opacity: 0; }
   100% { transform: scale(0.9); opacity: 0; }
 }
+
+/* ==========================================================================
+   Phase 3 — Dashboard rebuild (AR-70 / AR-71 / AR-72 / AR-73)
+
+   Every dashboard surface goes through these classes. All colors route
+   through the `--pm-*` tokens, so light / dim / dark themes and the accent
+   customizer Just Work. Numeric stats (prices, deltas, percents) opt into
+   `--pm-font-mono` so columns line up visually.
+   ========================================================================== */
+
+/* ---- StatCard (AR-70) ---- */
+
+.pm-stat-card {
+  background: var(--pm-card);
+  border: 1px solid var(--pm-border);
+  border-radius: 12px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0; /* lets long values truncate instead of overflow */
+}
+.pm-stat-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+.pm-stat-label-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.pm-stat-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  background: color-mix(in oklab, var(--pm-accent) 12%, transparent);
+  color: var(--pm-accent);
+  flex-shrink: 0;
+}
+.pm-stat-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--pm-fg-subtle);
+  letter-spacing: 0.01em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pm-stat-spark {
+  flex-shrink: 0;
+  opacity: 0.85;
+}
+.pm-stat-value {
+  font-family: var(--pm-font-display, inherit);
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--pm-fg);
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+.pm-stat-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.pm-stat-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.pm-stat-chip-pos {
+  color: var(--pm-success);
+  background: color-mix(in oklab, var(--pm-success) 14%, transparent);
+}
+.pm-stat-chip-neg {
+  color: var(--pm-danger);
+  background: color-mix(in oklab, var(--pm-danger) 14%, transparent);
+}
+.pm-stat-chip-neutral {
+  color: var(--pm-fg-subtle);
+  background: var(--pm-bg-2);
+}
+.pm-stat-sub {
+  font-size: 12px;
+  color: var(--pm-fg-subtle);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+/* ---- Dashboard grids (AR-71 / AR-72 / AR-73) ---- */
+
+.pm-grid-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+}
+.pm-grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+.pm-grid-2-63 {
+  display: grid;
+  grid-template-columns: 63% calc(37% - 16px);
+  gap: 16px;
+}
+.pm-grid-3 {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+@media (max-width: 1100px) {
+  .pm-grid-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .pm-grid-2,
+  .pm-grid-2-63,
+  .pm-grid-3 { grid-template-columns: 1fr; }
+}
+
+/* ---- Card stacking modifier (composes with the existing .pm-card) ---- */
+/*
+ * The Phase 0/1 `.pm-card` is a bare surface (background + border + padding
+ * from the density token). Phase 3 Dashboard cards want the same surface
+ * but with a vertical flex stack — so we layer `pm-card-stack` on top
+ * instead of redefining `.pm-card`.
+ */
+
+.pm-card-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+.pm-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+.pm-card-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--pm-fg);
+  margin: 0;
+}
+.pm-card-subtitle {
+  font-size: 12px;
+  color: var(--pm-fg-subtle);
+  margin: 0;
+}
+.pm-card-link {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--pm-accent-dark);
+  text-decoration: none;
+}
+.pm-card-link:hover { text-decoration: underline; }
+.pm-card-link:focus-visible {
+  outline: 2px solid var(--pm-accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* ---- Pill-shaped segmented control (Ledger Dashboard variant) ---- */
+/*
+ * The Phase 0/1 `.pm-seg` is a squarish rounded-rect variant used in the
+ * Tweaks panel. The Ledger Dashboard wants pill-shaped toggles (ranges,
+ * allocation), so we expose a parallel `.pm-seg-pill` family instead of
+ * overriding the original.
+ */
+
+.pm-seg-pill {
+  display: inline-flex;
+  padding: 2px;
+  background: var(--pm-bg-2);
+  border: 1px solid var(--pm-border);
+  border-radius: 999px;
+  gap: 0;
+}
+.pm-seg-pill-btn {
+  border: 0;
+  background: transparent;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--pm-fg-subtle);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+.pm-seg-pill-btn:hover { color: var(--pm-fg); }
+.pm-seg-pill-btn[aria-checked="true"] {
+  background: var(--pm-card);
+  color: var(--pm-fg);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.08);
+}
+.pm-seg-pill-btn:focus-visible {
+  outline: 2px solid var(--pm-accent);
+  outline-offset: 2px;
+}
+
+/* ---- Readouts row (under range seg in equity chart card) ---- */
+
+.pm-readout-row {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+.pm-readout {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.pm-readout-label {
+  font-size: 11px;
+  color: var(--pm-fg-subtle);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+.pm-readout-value {
+  font-family: var(--pm-font-mono, monospace);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--pm-fg);
+  font-variant-numeric: tabular-nums;
+}
+.pm-readout-value-pos { color: var(--pm-success); }
+.pm-readout-value-neg { color: var(--pm-danger); }
+
+/* ---- Allocation card legend ---- */
+
+.pm-alloc-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.pm-alloc-row {
+  display: grid;
+  grid-template-columns: 12px 1fr auto;
+  align-items: center;
+  gap: 10px;
+}
+.pm-alloc-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+}
+.pm-alloc-name {
+  font-size: 13px;
+  color: var(--pm-fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pm-alloc-pct {
+  font-family: var(--pm-font-mono, monospace);
+  font-size: 13px;
+  color: var(--pm-fg-subtle);
+  font-variant-numeric: tabular-nums;
+}
+.pm-alloc-center-total {
+  font-family: var(--pm-font-display, inherit);
+  font-weight: 700;
+  font-size: 18px;
+  color: var(--pm-fg);
+  line-height: 1;
+}
+.pm-alloc-center-sub {
+  font-size: 11px;
+  color: var(--pm-fg-subtle);
+  margin-top: 2px;
+}
+
+/* ---- Holdings table (AR-72) ---- */
+
+.pm-holdings-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.pm-holdings-table thead th {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--pm-fg-subtle);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  text-align: left;
+  padding: 8px 8px;
+  border-bottom: 1px solid var(--pm-border);
+}
+.pm-holdings-table tbody td {
+  padding: 10px 8px;
+  border-bottom: 1px solid var(--pm-border);
+  vertical-align: middle;
+  color: var(--pm-fg);
+}
+.pm-holdings-table tbody tr:last-child td { border-bottom: 0; }
+.pm-holdings-table .num {
+  font-family: var(--pm-font-mono, monospace);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.pm-holdings-ticker {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.pm-holdings-sym {
+  font-weight: 700;
+  color: var(--pm-fg);
+}
+.pm-holdings-name {
+  font-size: 11px;
+  color: var(--pm-fg-subtle);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 200px;
+}
+.pm-alloc-bar-cell {
+  min-width: 120px;
+}
+.pm-alloc-bar {
+  width: 100%;
+  height: 4px;
+  background: var(--pm-bg-2);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.pm-alloc-bar-fill {
+  height: 100%;
+  background: var(--pm-accent);
+  border-radius: 999px;
+}
+.pm-num-pos { color: var(--pm-success); }
+.pm-num-neg { color: var(--pm-danger); }
+
+/* ---- Activity feed (AR-72 right col) ---- */
+
+.pm-activity-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.pm-activity-row {
+  display: grid;
+  grid-template-columns: 32px 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--pm-border);
+}
+.pm-activity-list > li:last-child { border-bottom: 0; }
+.pm-activity-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.pm-activity-icon-buy     { background: color-mix(in oklab, var(--pm-success) 14%, transparent); color: var(--pm-success); }
+.pm-activity-icon-sell    { background: color-mix(in oklab, var(--pm-danger) 14%, transparent);  color: var(--pm-danger); }
+.pm-activity-icon-dividend{ background: color-mix(in oklab, var(--pm-accent) 14%, transparent);  color: var(--pm-accent); }
+.pm-activity-icon-deposit { background: var(--pm-bg-2); color: var(--pm-fg-subtle); }
+.pm-activity-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.pm-activity-headline {
+  font-size: 13px;
+  color: var(--pm-fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pm-activity-meta {
+  font-size: 11px;
+  color: var(--pm-fg-subtle);
+}
+.pm-activity-amount {
+  font-family: var(--pm-font-mono, monospace);
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--pm-fg);
+  text-align: right;
+}
+.pm-activity-amount-pos { color: var(--pm-success); }
+.pm-activity-amount-neg { color: var(--pm-danger); }
+
+/* ---- Watchlist + Theses + Daily Brief (AR-73) ---- */
+
+.pm-watchlist-row,
+.pm-thesis-row {
+  display: grid;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--pm-border);
+}
+.pm-watchlist-row { grid-template-columns: 1fr auto auto; }
+.pm-thesis-row   { grid-template-columns: 1fr auto 64px; }
+.pm-watchlist-row:last-child,
+.pm-thesis-row:last-child { border-bottom: 0; }
+.pm-watchlist-sym {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.pm-watchlist-ticker {
+  font-weight: 700;
+  color: var(--pm-fg);
+}
+.pm-watchlist-name {
+  font-size: 11px;
+  color: var(--pm-fg-subtle);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 160px;
+}
+.pm-watchlist-price {
+  font-family: var(--pm-font-mono, monospace);
+  font-variant-numeric: tabular-nums;
+  color: var(--pm-fg);
+  font-size: 13px;
+}
+.pm-watchlist-pct {
+  font-family: var(--pm-font-mono, monospace);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* Conviction chip — High/Med/Low with a consistent shape */
+.pm-chip-conv {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+.pm-chip-conv-high { color: var(--pm-accent);     background: color-mix(in oklab, var(--pm-accent) 14%, transparent); }
+.pm-chip-conv-med  { color: var(--pm-warn);       background: color-mix(in oklab, var(--pm-warn) 14%, transparent); }
+.pm-chip-conv-low  { color: var(--pm-fg-subtle);  background: var(--pm-bg-2); }
+
+.pm-thesis-name { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.pm-thesis-title {
+  font-size: 13px;
+  color: var(--pm-fg);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pm-thesis-meta { font-size: 11px; color: var(--pm-fg-subtle); }
+
+/* Daily Brief — dark insight variant card */
+.pm-card-insight {
+  background: var(--pm-fg);
+  color: var(--pm-card);
+  border: 1px solid var(--pm-fg);
+  border-radius: 12px;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.pm-insight-chip {
+  align-self: flex-start;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--pm-accent) 40%, transparent);
+  color: var(--pm-card);
+}
+.pm-insight-headline {
+  font-family: var(--pm-font-display, inherit);
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.25;
+  margin: 0;
+}
+.pm-insight-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: pm-insight-counter;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.pm-insight-item {
+  display: grid;
+  grid-template-columns: 22px 1fr;
+  align-items: start;
+  gap: 10px;
+  counter-increment: pm-insight-counter;
+}
+.pm-insight-item::before {
+  content: counter(pm-insight-counter);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  background: color-mix(in oklab, var(--pm-card) 18%, transparent);
+  color: var(--pm-card);
+}
+.pm-insight-heading {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--pm-card);
+}
+.pm-insight-desc {
+  font-size: 12px;
+  color: color-mix(in oklab, var(--pm-card) 75%, transparent);
+  margin-top: 2px;
+}
+.pm-insight-cta {
+  align-self: flex-start;
+  background: var(--pm-accent);
+  color: var(--pm-fg);
+  border: 0;
+  border-radius: 999px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+.pm-insight-cta:hover { background: var(--pm-accent-dark); }
+.pm-insight-cta:focus-visible {
+  outline: 2px solid var(--pm-accent);
+  outline-offset: 2px;
+}
+
+/* ---- Dashboard topbar (AR-71) ---- */
+
+.pm-dashboard-topbar {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.pm-crumbs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--pm-fg-subtle);
+  margin-bottom: 4px;
+}
+.pm-crumbs a { color: inherit; text-decoration: none; }
+.pm-crumbs a:hover { color: var(--pm-fg); }
+.pm-crumbs-sep { opacity: 0.6; }
+.pm-greeting {
+  font-family: var(--pm-font-display, inherit);
+  font-size: 28px;
+  font-weight: 700;
+  margin: 0;
+  line-height: 1.15;
+}
+.pm-greeting-sub {
+  font-size: 13px;
+  color: var(--pm-fg-subtle);
+  margin: 4px 0 0;
+}
+.pm-topbar-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+/*
+ * Topbar action buttons reuse the Phase 0/1 button rules (`.pm-btn` +
+ * `.pm-btn-primary` / `.pm-btn-ghost`). No new button classes here — we
+ * don't want to redefine `.pm-btn-primary` and accidentally break the
+ * sidebar or holdings screens.
+ */
+
+/* Dashboard outer stack — vertical rhythm between sections */
+.pm-dashboard-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
