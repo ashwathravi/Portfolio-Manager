@@ -4058,3 +4058,2601 @@
 .pm-bt-promo-step.is-done .pm-bt-promo-line {
   background: var(--pm-success);
 }
+
+/* =========================================================================
+   Phase 7 · AR-83 — Execution variant switcher + page shell
+   =========================================================================
+   The Execution surface ships three interchangeable layouts. The switcher
+   lives in the topbar's actions slot (right-aligned) so it reads like a
+   "view mode" toggle instead of a navigation choice. The active button
+   gets an accent border + ambient ring, same token vocabulary as the
+   rest of the Phase 4/5/6 surface.
+
+   The three variant stubs sit below the topbar row and share the same
+   `.pm-card` vocabulary — AR-84/85/86 replace these stubs with the real
+   Focus/Checkout/Terminal layouts.
+   ========================================================================= */
+
+.pm-exec-page {
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* Variant switcher — 3-button pill group living in the topbar actions slot.
+   Rounded container, internal dividers come from each button's left border
+   (skipping the first) so the group reads like one control. */
+.pm-variant-switch {
+  display: inline-flex;
+  background: var(--pm-bg-2);
+  border: 1px solid var(--pm-border);
+  border-radius: 10px;
+  padding: 3px;
+  gap: 2px;
+}
+
+.pm-variant-btn {
+  appearance: none;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  padding: 5px 12px 6px;
+  min-width: 108px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  cursor: pointer;
+  color: var(--pm-fg-muted);
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease,
+    box-shadow 120ms ease;
+  text-align: left;
+}
+
+.pm-variant-btn:hover {
+  color: var(--pm-fg);
+  background: color-mix(in oklab, var(--pm-accent) 6%, transparent);
+}
+
+.pm-variant-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--pm-accent) 40%, transparent);
+}
+
+.pm-variant-btn.is-active {
+  background: var(--pm-card);
+  border-color: color-mix(in oklab, var(--pm-accent) 45%, var(--pm-border));
+  color: var(--pm-fg);
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--pm-accent) 22%, transparent),
+    0 2px 8px -4px color-mix(in oklab, var(--pm-accent) 30%, transparent);
+}
+
+.pm-variant-label {
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  line-height: 1.1;
+}
+
+.pm-variant-sub {
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--pm-fg-subtle);
+  line-height: 1.2;
+}
+
+.pm-variant-btn.is-active .pm-variant-sub {
+  color: var(--pm-fg-muted);
+}
+
+/* Stub body — placeholder the three variant bodies render until AR-84/85/86
+   replace them with the real layouts. Keeps the page useful mid-phase. */
+.pm-exec-stub {
+  padding: 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 320px;
+  justify-content: center;
+  align-items: flex-start;
+}
+
+.pm-exec-stub-eyebrow {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--pm-accent);
+}
+
+.pm-exec-stub-title {
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--pm-fg);
+}
+
+.pm-exec-stub-desc {
+  font-size: 13px;
+  color: var(--pm-fg-muted);
+  max-width: 520px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+/* Responsive: on narrow viewports the switcher drops its sub-labels so
+   the pill group fits next to the topbar actions without wrapping. */
+@media (max-width: 720px) {
+  .pm-variant-btn {
+    min-width: 0;
+    padding: 6px 10px;
+  }
+  .pm-variant-sub {
+    display: none;
+  }
+}
+
+/* =========================================================================
+   Phase 7 · AR-84 — Execution Focus variant
+   =========================================================================
+   Split layout: order form (left, 420px) + blotter (right, fills). On
+   narrow viewports they stack form-on-top so the blotter keeps full
+   width. Both cards share the Phase 4 `.pm-card` shell so the surface
+   reads continuous with Portfolios, Performance, and Strategies.
+
+   The form is a single column of labeled fields with segmented toggles
+   for side + TIF. A 4-row preview shows notional/commission/buying power/
+   position after every edit. A guardrail list sits between preview and
+   the Review & submit foot so there's always a visible "am I about to
+   do something dumb" check before the click.
+   ========================================================================= */
+
+.pm-exec-focus {
+  display: grid;
+  grid-template-columns: minmax(380px, 440px) minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+
+@media (max-width: 1024px) {
+  .pm-exec-focus {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* --------------------------------------------------------------------- */
+/* Order form                                                             */
+/* --------------------------------------------------------------------- */
+
+.pm-exec-form {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.pm-exec-form-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.pm-exec-form-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--pm-fg);
+  letter-spacing: -0.01em;
+  margin: 0;
+}
+
+.pm-exec-form-sub {
+  font-size: 11.5px;
+  color: var(--pm-fg-subtle);
+}
+
+/* Side toggle — two-button pill, green for buy, red for sell. Full width
+   inside the card so the tap target stays big. */
+.pm-exec-side {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  background: var(--pm-bg-2);
+  border: 1px solid var(--pm-border);
+  border-radius: 10px;
+  padding: 3px;
+  gap: 2px;
+}
+
+.pm-exec-side-btn {
+  appearance: none;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  padding: 8px 0;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  color: var(--pm-fg-muted);
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.pm-exec-side-btn:hover {
+  color: var(--pm-fg);
+}
+
+.pm-exec-side-btn.is-buy.is-active {
+  background: color-mix(in oklab, var(--pm-success) 14%, var(--pm-card));
+  color: var(--pm-success);
+  border-color: color-mix(in oklab, var(--pm-success) 40%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--pm-success) 20%, transparent);
+}
+
+.pm-exec-side-btn.is-sell.is-active {
+  background: color-mix(in oklab, var(--pm-danger) 14%, var(--pm-card));
+  color: var(--pm-danger);
+  border-color: color-mix(in oklab, var(--pm-danger) 40%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--pm-danger) 20%, transparent);
+}
+
+/* Field row — label on top, control below, optional hint inline with input */
+.pm-exec-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.pm-exec-field-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--pm-fg-subtle);
+}
+
+.pm-exec-field-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.pm-exec-input {
+  width: 100%;
+  background: var(--pm-bg-2);
+  border: 1px solid var(--pm-border);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 13px;
+  color: var(--pm-fg);
+  font-family: inherit;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.pm-exec-input:hover {
+  border-color: color-mix(in oklab, var(--pm-accent) 30%, var(--pm-border));
+}
+
+.pm-exec-input:focus {
+  outline: none;
+  border-color: color-mix(in oklab, var(--pm-accent) 55%, var(--pm-border));
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--pm-accent) 18%, transparent);
+}
+
+.pm-exec-field-hint {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 12px;
+  color: var(--pm-fg-subtle);
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent, var(--pm-bg-2) 30%);
+  padding-left: 14px;
+}
+
+.pm-exec-row-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+/* TIF segmented row — 4 equal buttons, active one accent-tinted */
+.pm-exec-tif {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  background: var(--pm-bg-2);
+  border: 1px solid var(--pm-border);
+  border-radius: 8px;
+  padding: 2px;
+  gap: 2px;
+}
+
+.pm-exec-tif-btn {
+  appearance: none;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 6px 0;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  color: var(--pm-fg-muted);
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+.pm-exec-tif-btn:hover {
+  color: var(--pm-fg);
+}
+
+.pm-exec-tif-btn.is-active {
+  background: color-mix(in oklab, var(--pm-accent) 16%, var(--pm-card));
+  border-color: color-mix(in oklab, var(--pm-accent) 45%, transparent);
+  color: var(--pm-fg);
+}
+
+/* Preview rows */
+.pm-exec-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  background: var(--pm-bg-2);
+  border: 1px solid var(--pm-border);
+  border-radius: 10px;
+}
+
+.pm-exec-preview-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.pm-exec-preview-label {
+  font-size: 12px;
+  color: var(--pm-fg-muted);
+}
+
+.pm-exec-preview-value {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--pm-fg);
+  letter-spacing: -0.005em;
+}
+
+/* Guardrails list — three states: ok / warn / fail, each with a colored
+   dot. The message is muted since the label carries the scannable meaning. */
+.pm-exec-guardrails {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 4px 2px;
+}
+
+.pm-exec-guardrail {
+  display: grid;
+  grid-template-columns: 10px 120px 1fr;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+}
+
+.pm-exec-guardrail-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--pm-success);
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--pm-success) 25%, transparent);
+}
+
+.pm-exec-guardrail.is-warn .pm-exec-guardrail-dot {
+  background: var(--pm-warn);
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--pm-warn) 25%, transparent);
+}
+
+.pm-exec-guardrail.is-fail .pm-exec-guardrail-dot {
+  background: var(--pm-danger);
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--pm-danger) 30%, transparent);
+}
+
+.pm-exec-guardrail-label {
+  font-weight: 600;
+  color: var(--pm-fg);
+}
+
+.pm-exec-guardrail-msg {
+  color: var(--pm-fg-muted);
+}
+
+.pm-exec-guardrail.is-warn .pm-exec-guardrail-msg {
+  color: color-mix(in oklab, var(--pm-warn) 75%, var(--pm-fg));
+}
+
+.pm-exec-guardrail.is-fail .pm-exec-guardrail-msg {
+  color: var(--pm-danger);
+  font-weight: 500;
+}
+
+/* Foot — ghost save draft + primary/danger submit */
+.pm-exec-form-foot {
+  display: flex;
+  gap: 10px;
+  padding-top: 4px;
+}
+
+.pm-exec-form-foot > .pm-btn {
+  flex: 1;
+}
+
+/* --------------------------------------------------------------------- */
+/* Orders panel (blotter)                                                 */
+/* --------------------------------------------------------------------- */
+
+.pm-exec-blotter {
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 420px;
+}
+
+.pm-exec-blotter-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  gap: 16px;
+  border-bottom: 1px solid var(--pm-border);
+  flex-wrap: wrap;
+}
+
+.pm-exec-blotter-title {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  margin: 0;
+  color: var(--pm-fg);
+}
+
+.pm-exec-chips {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.pm-exec-chip {
+  appearance: none;
+  background: var(--pm-bg-2);
+  border: 1px solid var(--pm-border);
+  border-radius: 999px;
+  padding: 5px 11px 5px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--pm-fg-muted);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.pm-exec-chip:hover {
+  color: var(--pm-fg);
+  border-color: color-mix(in oklab, var(--pm-accent) 30%, var(--pm-border));
+}
+
+.pm-exec-chip.is-active {
+  background: color-mix(in oklab, var(--pm-accent) 14%, var(--pm-card));
+  border-color: color-mix(in oklab, var(--pm-accent) 50%, transparent);
+  color: var(--pm-fg);
+}
+
+.pm-exec-chip-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 16px;
+  border-radius: 6px;
+  padding: 0 4px;
+  background: var(--pm-border);
+  color: var(--pm-fg-muted);
+  font-size: 10.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.pm-exec-chip.is-active .pm-exec-chip-count {
+  background: color-mix(in oklab, var(--pm-accent) 30%, transparent);
+  color: var(--pm-fg);
+}
+
+/* Approval banner — warn-colored callout sitting between the header and
+   the table. Collapses when the queue is empty. */
+.pm-exec-approval {
+  margin: 14px 16px 8px;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in oklab, var(--pm-warn) 40%, var(--pm-border));
+  background: color-mix(in oklab, var(--pm-warn) 10%, var(--pm-card));
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.pm-exec-approval-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.pm-exec-approval-icon {
+  width: 16px;
+  height: 16px;
+  color: var(--pm-warn);
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.pm-exec-approval-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.pm-exec-approval-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--pm-fg);
+}
+
+.pm-exec-approval-sub {
+  font-size: 11.5px;
+  color: var(--pm-fg-muted);
+}
+
+.pm-exec-approval-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pm-exec-approval-row {
+  display: grid;
+  grid-template-columns: auto 60px 1fr auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  background: var(--pm-card);
+  border: 1px solid var(--pm-border);
+  border-radius: 8px;
+  font-size: 12.5px;
+}
+
+.pm-exec-approval-ticker {
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--pm-fg);
+}
+
+.pm-exec-approval-qty {
+  color: var(--pm-fg-muted);
+  font-size: 12px;
+}
+
+.pm-exec-approval-notional {
+  font-weight: 600;
+  color: var(--pm-fg);
+  text-align: right;
+}
+
+.pm-exec-approval-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.pm-exec-btn-sm {
+  padding: 5px 10px !important;
+  font-size: 11.5px !important;
+  height: auto !important;
+  gap: 4px;
+}
+
+.pm-exec-btn-icon {
+  width: 12px;
+  height: 12px;
+}
+
+/* Orders table */
+.pm-exec-table-wrap {
+  overflow-x: auto;
+  flex: 1;
+}
+
+.pm-exec-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+
+.pm-exec-table th,
+.pm-exec-table td {
+  padding: 10px 16px;
+  text-align: left;
+  border-bottom: 1px solid color-mix(in oklab, var(--pm-border) 60%, transparent);
+}
+
+.pm-exec-table th {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--pm-fg-subtle);
+  background: color-mix(in oklab, var(--pm-bg-2) 50%, transparent);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.pm-exec-table .num-col {
+  text-align: right;
+}
+
+.pm-exec-table tbody tr {
+  transition: background 120ms ease;
+}
+
+.pm-exec-table tbody tr:hover {
+  background: color-mix(in oklab, var(--pm-accent) 4%, transparent);
+}
+
+.pm-exec-table-ticker {
+  font-weight: 600;
+  letter-spacing: 0.005em;
+  color: var(--pm-fg);
+}
+
+.pm-exec-table-action {
+  text-align: right;
+  padding-right: 12px !important;
+}
+
+/* Side pill — BUY green / SELL red */
+.pm-exec-side-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 5px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+
+.pm-exec-side-pill.is-buy {
+  background: color-mix(in oklab, var(--pm-success) 16%, transparent);
+  color: var(--pm-success);
+}
+
+.pm-exec-side-pill.is-sell {
+  background: color-mix(in oklab, var(--pm-danger) 16%, transparent);
+  color: var(--pm-danger);
+}
+
+/* Status pill */
+.pm-exec-status {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 9px;
+  border-radius: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  border: 1px solid transparent;
+}
+
+.pm-exec-status-working {
+  background: color-mix(in oklab, var(--pm-accent) 14%, transparent);
+  color: var(--pm-accent);
+  border-color: color-mix(in oklab, var(--pm-accent) 35%, transparent);
+}
+
+.pm-exec-status-filled {
+  background: color-mix(in oklab, var(--pm-success) 14%, transparent);
+  color: var(--pm-success);
+  border-color: color-mix(in oklab, var(--pm-success) 35%, transparent);
+}
+
+.pm-exec-status-pending {
+  background: color-mix(in oklab, var(--pm-warn) 14%, transparent);
+  color: var(--pm-warn);
+  border-color: color-mix(in oklab, var(--pm-warn) 35%, transparent);
+}
+
+.pm-exec-status-cancelled {
+  background: var(--pm-bg-2);
+  color: var(--pm-fg-muted);
+  border-color: var(--pm-border);
+}
+
+.pm-exec-status-rejected {
+  background: color-mix(in oklab, var(--pm-danger) 14%, transparent);
+  color: var(--pm-danger);
+  border-color: color-mix(in oklab, var(--pm-danger) 35%, transparent);
+}
+
+.pm-exec-cancel {
+  appearance: none;
+  background: transparent;
+  border: none;
+  color: var(--pm-fg-subtle);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 5px;
+  line-height: 0;
+  transition: color 120ms ease, background 120ms ease;
+}
+
+.pm-exec-cancel:hover {
+  color: var(--pm-danger);
+  background: color-mix(in oklab, var(--pm-danger) 12%, transparent);
+}
+
+.pm-exec-cancel-icon {
+  width: 14px;
+  height: 14px;
+}
+
+.pm-exec-empty {
+  padding: 60px 24px;
+  text-align: center;
+  color: var(--pm-fg-subtle);
+  font-size: 13px;
+}
+
+/* Mobile: make the table a little tighter and collapse the chip count
+   badges so the filter row still fits under the title. */
+@media (max-width: 640px) {
+  .pm-exec-table th,
+  .pm-exec-table td {
+    padding: 8px 12px;
+  }
+  .pm-exec-approval-row {
+    grid-template-columns: auto 1fr auto;
+  }
+  .pm-exec-approval-qty,
+  .pm-exec-approval-notional {
+    display: none;
+  }
+}
+
+/* =========================================================================
+   Phase 7 · AR-85 — Execution Checkout variant
+   =========================================================================
+   Stripe-Checkout-style wizard. Four steps at the top (Security, Sizing,
+   Thesis, Review), a split below: left form card with step body, right
+   receipt card always visible. A compact blotter sits under the split.
+
+   The receipt is the star of the show — it's the trader's "am I sure"
+   surface. Impact bar + locked-price countdown + green-dot checks all
+   recompute live as the user edits qty / limit above. No modal, no
+   confirm screen; the Review step is just a summary of what the
+   receipt already told you.
+   ========================================================================= */
+
+.pm-exec-checkout {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* --------------------------------------------------------------------- */
+/* Stepper                                                                */
+/* --------------------------------------------------------------------- */
+
+.pm-co-stepper {
+  list-style: none;
+  margin: 0;
+  padding: 16px 20px;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  background: var(--pm-card);
+  border: 1px solid var(--pm-border);
+  border-radius: 12px;
+  position: relative;
+}
+
+.pm-co-step {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.pm-co-step-btn {
+  appearance: none;
+  background: transparent;
+  border: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 0;
+  cursor: pointer;
+  color: var(--pm-fg-subtle);
+  transition: color 120ms ease;
+  min-width: 0;
+}
+
+.pm-co-step-btn:disabled {
+  cursor: default;
+}
+
+.pm-co-step-btn:hover:not(:disabled) {
+  color: var(--pm-fg);
+}
+
+.pm-co-step.is-active .pm-co-step-btn,
+.pm-co-step.is-done .pm-co-step-btn {
+  color: var(--pm-fg);
+}
+
+.pm-co-step-dot {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--pm-bg-2);
+  border: 1.5px solid var(--pm-border);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--pm-fg-muted);
+  transition: background 150ms ease, color 150ms ease, border-color 150ms ease,
+    box-shadow 150ms ease;
+}
+
+.pm-co-step.is-active .pm-co-step-dot {
+  background: color-mix(in oklab, var(--pm-accent) 18%, var(--pm-card));
+  border-color: var(--pm-accent);
+  color: var(--pm-accent);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--pm-accent) 18%, transparent);
+}
+
+.pm-co-step.is-done .pm-co-step-dot {
+  background: var(--pm-success);
+  border-color: var(--pm-success);
+  color: #fff;
+}
+
+.pm-co-step-check {
+  width: 14px;
+  height: 14px;
+}
+
+.pm-co-step-label {
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pm-co-step-line {
+  position: absolute;
+  top: 50%;
+  left: calc(100% - 4px);
+  right: calc(-100% + 28px);
+  height: 1.5px;
+  background: var(--pm-border);
+  z-index: 0;
+}
+
+.pm-co-step.is-done .pm-co-step-line {
+  background: var(--pm-success);
+}
+
+@media (max-width: 720px) {
+  .pm-co-step-label {
+    display: none;
+  }
+  .pm-co-stepper {
+    padding: 12px 14px;
+  }
+}
+
+/* --------------------------------------------------------------------- */
+/* Split (form + receipt)                                                 */
+/* --------------------------------------------------------------------- */
+
+.pm-exec-checkout-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 360px);
+  gap: 20px;
+  align-items: start;
+}
+
+@media (max-width: 1024px) {
+  .pm-exec-checkout-split {
+    grid-template-columns: 1fr;
+  }
+}
+
+.pm-co-form {
+  padding: 28px 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.pm-co-step-body {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.pm-co-kicker {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--pm-accent);
+}
+
+.pm-co-title {
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  color: var(--pm-fg);
+  margin: 0;
+  line-height: 1.2;
+}
+
+.pm-co-helper {
+  font-size: 13px;
+  color: var(--pm-fg-muted);
+  line-height: 1.5;
+  margin: 0;
+  max-width: 56ch;
+}
+
+.pm-co-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pm-co-field-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--pm-fg-subtle);
+}
+
+.pm-co-form-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 8px;
+  border-top: 1px solid var(--pm-border);
+}
+
+.pm-co-foot-icon {
+  width: 14px;
+  height: 14px;
+}
+
+.pm-co-form-foot > .pm-btn {
+  gap: 6px;
+}
+
+/* Side toggle inside security step — reuses the Focus pill classes but
+   needs a little grid wrapper here since the form gap is larger. */
+.pm-co-side {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  background: var(--pm-bg-2);
+  border: 1px solid var(--pm-border);
+  border-radius: 10px;
+  padding: 3px;
+  gap: 2px;
+  max-width: 260px;
+}
+
+/* Security grid — ticker card radios, 3-col at desktop. */
+.pm-co-security-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+@media (max-width: 560px) {
+  .pm-co-security-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.pm-co-security {
+  appearance: none;
+  background: var(--pm-card);
+  border: 1.5px solid var(--pm-border);
+  border-radius: 10px;
+  padding: 14px 14px 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.pm-co-security:hover {
+  border-color: color-mix(in oklab, var(--pm-accent) 35%, var(--pm-border));
+  background: color-mix(in oklab, var(--pm-accent) 4%, var(--pm-card));
+}
+
+.pm-co-security.is-active {
+  border-color: var(--pm-accent);
+  background: color-mix(in oklab, var(--pm-accent) 10%, var(--pm-card));
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--pm-accent) 18%, transparent);
+}
+
+.pm-co-security-symbol {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--pm-fg);
+}
+
+.pm-co-security-price {
+  font-size: 12px;
+  color: var(--pm-fg-muted);
+}
+
+/* Ticker card in sizing step — a single panel showing chosen symbol + live price */
+.pm-co-ticker-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  background: var(--pm-bg-2);
+  border: 1px solid var(--pm-border);
+  border-radius: 12px;
+}
+
+.pm-co-ticker-symbol {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--pm-fg);
+}
+
+.pm-co-ticker-price {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--pm-fg);
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.pm-co-ticker-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--pm-success);
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: color-mix(in oklab, var(--pm-success) 14%, transparent);
+}
+
+/* Qty row — step buttons + input */
+.pm-co-qty-row {
+  display: grid;
+  grid-template-columns: 44px 1fr 44px;
+  align-items: stretch;
+  border: 1px solid var(--pm-border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.pm-co-qty-step {
+  appearance: none;
+  background: var(--pm-bg-2);
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--pm-fg-muted);
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.pm-co-qty-step:hover {
+  background: color-mix(in oklab, var(--pm-accent) 10%, var(--pm-bg-2));
+  color: var(--pm-fg);
+}
+
+.pm-co-qty-icon {
+  width: 16px;
+  height: 16px;
+}
+
+.pm-co-qty-input {
+  appearance: none;
+  background: var(--pm-card);
+  border: none;
+  border-left: 1px solid var(--pm-border);
+  border-right: 1px solid var(--pm-border);
+  padding: 12px 16px;
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--pm-fg);
+  text-align: center;
+  letter-spacing: -0.005em;
+}
+
+.pm-co-qty-input:focus {
+  outline: none;
+  background: color-mix(in oklab, var(--pm-accent) 4%, var(--pm-card));
+}
+
+/* Shortcut chips */
+.pm-co-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.pm-co-chip {
+  appearance: none;
+  background: var(--pm-bg-2);
+  border: 1px solid var(--pm-border);
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--pm-fg-muted);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.pm-co-chip:hover {
+  color: var(--pm-fg);
+  border-color: color-mix(in oklab, var(--pm-accent) 35%, var(--pm-border));
+}
+
+.pm-co-chip.is-active {
+  background: color-mix(in oklab, var(--pm-accent) 16%, var(--pm-card));
+  border-color: var(--pm-accent);
+  color: var(--pm-fg);
+}
+
+.pm-co-anchor-icon {
+  width: 12px;
+  height: 12px;
+  color: var(--pm-accent);
+}
+
+/* Limit slider */
+.pm-co-limit {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px;
+  background: var(--pm-bg-2);
+  border: 1px solid var(--pm-border);
+  border-radius: 10px;
+}
+
+.pm-co-limit-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.pm-co-limit-value {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--pm-fg);
+}
+
+.pm-co-slider {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 100%;
+  height: 6px;
+  background: linear-gradient(
+    90deg,
+    color-mix(in oklab, var(--pm-danger) 30%, transparent) 0%,
+    color-mix(in oklab, var(--pm-border) 60%, transparent) 50%,
+    color-mix(in oklab, var(--pm-success) 30%, transparent) 100%
+  );
+  border-radius: 999px;
+  outline: none;
+  cursor: pointer;
+}
+
+.pm-co-slider::-webkit-slider-thumb {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: var(--pm-accent);
+  border: 3px solid var(--pm-card);
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--pm-accent) 50%, transparent),
+    0 2px 6px -2px rgba(0, 0, 0, 0.35);
+  cursor: grab;
+}
+
+.pm-co-slider::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: var(--pm-accent);
+  border: 3px solid var(--pm-card);
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--pm-accent) 50%, transparent),
+    0 2px 6px -2px rgba(0, 0, 0, 0.35);
+  cursor: grab;
+}
+
+.pm-co-limit-ticks {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--pm-fg-subtle);
+}
+
+.pm-co-limit-hint {
+  font-size: 11.5px;
+  color: var(--pm-fg-muted);
+}
+
+/* Thesis */
+.pm-co-thesis-anchors {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.pm-co-textarea {
+  width: 100%;
+  background: var(--pm-bg-2);
+  border: 1px solid var(--pm-border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  font-size: 13px;
+  color: var(--pm-fg);
+  font-family: inherit;
+  line-height: 1.55;
+  resize: vertical;
+  min-height: 96px;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.pm-co-textarea:focus {
+  outline: none;
+  border-color: color-mix(in oklab, var(--pm-accent) 55%, var(--pm-border));
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--pm-accent) 18%, transparent);
+}
+
+/* Review grid */
+.pm-co-review-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border: 1px solid var(--pm-border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.pm-co-review-row {
+  display: grid;
+  grid-template-columns: 160px 1fr;
+  gap: 12px;
+  padding: 12px 16px;
+  background: var(--pm-card);
+  border-bottom: 1px solid color-mix(in oklab, var(--pm-border) 60%, transparent);
+}
+
+.pm-co-review-row:last-child {
+  border-bottom: none;
+}
+
+.pm-co-review-label {
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--pm-fg-subtle);
+  align-self: center;
+}
+
+.pm-co-review-val-col {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.pm-co-review-value {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--pm-fg);
+}
+
+.pm-co-review-sub {
+  font-size: 12px;
+  color: var(--pm-fg-muted);
+}
+
+/* --------------------------------------------------------------------- */
+/* Receipt                                                                */
+/* --------------------------------------------------------------------- */
+
+.pm-co-receipt {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  position: sticky;
+  top: 120px;
+}
+
+.pm-co-receipt-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--pm-border);
+}
+
+.pm-co-receipt-ticker {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--pm-fg);
+  flex: 1;
+}
+
+.pm-co-receipt-lock {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--pm-warn);
+  font-variant-numeric: tabular-nums;
+  padding: 3px 8px;
+  background: color-mix(in oklab, var(--pm-warn) 12%, transparent);
+  border: 1px solid color-mix(in oklab, var(--pm-warn) 35%, transparent);
+  border-radius: 999px;
+}
+
+.pm-co-lock-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--pm-warn);
+  animation: pm-co-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes pm-co-pulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
+
+.pm-co-receipt-notional {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.pm-co-receipt-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--pm-fg-subtle);
+}
+
+.pm-co-receipt-big {
+  font-size: 26px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  color: var(--pm-fg);
+}
+
+.pm-co-receipt-params {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 12px;
+  margin: 0;
+  padding: 12px 0;
+  border-top: 1px solid var(--pm-border);
+  border-bottom: 1px solid var(--pm-border);
+}
+
+.pm-co-receipt-pkey {
+  font-size: 11.5px;
+  color: var(--pm-fg-subtle);
+  letter-spacing: 0.02em;
+}
+
+.pm-co-receipt-pval {
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--pm-fg);
+  text-align: right;
+}
+
+/* Impact bar — stacks the before/after fills with the "cap" tick at 30% */
+.pm-co-impact {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pm-co-impact-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.pm-co-impact-delta {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--pm-fg);
+}
+
+.pm-co-impact-bar {
+  position: relative;
+  height: 10px;
+  background: var(--pm-bg-2);
+  border: 1px solid var(--pm-border);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.pm-co-impact-fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  border-radius: 999px;
+  transition: width 220ms ease;
+}
+
+.pm-co-impact-fill.is-before {
+  background: color-mix(in oklab, var(--pm-fg-muted) 30%, transparent);
+  z-index: 1;
+}
+
+.pm-co-impact-fill.is-after {
+  background: color-mix(in oklab, var(--pm-accent) 70%, transparent);
+  z-index: 2;
+  mix-blend-mode: normal;
+  opacity: 0.85;
+}
+
+.pm-co-impact-cap {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  right: 0;
+  width: 2px;
+  background: color-mix(in oklab, var(--pm-danger) 60%, transparent);
+  z-index: 3;
+}
+
+.pm-co-impact-scale {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10.5px;
+  color: var(--pm-fg-subtle);
+  letter-spacing: 0.02em;
+}
+
+/* Checks list */
+.pm-co-checks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.pm-co-check {
+  display: grid;
+  grid-template-columns: 18px 100px 1fr;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+}
+
+.pm-co-check-dot {
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.pm-co-check.is-ok .pm-co-check-dot {
+  background: var(--pm-success);
+}
+
+.pm-co-check.is-fail .pm-co-check-dot {
+  background: var(--pm-danger);
+}
+
+.pm-co-check-icon {
+  width: 11px;
+  height: 11px;
+}
+
+.pm-co-check-label {
+  font-weight: 600;
+  color: var(--pm-fg);
+}
+
+.pm-co-check-hint {
+  color: var(--pm-fg-muted);
+}
+
+.pm-co-check.is-fail .pm-co-check-hint {
+  color: var(--pm-danger);
+  font-weight: 500;
+}
+
+/* --------------------------------------------------------------------- */
+/* Recent orders                                                          */
+/* --------------------------------------------------------------------- */
+
+.pm-co-recent {
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.pm-co-recent-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--pm-border);
+}
+
+.pm-co-recent-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  margin: 0;
+  color: var(--pm-fg);
+}
+
+.pm-co-recent-sub {
+  font-size: 11.5px;
+  color: var(--pm-fg-subtle);
+}
+
+.pm-co-recent-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pm-co-recent-row {
+  display: grid;
+  grid-template-columns: auto 60px 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  transition: background 120ms ease;
+}
+
+.pm-co-recent-row:hover {
+  background: color-mix(in oklab, var(--pm-accent) 4%, transparent);
+}
+
+.pm-co-recent-ticker {
+  font-weight: 600;
+  letter-spacing: 0.005em;
+  color: var(--pm-fg);
+}
+
+.pm-co-recent-qty {
+  color: var(--pm-fg-muted);
+}
+
+@media (max-width: 560px) {
+  .pm-co-recent-row {
+    grid-template-columns: auto 1fr auto;
+  }
+  .pm-co-recent-qty {
+    display: none;
+  }
+}
+
+/* --------------------------------------------------------------------- */
+/* AR-86 — Execution Terminal variant                                    */
+/*                                                                       */
+/* Dark-theme pro-trader surface. Intentionally overrides the global     */
+/* tokens — terminal needs its own palette so it feels like a separate   */
+/* tool, not part of the workspace chrome. Colors are hardcoded because  */
+/* they encode meaning (green = bid/up, red = ask/down, amber = accent)  */
+/* that shouldn't flex with the user's theme preference.                 */
+/* --------------------------------------------------------------------- */
+
+.pm-term {
+  --term-bg: #0a0f0c;
+  --term-panel: #0d1410;
+  --term-panel-2: #121b17;
+  --term-border: #1c2822;
+  --term-border-strong: #2a3a32;
+  --term-fg: #d4e0d8;
+  --term-fg-muted: #8a9992;
+  --term-fg-subtle: #546058;
+  --term-bid: #19d07a;
+  --term-bid-bg: rgba(25, 208, 122, 0.10);
+  --term-bid-fill: rgba(25, 208, 122, 0.22);
+  --term-ask: #f04a4a;
+  --term-ask-bg: rgba(240, 74, 74, 0.10);
+  --term-ask-fill: rgba(240, 74, 74, 0.22);
+  --term-accent: #ffc857;
+  --term-warn: #ffb020;
+
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  gap: 10px;
+  min-height: calc(100vh - 180px);
+  padding: 12px;
+  background: var(--term-bg);
+  color: var(--term-fg);
+  border: 1px solid var(--term-border-strong);
+  border-radius: 10px;
+  font-family: "JetBrains Mono", "SF Mono", "Menlo", ui-monospace, monospace;
+  font-size: 12px;
+  line-height: 1.45;
+  font-feature-settings: "tnum" 1, "zero" 1;
+  outline: none;
+}
+
+.pm-term:focus-visible {
+  border-color: var(--term-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--term-accent) 25%, transparent);
+}
+
+/* Header ------------------------------------------------------------- */
+
+.pm-term-header {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.2fr) auto 1fr;
+  gap: 16px;
+  align-items: center;
+  padding: 10px 14px;
+  background: var(--term-panel);
+  border: 1px solid var(--term-border);
+  border-radius: 8px;
+}
+
+.pm-term-head-left {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.pm-term-symbol {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--term-fg);
+}
+
+.pm-term-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 10.5px;
+  color: var(--term-fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.pm-term-dot {
+  display: inline-block;
+  width: 3px;
+  height: 3px;
+  border-radius: 999px;
+  background: var(--term-fg-subtle);
+}
+
+.pm-term-head-center {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  justify-self: center;
+}
+
+.pm-term-quote {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--term-fg);
+}
+
+.pm-term-delta {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.pm-term-delta.is-up {
+  color: var(--term-bid);
+}
+
+.pm-term-delta.is-down {
+  color: var(--term-ask);
+}
+
+.pm-term-head-stats {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(54px, 1fr);
+  gap: 0;
+  justify-self: end;
+  align-self: stretch;
+  border: 1px solid var(--term-border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.pm-term-head-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 10px;
+  background: var(--term-panel-2);
+  border-right: 1px solid var(--term-border);
+}
+
+.pm-term-head-stat:last-child {
+  border-right: none;
+}
+
+.pm-term-head-label {
+  font-size: 9.5px;
+  color: var(--term-fg-subtle);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.pm-term-head-value {
+  font-size: 12px;
+  color: var(--term-fg);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Grid --------------------------------------------------------------- */
+
+.pm-term-grid {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.9fr) minmax(320px, 1.2fr) minmax(260px, 0.9fr);
+  gap: 10px;
+  min-height: 0;
+}
+
+@media (max-width: 1100px) {
+  .pm-term-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+  .pm-term-grid > section:nth-child(3) {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 720px) {
+  .pm-term-grid {
+    grid-template-columns: 1fr;
+  }
+  .pm-term-grid > section:nth-child(3) {
+    grid-column: auto;
+  }
+}
+
+.pm-term-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--term-panel);
+  border: 1px solid var(--term-border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.pm-term-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 12px;
+  background: var(--term-panel-2);
+  border-bottom: 1px solid var(--term-border);
+}
+
+.pm-term-panel-title {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--term-accent);
+}
+
+.pm-term-panel-sub {
+  font-size: 10px;
+  color: var(--term-fg-muted);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* L2 book ------------------------------------------------------------ */
+
+.pm-term-book {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.pm-term-book-headers {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--term-border);
+  font-size: 9.5px;
+  color: var(--term-fg-subtle);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+.pm-term-book-headers span:nth-child(2) {
+  text-align: center;
+}
+
+.pm-term-book-headers span:nth-child(3) {
+  text-align: right;
+}
+
+.pm-term-book-asks,
+.pm-term-book-bids {
+  display: flex;
+  flex-direction: column;
+}
+
+.pm-term-book-bids {
+  border-top: 1px dashed var(--term-border-strong);
+}
+
+.pm-term-book-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  align-items: center;
+  padding: 4px 12px;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid color-mix(in srgb, var(--term-border) 60%, transparent);
+  color: var(--term-fg);
+  font-family: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 90ms ease;
+}
+
+.pm-term-book-row:hover {
+  background: color-mix(in srgb, var(--term-accent) 6%, transparent);
+}
+
+.pm-term-book-row:last-child {
+  border-bottom: none;
+}
+
+.pm-term-book-fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+
+.pm-term-book-row.is-bid .pm-term-book-fill {
+  background: linear-gradient(to left, var(--term-bid-fill), transparent);
+}
+
+.pm-term-book-row.is-ask .pm-term-book-fill {
+  background: linear-gradient(to left, var(--term-ask-fill), transparent);
+}
+
+.pm-term-book-size,
+.pm-term-book-price,
+.pm-term-book-cum {
+  position: relative;
+  z-index: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.pm-term-book-size {
+  color: var(--term-fg-muted);
+}
+
+.pm-term-book-price {
+  text-align: center;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.pm-term-book-price.is-bid {
+  color: var(--term-bid);
+}
+
+.pm-term-book-price.is-ask {
+  color: var(--term-ask);
+}
+
+.pm-term-book-cum {
+  text-align: right;
+  color: var(--term-fg-subtle);
+}
+
+.pm-term-book-foot {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0;
+  padding: 8px 12px;
+  border-top: 1px solid var(--term-border);
+  background: var(--term-panel-2);
+}
+
+.pm-term-book-foot-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 3px 8px 3px 0;
+  font-size: 10.5px;
+  color: var(--term-fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.pm-term-book-foot-row .num {
+  color: var(--term-fg);
+  font-variant-numeric: tabular-nums;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.pm-term-book-foot-row .num.is-bid {
+  color: var(--term-bid);
+}
+
+.pm-term-book-foot-row .num.is-ask {
+  color: var(--term-ask);
+}
+
+/* Command prompt ----------------------------------------------------- */
+
+.pm-term-cli {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 12px 0;
+  padding: 8px 10px;
+  background: var(--term-bg);
+  border: 1px solid var(--term-border-strong);
+  border-radius: 6px;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.pm-term-cli:focus-within {
+  border-color: var(--term-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--term-accent) 18%, transparent);
+}
+
+.pm-term-cli.is-valid {
+  border-color: var(--term-bid);
+}
+
+.pm-term-cli.is-error {
+  border-color: var(--term-ask);
+}
+
+.pm-term-cli-prompt {
+  color: var(--term-accent);
+  font-weight: 700;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.pm-term-cli-input {
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--term-fg);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  width: 100%;
+  caret-color: var(--term-accent);
+}
+
+.pm-term-cli-input::placeholder {
+  color: var(--term-fg-subtle);
+  font-style: italic;
+}
+
+.pm-term-cli-status {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  color: var(--term-fg-muted);
+  text-transform: uppercase;
+  min-width: 52px;
+  text-align: right;
+}
+
+.pm-term-cli.is-valid .pm-term-cli-status {
+  color: var(--term-bid);
+}
+
+.pm-term-cli.is-error .pm-term-cli-status {
+  color: var(--term-ask);
+}
+
+/* Tokens ------------------------------------------------------------- */
+
+.pm-term-tokens {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin: 8px 12px 0;
+  padding: 6px 8px;
+  background: var(--term-panel-2);
+  border: 1px dashed var(--term-border);
+  border-radius: 6px;
+  min-height: 30px;
+}
+
+.pm-term-tokens.is-empty {
+  gap: 10px;
+  color: var(--term-fg-subtle);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.pm-term-tokens-hint {
+  color: var(--term-fg-subtle);
+}
+
+.pm-term-token {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  border: 1px solid transparent;
+  font-variant-numeric: tabular-nums;
+}
+
+.pm-term-token-kind {
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  opacity: 0.55;
+  text-transform: uppercase;
+}
+
+.pm-term-token-val {
+  letter-spacing: 0.02em;
+}
+
+.pm-term-token.is-side {
+  background: color-mix(in srgb, var(--term-accent) 14%, transparent);
+  border-color: color-mix(in srgb, var(--term-accent) 45%, transparent);
+  color: var(--term-accent);
+}
+
+.pm-term-token.is-qty {
+  background: color-mix(in srgb, var(--term-fg) 8%, transparent);
+  border-color: var(--term-border-strong);
+  color: var(--term-fg);
+}
+
+.pm-term-token.is-ticker {
+  background: color-mix(in srgb, var(--term-bid) 12%, transparent);
+  border-color: color-mix(in srgb, var(--term-bid) 40%, transparent);
+  color: var(--term-bid);
+}
+
+.pm-term-token.is-at {
+  color: var(--term-fg-subtle);
+}
+
+.pm-term-token.is-price {
+  background: color-mix(in srgb, var(--term-bid) 10%, transparent);
+  border-color: color-mix(in srgb, var(--term-bid) 35%, transparent);
+  color: var(--term-fg);
+}
+
+.pm-term-token.is-type,
+.pm-term-token.is-tif {
+  background: color-mix(in srgb, var(--term-fg-muted) 12%, transparent);
+  border-color: var(--term-border-strong);
+  color: var(--term-fg-muted);
+}
+
+.pm-term-token.is-error {
+  background: color-mix(in srgb, var(--term-ask) 14%, transparent);
+  border-color: color-mix(in srgb, var(--term-ask) 45%, transparent);
+  color: var(--term-ask);
+}
+
+/* Hotkey legend ------------------------------------------------------ */
+
+.pm-term-keys {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  align-items: center;
+  margin: 10px 12px 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--term-border);
+}
+
+.pm-term-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  color: var(--term-fg-muted);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.pm-term-kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 18px;
+  padding: 0 5px;
+  background: var(--term-panel-2);
+  border: 1px solid var(--term-border-strong);
+  border-bottom-width: 2px;
+  border-radius: 3px;
+  color: var(--term-fg);
+  font-family: inherit;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
+.pm-term-key-desc {
+  color: var(--term-fg-subtle);
+}
+
+/* Order ticket ------------------------------------------------------- */
+
+.pm-term-ticket {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 12px 12px;
+  border-top: 1px solid var(--term-border);
+  background: linear-gradient(
+    180deg,
+    var(--term-panel) 0%,
+    color-mix(in srgb, var(--term-panel) 96%, var(--term-bid) 4%) 100%
+  );
+}
+
+.pm-term-ticket.is-sell {
+  background: linear-gradient(
+    180deg,
+    var(--term-panel) 0%,
+    color-mix(in srgb, var(--term-panel) 96%, var(--term-ask) 4%) 100%
+  );
+}
+
+.pm-term-ticket-rows {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 12px;
+  padding: 6px 2px;
+}
+
+@media (max-width: 560px) {
+  .pm-term-ticket-rows {
+    grid-template-columns: 1fr;
+  }
+}
+
+.pm-term-ticket-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 3px 6px;
+  border-bottom: 1px dashed color-mix(in srgb, var(--term-border) 60%, transparent);
+  font-size: 11.5px;
+}
+
+.pm-term-ticket-row.is-highlight {
+  background: color-mix(in srgb, var(--term-accent) 8%, transparent);
+  border-radius: 4px;
+  border-bottom: none;
+}
+
+.pm-term-ticket-label {
+  font-size: 10px;
+  color: var(--term-fg-subtle);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.pm-term-ticket-value {
+  color: var(--term-fg);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.pm-term.is-buy .pm-term-ticket-value,
+.pm-term-ticket.is-buy .pm-term-ticket-row.is-highlight .pm-term-ticket-value {
+  color: var(--term-bid);
+}
+
+.pm-term-ticket.is-sell .pm-term-ticket-row.is-highlight .pm-term-ticket-value {
+  color: var(--term-ask);
+}
+
+.pm-term-ticket-actions {
+  display: grid;
+  grid-template-columns: 1fr 1.4fr;
+  gap: 8px;
+}
+
+.pm-term-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  cursor: pointer;
+  border: 1px solid var(--term-border-strong);
+  background: var(--term-panel-2);
+  color: var(--term-fg);
+  transition: transform 80ms ease, background 120ms ease, border-color 120ms ease;
+}
+
+.pm-term-btn:hover {
+  transform: translateY(-1px);
+}
+
+.pm-term-btn.is-ghost {
+  background: transparent;
+  color: var(--term-fg-muted);
+}
+
+.pm-term-btn.is-ghost:hover {
+  color: var(--term-fg);
+  border-color: var(--term-fg-muted);
+}
+
+.pm-term-btn.is-buy {
+  background: color-mix(in srgb, var(--term-bid) 18%, var(--term-panel));
+  border-color: var(--term-bid);
+  color: var(--term-bid);
+}
+
+.pm-term-btn.is-buy:hover {
+  background: color-mix(in srgb, var(--term-bid) 28%, var(--term-panel));
+}
+
+.pm-term-btn.is-sell {
+  background: color-mix(in srgb, var(--term-ask) 18%, var(--term-panel));
+  border-color: var(--term-ask);
+  color: var(--term-ask);
+}
+
+.pm-term-btn.is-sell:hover {
+  background: color-mix(in srgb, var(--term-ask) 28%, var(--term-panel));
+}
+
+/* Tape --------------------------------------------------------------- */
+
+.pm-term-tape {
+  display: flex;
+  flex-direction: column;
+  max-height: 260px;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+
+.pm-term-tape-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  gap: 10px;
+  align-items: center;
+  padding: 3px 12px;
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  border-bottom: 1px solid color-mix(in srgb, var(--term-border) 50%, transparent);
+}
+
+.pm-term-tape-row:last-child {
+  border-bottom: none;
+}
+
+.pm-term-tape-row.is-buy {
+  background: color-mix(in srgb, var(--term-bid) 4%, transparent);
+  color: var(--term-bid);
+}
+
+.pm-term-tape-row.is-sell {
+  background: color-mix(in srgb, var(--term-ask) 4%, transparent);
+  color: var(--term-ask);
+}
+
+.pm-term-tape-row.is-block {
+  border-left: 3px solid var(--term-accent);
+  padding-left: 9px;
+  font-weight: 700;
+}
+
+.pm-term-tape-time {
+  color: var(--term-fg-subtle);
+  font-size: 10.5px;
+}
+
+.pm-term-tape-price {
+  color: inherit;
+  font-weight: 600;
+}
+
+.pm-term-tape-qty {
+  color: var(--term-fg);
+  text-align: right;
+}
+
+.pm-term-tape-side {
+  color: inherit;
+  font-size: 11px;
+}
+
+/* Working orders ----------------------------------------------------- */
+
+.pm-term-wo {
+  display: flex;
+  flex-direction: column;
+  padding: 4px 0;
+}
+
+.pm-term-wo-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto auto auto;
+  gap: 8px;
+  align-items: center;
+  padding: 4px 12px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  border-bottom: 1px solid color-mix(in srgb, var(--term-border) 50%, transparent);
+}
+
+.pm-term-wo-row:last-child {
+  border-bottom: none;
+}
+
+.pm-term-wo-side {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  font-weight: 800;
+  font-size: 10px;
+}
+
+.pm-term-wo-row.is-buy .pm-term-wo-side {
+  background: color-mix(in srgb, var(--term-bid) 20%, transparent);
+  color: var(--term-bid);
+}
+
+.pm-term-wo-row.is-sell .pm-term-wo-side {
+  background: color-mix(in srgb, var(--term-ask) 20%, transparent);
+  color: var(--term-ask);
+}
+
+.pm-term-wo-tkr {
+  color: var(--term-fg);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.pm-term-wo-qty {
+  color: var(--term-fg);
+  text-align: right;
+}
+
+.pm-term-wo-price {
+  color: var(--term-fg-muted);
+}
+
+.pm-term-wo-tif {
+  font-size: 9.5px;
+  color: var(--term-fg-subtle);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.pm-term-wo-status {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--term-accent) 12%, transparent);
+  color: var(--term-accent);
+  text-transform: uppercase;
+}
+
+.pm-term-empty {
+  padding: 14px 12px;
+  color: var(--term-fg-subtle);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  font-style: italic;
+}
+
+/* Position ----------------------------------------------------------- */
+
+.pm-term-pos {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0;
+  padding: 6px;
+  border-top: 1px solid var(--term-border);
+}
+
+.pm-term-pos-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 8px;
+  border-bottom: 1px dashed color-mix(in srgb, var(--term-border) 60%, transparent);
+  font-size: 11.5px;
+}
+
+.pm-term-pos-row.is-up {
+  color: var(--term-bid);
+}
+
+.pm-term-pos-row.is-down {
+  color: var(--term-ask);
+}
+
+.pm-term-pos-label {
+  font-size: 10px;
+  color: var(--term-fg-subtle);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.pm-term-pos-value {
+  color: inherit;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Status strip ------------------------------------------------------- */
+
+.pm-term-status {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 0;
+  padding: 0;
+  background: var(--term-panel);
+  border: 1px solid var(--term-border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+@media (max-width: 720px) {
+  .pm-term-status {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+.pm-term-status-cell {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 12px;
+  border-right: 1px solid var(--term-border);
+  font-size: 10.5px;
+}
+
+.pm-term-status-cell:last-child {
+  border-right: none;
+}
+
+.pm-term-status-label {
+  color: var(--term-fg-subtle);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  font-size: 9.5px;
+}
+
+.pm-term-status-value {
+  color: var(--term-fg);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.pm-term-status-cell.is-up .pm-term-status-value {
+  color: var(--term-bid);
+}
+
+.pm-term-status-cell.is-warn .pm-term-status-value {
+  color: var(--term-warn);
+}
+
+.pm-term-status-cell.is-up .pm-term-status-value::before {
+  content: "● ";
+  color: var(--term-bid);
+  font-size: 8px;
+  vertical-align: middle;
+}
