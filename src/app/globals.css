@@ -58,13 +58,19 @@
   --background: #f6f8f6;
   --foreground: #111813;
 
-  /* Shadcn UI Mappings */
+  /* Shadcn UI Mappings — accent-aware tokens read `--pm-accent*` so the
+     shadcn `bg-primary`/`ring-primary`/`text-primary` utilities (and
+     therefore the active-nav highlight, focus rings, and primary chart
+     series) follow the user's chosen accent. The `#17cf54`/`#052e12`
+     fallbacks keep the SSR paint correct if the ThemeProvider hasn't
+     hydrated yet (e.g. first paint) or is missing (e.g. external consumer
+     embedding these tokens). AR-65 acceptance. */
   --card: var(--color-neutral-0);
   --card-foreground: #111813;
   --popover: var(--color-neutral-0);
   --popover-foreground: #111813;
-  --primary: #17cf54;
-  --primary-foreground: #052e12;
+  --primary: var(--pm-accent, #17cf54);
+  --primary-foreground: var(--pm-accent-foreground, #052e12);
   --secondary: #f0f2f4;
   --secondary-foreground: #111813;
   --muted: #f0f2f4;
@@ -75,11 +81,14 @@
   --destructive-foreground: #ffffff;
   --border: #e5e7eb;
   --input: transparent;
-  --ring: #17cf54;
+  --ring: var(--pm-accent, #17cf54);
   --radius: 0.5rem;
 
-  /* Chart Colors */
-  --chart-1: #17cf54;
+  /* Chart Colors — chart-1 is the "primary" series across performance /
+     analytics charts; bind it to the accent so picking Indigo gives an
+     Indigo primary line. chart-2..5 stay fixed so multi-series charts
+     keep their diverging palette. */
+  --chart-1: var(--pm-accent, #17cf54);
   --chart-2: #10b981;
   --chart-3: #f59e0b;
   --chart-4: #ef4444;
@@ -87,8 +96,8 @@
 
   /* Sidebar */
   --sidebar-foreground: #111813;
-  --sidebar-primary: #17cf54;
-  --sidebar-primary-foreground: #052e12;
+  --sidebar-primary: var(--pm-accent, #17cf54);
+  --sidebar-primary-foreground: var(--pm-accent-foreground, #052e12);
   --sidebar-accent: #f0f2f4;
 
   /* --- Ledger brand token layer (AR-62) --- */
@@ -159,8 +168,10 @@
   --card-foreground: #ffffff;
   --popover: #1a2c22;
   --popover-foreground: #ffffff;
-  --primary: #17cf54;
-  --primary-foreground: #052e12;
+  /* Accent-aware — mirrors the `:root` block so the user's chosen accent
+     drives primary/ring/chart-1 in dark mode too. AR-65 acceptance. */
+  --primary: var(--pm-accent, #17cf54);
+  --primary-foreground: var(--pm-accent-foreground, #052e12);
   --secondary: #253a2f;
   --secondary-foreground: #ffffff;
   --muted: #253a2f;
@@ -171,14 +182,14 @@
   --destructive-foreground: #ffffff;
   --border: #29382e;
   --input: #29382e;
-  --ring: #17cf54;
+  --ring: var(--pm-accent, #17cf54);
 
   /* Additional dark mode tokens */
   --input-background: #1c2e24;
   --switch-background: #29382e;
 
-  /* Chart Colors */
-  --chart-1: #17cf54;
+  /* Chart Colors — chart-1 follows accent; chart-2..5 stay fixed. */
+  --chart-1: var(--pm-accent, #17cf54);
   --chart-2: #10b981;
   --chart-3: #f59e0b;
   --chart-4: #ef4444;
@@ -187,12 +198,12 @@
   /* Sidebar */
   --sidebar: #0d1812;
   --sidebar-foreground: #ffffff;
-  --sidebar-primary: #17cf54;
-  --sidebar-primary-foreground: #052e12;
+  --sidebar-primary: var(--pm-accent, #17cf54);
+  --sidebar-primary-foreground: var(--pm-accent-foreground, #052e12);
   --sidebar-accent: #1c2e24;
   --sidebar-accent-foreground: #ffffff;
   --sidebar-border: #29382e;
-  --sidebar-ring: #17cf54;
+  --sidebar-ring: var(--pm-accent, #17cf54);
 }
 
 /* --- Ledger dark token overrides (AR-62 / AR-63) ---
