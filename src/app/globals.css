@@ -2269,3 +2269,946 @@
   border-left: 0;
   border-bottom: 1px solid var(--pm-border);
 }
+
+/* ==========================================================================
+   Phase 5 (AR-78/79) Research workspace
+   ==========================================================================
+   Master-detail surface for the Research page: left column (tabs + list)
+   plus right detail pane. AR-78 ships the left column + a selection-aware
+   placeholder on the right; AR-79 replaces the placeholder with the real
+   hypothesis / falsify-if / evidence / mini chart breakdown.
+   ------------------------------------------------------------------------ */
+
+.pm-research-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 24px;
+  min-height: 100%;
+}
+
+.pm-research-topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.pm-research-split {
+  display: grid;
+  grid-template-columns: 360px 1fr;
+  gap: 20px;
+  align-items: stretch;
+  min-height: 620px;
+}
+
+@media (max-width: 960px) {
+  .pm-research-split {
+    grid-template-columns: 1fr;
+  }
+}
+
+.pm-research-col {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  max-height: calc(100vh - 220px);
+  overflow: hidden;
+}
+
+.pm-research-tabs {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
+  padding: 4px;
+  background: var(--pm-bg-2);
+  border-radius: 10px;
+}
+
+.pm-research-tab {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 6px 4px;
+  background: transparent;
+  border: 0;
+  border-radius: 7px;
+  color: var(--pm-fg-subtle);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+
+.pm-research-tab:hover { color: var(--pm-fg); }
+
+.pm-research-tab.is-active {
+  background: var(--pm-card);
+  color: var(--pm-fg);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+}
+
+.pm-research-tab-count {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--pm-fg-subtle);
+  letter-spacing: 0.02em;
+}
+
+.pm-research-tab.is-active .pm-research-tab-count {
+  color: var(--pm-accent);
+}
+
+.pm-research-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: var(--pm-bg-2);
+  border-radius: 8px;
+  color: var(--pm-fg-subtle);
+}
+
+.pm-research-search input {
+  flex: 1;
+  background: transparent;
+  border: 0;
+  outline: 0;
+  font-size: 13px;
+  color: var(--pm-fg);
+  font-family: inherit;
+}
+
+.pm-research-list {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.pm-research-empty-hint {
+  padding: 24px 8px;
+  font-size: 13px;
+  color: var(--pm-fg-subtle);
+  text-align: center;
+}
+
+/* -- Thesis list card -- */
+.pm-thesis-list-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  padding: 12px 14px;
+  text-align: left;
+  background: var(--pm-bg-2);
+  border: 1px solid transparent;
+  border-radius: 10px;
+  color: var(--pm-fg);
+  font-family: inherit;
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease, transform 120ms ease;
+}
+
+.pm-thesis-list-card:hover {
+  background: color-mix(in oklab, var(--pm-accent) 6%, var(--pm-bg-2));
+  border-color: color-mix(in oklab, var(--pm-accent) 28%, transparent);
+}
+
+.pm-thesis-list-card.is-selected {
+  background: color-mix(in oklab, var(--pm-accent) 10%, var(--pm-card));
+  border-color: var(--pm-accent);
+}
+
+.pm-thesis-list-card.is-dimmed {
+  opacity: 0.72;
+}
+
+.pm-thesis-list-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.pm-thesis-list-ticker {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pm-thesis-list-sym {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.pm-thesis-list-dir {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.pm-thesis-list-dir-bull {
+  background: color-mix(in oklab, var(--pm-success) 16%, transparent);
+  color: var(--pm-success);
+}
+
+.pm-thesis-list-dir-bear {
+  background: color-mix(in oklab, var(--pm-danger) 16%, transparent);
+  color: var(--pm-danger);
+}
+
+.pm-thesis-list-dist {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.pm-thesis-list-name {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.pm-thesis-list-company {
+  font-size: 11px;
+  color: var(--pm-fg-subtle);
+}
+
+.pm-thesis-list-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--pm-fg);
+}
+
+.pm-thesis-list-desc {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--pm-fg-muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  margin: 0;
+}
+
+.pm-thesis-list-tags {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.pm-thesis-list-tag {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--pm-card);
+  border: 1px solid var(--pm-border);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--pm-fg-muted);
+}
+
+.pm-thesis-list-tag-more {
+  background: transparent;
+  border-color: transparent;
+  color: var(--pm-fg-subtle);
+}
+
+.pm-thesis-list-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.pm-thesis-list-horizon {
+  font-size: 11px;
+  color: var(--pm-fg-subtle);
+}
+
+.pm-thesis-list-progress {
+  position: relative;
+  height: 3px;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--pm-border) 60%, transparent);
+  overflow: hidden;
+}
+
+.pm-thesis-list-progress-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--pm-accent);
+  transition: width 180ms ease;
+}
+
+.pm-thesis-list-progress-fill.pm-num-neg { background: var(--pm-danger); }
+.pm-thesis-list-progress-fill.pm-num-pos { background: var(--pm-success); }
+
+.pm-thesis-list-meta {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--pm-fg-subtle);
+}
+
+.pm-thesis-list-target {
+  font-weight: 600;
+  color: var(--pm-fg);
+}
+
+/* -- Watchlist compact card -- */
+.pm-watch-list-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  background: var(--pm-bg-2);
+  border-radius: 10px;
+  border: 1px solid transparent;
+}
+
+.pm-watch-list-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.pm-watch-list-sym {
+  font-weight: 700;
+  font-size: 14px;
+  margin-right: 6px;
+}
+
+.pm-watch-list-company {
+  font-size: 11px;
+  color: var(--pm-fg-subtle);
+}
+
+.pm-watch-list-reason {
+  margin: 0;
+  font-size: 12px;
+  color: var(--pm-fg-muted);
+  line-height: 1.45;
+}
+
+.pm-watch-list-prices {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.pm-watch-list-k {
+  display: block;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--pm-fg-subtle);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.pm-watch-list-v {
+  display: block;
+  font-weight: 700;
+  font-size: 13px;
+}
+
+/* -- Journal compact card -- */
+.pm-journal-list-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  background: var(--pm-bg-2);
+  border-radius: 10px;
+  border: 1px solid transparent;
+}
+
+.pm-journal-list-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 6px;
+}
+
+.pm-journal-type {
+  padding: 2px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.pm-journal-type-entry {
+  background: color-mix(in oklab, var(--pm-accent) 16%, transparent);
+  color: var(--pm-accent);
+}
+
+.pm-journal-type-exit {
+  background: color-mix(in oklab, var(--pm-danger) 16%, transparent);
+  color: var(--pm-danger);
+}
+
+.pm-journal-type-hold {
+  background: var(--pm-bg);
+  color: var(--pm-fg-muted);
+  border: 1px solid var(--pm-border);
+}
+
+.pm-journal-sym {
+  margin-left: 6px;
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.pm-journal-outcome {
+  margin-left: 6px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.pm-journal-outcome-win {
+  background: color-mix(in oklab, var(--pm-success) 16%, transparent);
+  color: var(--pm-success);
+}
+
+.pm-journal-outcome-loss {
+  background: color-mix(in oklab, var(--pm-danger) 16%, transparent);
+  color: var(--pm-danger);
+}
+
+.pm-journal-date {
+  font-size: 11px;
+  color: var(--pm-fg-subtle);
+}
+
+.pm-journal-decision {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--pm-fg);
+}
+
+.pm-journal-rationale {
+  margin: 0;
+  font-size: 12px;
+  color: var(--pm-fg-muted);
+  line-height: 1.45;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.pm-journal-linked {
+  font-size: 11px;
+  color: var(--pm-accent);
+  font-weight: 600;
+}
+
+.pm-journal-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.pm-btn-sm {
+  padding: 4px 10px;
+  font-size: 11px;
+}
+
+/* -- Right pane -- */
+.pm-research-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px 22px;
+  min-height: 480px;
+}
+
+.pm-research-pane-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.pm-research-pane-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.pm-research-pane-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.pm-research-pane-lede {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--pm-fg-muted);
+}
+
+.pm-research-pane-hint {
+  padding: 14px 16px;
+  border: 1px dashed var(--pm-border);
+  border-radius: 10px;
+  font-size: 12px;
+  color: var(--pm-fg-subtle);
+}
+
+.pm-research-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  min-height: 280px;
+  padding: 40px 24px;
+  color: var(--pm-fg-subtle);
+}
+
+/* ==========================================================================
+   Phase 5 (AR-79) Research thesis detail pane
+   ==========================================================================
+   The right column when a thesis is selected. Five stacked sections share a
+   common "eyebrow + body" pattern; the price chart and the 2-col HF / FOR-
+   AGAINST grids are the only exceptions. Keeps visual rhythm steady and
+   leans on existing primitives (.pm-readout, .pm-chip-conv, .pm-btn) instead
+   of reinventing them per section.
+   ========================================================================== */
+
+/* -- Header row -- */
+.pm-thesis-detail-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.pm-thesis-detail-head-main {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.pm-thesis-detail-titlerow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.pm-thesis-detail-sym {
+  font-family: var(--pm-font-mono, monospace);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--pm-fg);
+}
+
+.pm-thesis-detail-title {
+  margin: 0;
+  font-size: 18px;
+  line-height: 1.3;
+}
+
+.pm-thesis-detail-archived-chip {
+  background: color-mix(in oklab, var(--pm-fg-subtle) 14%, transparent);
+  color: var(--pm-fg-muted);
+  border-color: color-mix(in oklab, var(--pm-fg-subtle) 30%, transparent);
+}
+
+/* -- Lede (one-line description) -- */
+.pm-thesis-detail-lede {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--pm-fg-muted);
+}
+
+/* -- Generic section scaffolding -- */
+.pm-thesis-detail-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.pm-thesis-detail-section-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.pm-thesis-detail-section-hint {
+  font-size: 11px;
+  color: var(--pm-fg-subtle);
+}
+
+.pm-thesis-detail-eyebrow {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--pm-fg-subtle);
+}
+
+.pm-thesis-detail-empty {
+  margin: 0;
+  padding: 14px 16px;
+  border: 1px dashed var(--pm-border);
+  border-radius: 10px;
+  font-size: 12px;
+  color: var(--pm-fg-subtle);
+}
+
+/* -- Price chart section -- */
+.pm-thesis-detail-chart-section {
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--pm-border);
+  border-radius: 12px;
+  background: color-mix(in oklab, var(--pm-bg-2) 60%, transparent);
+}
+
+.pm-thesis-detail-readouts {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+@media (max-width: 680px) {
+  .pm-thesis-detail-readouts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* -- Hypothesis + Falsify IF grid -- */
+.pm-thesis-detail-hfgrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 14px;
+}
+
+@media (max-width: 960px) {
+  .pm-thesis-detail-hfgrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.pm-thesis-detail-hf-col {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px;
+  border: 1px solid var(--pm-border);
+  border-radius: 12px;
+  background: var(--pm-bg-2);
+}
+
+.pm-thesis-detail-hf-col-falsify {
+  border-color: color-mix(in oklab, var(--pm-warn, var(--pm-danger)) 28%, var(--pm-border));
+  background: color-mix(in oklab, var(--pm-warn, var(--pm-danger)) 5%, var(--pm-bg-2));
+}
+
+.pm-thesis-detail-hf-body {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--pm-fg);
+}
+
+.pm-thesis-detail-hf-list {
+  margin: 0;
+  padding: 0 0 0 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--pm-fg);
+}
+
+.pm-thesis-detail-hf-list li::marker {
+  color: var(--pm-fg-subtle);
+}
+
+.pm-thesis-detail-hf-empty {
+  margin: 0;
+  font-size: 12px;
+  color: var(--pm-fg-subtle);
+  font-style: italic;
+}
+
+/* -- Evidence FOR / AGAINST grid -- */
+.pm-thesis-detail-evidence-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 14px;
+}
+
+@media (max-width: 960px) {
+  .pm-thesis-detail-evidence-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.pm-thesis-detail-ev-col {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px;
+  border: 1px solid var(--pm-border);
+  border-radius: 12px;
+  background: var(--pm-bg-2);
+}
+
+.pm-thesis-detail-ev-col-for {
+  border-color: color-mix(in oklab, var(--pm-success) 32%, var(--pm-border));
+  background: color-mix(in oklab, var(--pm-success) 6%, var(--pm-bg-2));
+}
+
+.pm-thesis-detail-ev-col-against {
+  border-color: color-mix(in oklab, var(--pm-danger) 32%, var(--pm-border));
+  background: color-mix(in oklab, var(--pm-danger) 6%, var(--pm-bg-2));
+}
+
+.pm-thesis-detail-ev-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.pm-thesis-detail-ev-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-family: var(--pm-font-mono, monospace);
+  font-size: 11px;
+  font-weight: 600;
+  background: color-mix(in oklab, var(--pm-fg) 10%, transparent);
+  color: var(--pm-fg);
+}
+
+.pm-thesis-detail-ev-col-for .pm-thesis-detail-ev-count {
+  background: color-mix(in oklab, var(--pm-success) 20%, transparent);
+  color: var(--pm-success);
+}
+
+.pm-thesis-detail-ev-col-against .pm-thesis-detail-ev-count {
+  background: color-mix(in oklab, var(--pm-danger) 20%, transparent);
+  color: var(--pm-danger);
+}
+
+.pm-thesis-detail-ev-list {
+  margin: 0;
+  padding: 0 0 0 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--pm-fg);
+}
+
+.pm-thesis-detail-ev-col-for .pm-thesis-detail-ev-list li::marker {
+  color: var(--pm-success);
+}
+
+.pm-thesis-detail-ev-col-against .pm-thesis-detail-ev-list li::marker {
+  color: var(--pm-danger);
+}
+
+/* -- Catalysts list -- */
+.pm-thesis-detail-catalysts {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pm-thesis-detail-catalyst {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--pm-border);
+  border-radius: 10px;
+  background: var(--pm-bg-2);
+  font-size: 13px;
+}
+
+.pm-thesis-detail-catalyst-date {
+  font-family: var(--pm-font-mono, monospace);
+  font-size: 12px;
+  color: var(--pm-fg-subtle);
+}
+
+.pm-thesis-detail-catalyst-title {
+  color: var(--pm-fg);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pm-thesis-detail-impact {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  border: 1px solid transparent;
+}
+
+.pm-thesis-detail-impact-high {
+  background: color-mix(in oklab, var(--pm-danger) 14%, transparent);
+  color: var(--pm-danger);
+  border-color: color-mix(in oklab, var(--pm-danger) 32%, transparent);
+}
+
+.pm-thesis-detail-impact-med {
+  background: color-mix(in oklab, var(--pm-warn, var(--pm-accent)) 14%, transparent);
+  color: var(--pm-warn, var(--pm-accent));
+  border-color: color-mix(in oklab, var(--pm-warn, var(--pm-accent)) 32%, transparent);
+}
+
+.pm-thesis-detail-impact-low {
+  background: color-mix(in oklab, var(--pm-fg-subtle) 12%, transparent);
+  color: var(--pm-fg-muted);
+  border-color: color-mix(in oklab, var(--pm-fg-subtle) 28%, transparent);
+}
+
+/* -- Linked sources list -- */
+.pm-thesis-detail-sources {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pm-thesis-detail-source {
+  padding: 0;
+  border: 1px solid var(--pm-border);
+  border-radius: 10px;
+  background: var(--pm-bg-2);
+  overflow: hidden;
+}
+
+.pm-thesis-detail-source-link {
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  text-decoration: none;
+  color: inherit;
+  font-size: 13px;
+  transition: background-color 120ms ease;
+}
+
+.pm-thesis-detail-source-link:hover {
+  background: color-mix(in oklab, var(--pm-accent) 6%, transparent);
+}
+
+.pm-thesis-detail-source-link-plain {
+  cursor: default;
+}
+
+.pm-thesis-detail-source-link-plain:hover {
+  background: transparent;
+}
+
+.pm-thesis-detail-source-type {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  background: color-mix(in oklab, var(--pm-accent) 12%, transparent);
+  color: var(--pm-accent);
+}
+
+.pm-thesis-detail-source-type-article {
+  background: color-mix(in oklab, var(--pm-accent) 14%, transparent);
+  color: var(--pm-accent);
+}
+
+.pm-thesis-detail-source-type-report {
+  background: color-mix(in oklab, var(--pm-success) 14%, transparent);
+  color: var(--pm-success);
+}
+
+.pm-thesis-detail-source-type-earnings {
+  background: color-mix(in oklab, var(--pm-warn, var(--pm-accent)) 14%, transparent);
+  color: var(--pm-warn, var(--pm-accent));
+}
+
+.pm-thesis-detail-source-type-note {
+  background: color-mix(in oklab, var(--pm-fg-subtle) 14%, transparent);
+  color: var(--pm-fg-muted);
+}
+
+.pm-thesis-detail-source-title {
+  color: var(--pm-fg);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pm-thesis-detail-source-date {
+  font-family: var(--pm-font-mono, monospace);
+  font-size: 11px;
+  color: var(--pm-fg-subtle);
+}
+
+.pm-thesis-detail-source-icon {
+  color: var(--pm-fg-subtle);
+}
+
+.pm-thesis-detail-source-link:hover .pm-thesis-detail-source-icon {
+  color: var(--pm-accent);
+}

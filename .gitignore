@@ -46,3 +46,6 @@ New Atlas Wealth/
 # Ignoring lint reports
 lint_report_*.txt
 .gstack/
+
+# Claude Code scratch worktrees
+.claude/worktrees/
