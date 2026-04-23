@@ -1,31 +1,48 @@
-
 import { db } from '@/db';
-import { PortfolioCard, type PortfolioSummary } from '@/components/portfolios/PortfolioCard';
-import { ActivityFeed } from '@/components/dashboard/ActivityFeed';
-import { AssetAllocation } from '@/components/dashboard/AssetAllocation';
-import { PortfolioPerformance } from '@/components/dashboard/PortfolioPerformance';
-import { TrendingUp, Calendar, Plus } from 'lucide-react';
-import Link from 'next/link';
-import { DashboardGreeting } from '@/components/dashboard/DashboardGreeting';
-import { DashboardLiveStats, type DashboardHoldingSeed } from '@/components/dashboard/DashboardLiveStats';
-import { mockTransactions } from '@/lib/mockData';
 import { marketDataEngine } from '@/lib/api/market-data';
 import { PageHeaderSync } from '@/components/layout/TopBar';
+import { DashboardTopbar } from '@/components/dashboard/DashboardTopbar';
+import { DashboardStatRow, type DashboardStatRowHolding } from '@/components/dashboard/DashboardStatRow';
+import { EquityChartCard } from '@/components/dashboard/EquityChartCard';
+import { AllocationCard, type AllocationHolding } from '@/components/dashboard/AllocationCard';
+import { TopHoldingsCard, type TopHoldingsRow } from '@/components/dashboard/TopHoldingsCard';
+import { RecentActivityCard, type ActivityRow } from '@/components/dashboard/RecentActivityCard';
+import { WatchlistCard } from '@/components/dashboard/WatchlistCard';
+import { ActiveThesesCard } from '@/components/dashboard/ActiveThesesCard';
+import { DailyBriefCard } from '@/components/dashboard/DailyBriefCard';
+import { mockTransactions } from '@/lib/mockData';
 
-export const dynamic = 'force-dynamic'; // Ensure it doesn't cache stale data on build
+/**
+ * Phase 3 Dashboard (AR-70/71/72/73).
+ *
+ * This is a server component by design — it does the live-quotes fetch for
+ * the initial paint, builds the derived dashboard data, and hands each
+ * section off to a client component. All live-polling + interactivity is
+ * contained in the client children.
+ */
+
+export const dynamic = 'force-dynamic';
 
 export default async function Dashboard() {
   const allPortfolios = await db.query.portfolios.findMany({
-    with: {
-      holdings: true,
-    }
+    with: { holdings: true },
   });
 
-  // Fetch live quotes once server-side so the initial paint has current prices.
-  // Client-side auto-refresh continues via DashboardLiveStats.
-  let liveQuotes: Record<string, any> = {};
+  // ---- Initial server-side quote fetch (warms the TanStack Query cache) ----
+  let liveQuotes: Record<string, {
+    price: number;
+    change?: number;
+    changePercent?: number;
+  }> = {};
   try {
-    const symbols = Array.from(new Set<string>(allPortfolios.flatMap(p => p.holdings).map((h: any) => h.symbol).filter(Boolean)));
+    const symbols = Array.from(
+      new Set<string>(
+        allPortfolios
+          .flatMap((p) => p.holdings)
+          .map((h: { symbol: string }) => h.symbol)
+          .filter(Boolean),
+      ),
+    );
     if (symbols.length > 0) {
       liveQuotes = await marketDataEngine.getQuotes(symbols);
     }
@@ -33,140 +50,216 @@ export default async function Dashboard() {
     console.warn('Failed to fetch live quotes for dashboard', e);
   }
 
-  const portfolioData: PortfolioSummary[] = allPortfolios.map(p => {
-    const holdingsValue = p.holdings.reduce((sum, h) => {
-      const currentPrice = liveQuotes[h.symbol]?.price ?? h.currentPrice ?? 0;
-      const value = h.marketValue || (Number(h.quantity) * currentPrice);
-      return sum + value;
-    }, 0);
-    const totalValue = (p.cashBalance || 0) + holdingsValue;
-    return {
-      id: p.id,
-      name: p.name,
-      description: p.description ?? null,
-      totalValue,
-      returnDollar: 0,
-      todayChange: 0,
-      todayChangePercent: 0,
-      returnPercent: 0,
-    };
-  });
+  // ---- Derive once, pass everywhere ----
+  const cashTotal = allPortfolios.reduce((s, p) => s + (p.cashBalance || 0), 0);
 
-  // Compute a server-side fallback for today's P&L so initial paint isn't blank
-  // before the client-side refresh lands.
-  let todayChange = 0;
-  if (Object.keys(liveQuotes).length > 0) {
-    todayChange = allPortfolios.flatMap(p => p.holdings).reduce((sum, h) => {
-      const quote = liveQuotes[h.symbol];
-      if (quote) {
-        return sum + (quote.change * Number(h.quantity));
-      }
-      return sum;
-    }, 0);
-  } else {
-    todayChange = 1240.50; // default mock
-  }
-
-  const cashTotal = allPortfolios.reduce((sum, p) => sum + (p.cashBalance || 0), 0);
-  const dashboardHoldings: DashboardHoldingSeed[] = allPortfolios.flatMap((p) =>
-    p.holdings
-      .filter((h: any) => !!h.symbol)
-      .map((h: any) => ({
-        symbol: h.symbol,
-        quantity: Number(h.quantity) || 0,
-        currentPrice: Number(liveQuotes[h.symbol]?.price ?? h.currentPrice ?? 0),
-        marketValue: Number(h.marketValue) || 0,
-      })),
+  // Drizzle returns numeric columns as strings, so we coerce inside the map
+  // (don't annotate h — the schema type is what matters).
+  const allHoldings = allPortfolios.flatMap((p) =>
+    p.holdings.map((h) => ({
+      id: h.id,
+      portfolio: p.name,
+      symbol: h.symbol,
+      quantity: Number(h.quantity) || 0,
+      avgCost: Number(h.avgCost) || 0,
+      currentPrice: Number(liveQuotes[h.symbol]?.price ?? h.currentPrice ?? 0),
+      marketValue: Number(h.marketValue) || 0,
+    })),
   );
 
-  const currentHour = new Date().getHours();
-  const greeting = currentHour < 12 ? 'Morning' : currentHour < 18 ? 'Afternoon' : 'Evening';
-  const currentDate = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  // Today's P&L fallback for before the client poll lands.
+  let todayChange = 0;
+  if (Object.keys(liveQuotes).length > 0) {
+    todayChange = allHoldings.reduce((sum, h) => {
+      const q = liveQuotes[h.symbol];
+      if (q?.change != null) return sum + q.change * h.quantity;
+      return sum;
+    }, 0);
+  }
+
+  const netWorthSeed = cashTotal + allHoldings.reduce(
+    (sum, h) => sum + (h.marketValue || h.quantity * h.currentPrice),
+    0,
+  );
+
+  const statRowHoldings: DashboardStatRowHolding[] = allHoldings
+    .filter((h) => h.symbol)
+    .map((h) => ({
+      symbol: h.symbol,
+      quantity: h.quantity,
+      currentPrice: h.currentPrice,
+      marketValue: h.marketValue,
+    }));
+
+  const allocationHoldings: AllocationHolding[] = allHoldings.map((h) => ({
+    symbol: h.symbol,
+    portfolio: h.portfolio,
+    marketValue: h.marketValue || h.quantity * h.currentPrice,
+  }));
+  const cashByPortfolio = Object.fromEntries(
+    allPortfolios.map((p) => [p.name, p.cashBalance || 0]),
+  );
+
+  const topHoldingsRows: TopHoldingsRow[] = allHoldings.map((h) => ({
+    id: h.id,
+    symbol: h.symbol,
+    name: resolveName(h.symbol),
+    quantity: h.quantity,
+    avgCost: h.avgCost,
+    currentPrice: h.currentPrice,
+    marketValue: h.marketValue || h.quantity * h.currentPrice,
+  }));
+
+  // ---- Recent activity: last 30 days from mock until we wire live txns ----
+  const thirtyDaysAgo = new Date();
+  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+  const activities: ActivityRow[] = mockTransactions
+    .filter((t) => new Date(t.date) >= thirtyDaysAgo)
+    .map((t) => ({
+      id: t.id,
+      type: t.type,
+      date: new Date(t.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+      ticker: t.ticker,
+      quantity: t.quantity,
+      amount: t.amount,
+      notes: t.notes,
+    }));
+
+  const greetingSubtitle = `${new Date().toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  })}`;
 
   return (
-    <div className="space-y-8 p-6">
+    <div className="pm-dashboard-stack p-6">
       <PageHeaderSync
         title="Dashboard"
-        subtitle={`${greeting}, ${currentDate}`}
-        crumbs={["Workspace", "Dashboard"]}
+        subtitle={greetingSubtitle}
+        crumbs={['Home', 'Dashboard']}
       />
-      {/* Header */}
-      <header className="flex flex-col md:flex-row md:items-end justify-between gap-4">
-        <div className="flex flex-col gap-1">
-          <div className="flex items-center gap-2 text-primary/80 text-sm font-medium mb-1">
-            <Calendar className="h-4 w-4" />
-            <span>{currentDate}</span>
-          </div>
-          <DashboardGreeting greeting={greeting} />
-          <p className="text-muted-foreground">
-            Here&apos;s your portfolio overview for today.
-          </p>
-        </div>
 
-        {/* Action Bar */}
-        <div className="flex items-center gap-3 flex-wrap">
-          <Link href="/portfolios" className="h-10 px-4 rounded-full bg-primary hover:bg-primary/90 text-primary-foreground font-bold text-sm flex items-center gap-2 transition-colors shadow-lg shadow-primary/20">
-            <Plus className="h-5 w-5" />
-            <span>Add Asset</span>
-          </Link>
-        </div>
-      </header>
+      {/* ---- AR-71: topbar + stat row + chart/allocation split ---- */}
+      <DashboardTopbar />
 
-      {/* Market Status Chips */}
-      <div className="flex gap-3 overflow-x-auto pb-2">
-        <div className="flex h-8 shrink-0 items-center justify-center gap-x-2 rounded-lg bg-primary/10 border border-primary/20 pl-2 pr-4">
-          <span className="relative flex h-2 w-2">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
-            <span className="relative inline-flex rounded-full h-2 w-2 bg-primary"></span>
-          </span>
-          <p className="text-primary text-xs font-bold uppercase tracking-wide">Market Open</p>
-        </div>
-        <div className="flex h-8 shrink-0 items-center justify-center gap-x-2 rounded-lg bg-card border border-border px-4">
-          <TrendingUp className="h-4 w-4 text-muted-foreground" />
-          <p className="text-muted-foreground text-xs font-medium">S&P 500 <span className="text-primary ml-1">+0.45%</span></p>
-        </div>
-        <div className="flex h-8 shrink-0 items-center justify-center gap-x-2 rounded-lg bg-card border border-border px-4">
-          <span className="text-muted-foreground text-xs font-medium">BTC <span className="text-destructive ml-1">-1.2%</span></span>
-        </div>
-      </div>
-
-      {/* Stats Grid — live, auto-refreshing */}
-      <DashboardLiveStats
+      <DashboardStatRow
         cashTotal={cashTotal}
-        holdings={dashboardHoldings}
+        holdings={statRowHoldings}
         fallbackTodayChange={todayChange}
+        alphaVsSp={1.8}
       />
 
-      {/* Charts Section */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <PortfolioPerformance />
-        <AssetAllocation />
+      <div className="pm-grid-2">
+        <EquityChartCard netWorth={netWorthSeed} seed={allHoldings.length} />
+        <AllocationCard
+          holdings={allocationHoldings}
+          cashByPortfolio={cashByPortfolio}
+        />
       </div>
 
-      {/* Bottom Section: Accounts & Movers */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 pb-20">
-        {/* Connected Accounts */}
-        <div className="flex flex-col gap-4">
-          <div className="flex items-center justify-between">
-            <h3 className="font-bold text-lg">Connected Accounts</h3>
-            <Link href="/portfolios" className="text-primary text-sm font-medium hover:underline">Manage</Link>
-          </div>
-          <div className="flex flex-col gap-3">
-            {portfolioData.length === 0 ? (
-              <p className="text-sm text-muted-foreground py-4 text-center">No portfolios found. Add one to get started.</p>
-            ) : (
-              portfolioData.map((portfolio) => (
-                <PortfolioCard key={portfolio.id} portfolio={portfolio} />
-              ))
-            )}
-          </div>
-        </div>
+      {/* ---- AR-72: 63/37 holdings + activity split ---- */}
+      <div className="pm-grid-2-63">
+        <TopHoldingsCard rows={topHoldingsRows} limit={6} />
+        <RecentActivityCard activities={activities} limit={8} />
+      </div>
 
-        {/* Top Movers activity feed */}
-        <div className="flex flex-col gap-4">
-          <ActivityFeed transactions={mockTransactions} />
-        </div>
+      {/* ---- AR-73: bottom 3-col strip ---- */}
+      <div className="pm-grid-3">
+        <WatchlistCard
+          rows={DEFAULT_WATCHLIST}
+          limit={5}
+        />
+        <ActiveThesesCard rows={DEFAULT_THESES} limit={3} />
+        <DailyBriefCard items={DEFAULT_BRIEF_ITEMS} />
       </div>
     </div>
   );
 }
+
+// ---------------------------------------------------------------------------
+// Seed data (replace with live sources as those features come online)
+// ---------------------------------------------------------------------------
+
+/**
+ * Rough ticker → company name map. Used by the Top Holdings card when the
+ * backend doesn't supply a name. Keep it small; anything not in the map
+ * falls back to the ticker itself (still readable).
+ */
+const TICKER_NAMES: Record<string, string> = {
+  AAPL: 'Apple Inc.',
+  MSFT: 'Microsoft Corp.',
+  NVDA: 'NVIDIA Corp.',
+  GOOG: 'Alphabet Inc. (Class C)',
+  GOOGL: 'Alphabet Inc. (Class A)',
+  META: 'Meta Platforms',
+  AMZN: 'Amazon.com',
+  TSLA: 'Tesla, Inc.',
+  JPM: 'JPMorgan Chase',
+  BRK_B: 'Berkshire Hathaway B',
+  JNJ: 'Johnson & Johnson',
+  BND: 'Vanguard Total Bond',
+  VTI: 'Vanguard Total Stock',
+  VOO: 'Vanguard S&P 500',
+  SPY: 'SPDR S&P 500',
+  QQQ: 'Invesco QQQ',
+};
+
+function resolveName(symbol: string): string {
+  return TICKER_NAMES[symbol.toUpperCase()] ?? symbol;
+}
+
+const DEFAULT_WATCHLIST = [
+  { symbol: 'SPY', name: 'SPDR S&P 500', fallbackPrice: 547.20, fallbackChangePct: 0.45 },
+  { symbol: 'QQQ', name: 'Invesco QQQ', fallbackPrice: 478.60, fallbackChangePct: 0.88 },
+  { symbol: 'NVDA', name: 'NVIDIA Corp.', fallbackPrice: 932.10, fallbackChangePct: 2.14 },
+  { symbol: 'META', name: 'Meta Platforms', fallbackPrice: 512.45, fallbackChangePct: -0.72 },
+  { symbol: 'COIN', name: 'Coinbase Global', fallbackPrice: 214.30, fallbackChangePct: 3.55 },
+];
+
+const DEFAULT_THESES = [
+  {
+    id: 'th-1',
+    tag: 'SEMI',
+    name: 'AI capex cycle extends into 2026',
+    state: 'Watching',
+    conviction: 'High' as const,
+    spark: [100, 102, 101, 104, 108, 106, 110, 114, 117, 120],
+    href: '/research',
+  },
+  {
+    id: 'th-2',
+    tag: 'CONSUMER',
+    name: 'Apple margin compression risk',
+    state: 'Active',
+    conviction: 'Med' as const,
+    spark: [100, 99, 101, 98, 97, 95, 96, 93, 94, 92],
+    href: '/research',
+  },
+  {
+    id: 'th-3',
+    tag: 'MACRO',
+    name: 'Fed pivot: rate cuts Q3',
+    state: 'Fading',
+    conviction: 'Low' as const,
+    spark: [100, 101, 100, 101, 102, 101, 100, 99, 100, 99],
+    href: '/research',
+  },
+];
+
+const DEFAULT_BRIEF_ITEMS = [
+  {
+    title: 'Rebalance tech exposure',
+    description:
+      'AAPL + NVDA now 34% of portfolio. Consider trimming 5–8% back toward target.',
+  },
+  {
+    title: 'Review cash runway',
+    description:
+      'Cash balance covers 8.4 months of burn. Redeploy or reallocate per IPS.',
+  },
+  {
+    title: 'Close dormant thesis',
+    description:
+      'Macro "Fed pivot" thesis has been Fading for 14 days — archive or act.',
+  },
+];
