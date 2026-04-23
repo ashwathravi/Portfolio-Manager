@@ -4058,3 +4058,137 @@
 .pm-bt-promo-step.is-done .pm-bt-promo-line {
   background: var(--pm-success);
 }
+
+/* =========================================================================
+   Phase 7 · AR-83 — Execution variant switcher + page shell
+   =========================================================================
+   The Execution surface ships three interchangeable layouts. The switcher
+   lives in the topbar's actions slot (right-aligned) so it reads like a
+   "view mode" toggle instead of a navigation choice. The active button
+   gets an accent border + ambient ring, same token vocabulary as the
+   rest of the Phase 4/5/6 surface.
+
+   The three variant stubs sit below the topbar row and share the same
+   `.pm-card` vocabulary — AR-84/85/86 replace these stubs with the real
+   Focus/Checkout/Terminal layouts.
+   ========================================================================= */
+
+.pm-exec-page {
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* Variant switcher — 3-button pill group living in the topbar actions slot.
+   Rounded container, internal dividers come from each button's left border
+   (skipping the first) so the group reads like one control. */
+.pm-variant-switch {
+  display: inline-flex;
+  background: var(--pm-bg-2);
+  border: 1px solid var(--pm-border);
+  border-radius: 10px;
+  padding: 3px;
+  gap: 2px;
+}
+
+.pm-variant-btn {
+  appearance: none;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  padding: 5px 12px 6px;
+  min-width: 108px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  cursor: pointer;
+  color: var(--pm-fg-muted);
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease,
+    box-shadow 120ms ease;
+  text-align: left;
+}
+
+.pm-variant-btn:hover {
+  color: var(--pm-fg);
+  background: color-mix(in oklab, var(--pm-accent) 6%, transparent);
+}
+
+.pm-variant-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--pm-accent) 40%, transparent);
+}
+
+.pm-variant-btn.is-active {
+  background: var(--pm-card);
+  border-color: color-mix(in oklab, var(--pm-accent) 45%, var(--pm-border));
+  color: var(--pm-fg);
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--pm-accent) 22%, transparent),
+    0 2px 8px -4px color-mix(in oklab, var(--pm-accent) 30%, transparent);
+}
+
+.pm-variant-label {
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  line-height: 1.1;
+}
+
+.pm-variant-sub {
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--pm-fg-subtle);
+  line-height: 1.2;
+}
+
+.pm-variant-btn.is-active .pm-variant-sub {
+  color: var(--pm-fg-muted);
+}
+
+/* Stub body — placeholder the three variant bodies render until AR-84/85/86
+   replace them with the real layouts. Keeps the page useful mid-phase. */
+.pm-exec-stub {
+  padding: 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 320px;
+  justify-content: center;
+  align-items: flex-start;
+}
+
+.pm-exec-stub-eyebrow {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--pm-accent);
+}
+
+.pm-exec-stub-title {
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--pm-fg);
+}
+
+.pm-exec-stub-desc {
+  font-size: 13px;
+  color: var(--pm-fg-muted);
+  max-width: 520px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+/* Responsive: on narrow viewports the switcher drops its sub-labels so
+   the pill group fits next to the topbar actions without wrapping. */
+@media (max-width: 720px) {
+  .pm-variant-btn {
+    min-width: 0;
+    padding: 6px 10px;
+  }
+  .pm-variant-sub {
+    display: none;
+  }
+}
