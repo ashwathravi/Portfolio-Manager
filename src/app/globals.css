@@ -1190,7 +1190,31 @@
    just not animated. */
 @media (prefers-reduced-motion: reduce) {
   .pm-live-dot::after,
-  .pm-tweaks-panel {
+  .pm-tweaks-panel,
+  .pm-chart-halo {
     animation: none !important;
   }
+}
+
+/* ==========================================================================
+   Phase 2 — SVG chart primitives (AR-69)
+
+   Almost everything for AreaChart / Sparkline / Donut / BarChart is handled
+   inline via SVG attrs + CSS custom props, so this section is small. The
+   one thing we want here is the pulsing end-dot halo on AreaChart — it's
+   cheaper to animate a CSS class than a React-side interval. The halo is
+   a semi-transparent circle rendered under the solid end-dot.
+   ========================================================================== */
+
+.pm-chart-halo {
+  transform-origin: center;
+  transform-box: fill-box;
+  animation: pm-chart-halo-pulse 2.4s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+
+@keyframes pm-chart-halo-pulse {
+  0%   { transform: scale(0.9); opacity: 0.35; }
+  60%  { transform: scale(1.8); opacity: 0; }
+  100% { transform: scale(0.9); opacity: 0; }
 }
