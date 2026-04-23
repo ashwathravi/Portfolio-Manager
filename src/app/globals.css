@@ -3212,3 +3212,199 @@
 .pm-thesis-detail-source-link:hover .pm-thesis-detail-source-icon {
   color: var(--pm-accent);
 }
+
+/* -------------------------------------------------------------------- */
+/* Phase 6 (AR-80) Strategy builder — selection row + topbar actions    */
+/* -------------------------------------------------------------------- */
+
+.pm-strategy-page {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 24px;
+}
+
+.pm-strategy-topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Strategy selection row ---------------------------------------------- */
+
+.pm-strategy-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+@media (max-width: 960px) {
+  .pm-strategy-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+.pm-strategy-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px;
+  background: var(--pm-card);
+  border: 1px solid var(--pm-border);
+  border-radius: 12px;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 120ms ease, box-shadow 120ms ease, transform 120ms ease;
+  color: var(--pm-fg);
+  font: inherit;
+}
+
+.pm-strategy-card:hover {
+  border-color: color-mix(in oklab, var(--pm-accent) 40%, var(--pm-border));
+}
+
+.pm-strategy-card:focus-visible {
+  outline: none;
+  border-color: var(--pm-accent);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--pm-accent) 25%, transparent);
+}
+
+.pm-strategy-card.is-selected {
+  border-color: var(--pm-accent);
+  box-shadow:
+    0 0 0 1px var(--pm-accent),
+    0 12px 32px -16px color-mix(in oklab, var(--pm-accent) 60%, transparent);
+  background: color-mix(in oklab, var(--pm-accent) 4%, var(--pm-card));
+}
+
+.pm-strategy-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.pm-strategy-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  text-transform: uppercase;
+}
+
+.pm-strategy-status-active {
+  color: var(--pm-success);
+  background: color-mix(in oklab, var(--pm-success) 12%, transparent);
+  border-color: color-mix(in oklab, var(--pm-success) 30%, transparent);
+}
+
+.pm-strategy-status-paused {
+  color: var(--pm-fg-muted);
+  background: color-mix(in oklab, var(--pm-fg-muted) 10%, transparent);
+  border-color: color-mix(in oklab, var(--pm-fg-muted) 25%, transparent);
+}
+
+.pm-strategy-status-backtesting {
+  color: var(--pm-warn);
+  background: color-mix(in oklab, var(--pm-warn) 12%, transparent);
+  border-color: color-mix(in oklab, var(--pm-warn) 30%, transparent);
+}
+
+.pm-strategy-shortid {
+  font-family: var(--pm-font-mono, monospace);
+  font-size: 11px;
+  color: var(--pm-fg-subtle);
+  letter-spacing: 0.04em;
+}
+
+.pm-strategy-name {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--pm-fg);
+  line-height: 1.3;
+}
+
+.pm-strategy-desc {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--pm-fg-muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.pm-strategy-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--pm-border);
+}
+
+@media (max-width: 520px) {
+  .pm-strategy-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* Builder / backtest split placeholder (AR-81 + AR-82 fill these)     */
+
+.pm-strategy-split {
+  display: grid;
+  grid-template-columns: minmax(0, 64fr) minmax(0, 36fr);
+  gap: 16px;
+}
+
+@media (max-width: 1100px) {
+  .pm-strategy-split {
+    grid-template-columns: 1fr;
+  }
+}
+
+.pm-strategy-builder-placeholder,
+.pm-strategy-backtest-placeholder {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 320px;
+  padding: 20px;
+}
+
+.pm-strategy-placeholder-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.pm-strategy-placeholder-eyebrow {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--pm-fg-subtle);
+}
+
+.pm-strategy-placeholder-hint {
+  font-family: var(--pm-font-mono, monospace);
+  font-size: 11px;
+  color: var(--pm-fg-subtle);
+  padding: 2px 8px;
+  border: 1px dashed var(--pm-border);
+  border-radius: 999px;
+}
+
+.pm-strategy-placeholder-body {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--pm-fg-muted);
+  max-width: 64ch;
+}
