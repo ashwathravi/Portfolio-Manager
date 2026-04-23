@@ -6,14 +6,24 @@ import {
     benchmarkMonthlySeries,
     portfolioMonthlySeries,
 } from "@/lib/performance/series";
+import {
+    defaultAssetClassBreakdown,
+    defaultSectorBreakdown,
+} from "@/lib/performance/attribution";
 import type { MonthlyValuation } from "@/lib/performance/periodSummary";
 import { EquityCurveCard, type Benchmark } from "./EquityCurveCard";
+import { AttributionBarsCard } from "./AttributionBarsCard";
+import { MetricsByPeriodTable } from "./MetricsByPeriodTable";
 
 /**
- * Phase 4 (AR-75) Performance page wrapper — AR-75 state.
+ * Phase 4 (AR-75 / AR-76) Performance page wrapper.
  *
- * Initial slice ships just the Equity curve hero card. Attribution bars,
- * metrics-by-period table, and monthly heatmap land in AR-76 and AR-77.
+ * Composes three of the four deep-dive cards:
+ *   - EquityCurveCard        (AR-75, hero)
+ *   - AttributionBarsCard    (AR-76, BHB decomposition)
+ *   - MetricsByPeriodTable   (AR-76, period × metrics matrix)
+ *
+ * The monthly return heatmap lands in AR-77.
  *
  * All state is local to each card. The client wrapper exists purely to
  * keep the page file thin and to keep the topbar / breadcrumbs / actions
@@ -96,6 +106,17 @@ export function PerformancePageClient() {
                 portfolio={portfolioMonthlySeries}
                 benchmarks={BENCHMARKS}
             />
+
+            <div className="pm-perf-split">
+                <AttributionBarsCard
+                    sectors={defaultSectorBreakdown}
+                    assetClasses={defaultAssetClassBreakdown}
+                />
+                <MetricsByPeriodTable
+                    portfolio={portfolioMonthlySeries}
+                    benchmark={benchmarkMonthlySeries}
+                />
+            </div>
         </div>
     );
 }
