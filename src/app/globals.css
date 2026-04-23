@@ -1844,3 +1844,428 @@
   flex-direction: column;
   gap: 20px;
 }
+
+/* ========================================================================
+ * Phase 4 (AR-74) Holdings page — summary strip + filter row + full table
+ * ======================================================================== */
+
+/* Outer stack reuses the Dashboard rhythm — sections separated by 20px. */
+.pm-holdings-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.pm-holdings-topbar {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.pm-page-title {
+  font-family: var(--pm-font-display, inherit);
+  font-size: 22px;
+  font-weight: 700;
+  margin: 0;
+  line-height: 1.2;
+}
+
+.pm-page-sub {
+  font-size: 13px;
+  color: var(--pm-fg-subtle);
+  margin: 4px 0 0;
+}
+
+/* --- Summary strip ------------------------------------------------------ */
+
+.pm-summary-strip {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 0;
+  background: var(--pm-card);
+  border: 1px solid var(--pm-border);
+  border-radius: 14px;
+  padding: 0;
+  overflow: hidden;
+}
+
+.pm-summary-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px 16px;
+  border-right: 1px solid var(--pm-border);
+  min-width: 0;
+}
+
+.pm-summary-cell:last-child {
+  border-right: 0;
+}
+
+.pm-summary-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--pm-fg-subtle);
+}
+
+.pm-summary-value {
+  font-family: var(--pm-font-mono, monospace);
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--pm-fg);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pm-summary-hint {
+  font-size: 11px;
+  color: var(--pm-fg-subtle);
+}
+
+@media (max-width: 1100px) {
+  .pm-summary-strip {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .pm-summary-cell:nth-child(3) {
+    border-right: 0;
+  }
+  .pm-summary-cell:nth-child(n + 4) {
+    border-top: 1px solid var(--pm-border);
+  }
+}
+
+@media (max-width: 640px) {
+  .pm-summary-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .pm-summary-cell {
+    border-right: 1px solid var(--pm-border);
+  }
+  .pm-summary-cell:nth-child(even) {
+    border-right: 0;
+  }
+  .pm-summary-cell:nth-child(n + 3) {
+    border-top: 1px solid var(--pm-border);
+  }
+}
+
+/* --- Filter row --------------------------------------------------------- */
+
+.pm-filter-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.pm-chip-group {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.pm-chip-btn {
+  appearance: none;
+  border: 1px solid var(--pm-border);
+  background: var(--pm-card);
+  color: var(--pm-fg-muted);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+.pm-chip-btn:hover {
+  color: var(--pm-fg);
+}
+
+.pm-chip-btn.is-active,
+.pm-chip-btn[aria-checked="true"] {
+  background: color-mix(in oklab, var(--pm-accent) 14%, transparent);
+  color: var(--pm-accent);
+  border-color: color-mix(in oklab, var(--pm-accent) 40%, transparent);
+}
+
+.pm-chip-btn:focus-visible {
+  outline: 2px solid var(--pm-accent);
+  outline-offset: 2px;
+}
+
+.pm-sort-select {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--pm-fg-subtle);
+}
+
+.pm-sort-label {
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* --- Full table --------------------------------------------------------- */
+
+.pm-table-full {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 13px;
+}
+
+.pm-table-full thead th {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--pm-fg-subtle);
+  text-align: left;
+  padding: 10px 10px;
+  border-bottom: 1px solid var(--pm-border);
+  white-space: nowrap;
+}
+
+.pm-table-full thead th.num {
+  text-align: right;
+}
+
+.pm-table-full tbody td {
+  padding: 12px 10px;
+  border-bottom: 1px solid var(--pm-border);
+  vertical-align: middle;
+  color: var(--pm-fg);
+}
+
+.pm-table-full tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.pm-table-full tbody tr:hover td {
+  background: color-mix(in oklab, var(--pm-accent) 4%, transparent);
+}
+
+.pm-table-full .num {
+  text-align: right;
+  font-family: var(--pm-font-mono, monospace);
+  white-space: nowrap;
+}
+
+.pm-account-pill {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--pm-bg-2);
+  color: var(--pm-fg-muted);
+  white-space: nowrap;
+}
+
+/* -------------------------------------------------------------------------
+ * Phase 4 (AR-75/76/77) Performance page — equity curve, attribution,
+ * metrics-by-period, monthly heatmap.
+ * ------------------------------------------------------------------------- */
+
+.pm-perf-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 24px;
+}
+
+.pm-perf-topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.pm-perf-equity-card {
+  gap: 16px;
+}
+
+.pm-perf-equity-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.pm-perf-equity-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.pm-perf-bench-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pm-perf-bench-label {
+  font-size: 11px;
+  color: var(--pm-fg-subtle);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 600;
+}
+
+.pm-perf-readouts {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 8px;
+  padding: 12px;
+  background: color-mix(in oklab, var(--pm-bg-2) 55%, transparent);
+  border: 1px solid var(--pm-border);
+  border-radius: 12px;
+}
+
+@media (max-width: 900px) {
+  .pm-perf-readouts {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+@media (max-width: 560px) {
+  .pm-perf-readouts {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.pm-perf-readout {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 10px;
+}
+
+.pm-perf-readout-label {
+  font-size: 11px;
+  color: var(--pm-fg-subtle);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 600;
+}
+
+.pm-perf-readout-val {
+  font-size: 18px;
+  font-weight: 700;
+  font-family: var(--pm-font-mono, monospace);
+  color: var(--pm-fg);
+}
+
+.pm-perf-split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+}
+
+@media (max-width: 1100px) {
+  .pm-perf-split {
+    grid-template-columns: 1fr;
+  }
+}
+
+.pm-perf-attr-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.pm-perf-attr-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.pm-perf-attr-totals {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--pm-border);
+}
+
+@media (max-width: 560px) {
+  .pm-perf-attr-totals {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.pm-perf-attr-total {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 2px 4px;
+}
+
+.pm-perf-attr-total-hi .pm-perf-readout-val {
+  font-size: 20px;
+}
+
+.pm-heatmap-wrap {
+  overflow-x: auto;
+}
+
+.pm-heatmap {
+  border-collapse: separate;
+  border-spacing: 4px;
+  width: 100%;
+  font-family: var(--pm-font-mono, monospace);
+  font-size: 12px;
+}
+
+.pm-heatmap thead th {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--pm-fg-subtle);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 4px 6px;
+  text-align: center;
+}
+
+.pm-heatmap tbody th {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--pm-fg);
+  text-align: right;
+  padding: 4px 8px 4px 4px;
+  white-space: nowrap;
+}
+
+.pm-heatmap-cell {
+  padding: 10px 6px;
+  min-width: 44px;
+  text-align: center;
+  border-radius: 6px;
+  font-variant-numeric: tabular-nums;
+  color: var(--pm-fg);
+}
+
+.pm-heatmap-yr-col {
+  border-left: 2px solid var(--pm-border);
+  padding-left: 10px;
+  min-width: 56px;
+}
+
+.pm-heatmap thead .pm-heatmap-yr-col {
+  border-left: 0;
+  border-bottom: 1px solid var(--pm-border);
+}
