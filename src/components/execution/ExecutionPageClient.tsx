@@ -12,6 +12,7 @@ import {
 import { VariantSwitcher } from "./VariantSwitcher";
 import { FocusVariant } from "./FocusVariant";
 import { CheckoutVariant } from "./CheckoutVariant";
+import { TerminalVariant } from "./TerminalVariant";
 
 /**
  * Phase 7 (AR-83) Execution page client wrapper.
@@ -73,23 +74,7 @@ export function ExecutionPageClient() {
         <div className="pm-exec-page" data-variant={variant} aria-busy={!hydrated}>
             {variant === "focus" && <FocusVariant />}
             {variant === "checkout" && <CheckoutVariant />}
-            {variant === "terminal" && <TerminalVariantStub />}
-        </div>
-    );
-}
-
-// --------------------------------------------------------------------- //
-// Variant stubs — replaced by AR-86.
-// --------------------------------------------------------------------- //
-
-function TerminalVariantStub() {
-    return (
-        <div className="pm-card pm-exec-stub">
-            <div className="pm-exec-stub-eyebrow">Terminal</div>
-            <div className="pm-exec-stub-title">Pro command palette</div>
-            <p className="pm-exec-stub-desc">
-                Level II book, CLI input, hotkeys, tape. Dark-theme override. Lands in AR-86.
-            </p>
+            {variant === "terminal" && <TerminalVariant />}
         </div>
     );
 }
