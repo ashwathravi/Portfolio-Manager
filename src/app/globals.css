@@ -3212,3 +3212,849 @@
 .pm-thesis-detail-source-link:hover .pm-thesis-detail-source-icon {
   color: var(--pm-accent);
 }
+
+/* -------------------------------------------------------------------- */
+/* Phase 6 (AR-80) Strategy builder — selection row + topbar actions    */
+/* -------------------------------------------------------------------- */
+
+.pm-strategy-page {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 24px;
+}
+
+.pm-strategy-topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Strategy selection row ---------------------------------------------- */
+
+.pm-strategy-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+@media (max-width: 960px) {
+  .pm-strategy-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+.pm-strategy-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px;
+  background: var(--pm-card);
+  border: 1px solid var(--pm-border);
+  border-radius: 12px;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 120ms ease, box-shadow 120ms ease, transform 120ms ease;
+  color: var(--pm-fg);
+  font: inherit;
+}
+
+.pm-strategy-card:hover {
+  border-color: color-mix(in oklab, var(--pm-accent) 40%, var(--pm-border));
+}
+
+.pm-strategy-card:focus-visible {
+  outline: none;
+  border-color: var(--pm-accent);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--pm-accent) 25%, transparent);
+}
+
+.pm-strategy-card.is-selected {
+  border-color: var(--pm-accent);
+  box-shadow:
+    0 0 0 1px var(--pm-accent),
+    0 12px 32px -16px color-mix(in oklab, var(--pm-accent) 60%, transparent);
+  background: color-mix(in oklab, var(--pm-accent) 4%, var(--pm-card));
+}
+
+.pm-strategy-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.pm-strategy-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  text-transform: uppercase;
+}
+
+.pm-strategy-status-active {
+  color: var(--pm-success);
+  background: color-mix(in oklab, var(--pm-success) 12%, transparent);
+  border-color: color-mix(in oklab, var(--pm-success) 30%, transparent);
+}
+
+.pm-strategy-status-paused {
+  color: var(--pm-fg-muted);
+  background: color-mix(in oklab, var(--pm-fg-muted) 10%, transparent);
+  border-color: color-mix(in oklab, var(--pm-fg-muted) 25%, transparent);
+}
+
+.pm-strategy-status-backtesting {
+  color: var(--pm-warn);
+  background: color-mix(in oklab, var(--pm-warn) 12%, transparent);
+  border-color: color-mix(in oklab, var(--pm-warn) 30%, transparent);
+}
+
+.pm-strategy-shortid {
+  font-family: var(--pm-font-mono, monospace);
+  font-size: 11px;
+  color: var(--pm-fg-subtle);
+  letter-spacing: 0.04em;
+}
+
+.pm-strategy-name {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--pm-fg);
+  line-height: 1.3;
+}
+
+.pm-strategy-desc {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--pm-fg-muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.pm-strategy-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--pm-border);
+}
+
+@media (max-width: 520px) {
+  .pm-strategy-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* Builder / backtest split placeholder (AR-81 + AR-82 fill these)     */
+
+.pm-strategy-split {
+  display: grid;
+  grid-template-columns: minmax(0, 64fr) minmax(0, 36fr);
+  gap: 16px;
+}
+
+@media (max-width: 1100px) {
+  .pm-strategy-split {
+    grid-template-columns: 1fr;
+  }
+}
+
+.pm-strategy-builder-placeholder,
+.pm-strategy-backtest-placeholder {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 320px;
+  padding: 20px;
+}
+
+.pm-strategy-placeholder-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.pm-strategy-placeholder-eyebrow {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--pm-fg-subtle);
+}
+
+.pm-strategy-placeholder-hint {
+  font-family: var(--pm-font-mono, monospace);
+  font-size: 11px;
+  color: var(--pm-fg-subtle);
+  padding: 2px 8px;
+  border: 1px dashed var(--pm-border);
+  border-radius: 999px;
+}
+
+.pm-strategy-placeholder-body {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--pm-fg-muted);
+  max-width: 64ch;
+}
+
+/* -------------------------------------------------------------------- */
+/* Phase 6 (AR-81) Rule builder · Universe · Guardrails                 */
+/* -------------------------------------------------------------------- */
+
+.pm-rule-builder {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 20px;
+  min-height: 320px;
+}
+
+.pm-rb-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.pm-rb-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.pm-rb-section-title {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--pm-fg-subtle);
+}
+
+.pm-rb-section-hint {
+  font-size: 11px;
+  color: var(--pm-fg-subtle);
+  font-family: var(--pm-font-mono, monospace);
+}
+
+.pm-rb-empty {
+  padding: 16px;
+  background: color-mix(in oklab, var(--pm-fg-subtle) 6%, transparent);
+  border: 1px dashed var(--pm-border);
+  border-radius: 10px;
+  font-size: 13px;
+  color: var(--pm-fg-muted);
+}
+
+.pm-rb-empty-cta {
+  font-weight: 600;
+  color: var(--pm-fg);
+}
+
+.pm-rb-add-rule {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--pm-accent);
+  background: color-mix(in oklab, var(--pm-accent) 10%, transparent);
+  border: 1px solid color-mix(in oklab, var(--pm-accent) 30%, transparent);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.pm-rb-add-rule:hover {
+  background: color-mix(in oklab, var(--pm-accent) 18%, transparent);
+  border-color: var(--pm-accent);
+}
+
+.pm-rb-add-icon {
+  width: 14px;
+  height: 14px;
+}
+
+/* Rules list ---------------------------------------------------------- */
+
+.pm-rb-rules {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.pm-rb-rule-wrap {
+  display: flex;
+  flex-direction: column;
+}
+
+.pm-rb-rule {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  padding: 8px;
+  background: var(--pm-bg-2);
+  border: 1px solid var(--pm-border);
+  border-radius: 10px;
+}
+
+@media (max-width: 720px) {
+  .pm-rb-rule {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: auto auto;
+  }
+  .pm-rb-rule > .pm-rb-field { grid-column: 1 / -1; }
+  .pm-rb-rule > .pm-rb-value { grid-column: 1 / 2; }
+  .pm-rb-rule > .pm-rb-rule-del { grid-column: 2 / 3; }
+}
+
+.pm-rb-field,
+.pm-rb-op,
+.pm-rb-value {
+  appearance: none;
+  -webkit-appearance: none;
+  padding: 6px 10px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--pm-fg);
+  background: var(--pm-card);
+  border: 1px solid var(--pm-border);
+  border-radius: 8px;
+  min-width: 0;
+}
+
+.pm-rb-field {
+  font-weight: 500;
+}
+
+.pm-rb-op {
+  font-family: var(--pm-font-mono, monospace);
+  font-size: 12px;
+  padding-right: 22px;
+  background-image: linear-gradient(45deg, transparent 50%, var(--pm-fg-subtle) 50%),
+                    linear-gradient(135deg, var(--pm-fg-subtle) 50%, transparent 50%);
+  background-position: calc(100% - 12px) 50%, calc(100% - 8px) 50%;
+  background-size: 4px 4px, 4px 4px;
+  background-repeat: no-repeat;
+  min-width: 80px;
+}
+
+.pm-rb-value {
+  font-family: var(--pm-font-mono, monospace);
+  font-size: 12px;
+}
+
+.pm-rb-field:focus-visible,
+.pm-rb-op:focus-visible,
+.pm-rb-value:focus-visible {
+  outline: none;
+  border-color: var(--pm-accent);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--pm-accent) 25%, transparent);
+}
+
+.pm-rb-rule-del {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  color: var(--pm-fg-subtle);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: color 120ms ease, background 120ms ease, border-color 120ms ease;
+}
+
+.pm-rb-rule-del:hover {
+  color: var(--pm-danger);
+  background: color-mix(in oklab, var(--pm-danger) 10%, transparent);
+  border-color: color-mix(in oklab, var(--pm-danger) 25%, transparent);
+}
+
+.pm-rb-del-icon {
+  width: 14px;
+  height: 14px;
+}
+
+/* Conjunction pill between rules ------------------------------------- */
+
+.pm-rb-conj-row {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+}
+
+.pm-rb-conj-line {
+  height: 1px;
+  background: var(--pm-border);
+}
+
+.pm-rb-conj {
+  font-family: var(--pm-font-mono, monospace);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--pm-border);
+  background: var(--pm-card);
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.pm-rb-conj.is-and {
+  color: var(--pm-accent);
+  background: color-mix(in oklab, var(--pm-accent) 10%, transparent);
+  border-color: color-mix(in oklab, var(--pm-accent) 40%, transparent);
+}
+
+.pm-rb-conj.is-or {
+  color: var(--pm-warn);
+  background: color-mix(in oklab, var(--pm-warn) 12%, transparent);
+  border-color: color-mix(in oklab, var(--pm-warn) 40%, transparent);
+}
+
+.pm-rb-conj:hover {
+  filter: brightness(1.05);
+}
+
+.pm-rb-conj:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--pm-accent) 25%, transparent);
+}
+
+/* Universe chips ------------------------------------------------------ */
+
+.pm-rb-universe-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.pm-rb-universe-chip {
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 5px 12px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease, opacity 120ms ease;
+  border: 1px solid var(--pm-border);
+}
+
+.pm-rb-universe-chip.is-on {
+  color: var(--pm-accent);
+  background: color-mix(in oklab, var(--pm-accent) 10%, transparent);
+  border-color: color-mix(in oklab, var(--pm-accent) 35%, transparent);
+}
+
+.pm-rb-universe-chip.is-off {
+  color: var(--pm-fg-subtle);
+  background: var(--pm-card);
+  opacity: 0.7;
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in oklab, var(--pm-fg-subtle) 60%, transparent);
+}
+
+.pm-rb-universe-chip:hover {
+  opacity: 1;
+  border-color: var(--pm-accent);
+}
+
+.pm-rb-universe-chip:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--pm-accent) 25%, transparent);
+}
+
+/* Guardrail sliders --------------------------------------------------- */
+
+.pm-rb-guardrails {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.pm-rb-guardrail {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pm-rb-guardrail-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.pm-rb-guardrail-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--pm-fg);
+}
+
+.pm-rb-guardrail-value {
+  font-family: var(--pm-font-mono, monospace);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--pm-fg);
+}
+
+.pm-rb-guardrail-hint {
+  font-size: 11px;
+  color: var(--pm-fg-subtle);
+}
+
+.pm-rb-guardrail-slider {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 100%;
+  height: 4px;
+  background: var(--pm-border);
+  border-radius: 999px;
+  outline: none;
+  cursor: pointer;
+  accent-color: var(--pm-accent);
+}
+
+.pm-rb-guardrail-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  background: var(--pm-accent);
+  border: 2px solid var(--pm-card);
+  cursor: pointer;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+}
+
+.pm-rb-guardrail-slider::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  background: var(--pm-accent);
+  border: 2px solid var(--pm-card);
+  cursor: pointer;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+}
+
+.pm-rb-guardrail-slider:focus-visible {
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--pm-accent) 25%, transparent);
+}
+
+/* -------------------------------------------------------------------- */
+/* Phase 6 (AR-82) Backtest · Monte Carlo · Promotion ladder            */
+/* -------------------------------------------------------------------- */
+
+.pm-bt-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px;
+  min-height: 320px;
+}
+
+.pm-bt-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.pm-bt-head-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.pm-bt-eyebrow {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--pm-fg-subtle);
+}
+
+.pm-bt-window {
+  font-family: var(--pm-font-mono, monospace);
+  font-size: 12px;
+  color: var(--pm-fg-muted);
+}
+
+.pm-bt-verdict {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border-radius: 999px;
+  border: 1px solid transparent;
+}
+
+.pm-bt-verdict-robust {
+  color: var(--pm-success);
+  background: color-mix(in oklab, var(--pm-success) 14%, transparent);
+  border-color: color-mix(in oklab, var(--pm-success) 35%, transparent);
+}
+
+.pm-bt-verdict-promising {
+  color: var(--pm-accent);
+  background: color-mix(in oklab, var(--pm-accent) 12%, transparent);
+  border-color: color-mix(in oklab, var(--pm-accent) 35%, transparent);
+}
+
+.pm-bt-verdict-fragile {
+  color: var(--pm-warn);
+  background: color-mix(in oklab, var(--pm-warn) 12%, transparent);
+  border-color: color-mix(in oklab, var(--pm-warn) 35%, transparent);
+}
+
+.pm-bt-verdict-unproven {
+  color: var(--pm-fg-muted);
+  background: color-mix(in oklab, var(--pm-fg-muted) 10%, transparent);
+  border-color: color-mix(in oklab, var(--pm-fg-muted) 25%, transparent);
+}
+
+/* Equity curve wrapper */
+
+.pm-bt-chart {
+  margin: 0 -4px;
+}
+
+/* Stats grid (2 rows × 4 cols) --------------------------------------- */
+
+.pm-bt-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--pm-border);
+}
+
+@media (max-width: 520px) {
+  .pm-bt-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.pm-bt-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.pm-bt-stat-label {
+  font-size: 11px;
+  color: var(--pm-fg-subtle);
+  letter-spacing: 0.02em;
+}
+
+.pm-bt-stat-value {
+  font-family: var(--pm-font-mono, monospace);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--pm-fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Monte Carlo percentile strip --------------------------------------- */
+
+.pm-bt-mc {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--pm-border);
+}
+
+.pm-bt-mc-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.pm-bt-mc-hint {
+  font-size: 11px;
+  color: var(--pm-fg-subtle);
+}
+
+.pm-bt-mc-row {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.pm-bt-mc-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 4px;
+  border-radius: 8px;
+  background: var(--pm-bg-2);
+  border: 1px solid var(--pm-border);
+  text-align: center;
+}
+
+.pm-bt-mc-cell.is-median {
+  background: color-mix(in oklab, var(--pm-accent) 8%, var(--pm-bg-2));
+  border-color: color-mix(in oklab, var(--pm-accent) 40%, var(--pm-border));
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--pm-accent) 30%, transparent);
+}
+
+.pm-bt-mc-pct {
+  font-family: var(--pm-font-mono, monospace);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--pm-fg-subtle);
+  letter-spacing: 0.04em;
+}
+
+.pm-bt-mc-cell.is-median .pm-bt-mc-pct {
+  color: var(--pm-accent);
+}
+
+.pm-bt-mc-val {
+  font-family: var(--pm-font-mono, monospace);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--pm-fg);
+}
+
+.pm-bt-mc-cagr {
+  font-family: var(--pm-font-mono, monospace);
+  font-size: 11px;
+  color: var(--pm-fg-muted);
+}
+
+/* Promotion ladder --------------------------------------------------- */
+
+.pm-bt-promo {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 12px;
+  border-top: 1px solid var(--pm-border);
+}
+
+.pm-bt-promo-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pm-bt-promo-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0;
+  align-items: start;
+}
+
+.pm-bt-promo-step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  position: relative;
+  padding: 0 4px;
+}
+
+.pm-bt-promo-dot {
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--pm-bg-2);
+  border: 1.5px solid var(--pm-border);
+  color: var(--pm-fg-subtle);
+  font-family: var(--pm-font-mono, monospace);
+  font-size: 11px;
+  font-weight: 700;
+  position: relative;
+  z-index: 1;
+  flex-shrink: 0;
+}
+
+.pm-bt-promo-step.is-done .pm-bt-promo-dot {
+  background: var(--pm-success);
+  border-color: var(--pm-success);
+  color: white;
+}
+
+.pm-bt-promo-step.is-active .pm-bt-promo-dot {
+  background: color-mix(in oklab, var(--pm-accent) 14%, var(--pm-card));
+  border-color: var(--pm-accent);
+  color: var(--pm-accent);
+  box-shadow: 0 0 0 4px color-mix(in oklab, var(--pm-accent) 20%, transparent);
+}
+
+.pm-bt-promo-check {
+  width: 12px;
+  height: 12px;
+}
+
+.pm-bt-promo-num {
+  line-height: 1;
+}
+
+.pm-bt-promo-label {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--pm-fg-muted);
+  text-align: center;
+  letter-spacing: 0.02em;
+}
+
+.pm-bt-promo-step.is-done .pm-bt-promo-label {
+  color: var(--pm-fg);
+}
+
+.pm-bt-promo-step.is-active .pm-bt-promo-label {
+  color: var(--pm-fg);
+  font-weight: 600;
+}
+
+/* Connector line between steps — a ::before absolute element so it sits
+   behind the dots and doesn't break flex centering. */
+.pm-bt-promo-line {
+  position: absolute;
+  top: 11px;
+  left: calc(50% + 11px);
+  right: calc(-50% + 11px);
+  height: 1.5px;
+  background: var(--pm-border);
+  z-index: 0;
+}
+
+.pm-bt-promo-step.is-done .pm-bt-promo-line {
+  background: var(--pm-success);
+}
