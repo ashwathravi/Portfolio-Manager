@@ -21,6 +21,10 @@ describe('settingsStore', () => {
     });
 
     beforeEach(() => {
+        // Drain the localStorage shim between tests so persist-middleware
+        // writes from a prior test don't hydrate the next one. resetSettings()
+        // handles in-memory state but not what zustand wrote to storage.
+        kvStore.clear();
         useSettingsStore.getState().resetSettings();
     });
 

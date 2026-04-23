@@ -373,6 +373,32 @@ export const useSettingsStore = create<SettingsState>()(
         }),
         {
             name: 'atlas-settings',
+            /**
+             * Bump when the shape of any persisted slice changes.
+             *   v1 — pre-Ledger: `appearance = { theme, compactMode, animationsEnabled }`
+             *   v2 — AR-64 + AR-65: adds `density` and `accent` as required fields.
+             * Without this migrate, any existing user who upgrades would hydrate
+             * with `appearance.density === undefined` and `appearance.accent
+             * === undefined`, which the ThemeProvider would then serialize into
+             * `body[data-density="undefined"]` and `--pm-accent: undefined`.
+             */
+            version: 2,
+            migrate: (persistedState, version) => {
+                const s = (persistedState ?? {}) as Partial<SettingsState>;
+                if (version < 2) {
+                    const existing = (s.appearance ?? {}) as Partial<AppearanceSettings>;
+                    s.appearance = {
+                        ...defaultAppearance,
+                        ...existing,
+                        // v1 had `compactMode` but no `density` — derive.
+                        density:
+                            existing.density ??
+                            (existing.compactMode ? 'compact' : 'comfortable'),
+                        accent: existing.accent ?? defaultAppearance.accent,
+                    };
+                }
+                return s as SettingsState;
+            },
             // Sentinel: Only persist non-sensitive preferences. API keys are
             // intentionally excluded so they don't end up in localStorage.
             partialize: (state) => ({

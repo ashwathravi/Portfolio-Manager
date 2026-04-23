@@ -93,9 +93,15 @@
 
   /* --- Ledger brand token layer (AR-62) --- */
   /* Accent — forest green default. Overridable at runtime to drive the whole
-     accent-aware surface (buttons, active nav, charts, rings). */
+     accent-aware surface (buttons, active nav, charts, rings).
+     `--pm-accent-dark` matches `darken('#17cf54', 0.18)` so the SSR paint
+     agrees with the value the ThemeProvider writes on hydration.
+     `--pm-accent-foreground` is picked by `chooseAccentForeground()` at
+     runtime — we seed it to white here because the default Forest accent
+     has low enough luminance that white reads well. */
   --pm-accent: #17cf54;
-  --pm-accent-dark: #0b8534;
+  --pm-accent-dark: #13aa45;
+  --pm-accent-foreground: #ffffff;
   --pm-accent-tint: rgba(23, 207, 84, 0.10);
 
   /* Surface */
@@ -125,7 +131,6 @@
   --pm-danger-50: #fef2f2;
   --pm-warn: #d97706;
   --pm-info: #2563eb;
-  --pm-violet: #7c3aed;
 
   /* Layout & Effects */
   --pm-sidebar-w: 248px;
@@ -188,28 +193,14 @@
   --sidebar-accent-foreground: #ffffff;
   --sidebar-border: #29382e;
   --sidebar-ring: #17cf54;
-
-  /* --- Ledger dark token overrides (AR-62 / AR-63) --- */
-  --pm-bg: #0d1812;
-  --pm-bg-2: #0a140f;
-  --pm-card: #112116;
-  --pm-border: #1f2e25;
-  --pm-border-strong: #2a3b31;
-  --pm-fg: #eaf3ee;
-  --pm-fg-muted: #8ea69a;
-  --pm-fg-subtle: #6b8578;
-  --pm-neutral-100: #162419;
-  --pm-neutral-200: #1f2e25;
-  --pm-shadow: 0 1px 2px rgba(0, 0, 0, 0.3),
-               0 4px 16px rgba(0, 0, 0, 0.3);
-  --pm-shadow-lg: 0 2px 4px rgba(0, 0, 0, 0.4),
-                  0 12px 32px rgba(0, 0, 0, 0.4);
 }
 
-/* --- Ledger theme attribute overrides (AR-63) --- */
-/* `.dark` is kept in sync with `[data-theme="dark"]` so legacy Tailwind
-   `dark:` variants and the new token layer stay in lockstep. The
-   ThemeProvider is responsible for writing both. */
+/* --- Ledger dark token overrides (AR-62 / AR-63) ---
+   The ThemeProvider writes both `.dark` on <html> (for legacy Tailwind
+   `dark:` variants) and `[data-theme="dark"]` on <body> (for the Ledger
+   token cascade). We define the Ledger overrides against BOTH selectors
+   in one rule so the two can never drift out of sync. */
+.dark,
 [data-theme="dark"] {
   --pm-bg: #0d1812;
   --pm-bg-2: #0a140f;
@@ -308,41 +299,34 @@
   }
 }
 
-/* --- Legacy compact mode (kept for back-compat — new code should prefer
-       `data-density="compact"` which feeds tokens directly) --- */
-[data-compact="true"] .space-y-6 > :not(:first-child) {
-  margin-top: 0.75rem;
-}
-[data-compact="true"] .space-y-4 > :not(:first-child) {
-  margin-top: 0.5rem;
-}
-[data-compact="true"] .p-4 {
-  padding: 0.5rem 1rem;
-}
-[data-compact="true"] .p-6 {
-  padding: 0.75rem 1.25rem;
-}
-[data-compact="true"] .p-10 {
-  padding: 1.5rem 2rem;
-}
-[data-compact="true"] .py-2 {
-  padding-top: 0.25rem;
-  padding-bottom: 0.25rem;
-}
-[data-compact="true"] .gap-4 {
-  gap: 0.5rem;
-}
-
-/* --- Ledger compact-density shim (AR-64) --- */
-/* When density is compact, tighten Tailwind spacing utilities so existing
+/* --- Compact-density shim (AR-64) ---
+   When density is compact, tighten Tailwind spacing utilities so existing
    pages (which use `p-4` / `space-y-6` etc.) reflect the density mode
-   before they get ported to the --pm-pad-* tokens directly. */
+   before they get ported to the --pm-pad-* tokens directly.
+
+   ThemeProvider writes both `data-compact="true"` on <html> (pre-Ledger
+   legacy attribute) and `data-density="compact"` on <body>, so matching
+   both selectors is redundant — but keeping them as a single combined
+   selector list guarantees the two paths can never drift. */
+[data-compact="true"] .space-y-6 > :not(:first-child),
 [data-density="compact"] .space-y-6 > :not(:first-child) { margin-top: 0.75rem; }
+
+[data-compact="true"] .space-y-4 > :not(:first-child),
 [data-density="compact"] .space-y-4 > :not(:first-child) { margin-top: 0.5rem; }
+
+[data-compact="true"] .p-4,
 [data-density="compact"] .p-4 { padding: 0.5rem 1rem; }
+
+[data-compact="true"] .p-6,
 [data-density="compact"] .p-6 { padding: 0.75rem 1.25rem; }
+
+[data-compact="true"] .p-10,
 [data-density="compact"] .p-10 { padding: 1.5rem 2rem; }
+
+[data-compact="true"] .py-2,
 [data-density="compact"] .py-2 { padding-top: 0.25rem; padding-bottom: 0.25rem; }
+
+[data-compact="true"] .gap-4,
 [data-density="compact"] .gap-4 { gap: 0.5rem; }
 
 /* --- Ledger utility classes (AR-62) --- */
@@ -415,7 +399,10 @@
 }
 .pm-btn-primary {
   background: var(--pm-accent);
-  color: #ffffff;
+  /* `--pm-accent-foreground` is computed at runtime by the ThemeProvider
+     based on the accent's relative luminance, so high-luminance accents
+     (Amber) don't leave white-on-yellow text failing WCAG AA. */
+  color: var(--pm-accent-foreground, #ffffff);
   border-color: var(--pm-accent-dark);
 }
 .pm-btn-primary:hover { background: var(--pm-accent-dark); }
@@ -514,6 +501,28 @@
 .pm-select:focus-visible {
   outline: 2px solid var(--pm-accent);
   outline-offset: 2px;
+}
+
+/* Accent-color picker dot (AR-65).
+   Visual styling lives here so the inline-style contract in
+   AppearanceSettings.tsx is limited to `background: a.value` — the
+   dynamic bit that has to come from JS. Focus ring is required:
+   without it keyboard users see no indication on the 28px circle. */
+.pm-accent-dot {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 2px solid var(--pm-border);
+  cursor: pointer;
+  transition: box-shadow 120ms ease-out, border-color 120ms ease-out;
+}
+.pm-accent-dot.is-active {
+  border-color: var(--pm-fg);
+  box-shadow: 0 0 0 2px var(--pm-card), 0 0 0 4px var(--pm-accent);
+}
+.pm-accent-dot:focus-visible {
+  outline: 2px solid var(--pm-fg);
+  outline-offset: 3px;
 }
 
 /* Toggle switch */

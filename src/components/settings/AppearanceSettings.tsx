@@ -1,5 +1,6 @@
 "use client";
 
+import type React from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
@@ -11,6 +12,51 @@ import {
     type ThemeMode,
 } from "@/lib/stores/settingsStore";
 import { toast } from "sonner";
+
+const DENSITY_ORDER: readonly DensityMode[] = ["comfortable", "compact"] as const;
+const DENSITY_LABEL: Record<DensityMode, string> = {
+    comfortable: "Comfortable",
+    compact: "Compact",
+};
+
+/**
+ * Roving-radiogroup keyboard handler. Implements the ARIA 1.2 radio pattern:
+ *   ArrowRight/Down → next (wraps)
+ *   ArrowLeft/Up   → previous (wraps)
+ *   Home           → first
+ *   End            → last
+ * Focus is moved to the newly-selected sibling so only one element per group
+ * is in the tab order (roving tabindex is handled via `tabIndex={active ? 0 : -1}`
+ * on each button).
+ */
+function handleRovingRadioKey<T>(
+    e: React.KeyboardEvent<HTMLElement>,
+    order: readonly T[],
+    current: T,
+    onSelect: (next: T) => void
+) {
+    const advance: Record<string, (i: number) => number> = {
+        ArrowRight: (i) => (i + 1) % order.length,
+        ArrowDown: (i) => (i + 1) % order.length,
+        ArrowLeft: (i) => (i - 1 + order.length) % order.length,
+        ArrowUp: (i) => (i - 1 + order.length) % order.length,
+        Home: () => 0,
+        End: () => order.length - 1,
+    };
+    const fn = advance[e.key];
+    if (!fn) return;
+    e.preventDefault();
+    const currentIdx = order.indexOf(current);
+    const nextIdx = fn(currentIdx < 0 ? 0 : currentIdx);
+    const next = order[nextIdx];
+    const parent = e.currentTarget.parentElement;
+    onSelect(next);
+    // React re-renders synchronously but we need to wait for the
+    // tabIndex={active ? 0 : -1} update to land before focusing.
+    requestAnimationFrame(() => {
+        (parent?.children[nextIdx] as HTMLElement | undefined)?.focus();
+    });
+}
 
 export function AppearanceSettings() {
     const theme = useSettingsStore((s) => s.appearance.theme);
@@ -162,18 +208,32 @@ export function AppearanceSettings() {
                         aria-label="Interface density"
                         className="pm-seg pm-seg-full max-w-sm"
                     >
-                        {(["comfortable", "compact"] as const).map((d) => (
-                            <button
-                                key={d}
-                                role="radio"
-                                aria-checked={density === d}
-                                type="button"
-                                onClick={() => handleDensityChange(d)}
-                                className={`pm-seg-btn ${density === d ? "is-active" : ""}`}
-                            >
-                                {d}
-                            </button>
-                        ))}
+                        {DENSITY_ORDER.map((d) => {
+                            const active = density === d;
+                            return (
+                                <button
+                                    key={d}
+                                    role="radio"
+                                    aria-checked={active}
+                                    // Roving tabindex: only the active button is in
+                                    // the tab order; arrow keys move selection.
+                                    tabIndex={active ? 0 : -1}
+                                    type="button"
+                                    onClick={() => handleDensityChange(d)}
+                                    onKeyDown={(e) =>
+                                        handleRovingRadioKey(
+                                            e,
+                                            DENSITY_ORDER,
+                                            density,
+                                            handleDensityChange
+                                        )
+                                    }
+                                    className={`pm-seg-btn ${active ? "is-active" : ""}`}
+                                >
+                                    {DENSITY_LABEL[d]}
+                                </button>
+                            );
+                        })}
                     </div>
                 </div>
 
@@ -199,22 +259,31 @@ export function AppearanceSettings() {
                                     role="radio"
                                     aria-checked={active}
                                     aria-label={a.name}
+                                    // Roving tabindex — see density comment above.
+                                    tabIndex={active ? 0 : -1}
                                     onClick={() => handleAccentChange(a.value, a.name)}
-                                    className="pm-accent-dot"
-                                    style={{
-                                        background: a.value,
-                                        width: 28,
-                                        height: 28,
-                                        borderRadius: "50%",
-                                        border: active
-                                            ? "2px solid var(--pm-fg)"
-                                            : "2px solid var(--pm-border)",
-                                        boxShadow: active
-                                            ? "0 0 0 2px var(--pm-card), 0 0 0 4px " + a.value
-                                            : "none",
-                                        cursor: "pointer",
-                                        transition: "box-shadow 120ms ease-out, border-color 120ms ease-out",
-                                    }}
+                                    onKeyDown={(e) =>
+                                        handleRovingRadioKey(
+                                            e,
+                                            ACCENT_PRESETS.map((p) => p.value),
+                                            accent,
+                                            (nextValue) => {
+                                                const match = ACCENT_PRESETS.find(
+                                                    (p) => p.value === nextValue
+                                                );
+                                                handleAccentChange(
+                                                    nextValue,
+                                                    match?.name ?? nextValue
+                                                );
+                                            }
+                                        )
+                                    }
+                                    className={`pm-accent-dot ${active ? "is-active" : ""}`}
+                                    // Only the dynamic background color stays inline —
+                                    // size/border/shadow/focus ring live in
+                                    // `.pm-accent-dot` / `.pm-accent-dot.is-active` /
+                                    // `.pm-accent-dot:focus-visible` in globals.css.
+                                    style={{ background: a.value }}
                                 />
                             );
                         })}
