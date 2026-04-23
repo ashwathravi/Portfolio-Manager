@@ -15,22 +15,28 @@ import {
 } from "@/lib/strategies/strategy";
 import { StrategyCard } from "./StrategyCard";
 import { RuleBuilderPanel } from "./RuleBuilderPanel";
+import { BacktestPanel } from "./BacktestPanel";
 
 /**
- * Phase 6 (AR-80/81) Strategy Builder client.
+ * Phase 6 (AR-80/81/82) Strategy Builder client.
  *
  * Owns the editable strategies array and the currently-selected strategy
  * id. Renders:
  *   1. The selection row — 3 cards side by side. Clicking switches which
  *      strategy the builder surface below reflects.
  *   2. The 64/36 split — rule builder + universe + guardrails on the
- *      left (AR-81), backtest + monte carlo + promotion ladder on the
- *      right (AR-82 placeholder until that ticket lands).
+ *      left (AR-81); backtest equity curve + stats + monte carlo
+ *      percentiles + promotion ladder on the right (AR-82).
  *
  * All state is local — edits live for as long as the tab is open. When
  * we persist strategies to the backend this lifts to either a URL param
  * (draft per strategy) or a server mutation that round-trips through the
  * same reducer helpers.
+ *
+ * Note: editing rules/universe/guardrails does NOT recompute the
+ * backtest — that's what the "Run backtest" action in the topbar will
+ * drive once the backtest engine lands. For now the panel always
+ * reflects the seed backtest bundle, which is stable per strategy.
  */
 
 export function StrategyBuilderClient() {
@@ -149,17 +155,7 @@ export function StrategyBuilderClient() {
                     onToggleUniverse={onToggleUniverse}
                     onChangeGuardrail={onChangeGuardrail}
                 />
-                <div className="pm-strategy-backtest-placeholder pm-card">
-                    <header className="pm-strategy-placeholder-head">
-                        <span className="pm-strategy-placeholder-eyebrow">Backtest · Monte Carlo · Promotion</span>
-                        <span className="pm-strategy-placeholder-hint">AR-82</span>
-                    </header>
-                    <p className="pm-strategy-placeholder-body">
-                        Equity curve, stats grid, percentile strip, and the rules →
-                        backtest → robustness → paper → live promotion ladder land here
-                        next.
-                    </p>
-                </div>
+                <BacktestPanel strategy={selected} />
             </section>
         </div>
     );

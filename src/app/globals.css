@@ -3759,3 +3759,302 @@
 .pm-rb-guardrail-slider:focus-visible {
   box-shadow: 0 0 0 3px color-mix(in oklab, var(--pm-accent) 25%, transparent);
 }
+
+/* -------------------------------------------------------------------- */
+/* Phase 6 (AR-82) Backtest · Monte Carlo · Promotion ladder            */
+/* -------------------------------------------------------------------- */
+
+.pm-bt-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px;
+  min-height: 320px;
+}
+
+.pm-bt-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.pm-bt-head-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.pm-bt-eyebrow {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--pm-fg-subtle);
+}
+
+.pm-bt-window {
+  font-family: var(--pm-font-mono, monospace);
+  font-size: 12px;
+  color: var(--pm-fg-muted);
+}
+
+.pm-bt-verdict {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border-radius: 999px;
+  border: 1px solid transparent;
+}
+
+.pm-bt-verdict-robust {
+  color: var(--pm-success);
+  background: color-mix(in oklab, var(--pm-success) 14%, transparent);
+  border-color: color-mix(in oklab, var(--pm-success) 35%, transparent);
+}
+
+.pm-bt-verdict-promising {
+  color: var(--pm-accent);
+  background: color-mix(in oklab, var(--pm-accent) 12%, transparent);
+  border-color: color-mix(in oklab, var(--pm-accent) 35%, transparent);
+}
+
+.pm-bt-verdict-fragile {
+  color: var(--pm-warn);
+  background: color-mix(in oklab, var(--pm-warn) 12%, transparent);
+  border-color: color-mix(in oklab, var(--pm-warn) 35%, transparent);
+}
+
+.pm-bt-verdict-unproven {
+  color: var(--pm-fg-muted);
+  background: color-mix(in oklab, var(--pm-fg-muted) 10%, transparent);
+  border-color: color-mix(in oklab, var(--pm-fg-muted) 25%, transparent);
+}
+
+/* Equity curve wrapper */
+
+.pm-bt-chart {
+  margin: 0 -4px;
+}
+
+/* Stats grid (2 rows × 4 cols) --------------------------------------- */
+
+.pm-bt-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--pm-border);
+}
+
+@media (max-width: 520px) {
+  .pm-bt-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.pm-bt-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.pm-bt-stat-label {
+  font-size: 11px;
+  color: var(--pm-fg-subtle);
+  letter-spacing: 0.02em;
+}
+
+.pm-bt-stat-value {
+  font-family: var(--pm-font-mono, monospace);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--pm-fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Monte Carlo percentile strip --------------------------------------- */
+
+.pm-bt-mc {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--pm-border);
+}
+
+.pm-bt-mc-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.pm-bt-mc-hint {
+  font-size: 11px;
+  color: var(--pm-fg-subtle);
+}
+
+.pm-bt-mc-row {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.pm-bt-mc-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 4px;
+  border-radius: 8px;
+  background: var(--pm-bg-2);
+  border: 1px solid var(--pm-border);
+  text-align: center;
+}
+
+.pm-bt-mc-cell.is-median {
+  background: color-mix(in oklab, var(--pm-accent) 8%, var(--pm-bg-2));
+  border-color: color-mix(in oklab, var(--pm-accent) 40%, var(--pm-border));
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--pm-accent) 30%, transparent);
+}
+
+.pm-bt-mc-pct {
+  font-family: var(--pm-font-mono, monospace);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--pm-fg-subtle);
+  letter-spacing: 0.04em;
+}
+
+.pm-bt-mc-cell.is-median .pm-bt-mc-pct {
+  color: var(--pm-accent);
+}
+
+.pm-bt-mc-val {
+  font-family: var(--pm-font-mono, monospace);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--pm-fg);
+}
+
+.pm-bt-mc-cagr {
+  font-family: var(--pm-font-mono, monospace);
+  font-size: 11px;
+  color: var(--pm-fg-muted);
+}
+
+/* Promotion ladder --------------------------------------------------- */
+
+.pm-bt-promo {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 12px;
+  border-top: 1px solid var(--pm-border);
+}
+
+.pm-bt-promo-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pm-bt-promo-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0;
+  align-items: start;
+}
+
+.pm-bt-promo-step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  position: relative;
+  padding: 0 4px;
+}
+
+.pm-bt-promo-dot {
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--pm-bg-2);
+  border: 1.5px solid var(--pm-border);
+  color: var(--pm-fg-subtle);
+  font-family: var(--pm-font-mono, monospace);
+  font-size: 11px;
+  font-weight: 700;
+  position: relative;
+  z-index: 1;
+  flex-shrink: 0;
+}
+
+.pm-bt-promo-step.is-done .pm-bt-promo-dot {
+  background: var(--pm-success);
+  border-color: var(--pm-success);
+  color: white;
+}
+
+.pm-bt-promo-step.is-active .pm-bt-promo-dot {
+  background: color-mix(in oklab, var(--pm-accent) 14%, var(--pm-card));
+  border-color: var(--pm-accent);
+  color: var(--pm-accent);
+  box-shadow: 0 0 0 4px color-mix(in oklab, var(--pm-accent) 20%, transparent);
+}
+
+.pm-bt-promo-check {
+  width: 12px;
+  height: 12px;
+}
+
+.pm-bt-promo-num {
+  line-height: 1;
+}
+
+.pm-bt-promo-label {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--pm-fg-muted);
+  text-align: center;
+  letter-spacing: 0.02em;
+}
+
+.pm-bt-promo-step.is-done .pm-bt-promo-label {
+  color: var(--pm-fg);
+}
+
+.pm-bt-promo-step.is-active .pm-bt-promo-label {
+  color: var(--pm-fg);
+  font-weight: 600;
+}
+
+/* Connector line between steps — a ::before absolute element so it sits
+   behind the dots and doesn't break flex centering. */
+.pm-bt-promo-line {
+  position: absolute;
+  top: 11px;
+  left: calc(50% + 11px);
+  right: calc(-50% + 11px);
+  height: 1.5px;
+  background: var(--pm-border);
+  z-index: 0;
+}
+
+.pm-bt-promo-step.is-done .pm-bt-promo-line {
+  background: var(--pm-success);
+}
