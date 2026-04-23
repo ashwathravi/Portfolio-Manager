@@ -3,13 +3,13 @@
 import { useMemo, useState } from "react";
 import { Check, AlertTriangle, X } from "lucide-react";
 import {
-    APPROVAL_THRESHOLD_USD,
     BUYING_POWER_USD,
     COMMISSION_PER_TRADE_USD,
     CURRENT_POSITIONS,
     LIVE_PRICES,
     SEED_ORDERS,
 } from "@/lib/execution/seed";
+import { useSettingsStore } from "@/lib/stores/settingsStore";
 import type {
     Order,
     OrderSide,
@@ -167,6 +167,10 @@ function OrderForm({ onSubmit }: OrderFormProps) {
     const [stopPrice, setStopPrice] = useState<number>(220.0);
     const [tif, setTif] = useState<TimeInForce>("day");
 
+    // Guardrail settings (AR-89) — user prefs from the Settings store.
+    // When a toggle is off, the corresponding check becomes a no-op.
+    const guardrailPrefs = useSettingsStore((s) => s.guardrails);
+
     const tickerUpper = ticker.toUpperCase();
     const livePrice = LIVE_PRICES[tickerUpper];
     const price = effectivePrice(tickerUpper, type, limitPrice, stopPrice);
@@ -191,6 +195,8 @@ function OrderForm({ onSubmit }: OrderFormProps) {
         buyingPowerAfter,
         positionAfter,
         ticker: tickerUpper,
+        concentrationCapEnabled: guardrailPrefs.concentrationCapEnabled,
+        concentrationCapPct: guardrailPrefs.concentrationCapPct,
     });
 
     const submitDisabled =
@@ -212,7 +218,11 @@ function OrderForm({ onSubmit }: OrderFormProps) {
             quantity,
             limitPrice: showLimit ? limitPrice : undefined,
             stopPrice: showStop ? stopPrice : undefined,
-            status: notional > APPROVAL_THRESHOLD_USD ? "pending" : "working",
+            status:
+                guardrailPrefs.approvalThresholdEnabled &&
+                notional > guardrailPrefs.approvalThresholdUsd
+                    ? "pending"
+                    : "working",
             filledQuantity: 0,
             timeInForce: tif,
             placedAt: new Date(),
@@ -445,12 +455,16 @@ function useGuardrails({
     buyingPowerAfter,
     positionAfter,
     ticker,
+    concentrationCapEnabled,
+    concentrationCapPct,
 }: {
     side: OrderSide;
     notional: number;
     buyingPowerAfter: number;
     positionAfter: number;
     ticker: string;
+    concentrationCapEnabled: boolean;
+    concentrationCapPct: number;
 }): Guardrail[] {
     return useMemo(() => {
         const bp: Guardrail =
@@ -472,18 +486,30 @@ function useGuardrails({
                         level: "ok",
                     };
 
-        // Concentration — notional vs a fake $250k portfolio NAV.
+        // Concentration — post-trade position value as a % of NAV.
+        // Thresholds come from the user's Settings › Guardrails card
+        // (AR-89). When the toggle is off we surface a neutral chip so
+        // the user still sees that the check ran — just with no ceiling.
+        // The warn band kicks in at 80% of the hard cap so big names
+        // light up amber before they block the order.
         const navUsd = 250_000;
         const postPosValue = positionAfter * (LIVE_PRICES[ticker] ?? 0);
         const concentrationPct = Math.abs(postPosValue) / navUsd;
-        const conc: Guardrail =
-            concentrationPct > 0.3
+        const capFrac = concentrationCapPct / 100;
+        const warnFrac = capFrac * 0.8;
+        const conc: Guardrail = !concentrationCapEnabled
+            ? {
+                label: "Concentration",
+                message: `${(concentrationPct * 100).toFixed(1)}% of NAV (cap off)`,
+                level: "ok",
+            }
+            : concentrationPct > capFrac
                 ? {
                     label: "Concentration",
-                    message: `${(concentrationPct * 100).toFixed(1)}% of NAV (cap 30%)`,
+                    message: `${(concentrationPct * 100).toFixed(1)}% of NAV (cap ${concentrationCapPct}%)`,
                     level: "fail",
                 }
-                : concentrationPct > 0.2
+                : concentrationPct > warnFrac
                     ? {
                         label: "Concentration",
                         message: `${(concentrationPct * 100).toFixed(1)}% of NAV`,
@@ -536,7 +562,15 @@ function useGuardrails({
                 : null;
 
         return [bp, conc, sector, vol, ...(shortCheck ? [shortCheck] : [])];
-    }, [side, notional, buyingPowerAfter, positionAfter, ticker]);
+    }, [
+        side,
+        notional,
+        buyingPowerAfter,
+        positionAfter,
+        ticker,
+        concentrationCapEnabled,
+        concentrationCapPct,
+    ]);
 }
 
 // --------------------------------------------------------------------- //
@@ -558,6 +592,11 @@ function OrdersPanel({
     onCancel,
     onApprove,
 }: OrdersPanelProps) {
+    // AR-89: the approval queue threshold is user-configurable. Reading
+    // the slice here (not at FocusVariant) keeps prop plumbing shallow
+    // and colocates the read with the only two places that need it:
+    // the `approvalQueue` filter below and the banner's copy.
+    const guardrailPrefs = useSettingsStore((s) => s.guardrails);
     const counts = useMemo(() => {
         const c: Record<BlotterFilter, number> = {
             all: orders.length,
@@ -584,10 +623,15 @@ function OrdersPanel({
                 (o) =>
                     o.status === "pending" ||
                     (o.status === "working" &&
+                        guardrailPrefs.approvalThresholdEnabled &&
                         (o.limitPrice ?? LIVE_PRICES[o.ticker] ?? 0) * o.quantity >
-                            APPROVAL_THRESHOLD_USD),
+                            guardrailPrefs.approvalThresholdUsd),
             ),
-        [orders],
+        [
+            orders,
+            guardrailPrefs.approvalThresholdEnabled,
+            guardrailPrefs.approvalThresholdUsd,
+        ],
     );
 
     return (
@@ -620,6 +664,7 @@ function OrdersPanel({
             {approvalQueue.length > 0 && (
                 <ApprovalBanner
                     orders={approvalQueue}
+                    threshold={guardrailPrefs.approvalThresholdUsd}
                     onCancel={onCancel}
                     onApprove={onApprove}
                 />
@@ -632,10 +677,12 @@ function OrdersPanel({
 
 function ApprovalBanner({
     orders,
+    threshold,
     onCancel,
     onApprove,
 }: {
     orders: Order[];
+    threshold: number;
     onCancel: (id: string) => void;
     onApprove: (id: string) => void;
 }) {
@@ -645,7 +692,7 @@ function ApprovalBanner({
                 <AlertTriangle className="pm-exec-approval-icon" aria-hidden="true" />
                 <div className="pm-exec-approval-text">
                     <div className="pm-exec-approval-title">
-                        {orders.length} order{orders.length > 1 ? "s" : ""} above {formatUsd(APPROVAL_THRESHOLD_USD, 0)} threshold
+                        {orders.length} order{orders.length > 1 ? "s" : ""} above {formatUsd(threshold, 0)} threshold
                     </div>
                     <div className="pm-exec-approval-sub">
                         Cancel or approve before routing to the broker.

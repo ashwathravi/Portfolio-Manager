@@ -3,12 +3,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, ArrowRight, Check, Minus, Plus, Sparkles } from "lucide-react";
 import {
-    APPROVAL_THRESHOLD_USD,
     BUYING_POWER_USD,
     CURRENT_POSITIONS,
     LIVE_PRICES,
     SEED_ORDERS,
 } from "@/lib/execution/seed";
+import { useSettingsStore } from "@/lib/stores/settingsStore";
 import type {
     Order,
     OrderSide,
@@ -75,6 +75,10 @@ export function CheckoutVariant() {
     const [thesisAnchor, setThesisAnchor] = useState<string | null>(null);
     const [orders, setOrders] = useState<Order[]>(SEED_ORDERS);
 
+    // AR-89: pull the user's guardrail prefs so the approval gate here
+    // matches the Focus variant and the Settings › Guardrails card.
+    const guardrailPrefs = useSettingsStore((s) => s.guardrails);
+
     // Re-seed the limit when the ticker changes so it defaults to the
     // current live price.
     useEffect(() => {
@@ -102,7 +106,11 @@ export function CheckoutVariant() {
             type: "limit",
             quantity: qty,
             limitPrice: limit,
-            status: limit * qty > APPROVAL_THRESHOLD_USD ? "pending" : "working",
+            status:
+                guardrailPrefs.approvalThresholdEnabled &&
+                limit * qty > guardrailPrefs.approvalThresholdUsd
+                    ? "pending"
+                    : "working",
             filledQuantity: 0,
             timeInForce: "day",
             placedAt: new Date(),
