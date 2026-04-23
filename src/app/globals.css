@@ -7076,3 +7076,33 @@
 .pm-settings-advanced-link:hover .pm-settings-advanced-chev {
   color: var(--pm-accent);
 }
+
+/* --- AR-88 Appearance card ----------------------------------------- */
+
+.pm-settings-appearance-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.pm-settings-accent-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+/* The accent row shares .pm-accent-dot (defined earlier) but renders
+   a touch larger here — Settings has more vertical budget than the
+   Tweaks popover, so the dots can breathe. */
+.pm-settings-accent-dot {
+  width: 26px;
+  height: 26px;
+}
+
+.pm-settings-accent-label {
+  font-size: 11px;
+  color: var(--pm-fg-muted);
+  letter-spacing: 0.04em;
+  font-weight: 500;
+}
