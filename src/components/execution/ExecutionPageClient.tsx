@@ -10,6 +10,7 @@ import {
     type ExecutionVariant,
 } from "@/lib/execution/variant";
 import { VariantSwitcher } from "./VariantSwitcher";
+import { FocusVariant } from "./FocusVariant";
 
 /**
  * Phase 7 (AR-83) Execution page client wrapper.
@@ -69,7 +70,7 @@ export function ExecutionPageClient() {
 
     return (
         <div className="pm-exec-page" data-variant={variant} aria-busy={!hydrated}>
-            {variant === "focus" && <FocusVariantStub />}
+            {variant === "focus" && <FocusVariant />}
             {variant === "checkout" && <CheckoutVariantStub />}
             {variant === "terminal" && <TerminalVariantStub />}
         </div>
@@ -77,21 +78,8 @@ export function ExecutionPageClient() {
 }
 
 // --------------------------------------------------------------------- //
-// Variant stubs — replaced by AR-84/85/86.
+// Variant stubs — replaced by AR-85/86.
 // --------------------------------------------------------------------- //
-
-function FocusVariantStub() {
-    return (
-        <div className="pm-card pm-exec-stub">
-            <div className="pm-exec-stub-eyebrow">Focus</div>
-            <div className="pm-exec-stub-title">Form + blotter</div>
-            <p className="pm-exec-stub-desc">
-                The default. Split order form on the left, today&rsquo;s orders on the
-                right. Lands in AR-84.
-            </p>
-        </div>
-    );
-}
 
 function CheckoutVariantStub() {
     return (

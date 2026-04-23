@@ -4192,3 +4192,642 @@
     display: none;
   }
 }
+
+/* =========================================================================
+   Phase 7 · AR-84 — Execution Focus variant
+   =========================================================================
+   Split layout: order form (left, 420px) + blotter (right, fills). On
+   narrow viewports they stack form-on-top so the blotter keeps full
+   width. Both cards share the Phase 4 `.pm-card` shell so the surface
+   reads continuous with Portfolios, Performance, and Strategies.
+
+   The form is a single column of labeled fields with segmented toggles
+   for side + TIF. A 4-row preview shows notional/commission/buying power/
+   position after every edit. A guardrail list sits between preview and
+   the Review & submit foot so there's always a visible "am I about to
+   do something dumb" check before the click.
+   ========================================================================= */
+
+.pm-exec-focus {
+  display: grid;
+  grid-template-columns: minmax(380px, 440px) minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+
+@media (max-width: 1024px) {
+  .pm-exec-focus {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* --------------------------------------------------------------------- */
+/* Order form                                                             */
+/* --------------------------------------------------------------------- */
+
+.pm-exec-form {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.pm-exec-form-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.pm-exec-form-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--pm-fg);
+  letter-spacing: -0.01em;
+  margin: 0;
+}
+
+.pm-exec-form-sub {
+  font-size: 11.5px;
+  color: var(--pm-fg-subtle);
+}
+
+/* Side toggle — two-button pill, green for buy, red for sell. Full width
+   inside the card so the tap target stays big. */
+.pm-exec-side {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  background: var(--pm-bg-2);
+  border: 1px solid var(--pm-border);
+  border-radius: 10px;
+  padding: 3px;
+  gap: 2px;
+}
+
+.pm-exec-side-btn {
+  appearance: none;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  padding: 8px 0;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  color: var(--pm-fg-muted);
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.pm-exec-side-btn:hover {
+  color: var(--pm-fg);
+}
+
+.pm-exec-side-btn.is-buy.is-active {
+  background: color-mix(in oklab, var(--pm-success) 14%, var(--pm-card));
+  color: var(--pm-success);
+  border-color: color-mix(in oklab, var(--pm-success) 40%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--pm-success) 20%, transparent);
+}
+
+.pm-exec-side-btn.is-sell.is-active {
+  background: color-mix(in oklab, var(--pm-danger) 14%, var(--pm-card));
+  color: var(--pm-danger);
+  border-color: color-mix(in oklab, var(--pm-danger) 40%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--pm-danger) 20%, transparent);
+}
+
+/* Field row — label on top, control below, optional hint inline with input */
+.pm-exec-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.pm-exec-field-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--pm-fg-subtle);
+}
+
+.pm-exec-field-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.pm-exec-input {
+  width: 100%;
+  background: var(--pm-bg-2);
+  border: 1px solid var(--pm-border);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 13px;
+  color: var(--pm-fg);
+  font-family: inherit;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.pm-exec-input:hover {
+  border-color: color-mix(in oklab, var(--pm-accent) 30%, var(--pm-border));
+}
+
+.pm-exec-input:focus {
+  outline: none;
+  border-color: color-mix(in oklab, var(--pm-accent) 55%, var(--pm-border));
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--pm-accent) 18%, transparent);
+}
+
+.pm-exec-field-hint {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 12px;
+  color: var(--pm-fg-subtle);
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent, var(--pm-bg-2) 30%);
+  padding-left: 14px;
+}
+
+.pm-exec-row-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+/* TIF segmented row — 4 equal buttons, active one accent-tinted */
+.pm-exec-tif {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  background: var(--pm-bg-2);
+  border: 1px solid var(--pm-border);
+  border-radius: 8px;
+  padding: 2px;
+  gap: 2px;
+}
+
+.pm-exec-tif-btn {
+  appearance: none;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 6px 0;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  color: var(--pm-fg-muted);
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+.pm-exec-tif-btn:hover {
+  color: var(--pm-fg);
+}
+
+.pm-exec-tif-btn.is-active {
+  background: color-mix(in oklab, var(--pm-accent) 16%, var(--pm-card));
+  border-color: color-mix(in oklab, var(--pm-accent) 45%, transparent);
+  color: var(--pm-fg);
+}
+
+/* Preview rows */
+.pm-exec-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  background: var(--pm-bg-2);
+  border: 1px solid var(--pm-border);
+  border-radius: 10px;
+}
+
+.pm-exec-preview-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.pm-exec-preview-label {
+  font-size: 12px;
+  color: var(--pm-fg-muted);
+}
+
+.pm-exec-preview-value {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--pm-fg);
+  letter-spacing: -0.005em;
+}
+
+/* Guardrails list — three states: ok / warn / fail, each with a colored
+   dot. The message is muted since the label carries the scannable meaning. */
+.pm-exec-guardrails {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 4px 2px;
+}
+
+.pm-exec-guardrail {
+  display: grid;
+  grid-template-columns: 10px 120px 1fr;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+}
+
+.pm-exec-guardrail-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--pm-success);
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--pm-success) 25%, transparent);
+}
+
+.pm-exec-guardrail.is-warn .pm-exec-guardrail-dot {
+  background: var(--pm-warn);
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--pm-warn) 25%, transparent);
+}
+
+.pm-exec-guardrail.is-fail .pm-exec-guardrail-dot {
+  background: var(--pm-danger);
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--pm-danger) 30%, transparent);
+}
+
+.pm-exec-guardrail-label {
+  font-weight: 600;
+  color: var(--pm-fg);
+}
+
+.pm-exec-guardrail-msg {
+  color: var(--pm-fg-muted);
+}
+
+.pm-exec-guardrail.is-warn .pm-exec-guardrail-msg {
+  color: color-mix(in oklab, var(--pm-warn) 75%, var(--pm-fg));
+}
+
+.pm-exec-guardrail.is-fail .pm-exec-guardrail-msg {
+  color: var(--pm-danger);
+  font-weight: 500;
+}
+
+/* Foot — ghost save draft + primary/danger submit */
+.pm-exec-form-foot {
+  display: flex;
+  gap: 10px;
+  padding-top: 4px;
+}
+
+.pm-exec-form-foot > .pm-btn {
+  flex: 1;
+}
+
+/* --------------------------------------------------------------------- */
+/* Orders panel (blotter)                                                 */
+/* --------------------------------------------------------------------- */
+
+.pm-exec-blotter {
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 420px;
+}
+
+.pm-exec-blotter-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  gap: 16px;
+  border-bottom: 1px solid var(--pm-border);
+  flex-wrap: wrap;
+}
+
+.pm-exec-blotter-title {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  margin: 0;
+  color: var(--pm-fg);
+}
+
+.pm-exec-chips {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.pm-exec-chip {
+  appearance: none;
+  background: var(--pm-bg-2);
+  border: 1px solid var(--pm-border);
+  border-radius: 999px;
+  padding: 5px 11px 5px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--pm-fg-muted);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.pm-exec-chip:hover {
+  color: var(--pm-fg);
+  border-color: color-mix(in oklab, var(--pm-accent) 30%, var(--pm-border));
+}
+
+.pm-exec-chip.is-active {
+  background: color-mix(in oklab, var(--pm-accent) 14%, var(--pm-card));
+  border-color: color-mix(in oklab, var(--pm-accent) 50%, transparent);
+  color: var(--pm-fg);
+}
+
+.pm-exec-chip-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 16px;
+  border-radius: 6px;
+  padding: 0 4px;
+  background: var(--pm-border);
+  color: var(--pm-fg-muted);
+  font-size: 10.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.pm-exec-chip.is-active .pm-exec-chip-count {
+  background: color-mix(in oklab, var(--pm-accent) 30%, transparent);
+  color: var(--pm-fg);
+}
+
+/* Approval banner — warn-colored callout sitting between the header and
+   the table. Collapses when the queue is empty. */
+.pm-exec-approval {
+  margin: 14px 16px 8px;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in oklab, var(--pm-warn) 40%, var(--pm-border));
+  background: color-mix(in oklab, var(--pm-warn) 10%, var(--pm-card));
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.pm-exec-approval-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.pm-exec-approval-icon {
+  width: 16px;
+  height: 16px;
+  color: var(--pm-warn);
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.pm-exec-approval-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.pm-exec-approval-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--pm-fg);
+}
+
+.pm-exec-approval-sub {
+  font-size: 11.5px;
+  color: var(--pm-fg-muted);
+}
+
+.pm-exec-approval-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pm-exec-approval-row {
+  display: grid;
+  grid-template-columns: auto 60px 1fr auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  background: var(--pm-card);
+  border: 1px solid var(--pm-border);
+  border-radius: 8px;
+  font-size: 12.5px;
+}
+
+.pm-exec-approval-ticker {
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--pm-fg);
+}
+
+.pm-exec-approval-qty {
+  color: var(--pm-fg-muted);
+  font-size: 12px;
+}
+
+.pm-exec-approval-notional {
+  font-weight: 600;
+  color: var(--pm-fg);
+  text-align: right;
+}
+
+.pm-exec-approval-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.pm-exec-btn-sm {
+  padding: 5px 10px !important;
+  font-size: 11.5px !important;
+  height: auto !important;
+  gap: 4px;
+}
+
+.pm-exec-btn-icon {
+  width: 12px;
+  height: 12px;
+}
+
+/* Orders table */
+.pm-exec-table-wrap {
+  overflow-x: auto;
+  flex: 1;
+}
+
+.pm-exec-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+
+.pm-exec-table th,
+.pm-exec-table td {
+  padding: 10px 16px;
+  text-align: left;
+  border-bottom: 1px solid color-mix(in oklab, var(--pm-border) 60%, transparent);
+}
+
+.pm-exec-table th {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--pm-fg-subtle);
+  background: color-mix(in oklab, var(--pm-bg-2) 50%, transparent);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.pm-exec-table .num-col {
+  text-align: right;
+}
+
+.pm-exec-table tbody tr {
+  transition: background 120ms ease;
+}
+
+.pm-exec-table tbody tr:hover {
+  background: color-mix(in oklab, var(--pm-accent) 4%, transparent);
+}
+
+.pm-exec-table-ticker {
+  font-weight: 600;
+  letter-spacing: 0.005em;
+  color: var(--pm-fg);
+}
+
+.pm-exec-table-action {
+  text-align: right;
+  padding-right: 12px !important;
+}
+
+/* Side pill — BUY green / SELL red */
+.pm-exec-side-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 5px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+
+.pm-exec-side-pill.is-buy {
+  background: color-mix(in oklab, var(--pm-success) 16%, transparent);
+  color: var(--pm-success);
+}
+
+.pm-exec-side-pill.is-sell {
+  background: color-mix(in oklab, var(--pm-danger) 16%, transparent);
+  color: var(--pm-danger);
+}
+
+/* Status pill */
+.pm-exec-status {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 9px;
+  border-radius: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  border: 1px solid transparent;
+}
+
+.pm-exec-status-working {
+  background: color-mix(in oklab, var(--pm-accent) 14%, transparent);
+  color: var(--pm-accent);
+  border-color: color-mix(in oklab, var(--pm-accent) 35%, transparent);
+}
+
+.pm-exec-status-filled {
+  background: color-mix(in oklab, var(--pm-success) 14%, transparent);
+  color: var(--pm-success);
+  border-color: color-mix(in oklab, var(--pm-success) 35%, transparent);
+}
+
+.pm-exec-status-pending {
+  background: color-mix(in oklab, var(--pm-warn) 14%, transparent);
+  color: var(--pm-warn);
+  border-color: color-mix(in oklab, var(--pm-warn) 35%, transparent);
+}
+
+.pm-exec-status-cancelled {
+  background: var(--pm-bg-2);
+  color: var(--pm-fg-muted);
+  border-color: var(--pm-border);
+}
+
+.pm-exec-status-rejected {
+  background: color-mix(in oklab, var(--pm-danger) 14%, transparent);
+  color: var(--pm-danger);
+  border-color: color-mix(in oklab, var(--pm-danger) 35%, transparent);
+}
+
+.pm-exec-cancel {
+  appearance: none;
+  background: transparent;
+  border: none;
+  color: var(--pm-fg-subtle);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 5px;
+  line-height: 0;
+  transition: color 120ms ease, background 120ms ease;
+}
+
+.pm-exec-cancel:hover {
+  color: var(--pm-danger);
+  background: color-mix(in oklab, var(--pm-danger) 12%, transparent);
+}
+
+.pm-exec-cancel-icon {
+  width: 14px;
+  height: 14px;
+}
+
+.pm-exec-empty {
+  padding: 60px 24px;
+  text-align: center;
+  color: var(--pm-fg-subtle);
+  font-size: 13px;
+}
+
+/* Mobile: make the table a little tighter and collapse the chip count
+   badges so the filter row still fits under the title. */
+@media (max-width: 640px) {
+  .pm-exec-table th,
+  .pm-exec-table td {
+    padding: 8px 12px;
+  }
+  .pm-exec-approval-row {
+    grid-template-columns: auto 1fr auto;
+  }
+  .pm-exec-approval-qty,
+  .pm-exec-approval-notional {
+    display: none;
+  }
+}
