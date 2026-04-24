@@ -91,6 +91,35 @@ export interface ConnectedAccount {
     errorMessage?: string;
 }
 
+/**
+ * Execution guardrails (AR-89).
+ *
+ * These flags gate risky behavior in the Execution surface (AR-84).
+ * Each toggle is independent — users can flip any combination on or
+ * off. Numeric values travel alongside their toggle; the toggle
+ * decides whether the value is enforced.
+ *
+ * Kept in the Settings store (not a separate execution store) because
+ * they are user preferences that persist across sessions, same as
+ * theme and density. The Execution surface reads them via selectors,
+ * never the other way around.
+ */
+export interface GuardrailSettings {
+    /** Require manual approval for orders whose notional exceeds the
+     *  threshold. Floor/ceiling enforced in the UI at $500 / $10M. */
+    approvalThresholdEnabled: boolean;
+    approvalThresholdUsd: number;
+
+    /** Block new orders that would push a single position over this
+     *  percentage of the portfolio. Bounded 5–50 in the UI. */
+    concentrationCapEnabled: boolean;
+    concentrationCapPct: number;
+
+    /** Every order must link to an active thesis. Violations surface
+     *  as a guardrail-fail in the Focus variant preview. */
+    thesisLinkageRequired: boolean;
+}
+
 export interface SettingsState {
     // State slices
     profile: ProfileSettings;
@@ -101,6 +130,7 @@ export interface SettingsState {
     preferences: PreferencesSettings;
     tags: Tag[];
     accounts: ConnectedAccount[];
+    guardrails: GuardrailSettings;
 
     // Actions - Profile
     updateProfile: (profile: Partial<ProfileSettings>) => void;
@@ -135,6 +165,9 @@ export interface SettingsState {
     syncAccount: (id: string) => void;
     reconnectAccount: (id: string) => void;
     removeAccount: (id: string) => void;
+
+    // Actions - Guardrails
+    updateGuardrails: (updates: Partial<GuardrailSettings>) => void;
 
     // Reset
     resetSettings: () => void;
@@ -189,6 +222,19 @@ const defaultTags: Tag[] = [
     { id: '3', name: 'Speculative', color: '#f59e0b' },
 ];
 
+/**
+ * Guardrails defaults (AR-89). The values match what AR-84's
+ * execution fixtures hardcoded before this slice existed, so moving
+ * to the store doesn't change behavior for existing users.
+ */
+const defaultGuardrails: GuardrailSettings = {
+    approvalThresholdEnabled: true,
+    approvalThresholdUsd: 25_000,
+    concentrationCapEnabled: true,
+    concentrationCapPct: 25,
+    thesisLinkageRequired: false,
+};
+
 const defaultAccounts: ConnectedAccount[] = [
     {
         id: 'fidelity',
@@ -237,6 +283,7 @@ export const useSettingsStore = create<SettingsState>()(
             preferences: defaultPreferences,
             tags: defaultTags,
             accounts: defaultAccounts,
+            guardrails: defaultGuardrails,
 
             // Profile
             updateProfile: (updates) =>
@@ -358,6 +405,12 @@ export const useSettingsStore = create<SettingsState>()(
                     accounts: state.accounts.filter((acc) => acc.id !== id),
                 })),
 
+            // Guardrails
+            updateGuardrails: (updates) =>
+                set((state) => ({
+                    guardrails: { ...state.guardrails, ...updates },
+                })),
+
             // Reset
             resetSettings: () =>
                 set({
@@ -369,6 +422,7 @@ export const useSettingsStore = create<SettingsState>()(
                     preferences: defaultPreferences,
                     tags: defaultTags,
                     accounts: defaultAccounts,
+                    guardrails: defaultGuardrails,
                 }),
         }),
         {
@@ -377,12 +431,13 @@ export const useSettingsStore = create<SettingsState>()(
              * Bump when the shape of any persisted slice changes.
              *   v1 — pre-Ledger: `appearance = { theme, compactMode, animationsEnabled }`
              *   v2 — AR-64 + AR-65: adds `density` and `accent` as required fields.
-             * Without this migrate, any existing user who upgrades would hydrate
-             * with `appearance.density === undefined` and `appearance.accent
-             * === undefined`, which the ThemeProvider would then serialize into
-             * `body[data-density="undefined"]` and `--pm-accent: undefined`.
+             *   v3 — AR-89: adds the `guardrails` slice (approval threshold,
+             *        concentration cap, thesis linkage). Existing users
+             *        migrate to the defaults — the numbers match what the
+             *        Execution surface hardcoded before the slice existed,
+             *        so behavior is unchanged.
              */
-            version: 2,
+            version: 3,
             migrate: (persistedState, version) => {
                 const s = (persistedState ?? {}) as Partial<SettingsState>;
                 if (version < 2) {
@@ -397,6 +452,10 @@ export const useSettingsStore = create<SettingsState>()(
                         accent: existing.accent ?? defaultAppearance.accent,
                     };
                 }
+                if (version < 3) {
+                    const existing = (s.guardrails ?? {}) as Partial<GuardrailSettings>;
+                    s.guardrails = { ...defaultGuardrails, ...existing };
+                }
                 return s as SettingsState;
             },
             // Sentinel: Only persist non-sensitive preferences. API keys are
@@ -406,6 +465,7 @@ export const useSettingsStore = create<SettingsState>()(
                 notifications: state.notifications,
                 preferences: state.preferences,
                 tags: state.tags,
+                guardrails: state.guardrails,
             }),
         }
     )

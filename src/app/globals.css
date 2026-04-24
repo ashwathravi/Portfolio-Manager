@@ -6656,3 +6656,557 @@
   font-size: 8px;
   vertical-align: middle;
 }
+
+/* --------------------------------------------------------------------- */
+/* AR-87 / AR-88 / AR-89 — Settings redesign                             */
+/*                                                                       */
+/* 2×2 card grid + Advanced links footer. Cards are self-contained —     */
+/* each one reads and writes to the same `useSettingsStore` slices as    */
+/* the old tabbed layout, so the data model is unchanged.                */
+/* --------------------------------------------------------------------- */
+
+.pm-settings-v2 {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  padding: 24px;
+  padding-bottom: 64px;
+  max-width: 1200px;
+  margin-inline: auto;
+  width: 100%;
+}
+
+.pm-settings-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+@media (max-width: 960px) {
+  .pm-settings-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* --- card shell ----------------------------------------------------- */
+
+.pm-settings-card {
+  display: flex;
+  flex-direction: column;
+  background: var(--pm-card);
+  border: 1px solid var(--pm-border);
+  border-radius: 12px;
+  overflow: hidden;
+  min-height: 260px;
+}
+
+.pm-settings-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--pm-border);
+}
+
+.pm-settings-card-head-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.pm-settings-card-icon {
+  width: 16px;
+  height: 16px;
+  color: var(--pm-accent);
+  flex-shrink: 0;
+}
+
+.pm-settings-card-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--pm-fg);
+}
+
+.pm-settings-card-sub {
+  font-size: 11.5px;
+  color: var(--pm-fg-muted);
+  letter-spacing: 0.01em;
+}
+
+.pm-settings-card-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  background: color-mix(in oklab, var(--pm-accent) 10%, transparent);
+  border: 1px solid color-mix(in oklab, var(--pm-accent) 35%, transparent);
+  border-radius: 999px;
+  color: var(--pm-accent);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  transition: background 120ms ease, transform 80ms ease;
+}
+
+.pm-settings-card-cta:hover {
+  background: color-mix(in oklab, var(--pm-accent) 18%, transparent);
+  transform: translateY(-1px);
+}
+
+.pm-settings-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px 18px 18px;
+}
+
+.pm-settings-card-stub .pm-settings-card-body {
+  padding: 24px 18px;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+}
+
+.pm-settings-card-placeholder {
+  margin: 0;
+  color: var(--pm-fg-muted);
+  font-size: 12.5px;
+  text-align: center;
+  max-width: 320px;
+}
+
+/* --- form fields ---------------------------------------------------- */
+
+.pm-settings-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pm-settings-field-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--pm-fg-muted);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.pm-settings-input,
+.pm-settings-select {
+  width: 100%;
+  padding: 9px 12px;
+  background: var(--pm-bg-2);
+  border: 1px solid var(--pm-border);
+  border-radius: 8px;
+  color: var(--pm-fg);
+  font-size: 13px;
+  font-family: inherit;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.pm-settings-input:focus,
+.pm-settings-select:focus {
+  outline: none;
+  border-color: var(--pm-accent);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--pm-accent) 18%, transparent);
+}
+
+.pm-settings-input::placeholder {
+  color: var(--pm-fg-subtle);
+}
+
+.pm-settings-select {
+  appearance: none;
+  padding-right: 32px;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 20 20' fill='none' stroke='%23999' stroke-width='2'><path d='M5 8l5 5 5-5'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  cursor: pointer;
+}
+
+/* --- integrations list --------------------------------------------- */
+
+.pm-integrations {
+  display: flex;
+  flex-direction: column;
+  padding: 4px 0;
+}
+
+.pm-integrations-empty {
+  padding: 24px 18px;
+  text-align: center;
+  color: var(--pm-fg-muted);
+  font-size: 12.5px;
+}
+
+.pm-integration-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 18px;
+  border-bottom: 1px solid color-mix(in oklab, var(--pm-border) 60%, transparent);
+}
+
+.pm-integration-row:last-child {
+  border-bottom: none;
+}
+
+.pm-integration-logo {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  font-weight: 700;
+  font-size: 14px;
+  background: color-mix(in oklab, var(--pm-accent) 12%, transparent);
+  color: var(--pm-accent);
+  border: 1px solid color-mix(in oklab, var(--pm-accent) 28%, transparent);
+}
+
+.pm-integration-row.is-warn .pm-integration-logo {
+  background: color-mix(in oklab, var(--pm-warn) 12%, transparent);
+  color: var(--pm-warn);
+  border-color: color-mix(in oklab, var(--pm-warn) 28%, transparent);
+}
+
+.pm-integration-row.is-error .pm-integration-logo {
+  background: color-mix(in oklab, var(--pm-danger) 12%, transparent);
+  color: var(--pm-danger);
+  border-color: color-mix(in oklab, var(--pm-danger) 28%, transparent);
+}
+
+.pm-integration-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.pm-integration-name {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--pm-fg);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pm-integration-mask {
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--pm-fg-subtle);
+  font-variant-numeric: tabular-nums;
+}
+
+.pm-integration-status {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  color: var(--pm-fg-muted);
+}
+
+.pm-integration-status-icon {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+}
+
+.pm-integration-row.is-ok .pm-integration-status-icon {
+  color: var(--pm-success);
+}
+
+.pm-integration-row.is-warn .pm-integration-status-icon,
+.pm-integration-row.is-warn .pm-integration-status {
+  color: var(--pm-warn);
+}
+
+.pm-integration-row.is-error .pm-integration-status-icon,
+.pm-integration-row.is-error .pm-integration-status {
+  color: var(--pm-danger);
+}
+
+.pm-integration-action {
+  padding: 5px 12px;
+  background: transparent;
+  border: 1px solid var(--pm-border);
+  border-radius: 6px;
+  color: var(--pm-fg-muted);
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
+}
+
+.pm-integration-action:hover:not(:disabled) {
+  color: var(--pm-fg);
+  border-color: var(--pm-fg-muted);
+}
+
+.pm-integration-action:disabled {
+  opacity: 0.5;
+  cursor: progress;
+}
+
+.pm-integration-action.is-warn {
+  border-color: color-mix(in oklab, var(--pm-warn) 45%, transparent);
+  color: var(--pm-warn);
+  background: color-mix(in oklab, var(--pm-warn) 8%, transparent);
+}
+
+.pm-integration-action.is-warn:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--pm-warn) 16%, transparent);
+}
+
+/* --- Advanced links footer ----------------------------------------- */
+
+.pm-settings-advanced {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 20px 2px 4px;
+}
+
+.pm-settings-advanced-head {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 0 4px;
+}
+
+.pm-settings-advanced-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--pm-fg-muted);
+}
+
+.pm-settings-advanced-sub {
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--pm-fg-subtle);
+}
+
+.pm-settings-advanced-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+@media (max-width: 960px) {
+  .pm-settings-advanced-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 560px) {
+  .pm-settings-advanced-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.pm-settings-advanced-link {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 14px;
+  background: var(--pm-card);
+  border: 1px solid var(--pm-border);
+  border-radius: 10px;
+  color: var(--pm-fg);
+  text-decoration: none;
+  transition: border-color 120ms ease, transform 100ms ease, background 120ms ease;
+}
+
+.pm-settings-advanced-link:hover {
+  border-color: color-mix(in oklab, var(--pm-accent) 45%, var(--pm-border));
+  background: color-mix(in oklab, var(--pm-accent) 4%, var(--pm-card));
+  transform: translateY(-1px);
+}
+
+.pm-settings-advanced-icon {
+  width: 16px;
+  height: 16px;
+  color: var(--pm-fg-muted);
+  flex-shrink: 0;
+}
+
+.pm-settings-advanced-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.pm-settings-advanced-label {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--pm-fg);
+}
+
+.pm-settings-advanced-desc {
+  font-size: 11px;
+  color: var(--pm-fg-subtle);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pm-settings-advanced-chev {
+  width: 14px;
+  height: 14px;
+  color: var(--pm-fg-subtle);
+  flex-shrink: 0;
+}
+
+.pm-settings-advanced-link:hover .pm-settings-advanced-chev {
+  color: var(--pm-accent);
+}
+
+/* --- AR-88 Appearance card ----------------------------------------- */
+
+.pm-settings-appearance-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.pm-settings-accent-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+/* The accent row shares .pm-accent-dot (defined earlier) but renders
+   a touch larger here — Settings has more vertical budget than the
+   Tweaks popover, so the dots can breathe. */
+.pm-settings-accent-dot {
+  width: 26px;
+  height: 26px;
+}
+
+.pm-settings-accent-label {
+  font-size: 11px;
+  color: var(--pm-fg-muted);
+  letter-spacing: 0.04em;
+  font-weight: 500;
+}
+
+/* --- AR-89 Guardrails card ----------------------------------------- */
+
+/* Stack of three rails. We avoid `.pm-settings-card-body` here because
+   each rail carries its own padding + divider, so the outer card only
+   owns the header and the list frame. */
+.pm-guard-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.pm-guard-item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 0;
+  border-top: 1px solid var(--pm-border);
+}
+
+.pm-guard-item:first-child {
+  border-top: 0;
+  padding-top: 4px;
+}
+
+.pm-guard-item:last-child {
+  padding-bottom: 4px;
+}
+
+/* When the toggle is off, dim the text + input but keep the switch at
+   full opacity — the user needs to see clearly what they just turned
+   off. Opacity 0.55 is the same value we use for disabled pm-btn so it
+   reads as "inert" not "broken". */
+.pm-guard-item.is-off .pm-guard-text {
+  opacity: 0.55;
+}
+
+.pm-guard-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  flex: 1 1 auto;
+  transition: opacity 140ms ease;
+}
+
+.pm-guard-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--pm-fg);
+  letter-spacing: -0.005em;
+}
+
+.pm-guard-desc {
+  font-size: 12.5px;
+  color: var(--pm-fg-muted);
+  line-height: 1.5;
+}
+
+/* Inline numeric input sits in the middle of a descriptive sentence —
+   it needs to look like part of the prose, not a form field. We give
+   it a subtle underline + token-tinted background so it reads as
+   "editable value" without pulling focus away from the copy. */
+.pm-guard-inline {
+  display: inline-block;
+  min-width: 0;
+  padding: 2px 6px;
+  margin: 0 2px;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--pm-fg);
+  background: color-mix(in oklab, var(--pm-accent) 10%, transparent);
+  border: 1px solid color-mix(in oklab, var(--pm-accent) 28%, var(--pm-border));
+  border-radius: 6px;
+  text-align: center;
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+.pm-guard-inline::-webkit-outer-spin-button,
+.pm-guard-inline::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.pm-guard-inline:focus {
+  outline: none;
+  border-color: var(--pm-accent);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--pm-accent) 22%, transparent);
+}
+
+.pm-guard-inline:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.pm-guard-inline-dollar {
+  width: 11ch;
+}
+
+.pm-guard-inline-pct {
+  width: 5ch;
+}

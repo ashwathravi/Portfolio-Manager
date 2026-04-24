@@ -141,9 +141,7 @@ export const CURRENT_POSITIONS: Record<string, { qty: number; avgCost: number }>
     JPM: { qty: 200, avgCost: 195.12 },
 };
 
-/**
- * Approval threshold — any single order whose notional exceeds this
- * dollar value lands in the approval queue instead of auto-routing.
- * Keeps a human in the loop for size that can move the portfolio.
- */
-export const APPROVAL_THRESHOLD_USD = 25_000;
+// Note: the approval threshold used to live here as a constant. It now
+// comes from `useSettingsStore.guardrails.approvalThresholdUsd` (AR-89)
+// so the user can tune it from Settings › Guardrails. The default
+// (25_000) is preserved in `defaultGuardrails` in settingsStore.ts.
