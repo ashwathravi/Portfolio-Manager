@@ -1,79 +1,52 @@
 import { test, expect } from '@playwright/test';
 
+/**
+ * Phase 9 (AR-94) Performance tests.
+ *
+ * Phase 4 (AR-75/76/77) replaced the legacy "Performance Analytics" h1
+ * + random metric tiles with a Topbar-driven shell that renders the new
+ * 4-card deep-dive:
+ *
+ *   - EquityCurveCard ........ h2 "Equity curve"
+ *   - AttributionBarsCard .... h2 "Attribution"
+ *   - MetricsByPeriodTable ... h2 "Metrics by period"
+ *   - MonthlyHeatmapCard ..... h2 "Monthly return heatmap"
+ *
+ * The page h1 moved into the Topbar via PageHeaderSync (title "Performance").
+ * The in-body h1 "Performance analytics" still exists inside the client
+ * wrapper for context, but it's no longer the single source of truth.
+ */
+
 test.describe('Performance page', () => {
     test.beforeEach(async ({ page }) => {
         await page.goto('/performance');
     });
 
-    test('should render page heading and description', async ({ page }) => {
-        await expect(page.locator('h1', { hasText: 'Performance Analytics' })).toBeVisible();
-        await expect(page.getByText('Deep dive into your portfolio performance and risk metrics')).toBeVisible();
+    test('Topbar title renders "Performance"', async ({ page }) => {
+        await expect(page.locator('h1.pm-topbar-title')).toHaveText('Performance');
     });
 
-    test('should display time period filters', async ({ page }) => {
-        await expect(page.getByText('All Time')).toBeVisible();
-        await expect(page.getByText('Date Range')).toBeVisible();
+    test('renders the four deep-dive cards', async ({ page }) => {
+        await expect(
+            page.locator('h2.pm-card-title', { hasText: /^Equity curve$/i }),
+        ).toBeVisible();
+        await expect(
+            page.locator('h2.pm-card-title', { hasText: /^Attribution$/i }),
+        ).toBeVisible();
+        await expect(
+            page.locator('h2.pm-card-title', { hasText: /^Metrics by period$/i }),
+        ).toBeVisible();
+        await expect(
+            page.locator('h2.pm-card-title', { hasText: /^Monthly return heatmap$/i }),
+        ).toBeVisible();
     });
 
-    test('should show trading performance metrics cards', async ({ page }) => {
-        await expect(page.getByText('Net Realized P&L')).toBeVisible();
-        await expect(page.getByText('Win Rate').first()).toBeVisible();
-        await expect(page.getByText('Profit Factor').first()).toBeVisible();
-        await expect(page.getByText('Avg win/loss trade')).toBeVisible();
-    });
-
-    test('should show additional financial metrics', async ({ page }) => {
-        await expect(page.getByText('Unrealized P&L')).toBeVisible();
-        await expect(page.getByText('Available Cash')).toBeVisible();
-        await expect(page.getByText('Deployed Capital')).toBeVisible();
-        await expect(page.getByText('Total Open Risk')).toBeVisible();
-    });
-
-    test('should display key performance stat cards', async ({ page }) => {
-        await expect(page.getByText('Total Return (1Y)')).toBeVisible();
-        await expect(page.getByText('Sharpe Ratio').first()).toBeVisible();
-        await expect(page.getByText('Max Drawdown').first()).toBeVisible();
-        await expect(page.getByText('Alpha').first()).toBeVisible();
-    });
-
-    test('should display Monthly Performance chart section', async ({ page }) => {
-        await expect(page.getByText('Monthly Performance')).toBeVisible();
-    });
-
-    test('should display Equity Curve chart section', async ({ page }) => {
-        await expect(page.getByText('Equity Curve')).toBeVisible();
-    });
-
-    test('should display Account Balance chart section', async ({ page }) => {
-        await expect(page.getByText('Account Balance')).toBeVisible();
-    });
-
-    test('should display Performance by Period table', async ({ page }) => {
-        await expect(page.getByText('Performance by Period')).toBeVisible();
-
-        // Table headers
-        await expect(page.getByText('Period').first()).toBeVisible();
-        await expect(page.getByText('Benchmark').first()).toBeVisible();
-
-        // Period rows from mock data
-        await expect(page.getByText('1M').first()).toBeVisible();
-        await expect(page.getByText('3M').first()).toBeVisible();
-        await expect(page.getByText('YTD').first()).toBeVisible();
-        await expect(page.getByText('1Y').first()).toBeVisible();
-    });
-
-    test('should display Risk Metrics section', async ({ page }) => {
-        await expect(page.getByText('Risk Metrics')).toBeVisible();
-        await expect(page.getByText('Volatility (Annual)')).toBeVisible();
-        await expect(page.getByText('Beta')).toBeVisible();
-        await expect(page.getByText('Value at Risk (95%)')).toBeVisible();
-        await expect(page.getByText('Sortino Ratio').first()).toBeVisible();
-    });
-
-    test('should display Attribution Analysis section', async ({ page }) => {
-        await expect(page.getByText('Attribution Analysis')).toBeVisible();
-        await expect(page.getByText('Stock Selection')).toBeVisible();
-        await expect(page.getByText('Asset Allocation')).toBeVisible();
-        await expect(page.getByText('Timing')).toBeVisible();
+    test('in-page header retains the legacy "Performance analytics" h1 for context', async ({ page }) => {
+        // The client wrapper still ships its own h1 — the Topbar h1 is the
+        // primary assertion above, but we verify this one stays wired so
+        // visual regressions there show up as test failures too.
+        await expect(
+            page.locator('h1.pm-page-title', { hasText: /Performance analytics/i }),
+        ).toBeVisible();
     });
 });
