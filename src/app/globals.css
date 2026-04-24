@@ -7210,3 +7210,314 @@
 .pm-guard-inline-pct {
   width: 5ch;
 }
+
+/* ==========================================================================
+   Phase 9 · AR-93 — Animation polish
+
+   The redesign leans on four motion primitives. Keep the list small so the
+   UI reads as calm, not performative:
+
+     pm-ping          live market dot in the sidebar      (Phase 1)
+     pm-chart-halo    AreaChart end-dot halo pulse        (Phase 2)
+     pm-co-pulse      Checkout locked-price countdown     (Phase 7)
+     pm-caret         Terminal CLI prompt blink           (this ticket)
+
+   Everything else is driven by 120–150ms ease-out `transition`s on hover,
+   focus, and state changes — short enough that fast users don't notice a
+   delay, long enough to feel intentional. We also tighten a handful of
+   surfaces that didn't have transitions yet (cards, chips), and expand
+   the `prefers-reduced-motion` escape hatch to cover every keyframe.
+   ========================================================================== */
+
+/* --- pm-caret (Terminal CLI prompt blink) -------------------------- */
+
+/* The Terminal's `>` prompt is the user's spatial anchor for the CLI.
+   A steady blink (1s cadence — same as macOS Terminal defaults) draws
+   the eye there on mount and pulses during idle moments without
+   competing with the book/tape live updates happening around it. We
+   blink the prompt character rather than synthesizing a custom block
+   caret inside the input because:
+     (a) Native `caret-color` already handles the in-input cursor.
+     (b) The prompt is `aria-hidden`, so the blink never produces SR
+         noise — it's a pure visual cue.
+     (c) Keyframing `opacity` is GPU-compositor-cheap. */
+.pm-term-cli-prompt {
+  animation: pm-caret 1s steps(2, jump-none) infinite;
+  will-change: opacity;
+}
+
+/* `.is-valid` / `.is-error` pause the blink — once the user has a parse
+   verdict, the steady prompt is the calmer signal. */
+.pm-term-cli.is-valid .pm-term-cli-prompt,
+.pm-term-cli.is-error .pm-term-cli-prompt {
+  animation: none;
+  opacity: 1;
+}
+
+@keyframes pm-caret {
+  0%, 49%   { opacity: 1; }
+  50%, 100% { opacity: 0.1; }
+}
+
+/* --- Transition polish on shared primitives ----------------------- */
+
+/* Cards and chips didn't have a transition, so hover state changes
+   popped instantly. Match the button spec (≤150ms ease-out) so cards
+   feel cohesive with the rest of the UI. We transition just the
+   properties that can change in :hover / :focus — keeping the list
+   narrow means browsers can fast-path the paint. */
+.pm-card,
+.pm-chip {
+  transition: background-color 140ms ease-out, border-color 140ms ease-out,
+              box-shadow 140ms ease-out, color 140ms ease-out;
+}
+
+/* --- prefers-reduced-motion: comprehensive sweep ------------------ */
+
+/* When the user opts out of motion (macOS: System Settings →
+   Accessibility → Display → Reduce motion; Windows: Settings → Ease
+   of Access → Display → Show animations), we disable every
+   keyframed animation site-wide. Transitions stay — they're short,
+   non-looping state changes and shouldn't trip motion sensitivity.
+   `animation: none !important` is the safe hammer here because the
+   per-element rules are the only `animation` declarations for these
+   classes. */
+@media (prefers-reduced-motion: reduce) {
+  .pm-live-dot::after,
+  .pm-tweaks-panel,
+  .pm-chart-halo,
+  .pm-co-lock-dot,
+  .pm-term-cli-prompt {
+    animation: none !important;
+  }
+
+  /* Belt-and-braces: flatten any one-off transitions that might
+     otherwise feel animated (>0) down to a no-op. We cap at 0.001s
+     rather than 0 so tests that check `getComputedStyle(...).transition`
+     still get a valid value — a flat 0 can confuse some tooling. */
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.001ms !important;
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ==========================================================================
+   Phase 9 · AR-91 — Accessibility pass
+
+   Most of the redesign already shipped with focus-visible rules and ARIA
+   attributes — this block fills the gaps from the Phase 7 / 8 surfaces
+   (Execution + Settings) and adds a catch-all for anything we may have
+   missed. Rule of thumb: every interactive element should show a visible
+   ring when focused with a keyboard, and icon-only controls must have
+   an `aria-label`.
+
+   We use the accent token for the ring so it tracks the user's accent
+   choice — this mostly matters for the Amber accent, which passes WCAG
+   AA against the page background and reads as "this is your cursor"
+   more clearly than a generic system color.
+   ========================================================================== */
+
+/* Focus rings on Execution / Terminal / Settings primitives that didn't
+   have one specified — the same 2px solid outline + 2px offset we use
+   on .pm-btn. */
+.pm-exec-cancel:focus-visible,
+.pm-exec-side-btn:focus-visible,
+.pm-exec-tif-btn:focus-visible,
+.pm-exec-chip:focus-visible,
+.pm-exec-input:focus-visible,
+.pm-term-btn:focus-visible,
+.pm-term-cli-input:focus-visible,
+.pm-settings-input:focus-visible,
+.pm-settings-select:focus-visible,
+.pm-integration-action:focus-visible,
+.pm-settings-advanced-link:focus-visible {
+  outline: 2px solid var(--pm-accent);
+  outline-offset: 2px;
+}
+
+/* Terminal inputs sit on a dark panel. Offsetting into the dark
+   surface makes the ring hard to see — use an inset ring (box-shadow)
+   instead so it stays visible against #0a0f0c. */
+.pm-term-cli-input:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--term-accent);
+  border-radius: 3px;
+}
+
+/* Universal safety net: any button / link / input / textarea / select
+   that we missed still gets a visible ring. Low-specificity so any
+   surface-specific rule above overrides it. We only target
+   :focus-visible (not :focus) so mouse-click focus doesn't light up
+   the ring — that's the keyboard-only convention modern browsers
+   follow, and it matches what each .pm-* rule above does. */
+button:focus-visible,
+a:focus-visible,
+[role="button"]:focus-visible,
+[role="tab"]:focus-visible,
+[role="radio"]:focus-visible,
+[role="menuitem"]:focus-visible,
+[role="link"]:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--pm-accent);
+  outline-offset: 2px;
+}
+
+/* Skip-to-content link — keyboard users land here first and need a
+   visible way to jump past the sidebar and topbar. Hidden off-screen
+   until focused, then snaps to the top-left corner. */
+.pm-a11y-skip {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 200;
+  padding: 8px 14px;
+  background: var(--pm-card);
+  color: var(--pm-fg);
+  border: 2px solid var(--pm-accent);
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  transform: translateY(-200%);
+  transition: transform 120ms ease-out;
+}
+
+.pm-a11y-skip:focus-visible {
+  transform: translateY(0);
+  outline: 2px solid var(--pm-accent);
+  outline-offset: 2px;
+}
+
+/* Screen-reader-only utility — useful anywhere we want to announce
+   state without showing it visually (e.g. "{count} new orders"). */
+.pm-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ==========================================================================
+   Phase 9 · AR-92 — Responsive breakpoints
+
+   The redesign was drawn at a 1280px desktop baseline. Most surfaces scale
+   down via grid rules already added in earlier phases (stat row collapses
+   to 2×2 at ≤1100px, dashboard 2-col / 3-col grids fall to 1fr at the
+   same breakpoint, Topbar crumbs truncate via `overflow: hidden`, Terminal
+   grid collapses at 1100 / 720). This block patches the remaining gaps:
+
+     - Table overflow for Holdings + Execution blotter on narrow widths
+     - "Best on desktop" notice for the Terminal variant (self-hides ≥900px)
+     - Topbar title/breadcrumb truncation polish on mobile
+     - Settings advanced grid → single-column below 720px
+
+   We intentionally do NOT push the sidebar to a drawer at ≤768px here —
+   the existing AR-41 drawer already handles that (`md:ml-[var(--pm-sidebar-w)]`
+   only applies at ≥768px, so below that the sidebar is hidden and the
+   drawer shell takes over). Adding more rules here would double-hide it.
+   ========================================================================== */
+
+/* --- Terminal: "Best on desktop" notice --------------------------- */
+
+/* Hidden by default on ≥900px (where the grid fits). Snaps into view
+   below that with a subtle amber dot so it reads as "advisory", not
+   "error". The notice sits inside `.pm-term` so the dark-theme scoped
+   tokens (`--term-*`) apply automatically — it doesn't need a light-
+   theme variant. */
+.pm-term-narrow-notice {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 12px 0;
+  padding: 8px 12px;
+  background: color-mix(in srgb, var(--term-accent) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--term-accent) 38%, transparent);
+  border-radius: 6px;
+  color: var(--term-fg);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+
+.pm-term-narrow-notice-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--term-accent);
+  flex-shrink: 0;
+}
+
+@media (max-width: 899px) {
+  .pm-term-narrow-notice {
+    display: flex;
+  }
+}
+
+/* --- Holdings + Execution tables: horizontal scroll on mobile ---- */
+
+/* On narrow widths the Holdings / Execution tables have too many
+   columns to fit without breaking data alignment. Wrap each in a
+   horizontally-scrollable container so the user can swipe to reach
+   columns that don't fit. We scope via `:where(...)` so we don't
+   bump specificity — table-specific rules keep winning. */
+@media (max-width: 720px) {
+  :where(.pm-holdings-table, .pm-exec-table) {
+    display: block;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    white-space: nowrap;
+  }
+
+  /* When the table becomes `display: block`, the internal thead /
+     tbody also become block, which breaks the native <table> row
+     model. Re-assert `table` semantics on the inner groups so cells
+     still align. */
+  :where(.pm-holdings-table, .pm-exec-table) > thead,
+  :where(.pm-holdings-table, .pm-exec-table) > tbody {
+    display: table;
+    width: 100%;
+    min-width: 600px;
+  }
+}
+
+/* --- Topbar: tighter title on very narrow viewports --------------- */
+
+/* The topbar title was 20px/700 — fine at 1024px, a bit heavy on a
+   phone. Drop to 16px/700 + single-line ellipsis below 560px so the
+   Topbar stays one row tall instead of wrapping. */
+@media (max-width: 560px) {
+  .pm-topbar-title {
+    font-size: 16px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .pm-topbar-sub {
+    display: none;
+  }
+
+  .pm-crumb-list {
+    font-size: 11px;
+  }
+}
+
+/* --- Settings advanced grid: single column below 720px ------------ */
+
+/* The 3-col advanced-settings grid is already defined upstream with a
+   `minmax(240px, 1fr)` repeat which auto-wraps. But at very narrow
+   widths the auto-fit leaves weird two-card rows — force single
+   column below 720px so each link renders as a clean full-width row. */
+@media (max-width: 720px) {
+  .pm-settings-advanced-grid {
+    grid-template-columns: 1fr;
+  }
+}

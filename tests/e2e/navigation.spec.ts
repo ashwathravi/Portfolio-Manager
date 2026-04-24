@@ -1,80 +1,74 @@
 import { test, expect } from '@playwright/test';
 
+/**
+ * Phase 9 (AR-94) sidebar navigation tests.
+ *
+ * The Phase 1 redesign flattened the sidebar — the expandable
+ * Portfolio / Research / Strategies sub-menus are gone. The sidebar
+ * now has a flat "Workspace" section (Dashboard, Performance,
+ * Holdings, Research, Strategies, Execution) and a "System" section
+ * (Settings). Page titles moved out of the body and into the Topbar.
+ *
+ *   - Assertions use the Topbar h1 (`.pm-topbar-title`) for the page
+ *     title, which is the single source of truth post-redesign.
+ *   - Sub-page navigation happens INSIDE each landing page (not via
+ *     sidebar submenus), so those journeys belong in per-section specs.
+ */
+
 test.describe('Sidebar navigation', () => {
-    test('should navigate to all top-level routes from sidebar', async ({ page }) => {
+    test('navigates to all top-level routes from the flat sidebar', async ({ page }) => {
         await page.goto('/');
 
-        // Sidebar should always be visible
-        const sidebar = page.locator('nav');
+        const sidebar = page.locator('aside.pm-sidebar');
         await expect(sidebar).toBeVisible();
 
-        // Dashboard link should be highlighted by default
-        await expect(sidebar.getByText('Dashboard')).toBeVisible();
+        // Dashboard (home) is active by default on '/'.
+        await expect(sidebar.getByRole('link', { name: /^Dashboard$/ })).toBeVisible();
 
-        // Navigate to Performance
-        await sidebar.getByText('Performance').click();
-        await expect(page).toHaveURL(/\/performance/);
-        await expect(page.locator('h1', { hasText: 'Performance Analytics' })).toBeVisible();
+        // Performance
+        await sidebar.getByRole('link', { name: /^Performance$/ }).click();
+        await expect(page).toHaveURL(/\/performance$/);
+        await expect(page.locator('h1.pm-topbar-title')).toHaveText('Performance');
 
-        // Navigate to Trade Analytics
-        await sidebar.getByText('Trade Analytics').click();
-        await expect(page).toHaveURL(/\/analytics/);
-        await expect(page.locator('h1', { hasText: 'Trade Analytics' })).toBeVisible();
+        // Holdings (flat link — no longer behind a Portfolio sub-menu)
+        await sidebar.getByRole('link', { name: /^Holdings$/ }).click();
+        await expect(page).toHaveURL(/\/portfolios\/holdings$/);
 
-        // Navigate to Settings
-        await sidebar.getByText('Settings').click();
-        await expect(page).toHaveURL(/\/settings/);
-        await expect(page.locator('h2', { hasText: 'Settings' })).toBeVisible();
+        // Research (flat link)
+        await sidebar.getByRole('link', { name: /^Research$/ }).click();
+        await expect(page).toHaveURL(/\/research(\/|$)/);
+
+        // Strategies (flat link)
+        await sidebar.getByRole('link', { name: /^Strategies$/ }).click();
+        await expect(page).toHaveURL(/\/strategies(\/|$)/);
+
+        // Execution (flat link)
+        await sidebar.getByRole('link', { name: /^Execution$/ }).click();
+        await expect(page).toHaveURL(/\/execution(\/|$)/);
+
+        // Settings (System section)
+        await sidebar.getByRole('link', { name: /^Settings$/ }).click();
+        await expect(page).toHaveURL(/\/settings$/);
+        await expect(page.locator('h1.pm-topbar-title')).toHaveText('Settings');
     });
 
-    test('should expand Portfolio sub-menu and navigate to sub-pages', async ({ page }) => {
+    test('exposes both Workspace and System section labels', async ({ page }) => {
         await page.goto('/');
 
-        const sidebar = page.locator('nav');
-
-        // Click on "Portfolio" to expand the sub-menu
-        await sidebar.getByText('Portfolio', { exact: false }).first().click();
-
-        // Sub-items should become visible
-        await expect(sidebar.getByText('Overview')).toBeVisible();
-        await expect(sidebar.getByText('Current Holdings')).toBeVisible();
-        await expect(sidebar.getByText('Trade Log')).toBeVisible();
-
-        // Navigate to Overview
-        await sidebar.getByText('Overview').click();
-        await expect(page).toHaveURL(/\/portfolios/);
-        await expect(page.locator('h1', { hasText: 'Portfolios' })).toBeVisible();
+        const sidebar = page.locator('aside.pm-sidebar');
+        // Case-insensitive because the CSS applies text-transform:
+        // uppercase; the DOM text stays as "Workspace" / "System".
+        await expect(sidebar.locator('.pm-nav-label', { hasText: /^Workspace$/i })).toBeVisible();
+        await expect(sidebar.locator('.pm-nav-label', { hasText: /^System$/i })).toBeVisible();
     });
 
-    test('should expand Research sub-menu and navigate to sub-pages', async ({ page }) => {
+    test('shows the user footer with identity + plan line', async ({ page }) => {
         await page.goto('/');
 
-        const sidebar = page.locator('nav');
-
-        // Click on "Research" to expand the sub-menu
-        await sidebar.getByText('Research', { exact: false }).first().click();
-
-        // Sub-items should become visible
-        await expect(sidebar.getByText('Theses')).toBeVisible();
-        await expect(sidebar.getByText('Watchlists')).toBeVisible();
-        await expect(sidebar.getByText('Journal')).toBeVisible();
-    });
-
-    test('should expand Strategies sub-menu', async ({ page }) => {
-        await page.goto('/');
-
-        const sidebar = page.locator('nav');
-
-        // Click on "Strategies" to expand the sub-menu
-        await sidebar.getByText('Strategies', { exact: false }).first().click();
-
-        await expect(sidebar.getByText('Builder')).toBeVisible();
-        await expect(sidebar.getByText('Backtests')).toBeVisible();
-    });
-
-    test('should show user info in sidebar footer', async ({ page }) => {
-        await page.goto('/');
+        // Default store fullName is "John Doe". The plan line shows
+        // "Pro" while the portfolio count query is in-flight and
+        // "Pro · N accounts" once it resolves.
         await expect(page.getByText('John Doe')).toBeVisible();
-        await expect(page.getByText('Pro Plan')).toBeVisible();
+        await expect(page.locator('.pm-user-plan')).toContainText(/Pro/);
     });
 });

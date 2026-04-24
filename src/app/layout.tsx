@@ -63,11 +63,22 @@ export default function RootLayout({
         <QueryProvider>
           <ThemeProvider>
             <PageHeaderProvider>
+              {/* Skip-to-content link (AR-91). The first tab stop in the app.
+                  Invisible until focused, then appears in the top-left so
+                  keyboard users can bypass the sidebar + topbar and jump
+                  straight to the current page's content region. */}
+              <a href="#pm-main-content" className="pm-a11y-skip">
+                Skip to main content
+              </a>
               <div className="flex h-screen w-full bg-muted/40">
                 <AppSidebar />
                 <div className="flex-1 flex flex-col h-full md:ml-[var(--pm-sidebar-w)] transition-all duration-300 ease-in-out">
                   <TopBar />
-                  <main className="flex-1 overflow-y-auto">
+                  <main
+                    id="pm-main-content"
+                    className="flex-1 overflow-y-auto"
+                    tabIndex={-1}
+                  >
                     {children}
                   </main>
                 </div>

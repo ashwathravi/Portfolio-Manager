@@ -100,7 +100,8 @@ test.describe('Critical user paths', () => {
         page.on('pageerror', (err) => consoleErrors.push(err.message));
 
         await page.goto('/');
-        await expect(page.getByText(/Here's your portfolio overview/i)).toBeVisible();
+        // Post-redesign: the dashboard title lives in the Topbar, not the body.
+        await expect(page.locator('h1.pm-topbar-title')).toHaveText('Dashboard');
 
         // Jump to holdings via direct URL (sidebar is covered by navigation.spec.ts).
         await page.goto('/portfolios/holdings');
