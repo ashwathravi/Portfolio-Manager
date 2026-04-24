@@ -237,4 +237,11 @@ export interface JournalEntry {
      *  appear in the journal (the execution flow handles the skipped
      *  case via analytics events, not by synthesizing a placeholder). */
     rationale: TradeRationale;
+    /** Frozen AR-111 adherence bundle — the rule-check result at submit
+     *  time. Optional because older entries (and pre-AR-111 seed data)
+     *  predate the freeze. When present, the trade detail and returns-
+     *  comparison card consume it verbatim; never recomputed after the
+     *  fact so the history stays honest even if a user edits rules
+     *  later. */
+    adherence?: import('@/lib/adherence/rules').TradeAdherence;
 }

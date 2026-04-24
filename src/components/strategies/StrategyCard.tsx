@@ -11,6 +11,7 @@ import type { Strategy } from "@/lib/strategies/strategy";
  *   - status pill (active / paused / backtesting)
  *   - shortId (S-001) in mono
  *   - strategy name + one-line description
+ *   - optional rolling 30-day adherence score (AR-111)
  *   - 4 readouts: Total return / Sharpe / Max DD / Win rate
  *
  * The selected card gets an accent border + ambient shadow so the user
@@ -26,6 +27,12 @@ export interface StrategyCardProps {
     strategy: Strategy;
     selected?: boolean;
     onSelect?: () => void;
+    /** AR-111 rolling 30-day adherence score for this strategy. `null` =
+     *  no data in the window (seed trades may not cover every strategy). */
+    adherenceScore?: number | null;
+    /** AR-111 tier from `adherenceTier(score)`. Drives the color of the
+     *  pill so top-quartile strategies read distinct from the rest. */
+    adherenceTier?: 'top' | 'good' | 'ok' | 'low' | null;
 }
 
 const STATUS_LABEL: Record<Strategy["status"], string> = {
@@ -56,7 +63,13 @@ function formatRatio(r: number): string {
     return r.toFixed(2);
 }
 
-export function StrategyCard({ strategy, selected = false, onSelect }: StrategyCardProps) {
+export function StrategyCard({
+    strategy,
+    selected = false,
+    onSelect,
+    adherenceScore = null,
+    adherenceTier = null,
+}: StrategyCardProps) {
     const { stats, status } = strategy;
     const hasRun = status !== "backtesting";
 
@@ -85,6 +98,24 @@ export function StrategyCard({ strategy, selected = false, onSelect }: StrategyC
 
             <div className="pm-strategy-name">{strategy.name}</div>
             <p className="pm-strategy-desc">{strategy.description}</p>
+
+            {adherenceScore != null && (
+                <div
+                    className="pm-strategy-adherence"
+                    data-tier={adherenceTier ?? 'none'}
+                    data-testid="strategy-card-adherence"
+                    aria-label={`30-day adherence ${adherenceScore} of 100`}
+                    title="Rolling 30-day rule adherence"
+                >
+                    <span className="pm-strategy-adherence-label">
+                        30d adherence
+                    </span>
+                    <span className="pm-strategy-adherence-value num">
+                        {adherenceScore}
+                        <span className="pm-strategy-adherence-max">/ 100</span>
+                    </span>
+                </div>
+            )}
 
             <div className="pm-strategy-stats">
                 <div className="pm-readout">

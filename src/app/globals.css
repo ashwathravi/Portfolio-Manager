@@ -8199,3 +8199,760 @@ a:focus-visible,
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
   border: 1px solid color-mix(in srgb, var(--pm-accent) 35%, var(--pm-border));
 }
+
+/* ==========================================================================
+   AR-111 — Rule adherence (JournalPlus Integration)
+   ==========================================================================
+   The discipline rule system. Three surfaces share this suite:
+
+     1. `AdherenceRulesPanel` — CRUD editor on the Strategies builder,
+        rendered directly under `RuleBuilderPanel` in the 64% left column.
+     2. `AdherencePanel` — live-eval readout on the Focus execution ticket
+        (wired in the next pass).
+     3. `AdherenceImpactCard` — returns-comparison card on the Strategies
+        page (wired in the next pass).
+
+   The editor lives in the same visual idiom as the rule builder above
+   it — a `pm-card` with a section header, rows, and an add-rule button.
+   We reuse the `.pm-rb-section-head`, `.pm-rb-add-rule`, and
+   `.pm-rb-rule-del` primitives where they work and add only the
+   adherence-specific parts below.
+   ------------------------------------------------------------------------ */
+
+/* Left column wrapper — stacks RuleBuilder + Adherence vertically inside
+   the 64fr grid cell. Gap matches the top-level `.pm-strategy-split`. */
+.pm-strategy-left-col {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+/* --- Panel shell ----------------------------------------------------- */
+
+.pm-adherence-panel {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.pm-adherence-head-lede {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.pm-adherence-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* --- Rule list ------------------------------------------------------- */
+
+.pm-adherence-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pm-adherence-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--pm-border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--pm-fg) 2%, transparent);
+}
+
+.pm-adherence-row[data-severity="hard"] {
+  border-left: 3px solid color-mix(in srgb, var(--pm-danger) 70%, var(--pm-border));
+}
+
+.pm-adherence-row[data-severity="soft"] {
+  border-left: 3px solid color-mix(in srgb, var(--pm-warn) 60%, var(--pm-border));
+}
+
+.pm-adherence-body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.pm-adherence-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--pm-fg);
+  line-height: 1.2;
+}
+
+.pm-adherence-desc {
+  margin: 0;
+  font-size: 11px;
+  color: var(--pm-fg-subtle, var(--pm-muted));
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* --- Severity pill --------------------------------------------------- */
+
+.pm-adherence-sev {
+  appearance: none;
+  border: 1px solid var(--pm-border);
+  border-radius: 999px;
+  padding: 3px 8px 3px 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background-color 0.14s ease, border-color 0.14s ease, color 0.14s ease;
+  min-width: 64px;
+  justify-content: center;
+}
+
+.pm-adherence-sev-hard {
+  color: var(--pm-danger);
+  background: color-mix(in srgb, var(--pm-danger) 10%, transparent);
+  border-color: color-mix(in srgb, var(--pm-danger) 35%, var(--pm-border));
+}
+
+.pm-adherence-sev-soft {
+  color: var(--pm-warn);
+  background: color-mix(in srgb, var(--pm-warn) 10%, transparent);
+  border-color: color-mix(in srgb, var(--pm-warn) 35%, var(--pm-border));
+}
+
+.pm-adherence-sev:hover {
+  filter: brightness(1.05);
+}
+
+.pm-adherence-sev-icon {
+  width: 12px;
+  height: 12px;
+}
+
+.pm-adherence-sev-label {
+  font-variant-caps: all-small-caps;
+}
+
+/* --- Params --------------------------------------------------------- */
+
+.pm-adherence-params {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.pm-adherence-param {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.pm-adherence-param-label {
+  font-size: 10px;
+  color: var(--pm-fg-subtle, var(--pm-muted));
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 600;
+}
+
+.pm-adherence-param-input-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.pm-adherence-param-num,
+.pm-adherence-param-text {
+  appearance: none;
+  border: 1px solid var(--pm-border);
+  border-radius: 6px;
+  background: var(--pm-card);
+  color: var(--pm-fg);
+  font-size: 12px;
+  padding: 4px 6px;
+  font-variant-numeric: tabular-nums;
+  min-width: 0;
+}
+
+.pm-adherence-param-num {
+  width: 64px;
+  text-align: right;
+}
+
+.pm-adherence-param-text {
+  width: 120px;
+}
+
+.pm-adherence-param-num:focus,
+.pm-adherence-param-text:focus {
+  outline: none;
+  border-color: var(--pm-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--pm-accent) 20%, transparent);
+}
+
+.pm-adherence-param-suffix {
+  font-size: 11px;
+  color: var(--pm-fg-subtle, var(--pm-muted));
+  font-variant-numeric: tabular-nums;
+}
+
+.pm-adherence-param-empty {
+  font-size: 11px;
+  color: var(--pm-fg-subtle, var(--pm-muted));
+  font-style: italic;
+}
+
+/* --- Add-rule picker ------------------------------------------------- */
+
+.pm-adherence-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pm-adherence-picker-select {
+  appearance: none;
+  border: 1px solid var(--pm-border);
+  border-radius: 6px;
+  background: var(--pm-card);
+  color: var(--pm-fg);
+  font-size: 12px;
+  padding: 4px 24px 4px 8px;
+  cursor: pointer;
+  background-image: linear-gradient(45deg, transparent 50%, var(--pm-fg-subtle, var(--pm-muted)) 50%),
+                    linear-gradient(135deg, var(--pm-fg-subtle, var(--pm-muted)) 50%, transparent 50%);
+  background-position: right 10px top 50%, right 6px top 50%;
+  background-size: 4px 4px, 4px 4px;
+  background-repeat: no-repeat;
+}
+
+.pm-adherence-picker-select:focus {
+  outline: none;
+  border-color: var(--pm-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--pm-accent) 20%, transparent);
+}
+
+.pm-adherence-picker-cancel {
+  font-size: 11px;
+  padding: 4px 8px;
+}
+
+/* --- Header badge (rolling 30-day adherence) ------------------------- */
+
+.pm-adherence-badge {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--pm-border);
+  background: color-mix(in srgb, var(--pm-fg) 3%, transparent);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.pm-adherence-badge[data-tier="top"] {
+  border-color: color-mix(in srgb, var(--pm-pos, #1fb87a) 40%, var(--pm-border));
+  background: color-mix(in srgb, var(--pm-pos, #1fb87a) 10%, transparent);
+}
+
+.pm-adherence-badge[data-tier="good"] {
+  border-color: color-mix(in srgb, var(--pm-accent) 35%, var(--pm-border));
+  background: color-mix(in srgb, var(--pm-accent) 8%, transparent);
+}
+
+.pm-adherence-badge[data-tier="ok"] {
+  border-color: color-mix(in srgb, var(--pm-warn) 30%, var(--pm-border));
+  background: color-mix(in srgb, var(--pm-warn) 7%, transparent);
+}
+
+.pm-adherence-badge[data-tier="low"] {
+  border-color: color-mix(in srgb, var(--pm-danger) 30%, var(--pm-border));
+  background: color-mix(in srgb, var(--pm-danger) 7%, transparent);
+}
+
+.pm-adherence-badge-score {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--pm-fg);
+}
+
+.pm-adherence-badge-max {
+  font-size: 10px;
+  color: var(--pm-fg-subtle, var(--pm-muted));
+}
+
+.pm-adherence-badge-copy {
+  font-size: 10px;
+  color: var(--pm-fg-subtle, var(--pm-muted));
+  text-transform: lowercase;
+  letter-spacing: 0.02em;
+  margin-left: 2px;
+}
+
+/* --- Responsive: collapse row to stacked on narrow columns ---------- */
+
+@media (max-width: 720px) {
+  .pm-adherence-row {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-rows: auto auto;
+    row-gap: 8px;
+  }
+  .pm-adherence-params {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+  }
+  .pm-adherence-desc {
+    white-space: normal;
+  }
+}
+
+/* ==========================================================================
+   AR-111 — Live adherence panel (Focus execution variant)
+   ==========================================================================
+   Sits inside the left "New order" card under the rationale block.
+   Non-blocking — the Submit button doesn't care what this says — so the
+   styling leans informational: clear pass/fail icons, muted "—"
+   neutrals, a quiet score badge. When a failure exists the row is
+   washed in a warn tint; we don't escalate to full red to avoid
+   crying-wolf on the live panel where the context is still mid-compose.
+   ------------------------------------------------------------------------ */
+
+.pm-adherence-live {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--pm-border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--pm-fg) 2%, transparent);
+}
+
+.pm-adherence-live-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.pm-adherence-live-lede {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.pm-adherence-live-eyebrow {
+  font-size: 10px;
+  color: var(--pm-fg-subtle, var(--pm-muted));
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+}
+
+.pm-adherence-live-verdict {
+  font-size: 12px;
+  color: var(--pm-fg);
+  font-weight: 500;
+}
+
+.pm-adherence-live-warn {
+  color: var(--pm-warn);
+  font-weight: 600;
+}
+
+.pm-adherence-live-score {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 2px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--pm-border);
+  background: var(--pm-card);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.pm-adherence-live-score[data-tier="top"] {
+  border-color: color-mix(in srgb, var(--pm-pos, #1fb87a) 40%, var(--pm-border));
+  background: color-mix(in srgb, var(--pm-pos, #1fb87a) 8%, var(--pm-card));
+}
+.pm-adherence-live-score[data-tier="good"] {
+  border-color: color-mix(in srgb, var(--pm-accent) 35%, var(--pm-border));
+  background: color-mix(in srgb, var(--pm-accent) 6%, var(--pm-card));
+}
+.pm-adherence-live-score[data-tier="ok"] {
+  border-color: color-mix(in srgb, var(--pm-warn) 30%, var(--pm-border));
+  background: color-mix(in srgb, var(--pm-warn) 6%, var(--pm-card));
+}
+.pm-adherence-live-score[data-tier="low"] {
+  border-color: color-mix(in srgb, var(--pm-danger) 30%, var(--pm-border));
+  background: color-mix(in srgb, var(--pm-danger) 6%, var(--pm-card));
+}
+
+.pm-adherence-live-score-num {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--pm-fg);
+}
+
+.pm-adherence-live-score-max {
+  font-size: 10px;
+  color: var(--pm-fg-subtle, var(--pm-muted));
+}
+
+.pm-adherence-live-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pm-adherence-live-row {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  border-radius: 6px;
+}
+
+.pm-adherence-live-row[data-tone="pass"] {
+  color: var(--pm-fg);
+}
+.pm-adherence-live-row[data-tone="pass"] .pm-adherence-live-icon {
+  color: var(--pm-pos, #1fb87a);
+}
+
+.pm-adherence-live-row[data-tone="fail"] {
+  background: color-mix(in srgb, var(--pm-warn) 8%, transparent);
+}
+.pm-adherence-live-row[data-tone="fail"] .pm-adherence-live-icon {
+  color: var(--pm-warn);
+}
+.pm-adherence-live-row[data-tone="fail"][data-severity="hard"] {
+  background: color-mix(in srgb, var(--pm-danger) 9%, transparent);
+}
+.pm-adherence-live-row[data-tone="fail"][data-severity="hard"] .pm-adherence-live-icon {
+  color: var(--pm-danger);
+}
+
+.pm-adherence-live-row[data-tone="neutral"] {
+  color: var(--pm-fg-subtle, var(--pm-muted));
+}
+.pm-adherence-live-row[data-tone="neutral"] .pm-adherence-live-icon {
+  color: var(--pm-fg-subtle, var(--pm-muted));
+}
+
+.pm-adherence-live-icon {
+  width: 14px;
+  height: 14px;
+}
+
+.pm-adherence-live-body {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.pm-adherence-live-label {
+  font-size: 12px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pm-adherence-live-meta {
+  font-size: 11px;
+  color: var(--pm-fg-subtle, var(--pm-muted));
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.pm-adherence-live-observed {
+  color: var(--pm-fg);
+  font-weight: 600;
+}
+
+.pm-adherence-live-row[data-tone="neutral"] .pm-adherence-live-observed {
+  color: var(--pm-fg-subtle, var(--pm-muted));
+  font-weight: 400;
+}
+
+.pm-adherence-live-vs {
+  opacity: 0.6;
+}
+
+.pm-adherence-live-threshold {
+  color: var(--pm-fg-subtle, var(--pm-muted));
+}
+
+/* ==========================================================================
+   AR-111 — Returns comparison card ("cost of breaking your own rules")
+   ==========================================================================
+   Sits below the builder split on the Strategies page. Two tiles side by
+   side (adherent / broken) plus a big delta badge in the header and a
+   one-sentence verdict in the footer. Empty state uses the same card
+   frame so it doesn't feel like a different component when the journal
+   is too thin to compare.
+   ------------------------------------------------------------------------ */
+
+.pm-adherence-impact {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 20px;
+  margin-top: 16px;
+}
+
+.pm-adherence-impact-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.pm-adherence-impact-title {
+  margin: 0 0 4px 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--pm-fg);
+}
+
+.pm-adherence-impact-sub {
+  margin: 0;
+  font-size: 12px;
+  color: var(--pm-fg-subtle, var(--pm-muted));
+  max-width: 540px;
+}
+
+.pm-adherence-impact-delta {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--pm-border);
+  background: var(--pm-card);
+  white-space: nowrap;
+}
+
+.pm-adherence-impact-delta[data-tone="pos"] {
+  border-color: color-mix(in srgb, var(--pm-pos, #1fb87a) 40%, var(--pm-border));
+  background: color-mix(in srgb, var(--pm-pos, #1fb87a) 8%, var(--pm-card));
+}
+
+.pm-adherence-impact-delta[data-tone="neg"] {
+  border-color: color-mix(in srgb, var(--pm-danger) 35%, var(--pm-border));
+  background: color-mix(in srgb, var(--pm-danger) 7%, var(--pm-card));
+}
+
+.pm-adherence-impact-delta-icon {
+  width: 16px;
+  height: 16px;
+  align-self: center;
+}
+
+.pm-adherence-impact-delta[data-tone="pos"] .pm-adherence-impact-delta-icon {
+  color: var(--pm-pos, #1fb87a);
+}
+
+.pm-adherence-impact-delta[data-tone="neg"] .pm-adherence-impact-delta-icon {
+  color: var(--pm-danger);
+}
+
+.pm-adherence-impact-delta-value {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--pm-fg);
+  font-variant-numeric: tabular-nums;
+}
+
+.pm-adherence-impact-delta-label {
+  font-size: 10px;
+  color: var(--pm-fg-subtle, var(--pm-muted));
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 600;
+}
+
+.pm-adherence-impact-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+@media (max-width: 640px) {
+  .pm-adherence-impact-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.pm-adherence-impact-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px 16px;
+  border: 1px solid var(--pm-border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--pm-fg) 2%, transparent);
+}
+
+.pm-adherence-impact-tile[data-label-tone="pos"] {
+  border-left: 3px solid color-mix(in srgb, var(--pm-pos, #1fb87a) 55%, var(--pm-border));
+}
+
+.pm-adherence-impact-tile[data-label-tone="neg"] {
+  border-left: 3px solid color-mix(in srgb, var(--pm-warn) 55%, var(--pm-border));
+}
+
+.pm-adherence-impact-tile-label {
+  font-size: 11px;
+  color: var(--pm-fg-subtle, var(--pm-muted));
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 600;
+}
+
+.pm-adherence-impact-tile-value {
+  font-size: 24px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+
+.pm-adherence-impact-tile-hint {
+  font-size: 11px;
+  color: var(--pm-fg-subtle, var(--pm-muted));
+}
+
+.pm-adherence-impact-foot {
+  font-size: 12px;
+  color: var(--pm-fg-subtle, var(--pm-muted));
+  line-height: 1.5;
+  padding-top: 6px;
+  border-top: 1px dashed var(--pm-border);
+}
+
+.pm-adherence-impact-foot strong {
+  color: var(--pm-fg);
+}
+
+/* Empty-state */
+
+.pm-adherence-impact-empty-body {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 18px;
+  border: 1px dashed var(--pm-border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--pm-fg) 2%, transparent);
+}
+
+.pm-adherence-impact-empty-icon {
+  width: 24px;
+  height: 24px;
+  color: var(--pm-fg-subtle, var(--pm-muted));
+  flex-shrink: 0;
+}
+
+.pm-adherence-impact-empty-copy {
+  margin: 0;
+  font-size: 13px;
+  color: var(--pm-fg);
+  line-height: 1.45;
+}
+
+/* ==========================================================================
+   AR-111 — Strategy card rolling-adherence pill
+   ==========================================================================
+   Sits between the description and the stats grid on the top-row cards.
+   Tiny pill — score / 100 — tinted by tier so the user can compare
+   discipline across strategies at a glance. Hidden when the window has
+   no data (parent passes `null`).
+   ------------------------------------------------------------------------ */
+
+.pm-strategy-adherence {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 3px 8px;
+  margin-top: 2px;
+  border-radius: 999px;
+  border: 1px solid var(--pm-border);
+  background: color-mix(in srgb, var(--pm-fg) 3%, transparent);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  align-self: flex-start;
+  white-space: nowrap;
+}
+
+.pm-strategy-adherence[data-tier="top"] {
+  border-color: color-mix(in srgb, var(--pm-pos, #1fb87a) 40%, var(--pm-border));
+  background: color-mix(in srgb, var(--pm-pos, #1fb87a) 9%, transparent);
+}
+.pm-strategy-adherence[data-tier="good"] {
+  border-color: color-mix(in srgb, var(--pm-accent) 35%, var(--pm-border));
+  background: color-mix(in srgb, var(--pm-accent) 7%, transparent);
+}
+.pm-strategy-adherence[data-tier="ok"] {
+  border-color: color-mix(in srgb, var(--pm-warn) 30%, var(--pm-border));
+  background: color-mix(in srgb, var(--pm-warn) 6%, transparent);
+}
+.pm-strategy-adherence[data-tier="low"] {
+  border-color: color-mix(in srgb, var(--pm-danger) 30%, var(--pm-border));
+  background: color-mix(in srgb, var(--pm-danger) 6%, transparent);
+}
+
+.pm-strategy-adherence-label {
+  font-size: 10px;
+  color: var(--pm-fg-subtle, var(--pm-muted));
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 600;
+}
+
+.pm-strategy-adherence-value {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--pm-fg);
+  display: inline-flex;
+  align-items: baseline;
+  gap: 2px;
+}
+
+.pm-strategy-adherence-max {
+  font-size: 10px;
+  color: var(--pm-fg-subtle, var(--pm-muted));
+  font-weight: 500;
+}

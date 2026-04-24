@@ -32,6 +32,14 @@ import {
     type RationaleDraft,
 } from "./PreTradeRationale";
 import { RationaleSummary } from "./RationaleSummary";
+import { AdherencePanel } from "./AdherencePanel";
+import {
+    SEED_ADHERENCE_RULES,
+    SEED_SECTOR_BY_TICKER,
+    SEED_THESIS_TO_STRATEGY,
+} from "@/lib/adherence/seed";
+import type { TradeContext } from "@/lib/adherence/evaluate";
+import { SEED_STRATEGIES } from "@/lib/strategies/seed";
 
 /**
  * Phase 7 (AR-84) Execution Focus variant.
@@ -282,6 +290,78 @@ function OrderForm({ onSubmit }: OrderFormProps) {
         concentrationCapEnabled: guardrailPrefs.concentrationCapEnabled,
         concentrationCapPct: guardrailPrefs.concentrationCapPct,
     });
+
+    // AR-111 live adherence. Resolve the strategy by mapping the draft
+    // rationale's thesis id — the rationale chip row commits thesisId
+    // synchronously when the user picks or creates a thesis, so by the
+    // time the user is finalizing conviction/mood the mapping is stable.
+    //
+    // We pass a fully-formed `TradeContext` rather than threading raw
+    // form state so the evaluator stays ignorant of the ticket shape.
+    // `nav` is hardcoded to match the seed execution fixture (matches
+    // the 250k baseline used by the concentration guardrail above); once
+    // a live portfolio balance lands this reads the store.
+    const resolvedStrategyId = rationaleDraft.thesisId
+        ? SEED_THESIS_TO_STRATEGY[rationaleDraft.thesisId]
+        : undefined;
+    const adherenceRules = resolvedStrategyId
+        ? SEED_ADHERENCE_RULES[resolvedStrategyId] ?? []
+        : [];
+    const strategyName = useMemo(() => {
+        if (!resolvedStrategyId) return undefined;
+        return SEED_STRATEGIES.find((s) => s.id === resolvedStrategyId)?.name;
+    }, [resolvedStrategyId]);
+
+    const liveContext = useMemo<TradeContext>(() => {
+        const nav = 250_000;
+        // Post-trade market value of the subject position. Uses live price
+        // (or effective limit/stop) so the % is computed against the same
+        // dollar figure the user sees in the preview.
+        const postMarketValue = positionAfter * price;
+        const sector = SEED_SECTOR_BY_TICKER[tickerUpper];
+        // Sector exposure post-trade. The existing concentration guardrail
+        // fakes a 47% tech weight; we mirror that here so the two panels
+        // don't disagree on reality. A real wire-up reads from holdings.
+        const sectorExposurePct = sector === 'Technology' ? 0.47
+            : sector === 'Financials' ? 0.18
+            : sector === 'Energy' ? 0.08
+            : sector === 'Consumer Staples' ? 0.12
+            : sector === 'Consumer Discretionary' ? 0.10
+            : sector === 'Health Care' ? 0.09
+            : sector === 'Communication Services' ? 0.06
+            : 0;
+        // Rationale is finalized only when the draft is complete; partial
+        // drafts won't satisfy `thesis_required` or `min_conviction`,
+        // which is the honest answer mid-compose.
+        const rationale = isRationaleComplete(rationaleDraft)
+            ? finalizeRationale(rationaleDraft)
+            : null;
+        return {
+            ticker: tickerUpper,
+            side,
+            nav,
+            postMarketValue,
+            sector,
+            sectorExposurePct,
+            // No live earnings data yet; evaluator treats this as neutral
+            // pass so the row renders "—" instead of crying wolf.
+            daysUntilEarnings: null,
+            // Stop price only exists on stop / stop_limit orders. Passing
+            // `undefined` on market / limit is the whole point of the rule
+            // firing: the discipline check asks "did you set a stop?"
+            stopLoss: showStop ? stopPrice : undefined,
+            rationale,
+            executedAt: new Date().toISOString(),
+        };
+    }, [
+        tickerUpper,
+        side,
+        positionAfter,
+        price,
+        showStop,
+        stopPrice,
+        rationaleDraft,
+    ]);
 
     // AR-109: the rationale block has its own completeness gate.
     // Isolated from the other order-level gates so the Submit button's
@@ -606,6 +686,17 @@ function OrderForm({ onSubmit }: OrderFormProps) {
                     onChange={setRationaleDraft}
                 />
             )}
+
+            {/* AR-111 live adherence check. Only renders when a strategy
+                has been resolved from the rationale's thesis id and that
+                strategy has at least one discipline rule. Non-blocking
+                in v1 — Submit stays enabled even on a failing score; the
+                panel exists to inform the decision, not to override it. */}
+            <AdherencePanel
+                rules={adherenceRules}
+                context={liveContext}
+                strategyName={strategyName}
+            />
 
             {/* Foot */}
             <footer className="pm-exec-form-foot">

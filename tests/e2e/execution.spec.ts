@@ -469,3 +469,122 @@ test.describe('Execution page — caution-mood cooldown (AR-110)', () => {
         );
     });
 });
+
+/**
+ * AR-111 (JournalPlus): live adherence panel on the Focus variant.
+ *
+ * When the user links a thesis that resolves to a strategy, the Focus
+ * variant shows a "Discipline check" panel below the rationale with a
+ * score badge and pass/fail rows. Picking the seeded NVDA thesis on
+ * the Execution page lands us on `strategy-momentum-value`, whose seed
+ * adherence set has 5 rules, so the panel renders concretely.
+ *
+ * Hidden when no strategy resolves — e.g., the default AAPL ticker
+ * has no seed thesis, and any inline-created thesis lacks a strategy
+ * mapping until the user links one.
+ */
+test.describe('Execution page — live adherence panel (AR-111)', () => {
+    test.beforeEach(async ({ page }) => {
+        await page.addInitScript(() => {
+            (window as unknown as {
+                __pmAnalytics: { events: unknown[] };
+            }).__pmAnalytics = { events: [] };
+        });
+        await page.goto('/execution');
+        await page.evaluate(() => {
+            try {
+                window.localStorage.removeItem('pm-exec-variant');
+                window.localStorage.removeItem('atlas-settings');
+            } catch {
+                /* ignore */
+            }
+        });
+        await page.reload();
+    });
+
+    test('panel is hidden when no thesis is linked', async ({ page }) => {
+        // Default AAPL ticker and no thesis selected — nothing to
+        // evaluate, panel suppressed.
+        await expect(page.getByTestId('adherence-live-panel')).toHaveCount(0);
+    });
+
+    test('renders with seeded NVDA thesis → Momentum + Value strategy', async ({
+        page,
+    }) => {
+        // Switch ticker to NVDA so the seed-nvda chip appears in the
+        // Thesis linkage group (seed-aapl is NOT seeded by default).
+        await page.getByLabel('Ticker').fill('NVDA');
+
+        const panel = page.getByTestId('pre-trade-rationale');
+        const thesisGroup = panel.locator(
+            'div[role="group"][aria-label="Thesis linkage"]',
+        );
+        // Pick the first real thesis chip in the group.
+        const firstThesisChip = thesisGroup.locator('button.pm-rat-chip').first();
+        await firstThesisChip.click();
+
+        // The AdherencePanel should now render with 5 rules from
+        // SEED_ADHERENCE_RULES['strategy-momentum-value'].
+        const livePanel = page.getByTestId('adherence-live-panel');
+        await expect(livePanel).toBeVisible();
+        await expect(livePanel.locator('.pm-adherence-live-row')).toHaveCount(5);
+    });
+
+    test('header eyebrow names the resolved strategy', async ({ page }) => {
+        await page.getByLabel('Ticker').fill('NVDA');
+        const panel = page.getByTestId('pre-trade-rationale');
+        const thesisGroup = panel.locator(
+            'div[role="group"][aria-label="Thesis linkage"]',
+        );
+        await thesisGroup.locator('button.pm-rat-chip').first().click();
+
+        const livePanel = page.getByTestId('adherence-live-panel');
+        await expect(livePanel).toBeVisible();
+        // Header contains "Discipline check · Momentum + Value".
+        await expect(
+            livePanel.locator('.pm-adherence-live-eyebrow'),
+        ).toContainText('Momentum + Value');
+    });
+
+    test('score badge exposes a numeric tier data attribute', async ({ page }) => {
+        await page.getByLabel('Ticker').fill('NVDA');
+        const panel = page.getByTestId('pre-trade-rationale');
+        const thesisGroup = panel.locator(
+            'div[role="group"][aria-label="Thesis linkage"]',
+        );
+        await thesisGroup.locator('button.pm-rat-chip').first().click();
+
+        const livePanel = page.getByTestId('adherence-live-panel');
+        await expect(livePanel).toBeVisible();
+
+        const score = livePanel.locator('.pm-adherence-live-score');
+        const tier = await score.getAttribute('data-tier');
+        expect(['top', 'good', 'ok', 'low', 'none']).toContain(tier);
+    });
+
+    test('rule rows carry tone, severity, and rule-type data attributes', async ({
+        page,
+    }) => {
+        await page.getByLabel('Ticker').fill('NVDA');
+        const panel = page.getByTestId('pre-trade-rationale');
+        const thesisGroup = panel.locator(
+            'div[role="group"][aria-label="Thesis linkage"]',
+        );
+        await thesisGroup.locator('button.pm-rat-chip').first().click();
+
+        const livePanel = page.getByTestId('adherence-live-panel');
+        await expect(livePanel).toBeVisible();
+        const rows = livePanel.locator('.pm-adherence-live-row');
+        const n = await rows.count();
+        expect(n).toBeGreaterThan(0);
+
+        for (let i = 0; i < n; i++) {
+            const tone = await rows.nth(i).getAttribute('data-tone');
+            const severity = await rows.nth(i).getAttribute('data-severity');
+            const ruleType = await rows.nth(i).getAttribute('data-rule-type');
+            expect(['pass', 'fail', 'neutral']).toContain(tone);
+            expect(['hard', 'soft']).toContain(severity);
+            expect(ruleType).toBeTruthy();
+        }
+    });
+});

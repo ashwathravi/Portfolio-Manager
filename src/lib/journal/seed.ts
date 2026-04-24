@@ -22,6 +22,12 @@
  * feed the journal.
  */
 import type { JournalEntry } from '@/types/trade';
+import { evaluateRules, type TradeContext } from '@/lib/adherence/evaluate';
+import {
+    SEED_ADHERENCE_RULES,
+    SEED_SECTOR_BY_TICKER,
+    SEED_THESIS_TO_STRATEGY,
+} from '@/lib/adherence/seed';
 
 // Anchor the journal window to a stable "now" captured at module load.
 // Every date is relative so the heatmap, range filter, and "last 30
@@ -113,7 +119,7 @@ function rat(
  * The verdict panel pulls the worst-performing mood and the card
  * reads something a real trader would recognize.
  */
-export const SEED_JOURNAL: JournalEntry[] = [
+const BASE_JOURNAL: JournalEntry[] = [
     // ─── Calm (the bread-and-butter wins) ─────────────────────────
     entry('j-001', 'AAPL', 'buy', 50, 178.40, 192.15, 88, 21,
         rat('conviction_add', 'calm', 7.5, 'Margin expansion through services revenue.', 88, 45_000, 'aapl')),
@@ -176,3 +182,103 @@ export const SEED_JOURNAL: JournalEntry[] = [
     entry('j-025', 'NVDA', 'buy', 20, 134.60, 126.80, 15, 2,
         rat('conviction_add', 'revenge', 8.0, 'They owe me this one.', 15, 1_400, 'nvda')),
 ];
+
+// --------------------------------------------------------------------- //
+// AR-111 adherence freeze
+// --------------------------------------------------------------------- //
+
+/**
+ * NAV used for the `max_position_pct` math on seeded trades. A hundred
+ * grand is the shared mock portfolio size across the app (matches the
+ * backtest seed in `src/lib/strategies/seed.ts`), so the freeze stays
+ * consistent with what the Strategies chart reports.
+ */
+const SEED_NAV = 100_000;
+
+/**
+ * Per-ticker assumption: what fraction of NAV is already in that
+ * ticker's sector at the time of each seeded trade. Tuned high enough
+ * for the `max_sector_pct` rule on sector-rotation to occasionally
+ * violate — the returns-comparison card needs real mixed results to
+ * be interesting, not a wall of 100s.
+ *
+ * Values are fractions (0.22 = 22%).
+ */
+const SECTOR_EXPOSURE_BY_TICKER: Record<string, number> = {
+    // Tech concentration stays modestly high — most seeded trades are
+    // tech, so a 30-40% reading is realistic.
+    AAPL: 0.32, MSFT: 0.34, GOOGL: 0.28, NVDA: 0.36, META: 0.30,
+    AMD: 0.33, SMCI: 0.36, PLTR: 0.28, TSLA: 0.18,
+    // Financials — dispersed across a handful of tickers in the seed.
+    JPM: 0.14, BAC: 0.12, WFC: 0.10, COIN: 0.08, MARA: 0.06, RIOT: 0.06,
+    // Energy and staples trade small in the seed.
+    XOM: 0.07, CVX: 0.06, KO: 0.05, WMT: 0.05, COST: 0.05,
+    // Health / comm / discretionary one-offs.
+    JNJ: 0.06, PFE: 0.04, AMC: 0.02, GME: 0.02, AMZN: 0.09,
+};
+
+/**
+ * Distance in days from each seeded trade's entry to the next earnings
+ * release. Shallow mock — no real calendar lookup at seed time. Picked
+ * so that a handful of seeded trades trip `no_trade_near_earnings` on
+ * mean-reversion, which is the only strategy that runs that rule.
+ */
+const DAYS_TO_EARNINGS: Record<string, number> = {
+    // Big tech earnings cycle is ~90d; pick values so some trades
+    // land in-window, some safely far.
+    AAPL: 28, MSFT: 35, GOOGL: 12, NVDA: 5, META: 22, AMD: 9,
+    AMZN: 45, TSLA: 2, SMCI: 8, PLTR: 40,
+    // Financials — quarterly but spread differently.
+    JPM: 50, BAC: 48, WFC: 15, COIN: 20,
+    // Commodities don't really matter to the seed; large numbers so
+    // the rule passes on energy/staples.
+    XOM: 60, CVX: 62, JNJ: 40, PFE: 25, KO: 55, WMT: 30, COST: 35,
+    // Meme names — fuzzy calendars, pick ~20.
+    GME: 18, AMC: 22, MARA: 16, RIOT: 14,
+};
+
+/**
+ * Build a synthetic `TradeContext` for a seeded journal entry. Used
+ * purely for the adherence freeze — the live execution panel builds
+ * its own context from the ticket draft. Kept here so the freeze step
+ * reads linearly next to the seed.
+ */
+function contextForEntry(e: JournalEntry): TradeContext {
+    const postMarketValue =
+        e.side === 'buy' ? e.notionalUsd : -e.notionalUsd;
+    const sector = SEED_SECTOR_BY_TICKER[e.ticker];
+    const sectorExposurePct = SECTOR_EXPOSURE_BY_TICKER[e.ticker];
+    const daysUntilEarnings = DAYS_TO_EARNINGS[e.ticker];
+    return {
+        ticker: e.ticker,
+        side: e.side,
+        nav: SEED_NAV,
+        postMarketValue: Math.abs(postMarketValue),
+        sector,
+        sectorExposurePct,
+        daysUntilEarnings,
+        // Stop-loss: seeded trades don't record one, so the
+        // stop_loss_required rule violates where it runs (mean-reversion).
+        stopLoss: null,
+        rationale: e.rationale,
+        executedAt: e.openedAt,
+    };
+}
+
+/**
+ * The exported journal. Each entry is the raw seed plus a frozen
+ * `adherence` bundle computed from the strategy the thesis points to.
+ * If no strategy maps (or no rules exist for it), the entry keeps the
+ * `adherence` slot undefined — the returns-comparison card skips
+ * those.
+ */
+export const SEED_JOURNAL: JournalEntry[] = BASE_JOURNAL.map((e) => {
+    const thesisId = e.rationale?.thesisId;
+    const strategyId = thesisId ? SEED_THESIS_TO_STRATEGY[thesisId] : undefined;
+    if (!strategyId) return e;
+    const rules = SEED_ADHERENCE_RULES[strategyId];
+    if (!rules || rules.length === 0) return e;
+    const ctx = contextForEntry(e);
+    const adherence = evaluateRules(rules, ctx, e.openedAt);
+    return { ...e, adherence };
+});
