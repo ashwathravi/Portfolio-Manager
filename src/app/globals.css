@@ -9621,3 +9621,366 @@ a:focus-visible,
     margin-top: 10px;
   }
 }
+
+/* ========================================================================
+ * AR-114 — Weekly review ritual
+ * ------------------------------------------------------------------------
+ * Two surfaces:
+ *   .pm-review-*           → dashboard hero card (ack / remind / reflect)
+ *   .pm-reviews-archive-*  → Performance archive list (last 8 weeks)
+ * ======================================================================== */
+
+.pm-review-card {
+  border: 1px solid color-mix(in srgb, var(--pm-accent) 35%, var(--pm-border));
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--pm-accent) 6%, transparent) 0%,
+    transparent 55%
+  );
+}
+
+.pm-review-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.pm-review-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--pm-accent);
+  margin: 0 0 4px;
+}
+
+.pm-review-actions {
+  display: inline-flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.pm-review-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.pm-review-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px 14px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--pm-border);
+  background: var(--pm-card-bg, #fff);
+}
+
+.pm-review-stat[data-tone='pos'] {
+  border-color: color-mix(in srgb, var(--pm-pos) 35%, var(--pm-border));
+  background: color-mix(in srgb, var(--pm-pos) 5%, #fff);
+}
+
+.pm-review-stat[data-tone='neg'] {
+  border-color: color-mix(in srgb, var(--pm-danger) 35%, var(--pm-border));
+  background: color-mix(in srgb, var(--pm-danger) 5%, #fff);
+}
+
+.pm-review-stat[data-tone='warn'] {
+  border-color: color-mix(in srgb, var(--pm-warn) 40%, var(--pm-border));
+  background: color-mix(in srgb, var(--pm-warn) 6%, #fff);
+}
+
+.pm-review-stat-label {
+  font-size: 11px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--pm-muted);
+  margin: 0;
+}
+
+.pm-review-stat-value {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--pm-ink);
+  line-height: 1.2;
+}
+
+.pm-review-stat[data-tone='pos'] .pm-review-stat-value {
+  color: var(--pm-pos);
+}
+
+.pm-review-stat[data-tone='neg'] .pm-review-stat-value {
+  color: var(--pm-danger);
+}
+
+.pm-review-stat[data-tone='warn'] .pm-review-stat-value {
+  color: color-mix(in srgb, var(--pm-warn) 80%, var(--pm-ink));
+}
+
+.pm-review-stat-sub {
+  margin: 0;
+  font-size: 12px;
+  color: var(--pm-muted);
+}
+
+.pm-review-note {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  border-radius: 10px;
+  border: 1px solid var(--pm-border);
+  background: color-mix(in srgb, var(--pm-ink) 3%, #fff);
+}
+
+.pm-review-note-lede {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--pm-ink);
+}
+
+.pm-review-reflect-label {
+  display: block;
+  font-size: 12px;
+  color: var(--pm-muted);
+  line-height: 1.4;
+}
+
+.pm-review-reflect-label em {
+  font-style: italic;
+  color: color-mix(in srgb, var(--pm-muted) 80%, var(--pm-ink));
+}
+
+.pm-review-reflect {
+  width: 100%;
+  resize: vertical;
+  min-height: 52px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--pm-border);
+  background: #fff;
+  color: var(--pm-ink);
+  font-size: 13px;
+  font-family: inherit;
+  line-height: 1.45;
+}
+
+.pm-review-reflect:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--pm-accent) 65%, transparent);
+  outline-offset: 2px;
+  border-color: var(--pm-accent);
+}
+
+@media (max-width: 720px) {
+  .pm-review-grid {
+    grid-template-columns: 1fr;
+  }
+  .pm-review-head {
+    flex-direction: column;
+  }
+  .pm-review-actions {
+    width: 100%;
+  }
+}
+
+/* ---- Reviews archive (Performance tab) -------------------------------- */
+
+.pm-reviews-archive-head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pm-reviews-archive-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--pm-muted);
+  margin: 0 0 2px;
+}
+
+.pm-reviews-archive-empty {
+  padding: 22px 18px;
+  border: 1px dashed var(--pm-border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--pm-ink) 2%, #fff);
+  color: var(--pm-muted);
+  text-align: center;
+}
+
+.pm-reviews-archive-empty p {
+  margin: 0 0 4px;
+  font-size: 13px;
+}
+
+.pm-reviews-archive-empty-sub {
+  font-size: 12px;
+  color: color-mix(in srgb, var(--pm-muted) 70%, var(--pm-ink));
+}
+
+.pm-reviews-archive-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.pm-reviews-archive-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    'meta  stats'
+    'meta  ack';
+  column-gap: 18px;
+  row-gap: 6px;
+  align-items: start;
+  padding: 14px 16px;
+  border: 1px solid var(--pm-border);
+  border-radius: 10px;
+  background: #fff;
+}
+
+.pm-reviews-archive-row[data-empty='true'] {
+  opacity: 0.65;
+}
+
+.pm-reviews-archive-meta {
+  grid-area: meta;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.pm-reviews-archive-range {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--pm-ink);
+}
+
+.pm-reviews-archive-narr {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: color-mix(in srgb, var(--pm-muted) 70%, var(--pm-ink));
+}
+
+.pm-reviews-archive-reflect {
+  margin: 2px 0 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--pm-accent) 25%, var(--pm-border));
+  background: color-mix(in srgb, var(--pm-accent) 4%, #fff);
+  color: var(--pm-ink);
+}
+
+.pm-reviews-archive-reflect strong {
+  color: var(--pm-accent);
+}
+
+.pm-reviews-archive-stats {
+  grid-area: stats;
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.pm-reviews-archive-mini {
+  min-width: 88px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 1px solid var(--pm-border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--pm-ink) 2%, #fff);
+  text-align: right;
+}
+
+.pm-reviews-archive-mini[data-tone='pos'] {
+  border-color: color-mix(in srgb, var(--pm-pos) 35%, var(--pm-border));
+}
+
+.pm-reviews-archive-mini[data-tone='neg'] {
+  border-color: color-mix(in srgb, var(--pm-danger) 35%, var(--pm-border));
+}
+
+.pm-reviews-archive-mini[data-tone='warn'] {
+  border-color: color-mix(in srgb, var(--pm-warn) 40%, var(--pm-border));
+}
+
+.pm-reviews-archive-mini-label {
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--pm-muted);
+}
+
+.pm-reviews-archive-mini-value {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--pm-ink);
+}
+
+.pm-reviews-archive-mini[data-tone='pos'] .pm-reviews-archive-mini-value {
+  color: var(--pm-pos);
+}
+
+.pm-reviews-archive-mini[data-tone='neg'] .pm-reviews-archive-mini-value {
+  color: var(--pm-danger);
+}
+
+.pm-reviews-archive-mini[data-tone='warn'] .pm-reviews-archive-mini-value {
+  color: color-mix(in srgb, var(--pm-warn) 80%, var(--pm-ink));
+}
+
+.pm-reviews-archive-ack {
+  grid-area: ack;
+  justify-self: end;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--pm-pos);
+  background: color-mix(in srgb, var(--pm-pos) 10%, #fff);
+  border: 1px solid color-mix(in srgb, var(--pm-pos) 30%, var(--pm-border));
+}
+
+@media (max-width: 720px) {
+  .pm-reviews-archive-row {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      'meta'
+      'stats'
+      'ack';
+  }
+  .pm-reviews-archive-stats {
+    justify-content: flex-start;
+  }
+  .pm-reviews-archive-ack {
+    justify-self: start;
+  }
+}

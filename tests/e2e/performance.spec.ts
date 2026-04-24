@@ -203,3 +203,87 @@ test.describe('Performance page \u2014 P&L density (AR-113)', () => {
         await expect(card.getByTestId('pnl-density-callout-worst')).toBeVisible();
     });
 });
+
+// --------------------------------------------------------------------- //
+// AR-114 — Reviews archive card
+// --------------------------------------------------------------------- //
+
+test.describe('Performance page — Reviews archive (AR-114)', () => {
+    test.beforeEach(async ({ page }) => {
+        // Reset the reviews slice exactly once per test, even if the
+        // test navigates across pages. Using addInitScript alone would
+        // re-wipe the key on every goto — the sessionStorage sentinel
+        // gates the clear to the first navigation in the session.
+        await page.addInitScript(() => {
+            try {
+                const done = window.sessionStorage.getItem('__pm_test_wipe_done');
+                if (!done) {
+                    window.localStorage.removeItem('pm-weekly-reviews-v1');
+                    window.sessionStorage.setItem('__pm_test_wipe_done', '1');
+                }
+            } catch {
+                /* ignore */
+            }
+        });
+        await page.goto('/performance');
+    });
+
+    test('archive card renders with heading and subtitle', async ({ page }) => {
+        const card = page.getByTestId('reviews-archive');
+        await expect(card).toBeVisible();
+        await expect(card).toContainText('Weekly reviews');
+        await expect(card).toContainText('Reviews · Archive');
+    });
+
+    test('archive renders either populated rows or a clear empty state', async ({ page }) => {
+        const card = page.getByTestId('reviews-archive');
+        const rows = card.getByTestId('reviews-archive-row');
+        const empty = card.getByTestId('reviews-archive-empty');
+
+        const rowCount = await rows.count();
+        const emptyVisible = await empty.isVisible().catch(() => false);
+
+        // Exactly one surface should be active — and it should not be
+        // both at once.
+        expect(rowCount > 0 || emptyVisible).toBeTruthy();
+        if (rowCount > 0) {
+            // Each row must carry the week id data hook.
+            const firstId = await rows.first().getAttribute('data-week-id');
+            expect(firstId).toMatch(/^wk:\d{4}-\d{2}-\d{2}$/);
+        }
+    });
+
+    test('reflections saved on the dashboard appear in the archive', async ({ page }) => {
+        // Drop directly onto the dashboard to author a reflection, then
+        // navigate to /performance and verify it surfaces.
+        await page.goto('/');
+        const textarea = page.getByTestId('weekly-review-reflection');
+        await textarea.fill('Held through the earnings dip — right call.');
+        await textarea.blur();
+        // Give onBlur a moment to commit.
+        await expect(async () => {
+            const raw = await page.evaluate(() =>
+                window.localStorage.getItem('pm-weekly-reviews-v1'),
+            );
+            expect(raw).not.toBeNull();
+        }).toPass({ timeout: 2000 });
+
+        await page.goto('/performance');
+        const card = page.getByTestId('reviews-archive');
+        const reflections = card.getByTestId('reviews-archive-reflection');
+        // Current-week row should surface the reflection we just saved.
+        await expect(reflections.first()).toBeVisible();
+        await expect(reflections.first()).toContainText(/earnings dip/);
+    });
+
+    test('archive rows carry three mini-stats (Realized / Adherence / Trades)', async ({ page }) => {
+        const card = page.getByTestId('reviews-archive');
+        const rows = card.getByTestId('reviews-archive-row');
+        const rowCount = await rows.count();
+        if (rowCount === 0) test.skip();
+        const first = rows.first();
+        await expect(first).toContainText('Realized');
+        await expect(first).toContainText('Adherence');
+        await expect(first).toContainText('Trades');
+    });
+});

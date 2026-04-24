@@ -10,6 +10,7 @@ import { RecentActivityCard, type ActivityRow } from '@/components/dashboard/Rec
 import { WatchlistCard } from '@/components/dashboard/WatchlistCard';
 import { ActiveThesesCard } from '@/components/dashboard/ActiveThesesCard';
 import { PatternFeed } from '@/components/dashboard/PatternFeed';
+import { WeeklyReviewCard } from '@/components/dashboard/WeeklyReviewCard';
 import { mockTransactions } from '@/lib/mockData';
 
 /**
@@ -148,6 +149,9 @@ export default async function Dashboard() {
         fallbackTodayChange={todayChange}
         alphaVsSp={1.8}
       />
+
+      {/* ---- AR-114: weekly review ritual (hero slot; hides when acked) ---- */}
+      <WeeklyReviewCard />
 
       <div className="pm-grid-2">
         <EquityChartCard netWorth={netWorthSeed} seed={allHoldings.length} />

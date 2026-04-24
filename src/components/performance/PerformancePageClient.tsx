@@ -18,6 +18,7 @@ import { MetricsByPeriodTable } from "./MetricsByPeriodTable";
 import { MonthlyHeatmapCard } from "./MonthlyHeatmapCard";
 import { MoodBreakdownCard } from "./MoodBreakdownCard";
 import { PnlDensityCard } from "./PnlDensityCard";
+import { ReviewsArchiveCard } from "./ReviewsArchiveCard";
 
 /**
  * Performance page wrapper.
@@ -29,6 +30,7 @@ import { PnlDensityCard } from "./PnlDensityCard";
  *   - MonthlyHeatmapCard     (AR-77, year × month intensity grid)
  *   - MoodBreakdownCard      (AR-110, mood × realized P&L)
  *   - PnlDensityCard         (AR-113, weekday × hour P&L heatmap)
+ *   - ReviewsArchiveCard     (AR-114, last 8 weekly reviews + reflections)
  *
  * All state is local to each card. The client wrapper exists purely to
  * keep the page file thin and to keep the topbar / breadcrumbs / actions
@@ -128,6 +130,8 @@ export function PerformancePageClient() {
             <MoodBreakdownCard trades={SEED_JOURNAL} />
 
             <PnlDensityCard trades={SEED_JOURNAL} />
+
+            <ReviewsArchiveCard entries={SEED_JOURNAL} />
         </div>
     );
 }

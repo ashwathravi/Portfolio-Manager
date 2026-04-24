@@ -192,3 +192,97 @@ test.describe('Pattern feed (AR-112)', () => {
         }
     });
 });
+
+// --------------------------------------------------------------------- //
+// AR-114 — Weekly review ritual
+// --------------------------------------------------------------------- //
+
+test.describe('Weekly review ritual (AR-114)', () => {
+    test.beforeEach(async ({ page }) => {
+        // Wipe the reviews slice exactly once per test. A naive
+        // addInitScript would also fire on every reload — sessionStorage
+        // sentinels gate the wipe to the first navigation.
+        await page.addInitScript(() => {
+            try {
+                const done = window.sessionStorage.getItem('__pm_test_wipe_done');
+                if (!done) {
+                    window.localStorage.removeItem('pm-weekly-reviews-v1');
+                    window.sessionStorage.setItem('__pm_test_wipe_done', '1');
+                }
+            } catch {
+                /* ignore */
+            }
+        });
+        await page.goto('/');
+    });
+
+    test('card renders with eyebrow, week range, and three stat tiles', async ({ page }) => {
+        const card = page.getByTestId('weekly-review-card');
+        await expect(card).toBeVisible();
+        await expect(card).toContainText('Weekly review');
+        await expect(card).toContainText(/Week of \w{3}/);
+        await expect(card.getByTestId('weekly-review-pnl')).toBeVisible();
+        await expect(card.getByTestId('weekly-review-adherence')).toBeVisible();
+        await expect(card.getByTestId('weekly-review-best')).toBeVisible();
+    });
+
+    test('reflection textarea saves to localStorage on blur', async ({ page }) => {
+        const textarea = page.getByTestId('weekly-review-reflection');
+        await expect(textarea).toBeVisible();
+        await textarea.fill('I cut winners too early this week.');
+        await textarea.blur();
+
+        // Trip a tick for the onBlur handler, then read the key back.
+        await expect(async () => {
+            const raw = await page.evaluate(() =>
+                window.localStorage.getItem('pm-weekly-reviews-v1'),
+            );
+            expect(raw).not.toBeNull();
+            const parsed = JSON.parse(raw!);
+            const firstEntry = Object.values(parsed)[0] as { reflection?: string };
+            expect(firstEntry?.reflection).toContain('cut winners too early');
+        }).toPass({ timeout: 2000 });
+    });
+
+    test('Done button acknowledges the review and hides the card', async ({ page }) => {
+        const card = page.getByTestId('weekly-review-card');
+        await expect(card).toBeVisible();
+        await page.getByTestId('weekly-review-acknowledge').click();
+        await expect(card).toBeHidden();
+
+        const raw = await page.evaluate(() =>
+            window.localStorage.getItem('pm-weekly-reviews-v1'),
+        );
+        expect(raw).not.toBeNull();
+        const parsed = JSON.parse(raw!);
+        const firstEntry = Object.values(parsed)[0] as { acknowledgedAt?: string };
+        expect(firstEntry?.acknowledgedAt).toBeDefined();
+    });
+
+    test('Remind-me-later snoozes the card for 24 hours', async ({ page }) => {
+        const card = page.getByTestId('weekly-review-card');
+        await expect(card).toBeVisible();
+        await page.getByTestId('weekly-review-remind').click();
+        await expect(card).toBeHidden();
+
+        const raw = await page.evaluate(() =>
+            window.localStorage.getItem('pm-weekly-reviews-v1'),
+        );
+        expect(raw).not.toBeNull();
+        const parsed = JSON.parse(raw!);
+        const firstEntry = Object.values(parsed)[0] as { remindAt?: string };
+        expect(firstEntry?.remindAt).toBeDefined();
+        // remindAt must be in the future, roughly 24h out.
+        const ts = Date.parse(firstEntry!.remindAt!);
+        const deltaHours = (ts - Date.now()) / (60 * 60 * 1000);
+        expect(deltaHours).toBeGreaterThan(23);
+        expect(deltaHours).toBeLessThan(25);
+    });
+
+    test('card stays hidden on reload after acknowledgement', async ({ page }) => {
+        await page.getByTestId('weekly-review-acknowledge').click();
+        await expect(page.getByTestId('weekly-review-card')).toBeHidden();
+        await page.reload();
+        await expect(page.getByTestId('weekly-review-card')).toBeHidden();
+    });
+});
