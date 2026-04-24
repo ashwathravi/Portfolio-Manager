@@ -3,15 +3,16 @@ import { test, expect } from '@playwright/test';
 /**
  * Performance page tests.
  *
- * Phase 4 (AR-75/76/77) replaced the legacy "Performance Analytics" h1
- * + random metric tiles with a Topbar-driven shell that renders the
- * deep-dive cards:
+ * Phase 4 (AR-75/76/77) + AR-110 + AR-113 replaced the legacy
+ * "Performance Analytics" h1 + random metric tiles with a Topbar-
+ * driven shell that renders the deep-dive cards:
  *
  *   - EquityCurveCard ........ h2 "Equity curve"
  *   - AttributionBarsCard .... h2 "Attribution"
  *   - MetricsByPeriodTable ... h2 "Metrics by period"
  *   - MonthlyHeatmapCard ..... h2 "Monthly return heatmap"
  *   - MoodBreakdownCard ...... h2 "Mood breakdown" (AR-110)
+ *   - PnlDensityCard ......... h2 "P&L density · weekday × hour" (AR-113)
  *
  * The page h1 moved into the Topbar via PageHeaderSync (title "Performance").
  * The in-body h1 "Performance analytics" still exists inside the client
@@ -27,7 +28,7 @@ test.describe('Performance page', () => {
         await expect(page.locator('h1.pm-topbar-title')).toHaveText('Performance');
     });
 
-    test('renders the five deep-dive cards', async ({ page }) => {
+    test('renders the six deep-dive cards', async ({ page }) => {
         await expect(
             page.locator('h2.pm-card-title', { hasText: /^Equity curve$/i }),
         ).toBeVisible();
@@ -42,6 +43,9 @@ test.describe('Performance page', () => {
         ).toBeVisible();
         await expect(
             page.locator('h2.pm-card-title', { hasText: /^Mood breakdown$/i }),
+        ).toBeVisible();
+        await expect(
+            page.locator('h2.pm-card-title', { hasText: /^P&L density/i }),
         ).toBeVisible();
     });
 
@@ -110,5 +114,92 @@ test.describe('Performance page \u2014 Mood breakdown (AR-110)', () => {
         await expect(verdict).toBeVisible();
         // Verdict always has a data-kind — caution / ok / neutral.
         await expect(verdict).toHaveAttribute('data-kind', /caution|ok|neutral/);
+    });
+});
+
+/**
+ * AR-113 P&L density heatmap. 6 rows (Mon–Sat) × 24 columns (0–23
+ * local time) tinted by average realised P&L of trades that closed
+ * in that window, with a legend and deterministic best/worst callout.
+ */
+test.describe('Performance page \u2014 P&L density (AR-113)', () => {
+    test.beforeEach(async ({ page }) => {
+        await page.goto('/performance');
+    });
+
+    test('renders card with title, grid, legend', async ({ page }) => {
+        const card = page.getByTestId('pnl-density-card');
+        await expect(card).toBeVisible();
+        await expect(card.locator('h2#pm-heat-head')).toContainText(/P&L density/);
+        await expect(card.getByTestId('pnl-density-grid')).toBeVisible();
+        await expect(card.getByTestId('pnl-density-legend')).toBeVisible();
+    });
+
+    test('grid holds the full 6\u00d724 cell scaffold', async ({ page }) => {
+        const card = page.getByTestId('pnl-density-card');
+        // 6 weekdays * 24 hours = 144 cells. Asserting the exact count
+        // locks the contract that the scaffold is always complete even
+        // when trade counts are uneven.
+        await expect(card.locator('[data-testid^="pnl-density-cell-"]')).toHaveCount(144);
+    });
+
+    test('range selector shows 30d / 90d / 1Y / ALL with 90d default', async ({ page }) => {
+        const card = page.getByTestId('pnl-density-card');
+        const range = card.getByRole('tablist', { name: /Time range/ });
+        for (const label of ['30d', '90d', '1Y', 'ALL']) {
+            await expect(range.getByRole('tab', { name: label })).toBeVisible();
+        }
+        await expect(range.getByRole('tab', { name: '90d' })).toHaveAttribute(
+            'aria-selected',
+            'true',
+        );
+    });
+
+    test('switching the range updates the selected tab', async ({ page }) => {
+        const card = page.getByTestId('pnl-density-card');
+        const range = card.getByRole('tablist', { name: /Time range/ });
+        await range.getByRole('tab', { name: 'ALL' }).click();
+        await expect(range.getByRole('tab', { name: 'ALL' })).toHaveAttribute(
+            'aria-selected',
+            'true',
+        );
+        await expect(range.getByRole('tab', { name: '90d' })).toHaveAttribute(
+            'aria-selected',
+            'false',
+        );
+    });
+
+    test('seed data produces at least one populated cell on the ALL view', async ({ page }) => {
+        const card = page.getByTestId('pnl-density-card');
+        // Widen the window so we see the full 25-trade fixture.
+        await card.getByRole('tab', { name: 'ALL' }).click();
+        const populated = card.locator(
+            '[data-testid^="pnl-density-cell-"]:not([data-trades="0"])',
+        );
+        expect(await populated.count()).toBeGreaterThan(0);
+    });
+
+    test('hovering a populated cell reveals the tooltip', async ({ page }) => {
+        const card = page.getByTestId('pnl-density-card');
+        await card.getByRole('tab', { name: 'ALL' }).click();
+        const populated = card
+            .locator('[data-testid^="pnl-density-cell-"]:not([data-trades="0"])')
+            .first();
+        await populated.hover();
+        await expect(card.getByTestId('pnl-density-tooltip')).toBeVisible();
+        await expect(card.getByTestId('pnl-density-tooltip')).toContainText(
+            /(Mon|Tue|Wed|Thu|Fri|Sat)\s+\d{2}:00/,
+        );
+    });
+
+    test('callouts surface best and/or worst windows', async ({ page }) => {
+        const card = page.getByTestId('pnl-density-card');
+        await card.getByRole('tab', { name: 'ALL' }).click();
+        const callouts = card.getByTestId('pnl-density-callouts');
+        await expect(callouts).toBeVisible();
+        // Seed journal contains both winners and losers, so both
+        // callouts should render.
+        await expect(card.getByTestId('pnl-density-callout-best')).toBeVisible();
+        await expect(card.getByTestId('pnl-density-callout-worst')).toBeVisible();
     });
 });
