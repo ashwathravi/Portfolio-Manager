@@ -7304,3 +7304,103 @@
     scroll-behavior: auto !important;
   }
 }
+
+/* ==========================================================================
+   Phase 9 · AR-91 — Accessibility pass
+
+   Most of the redesign already shipped with focus-visible rules and ARIA
+   attributes — this block fills the gaps from the Phase 7 / 8 surfaces
+   (Execution + Settings) and adds a catch-all for anything we may have
+   missed. Rule of thumb: every interactive element should show a visible
+   ring when focused with a keyboard, and icon-only controls must have
+   an `aria-label`.
+
+   We use the accent token for the ring so it tracks the user's accent
+   choice — this mostly matters for the Amber accent, which passes WCAG
+   AA against the page background and reads as "this is your cursor"
+   more clearly than a generic system color.
+   ========================================================================== */
+
+/* Focus rings on Execution / Terminal / Settings primitives that didn't
+   have one specified — the same 2px solid outline + 2px offset we use
+   on .pm-btn. */
+.pm-exec-cancel:focus-visible,
+.pm-exec-side-btn:focus-visible,
+.pm-exec-tif-btn:focus-visible,
+.pm-exec-chip:focus-visible,
+.pm-exec-input:focus-visible,
+.pm-term-btn:focus-visible,
+.pm-term-cli-input:focus-visible,
+.pm-settings-input:focus-visible,
+.pm-settings-select:focus-visible,
+.pm-integration-action:focus-visible,
+.pm-settings-advanced-link:focus-visible {
+  outline: 2px solid var(--pm-accent);
+  outline-offset: 2px;
+}
+
+/* Terminal inputs sit on a dark panel. Offsetting into the dark
+   surface makes the ring hard to see — use an inset ring (box-shadow)
+   instead so it stays visible against #0a0f0c. */
+.pm-term-cli-input:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--term-accent);
+  border-radius: 3px;
+}
+
+/* Universal safety net: any button / link / input / textarea / select
+   that we missed still gets a visible ring. Low-specificity so any
+   surface-specific rule above overrides it. We only target
+   :focus-visible (not :focus) so mouse-click focus doesn't light up
+   the ring — that's the keyboard-only convention modern browsers
+   follow, and it matches what each .pm-* rule above does. */
+button:focus-visible,
+a:focus-visible,
+[role="button"]:focus-visible,
+[role="tab"]:focus-visible,
+[role="radio"]:focus-visible,
+[role="menuitem"]:focus-visible,
+[role="link"]:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--pm-accent);
+  outline-offset: 2px;
+}
+
+/* Skip-to-content link — keyboard users land here first and need a
+   visible way to jump past the sidebar and topbar. Hidden off-screen
+   until focused, then snaps to the top-left corner. */
+.pm-a11y-skip {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 200;
+  padding: 8px 14px;
+  background: var(--pm-card);
+  color: var(--pm-fg);
+  border: 2px solid var(--pm-accent);
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  transform: translateY(-200%);
+  transition: transform 120ms ease-out;
+}
+
+.pm-a11y-skip:focus-visible {
+  transform: translateY(0);
+  outline: 2px solid var(--pm-accent);
+  outline-offset: 2px;
+}
+
+/* Screen-reader-only utility — useful anywhere we want to announce
+   state without showing it visually (e.g. "{count} new orders"). */
+.pm-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

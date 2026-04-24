@@ -635,7 +635,11 @@ function OrdersPanel({
     );
 
     return (
-        <section className="pm-exec-blotter pm-card" aria-label="Today's orders">
+        <section
+            className="pm-exec-blotter pm-card"
+            aria-label="Today's orders"
+            aria-live="polite"
+        >
             <header className="pm-exec-blotter-head">
                 <h3 className="pm-exec-blotter-title">Today&rsquo;s orders</h3>
                 <div className="pm-exec-chips" role="tablist" aria-label="Order filter">
@@ -687,7 +691,12 @@ function ApprovalBanner({
     onApprove: (id: string) => void;
 }) {
     return (
-        <div className="pm-exec-approval" role="region" aria-label="Approval queue">
+        <div
+            className="pm-exec-approval"
+            role="region"
+            aria-label="Approval queue"
+            aria-live="polite"
+        >
             <div className="pm-exec-approval-head">
                 <AlertTriangle className="pm-exec-approval-icon" aria-hidden="true" />
                 <div className="pm-exec-approval-text">
