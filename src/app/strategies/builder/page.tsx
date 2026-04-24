@@ -147,11 +147,11 @@ export default function StrategyBuilderPage() {
                                 </div>
                                 <div className="space-y-2">
                                     <div className="flex items-center space-x-2">
-                                        <input type="checkbox" id="sl" className="rounded border-gray-300" defaultChecked />
+                                        <input type="checkbox" id="sl" className="rounded border-border" defaultChecked />
                                         <Label htmlFor="sl">Stop Loss (5%)</Label>
                                     </div>
                                     <div className="flex items-center space-x-2">
-                                        <input type="checkbox" id="tp" className="rounded border-gray-300" defaultChecked />
+                                        <input type="checkbox" id="tp" className="rounded border-border" defaultChecked />
                                         <Label htmlFor="tp">Take Profit (10%)</Label>
                                     </div>
                                 </div>
