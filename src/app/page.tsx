@@ -9,7 +9,7 @@ import { TopHoldingsCard, type TopHoldingsRow } from '@/components/dashboard/Top
 import { RecentActivityCard, type ActivityRow } from '@/components/dashboard/RecentActivityCard';
 import { WatchlistCard } from '@/components/dashboard/WatchlistCard';
 import { ActiveThesesCard } from '@/components/dashboard/ActiveThesesCard';
-import { DailyBriefCard } from '@/components/dashboard/DailyBriefCard';
+import { PatternFeed } from '@/components/dashboard/PatternFeed';
 import { mockTransactions } from '@/lib/mockData';
 
 /**
@@ -163,14 +163,13 @@ export default async function Dashboard() {
         <RecentActivityCard activities={activities} limit={8} />
       </div>
 
-      {/* ---- AR-73: bottom 3-col strip ---- */}
-      <div className="pm-grid-3">
-        <WatchlistCard
-          rows={DEFAULT_WATCHLIST}
-          limit={5}
-        />
-        <ActiveThesesCard rows={DEFAULT_THESES} limit={3} />
-        <DailyBriefCard items={DEFAULT_BRIEF_ITEMS} />
+      {/* ---- AR-73 + AR-112: bottom row — watchlist + theses + pattern feed ---- */}
+      <div className="pm-grid-2-63">
+        <PatternFeed />
+        <div className="pm-dashboard-side-stack">
+          <WatchlistCard rows={DEFAULT_WATCHLIST} limit={5} />
+          <ActiveThesesCard rows={DEFAULT_THESES} limit={3} />
+        </div>
       </div>
     </div>
   );
@@ -246,20 +245,7 @@ const DEFAULT_THESES = [
   },
 ];
 
-const DEFAULT_BRIEF_ITEMS = [
-  {
-    title: 'Rebalance tech exposure',
-    description:
-      'AAPL + NVDA now 34% of portfolio. Consider trimming 5–8% back toward target.',
-  },
-  {
-    title: 'Review cash runway',
-    description:
-      'Cash balance covers 8.4 months of burn. Redeploy or reallocate per IPS.',
-  },
-  {
-    title: 'Close dormant thesis',
-    description:
-      'Macro "Fed pivot" thesis has been Fading for 14 days — archive or act.',
-  },
-];
+// AR-112: the dashboard's "Daily Brief" decision list was superseded
+// by the PatternFeed card. `DailyBriefCard` still exports from
+// `@/components/dashboard/DailyBriefCard` for any external consumer,
+// but this page no longer renders it.
