@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils";
 import { AppSidebar } from "@/components/layout/AppSidebar";
 import { TopBar } from "@/components/layout/TopBar";
 import { TweaksPanel } from "@/components/layout/TweaksPanel";
+import { AskShortcut } from "@/components/ask/AskShortcut";
 import { ThemeProvider } from "@/components/providers/ThemeProvider";
 import { QueryProvider } from "@/components/providers/QueryProvider";
 import { PageHeaderProvider } from "@/components/layout/PageHeaderContext";
@@ -86,6 +87,10 @@ export default function RootLayout({
               {/* Floating Tweaks panel — lives outside the flex row so it can
                   float over the whole viewport without affecting layout. */}
               <TweaksPanel />
+              {/* AR-115: ⌘K / Ctrl+K overlay for Ask Ledger. Mounts nothing
+                  until triggered, then renders a full-viewport modal with
+                  the AskSheet inside. */}
+              <AskShortcut />
             </PageHeaderProvider>
           </ThemeProvider>
         </QueryProvider>

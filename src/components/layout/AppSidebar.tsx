@@ -8,6 +8,7 @@ import {
     Cpu,
     PlayCircle,
     Settings,
+    Sparkles,
     X,
 } from 'lucide-react';
 import Link from 'next/link';
@@ -62,6 +63,9 @@ interface NavItem {
      *  this; wire-up for a global working-orders store lands with the
      *  Execution rework (Phase 7). */
     badge?: number;
+    /** Optional short tag shown next to the title — used for "Beta"
+     *  on new surfaces like Ask Ledger (AR-115). */
+    pill?: string;
 }
 
 interface NavSection {
@@ -79,6 +83,7 @@ const NAV_SECTIONS: readonly NavSection[] = [
             { title: 'Research', icon: FileText, href: '/research' },
             { title: 'Strategies', icon: Cpu, href: '/strategies' },
             { title: 'Execution', icon: PlayCircle, href: '/execution' },
+            { title: 'Ask Ledger', icon: Sparkles, href: '/ask', pill: 'Beta' },
         ],
     },
     {
@@ -187,6 +192,14 @@ export function AppSidebar() {
                                                 <span className="pm-nav-title">
                                                     {item.title}
                                                 </span>
+                                                {item.pill && (
+                                                    <span
+                                                        className="pm-nav-pill"
+                                                        aria-label={`${item.pill} feature`}
+                                                    >
+                                                        {item.pill}
+                                                    </span>
+                                                )}
                                                 {item.badge !== undefined &&
                                                     item.badge > 0 && (
                                                         <span
