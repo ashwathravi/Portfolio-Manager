@@ -1,34 +1,36 @@
 import { test, expect } from '@playwright/test';
 
 /**
- * Phase 9 (AR-94) Settings tests.
+ * Phase 9 (AR-94) Settings tests, refreshed for JournalPlus (AR-109).
  *
  * Phase 8 (AR-87/88/89) replaced the old horizontal-tabs surface with
- * a 2×2 card grid. The default `/settings` now renders
- * `SettingsPageClient` — a grid of ProfileCard, IntegrationsCard,
- * AppearanceCard, and GuardrailsCard plus an "Advanced settings"
- * section linking to the legacy tabbed surface at
+ * a card grid. AR-109 added a fifth card — Execution — to host the
+ * "Require pre-trade rationale" toggle. The default `/settings` now
+ * renders `SettingsPageClient` with ProfileCard, IntegrationsCard,
+ * AppearanceCard, GuardrailsCard, and ExecutionCard plus an "Advanced
+ * settings" section linking to the legacy tabbed surface at
  * `/settings?tab=<slug>`. Those legacy flows remain reachable so
  * notifications, API keys, data & privacy, and tags can still be
  * managed until they get their own cards.
  */
 
-test.describe('Settings page (v2 4-card grid)', () => {
+test.describe('Settings page (v2 card grid)', () => {
     test.beforeEach(async ({ page }) => {
         await page.goto('/settings');
     });
 
-    test('renders Topbar title and the 4 primary cards', async ({ page }) => {
+    test('renders Topbar title and the primary cards', async ({ page }) => {
         await expect(page.locator('h1.pm-topbar-title')).toHaveText('Settings');
 
         // Grid container (single `role="list"`-like semantics).
         await expect(page.locator('.pm-settings-grid')).toBeVisible();
 
-        // Each of the 4 cards by their card title.
+        // Each primary card by its card title.
         await expect(page.locator('.pm-settings-card-title', { hasText: /^Profile$/ })).toBeVisible();
         await expect(page.locator('.pm-settings-card-title', { hasText: /^Connected accounts$/i })).toBeVisible();
         await expect(page.locator('.pm-settings-card-title', { hasText: /^Appearance$/ })).toBeVisible();
         await expect(page.locator('.pm-settings-card-title', { hasText: /^Guardrails$/ })).toBeVisible();
+        await expect(page.locator('.pm-settings-card-title', { hasText: /^Execution$/ })).toBeVisible();
     });
 
     test('exposes an Advanced settings section linking to legacy tabs', async ({ page }) => {

@@ -43,8 +43,17 @@ export function useThesisStore() {
         saveThesesToStorage(getBrowserStorage(), theses);
     }, [hydrated, theses]);
 
-    const create = useCallback((draft: ThesisDraft) => {
-        setTheses((prev) => [createThesis(draft), ...prev]);
+    /**
+     * Create a new thesis and return its generated id so the caller can
+     * link other records (order rationale, tags, notes) to it in the
+     * same tick. The id is generated synchronously via `createThesis`,
+     * so there's no round-trip — this is a real id the instant it
+     * returns, not a placeholder that resolves later.
+     */
+    const create = useCallback((draft: ThesisDraft): string => {
+        const thesis = createThesis(draft);
+        setTheses((prev) => [thesis, ...prev]);
+        return thesis.id;
     }, []);
 
     const update = useCallback((id: string, patch: Partial<ThesisDraft>) => {

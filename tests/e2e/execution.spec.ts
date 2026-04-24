@@ -126,3 +126,165 @@ test.describe('Execution page (Focus variant, default)', () => {
         await expect(page.locator('.pm-exec-page[data-variant="terminal"]')).toBeVisible();
     });
 });
+
+/**
+ * AR-109 (JournalPlus): pre-trade rationale capture.
+ *
+ * The Focus variant gates Submit behind a completed rationale panel
+ * when `execution.rationaleRequired` is true (the default). These
+ * tests exercise the rendering, the gate, the analytics event path,
+ * and the settings override.
+ */
+test.describe('Execution page — pre-trade rationale (AR-109)', () => {
+    test.beforeEach(async ({ page }) => {
+        // `addInitScript` re-runs on every navigation, which would wipe
+        // the settings store mid-test. So we ONLY use it to install the
+        // analytics sink (idempotent to rerun), and clear the persisted
+        // state once via a fresh blank page before the first real goto.
+        await page.addInitScript(() => {
+            (window as unknown as {
+                __pmAnalytics: { events: unknown[] };
+            }).__pmAnalytics = { events: [] };
+        });
+
+        // First navigation is to a blank page on the app origin so we
+        // can reach into localStorage and reset persisted stores to
+        // defaults. Subsequent navigations inside the test rehydrate
+        // cleanly without re-wiping.
+        await page.goto('/execution');
+        await page.evaluate(() => {
+            try {
+                window.localStorage.removeItem('pm-exec-variant');
+                window.localStorage.removeItem('atlas-settings');
+            } catch {
+                /* ignore */
+            }
+        });
+        // Reload so the stores pick up the cleared state on this first
+        // visit (rationaleRequired defaults back to `true`).
+        await page.reload();
+    });
+
+    test('renders the rationale panel on the Focus variant by default', async ({ page }) => {
+        await expect(page.getByTestId('pre-trade-rationale')).toBeVisible();
+        await expect(
+            page.getByRole('heading', { name: 'Why this trade?' }),
+        ).toBeVisible();
+    });
+
+    test('Submit stays disabled until the rationale is complete', async ({ page }) => {
+        const submit = page.getByRole('button', { name: /Review & buy/ });
+        await expect(submit).toBeDisabled();
+
+        // Fill the 5 required fields in order. The chip buttons use
+        // `aria-pressed` rather than `role="radio"` — the chip list has
+        // no roving tabindex / arrow-key handling, so the "radio" role
+        // would mislead screen readers. Tests match real semantics: a
+        // toggle button group.
+        const panel = page.getByTestId('pre-trade-rationale');
+
+        // Thesis — pick the first available chip in the Thesis group,
+        // or create inline if the store had no seeded thesis for AAPL.
+        const thesisGroup = panel.locator(
+            'div[role="group"][aria-label="Thesis linkage"]',
+        );
+        const firstThesisChip = thesisGroup.locator('button.pm-rat-chip').first();
+        const anyThesisVisible = await firstThesisChip.isVisible();
+        if (anyThesisVisible && !(await firstThesisChip.getAttribute('class'))?.includes('pm-rat-chip-add')) {
+            await firstThesisChip.click();
+        } else {
+            // No seeded thesis for AAPL in default store — create one inline.
+            await panel.getByRole('button', { name: /New thesis/ }).click();
+            await panel
+                .getByPlaceholder(/Why buy AAPL\?/)
+                .fill('Margin expansion 2026');
+            await panel.getByRole('button', { name: 'Create', exact: true }).click();
+        }
+
+        // Setup — pick "Breakout".
+        await panel.getByRole('button', { name: 'Breakout' }).click();
+
+        // Conviction — bump slider to 7.0.
+        const slider = panel.getByLabel(/Conviction/);
+        await slider.fill('7');
+
+        // Mood — pick "Focused".
+        await panel.getByRole('button', { name: /Focused/ }).click();
+
+        // Rationale text.
+        await panel
+            .getByLabel('Rationale')
+            .fill('Gap up on upgrade, riding momentum into close.');
+
+        // Submit should now be enabled.
+        await expect(submit).toBeEnabled();
+    });
+
+    test('overshooting the 240-char limit flags the counter', async ({ page }) => {
+        const panel = page.getByTestId('pre-trade-rationale');
+        const textarea = panel.getByLabel('Rationale');
+        const long = 'x'.repeat(245);
+        await textarea.fill(long);
+
+        // Counter flips to over-limit styling.
+        await expect(panel.locator('.pm-rat-counter.is-over')).toBeVisible();
+    });
+
+    test('submitting fires the trade.rationale.submitted analytics event', async ({ page }) => {
+        const panel = page.getByTestId('pre-trade-rationale');
+
+        // Pick first thesis chip or inline-create. Chips are buttons
+        // with `aria-pressed`; scope to the thesis group so we don't
+        // accidentally grab the "+ New thesis" chip.
+        const thesisGroup = panel.locator(
+            'div[role="group"][aria-label="Thesis linkage"]',
+        );
+        const firstThesisChip = thesisGroup.locator('button.pm-rat-chip').first();
+        const firstChipClass = (await firstThesisChip.getAttribute('class')) ?? '';
+        if (
+            (await firstThesisChip.isVisible()) &&
+            !firstChipClass.includes('pm-rat-chip-add')
+        ) {
+            await firstThesisChip.click();
+        } else {
+            await panel.getByRole('button', { name: /New thesis/ }).click();
+            await panel.getByPlaceholder(/Why buy/).fill('Test thesis');
+            await panel.getByRole('button', { name: 'Create', exact: true }).click();
+        }
+        await panel.getByRole('button', { name: 'Conviction add' }).click();
+        await panel.getByLabel(/Conviction/).fill('6');
+        await panel.getByRole('button', { name: /Calm/ }).click();
+        await panel.getByLabel('Rationale').fill('Adding to winner on pullback.');
+
+        await page.getByRole('button', { name: /Review & buy/ }).click();
+
+        // Analytics sink should have captured a submitted event.
+        const events = await page.evaluate(() => {
+            return (
+                window as unknown as {
+                    __pmAnalytics?: { events: Array<{ name: string }> };
+                }
+            ).__pmAnalytics?.events ?? [];
+        });
+        expect(events.some((e) => e.name === 'trade.rationale.submitted')).toBe(
+            true,
+        );
+    });
+
+    test('disabling the rationale requirement in Settings lifts the gate', async ({ page }) => {
+        // Flip the setting off.
+        await page.goto('/settings');
+        const toggle = page.getByLabel(
+            'Toggle pre-trade rationale requirement',
+        );
+        await expect(toggle).toBeChecked();
+        await toggle.click();
+        await expect(toggle).not.toBeChecked();
+
+        // Back to Execution — rationale panel should be gone and Submit
+        // should only be blocked by the regular order-form validation.
+        await page.goto('/execution');
+        await expect(page.getByTestId('pre-trade-rationale')).toHaveCount(0);
+        await expect(page.getByRole('button', { name: /Review & buy/ })).toBeEnabled();
+    });
+});

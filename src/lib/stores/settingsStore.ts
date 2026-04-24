@@ -120,6 +120,23 @@ export interface GuardrailSettings {
     thesisLinkageRequired: boolean;
 }
 
+/**
+ * Execution workflow preferences (AR-109 / JournalPlus Integration).
+ *
+ * These flags shape the *shape* of the order submission flow rather
+ * than the risk rails in `GuardrailSettings`. Separate slice because
+ * they're about friction/journaling, not capital preservation — mixing
+ * them into `guardrails` would conflate two concepts that belong on
+ * different settings cards.
+ */
+export interface ExecutionSettings {
+    /** Require a completed `<PreTradeRationale>` panel before Submit
+     *  becomes enabled. Default ON — the whole point of the capture is
+     *  the friction, but power users may disable it once behaviors are
+     *  stable. See AR-109 acceptance criteria. */
+    rationaleRequired: boolean;
+}
+
 export interface SettingsState {
     // State slices
     profile: ProfileSettings;
@@ -131,6 +148,7 @@ export interface SettingsState {
     tags: Tag[];
     accounts: ConnectedAccount[];
     guardrails: GuardrailSettings;
+    execution: ExecutionSettings;
 
     // Actions - Profile
     updateProfile: (profile: Partial<ProfileSettings>) => void;
@@ -168,6 +186,9 @@ export interface SettingsState {
 
     // Actions - Guardrails
     updateGuardrails: (updates: Partial<GuardrailSettings>) => void;
+
+    // Actions - Execution
+    updateExecution: (updates: Partial<ExecutionSettings>) => void;
 
     // Reset
     resetSettings: () => void;
@@ -235,6 +256,15 @@ const defaultGuardrails: GuardrailSettings = {
     thesisLinkageRequired: false,
 };
 
+/**
+ * Execution defaults (AR-109). `rationaleRequired` ships ON so the
+ * JournalPlus capture happens out of the box — the whole JournalPlus
+ * value prop rests on never shipping a trade without a "why".
+ */
+const defaultExecution: ExecutionSettings = {
+    rationaleRequired: true,
+};
+
 const defaultAccounts: ConnectedAccount[] = [
     {
         id: 'fidelity',
@@ -284,6 +314,7 @@ export const useSettingsStore = create<SettingsState>()(
             tags: defaultTags,
             accounts: defaultAccounts,
             guardrails: defaultGuardrails,
+            execution: defaultExecution,
 
             // Profile
             updateProfile: (updates) =>
@@ -411,6 +442,12 @@ export const useSettingsStore = create<SettingsState>()(
                     guardrails: { ...state.guardrails, ...updates },
                 })),
 
+            // Execution
+            updateExecution: (updates) =>
+                set((state) => ({
+                    execution: { ...state.execution, ...updates },
+                })),
+
             // Reset
             resetSettings: () =>
                 set({
@@ -423,6 +460,7 @@ export const useSettingsStore = create<SettingsState>()(
                     tags: defaultTags,
                     accounts: defaultAccounts,
                     guardrails: defaultGuardrails,
+                    execution: defaultExecution,
                 }),
         }),
         {
@@ -436,8 +474,12 @@ export const useSettingsStore = create<SettingsState>()(
              *        migrate to the defaults — the numbers match what the
              *        Execution surface hardcoded before the slice existed,
              *        so behavior is unchanged.
+             *   v4 — AR-109: adds the `execution` slice (`rationaleRequired`).
+             *        Existing users migrate to `{ rationaleRequired: true }`
+             *        so pre-trade rationale capture turns on transparently
+             *        — matches the out-of-the-box JournalPlus UX.
              */
-            version: 3,
+            version: 4,
             migrate: (persistedState, version) => {
                 const s = (persistedState ?? {}) as Partial<SettingsState>;
                 if (version < 2) {
@@ -456,6 +498,10 @@ export const useSettingsStore = create<SettingsState>()(
                     const existing = (s.guardrails ?? {}) as Partial<GuardrailSettings>;
                     s.guardrails = { ...defaultGuardrails, ...existing };
                 }
+                if (version < 4) {
+                    const existing = (s.execution ?? {}) as Partial<ExecutionSettings>;
+                    s.execution = { ...defaultExecution, ...existing };
+                }
                 return s as SettingsState;
             },
             // Sentinel: Only persist non-sensitive preferences. API keys are
@@ -466,6 +512,7 @@ export const useSettingsStore = create<SettingsState>()(
                 preferences: state.preferences,
                 tags: state.tags,
                 guardrails: state.guardrails,
+                execution: state.execution,
             }),
         }
     )

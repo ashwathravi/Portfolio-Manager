@@ -15,6 +15,7 @@ import { ProfileCard } from "./cards/ProfileCard";
 import { IntegrationsCard } from "./cards/IntegrationsCard";
 import { AppearanceCard } from "./cards/AppearanceCard";
 import { GuardrailsCard } from "./cards/GuardrailsCard";
+import { ExecutionCard } from "./cards/ExecutionCard";
 
 interface AdvancedLink {
     slug: string;
@@ -63,20 +64,22 @@ const ADVANCED_LINKS: AdvancedLink[] = [
 ];
 
 /**
- * Phase 8 Settings redesign (AR-87/88/89).
+ * Phase 8 Settings redesign (AR-87/88/89) + JournalPlus (AR-109).
  *
- * Replaces the old tabbed surface with a 2×2 card grid. Each card
- * reads and writes directly to the existing `useSettingsStore`, so
+ * Replaces the old tabbed surface with a card grid. Each card reads
+ * and writes directly to the existing `useSettingsStore`, so
  * preferences stay backward-compatible — the server-side shape is
  * unchanged; only the UI is rebuilt.
  *
- *   ┌─────────────── Settings ────────────────┐
- *   │  [ Profile ]       [ Connected accts ]  │
- *   │  [ Appearance ]    [ Guardrails ]       │
- *   └─────────────────────────────────────────┘
+ *   ┌────────────────── Settings ───────────────────┐
+ *   │  [ Profile ]        [ Connected accts ]       │
+ *   │  [ Appearance ]     [ Guardrails ]            │
+ *   │  [ Execution ]                                │
+ *   └───────────────────────────────────────────────┘
  *
- * The grid collapses to 1 column below ~960px so the cards breathe on
- * phones/split-screens; each card is self-contained and never needs
+ * The grid is `auto-fit` + `minmax` so a 5th card (Execution, added in
+ * AR-109) flows onto a new row at wide widths and collapses to 1
+ * column below ~960px. Each card is self-contained and never needs
  * siblings to render correctly.
  *
  * Deeper tabs (notifications, API keys, data & privacy, tags, alerts)
@@ -99,6 +102,7 @@ export function SettingsPageClient() {
                 <IntegrationsCard />
                 <AppearanceCard />
                 <GuardrailsCard />
+                <ExecutionCard />
             </div>
 
             <section

@@ -7521,3 +7521,360 @@ a:focus-visible,
     grid-template-columns: 1fr;
   }
 }
+
+/* ================================================================== */
+/* JournalPlus pre-trade rationale (AR-109)                            */
+/* ================================================================== */
+
+/*
+ * Visual weight rules:
+ *   - Whole panel sits inside the order form with a subtle `pm-card`
+ *     recess so it reads as "one more step" rather than a new screen.
+ *   - Chip choices use the same density/kerning as the TIF pills so
+ *     the eye learns one shape across Execution.
+ *   - Mood chips use a secondary tone accent so they don't compete
+ *     with the primary Buy/Sell colour.
+ */
+
+.pm-rat {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 14px 16px;
+  border: 1px solid var(--pm-border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--pm-card) 94%, var(--pm-accent) 6%);
+  margin-top: 4px;
+}
+
+.pm-rat-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.pm-rat-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--pm-fg);
+  letter-spacing: -0.01em;
+  margin: 0;
+}
+
+.pm-rat-sub {
+  font-size: 12px;
+  color: var(--pm-muted);
+  margin: 0;
+}
+
+.pm-rat-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pm-rat-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--pm-muted);
+}
+
+.pm-rat-label-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.pm-rat-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.pm-rat-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--pm-border);
+  border-radius: 999px;
+  background: var(--pm-card);
+  color: var(--pm-fg);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.pm-rat-chip:hover {
+  background: color-mix(in srgb, var(--pm-card) 88%, var(--pm-accent) 12%);
+}
+
+.pm-rat-chip.is-on {
+  background: color-mix(in srgb, var(--pm-accent) 14%, var(--pm-card) 86%);
+  border-color: var(--pm-accent);
+  color: var(--pm-fg);
+}
+
+.pm-rat-chip.is-match {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--pm-accent) 40%, transparent 60%);
+}
+
+.pm-rat-chip-ticker {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.pm-rat-chip-title {
+  color: var(--pm-muted);
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pm-rat-chip.is-on .pm-rat-chip-title {
+  color: var(--pm-fg);
+}
+
+.pm-rat-chip-add {
+  border-style: dashed;
+  color: var(--pm-muted);
+}
+
+.pm-rat-chips-mood {
+  gap: 8px;
+}
+
+.pm-rat-chip-mood {
+  padding: 6px 10px;
+}
+
+.pm-rat-chip-mood[data-tone="caution"].is-on {
+  background: color-mix(in srgb, var(--pm-warn) 18%, var(--pm-card) 82%);
+  border-color: var(--pm-warn);
+}
+
+.pm-rat-chip-emoji {
+  font-size: 14px;
+  line-height: 1;
+}
+
+.pm-rat-chip-mood-label {
+  font-size: 12px;
+}
+
+.pm-rat-empty {
+  font-size: 12px;
+  color: var(--pm-muted);
+  font-style: italic;
+}
+
+.pm-rat-inline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.pm-rat-inline-input {
+  flex: 1 1 220px;
+  min-width: 0;
+  padding: 6px 10px;
+  border: 1px solid var(--pm-border);
+  border-radius: 6px;
+  background: var(--pm-bg);
+  color: var(--pm-fg);
+  font-size: 12px;
+}
+
+.pm-rat-inline-input:focus {
+  outline: 2px solid color-mix(in srgb, var(--pm-accent) 40%, transparent 60%);
+  outline-offset: 1px;
+  border-color: var(--pm-accent);
+}
+
+.pm-rat-conv-value {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--pm-fg);
+}
+
+.pm-rat-conv-scale {
+  color: var(--pm-muted);
+  font-weight: 400;
+}
+
+.pm-rat-slider {
+  width: 100%;
+  appearance: none;
+  height: 4px;
+  background: var(--pm-border);
+  border-radius: 4px;
+  margin: 6px 0;
+}
+
+.pm-rat-slider::-webkit-slider-thumb {
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--pm-accent);
+  cursor: pointer;
+  border: 2px solid var(--pm-card);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
+}
+
+.pm-rat-slider::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--pm-accent);
+  cursor: pointer;
+  border: 2px solid var(--pm-card);
+}
+
+.pm-rat-slider-marks {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  color: var(--pm-muted);
+  padding: 0 2px;
+}
+
+.pm-rat-textarea {
+  width: 100%;
+  resize: vertical;
+  padding: 8px 10px;
+  border: 1px solid var(--pm-border);
+  border-radius: 6px;
+  background: var(--pm-bg);
+  color: var(--pm-fg);
+  font-size: 13px;
+  line-height: 1.4;
+  min-height: 52px;
+  font-family: inherit;
+}
+
+.pm-rat-textarea:focus {
+  outline: 2px solid color-mix(in srgb, var(--pm-accent) 40%, transparent 60%);
+  outline-offset: 1px;
+  border-color: var(--pm-accent);
+}
+
+.pm-rat-textarea.is-over {
+  border-color: #ef4444;
+}
+
+.pm-rat-counter {
+  font-size: 11px;
+  color: var(--pm-muted);
+  align-self: flex-end;
+  font-variant-numeric: tabular-nums;
+}
+
+.pm-rat-counter.is-over {
+  color: #ef4444;
+  font-weight: 600;
+}
+
+/* --- Read-only summary ---------------------------------------------- */
+
+.pm-rat-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--pm-border);
+  border-left: 3px solid var(--pm-accent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--pm-card) 96%, var(--pm-accent) 4%);
+}
+
+.pm-rat-summary[data-mood-tone="caution"] {
+  border-left-color: var(--pm-warn);
+}
+
+.pm-rat-summary[data-decision-tone="fast"] .pm-rat-summary-time {
+  color: var(--pm-warn);
+}
+
+.pm-rat-summary-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.pm-rat-summary-kicker {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--pm-muted);
+}
+
+.pm-rat-summary-time {
+  font-size: 11px;
+  color: var(--pm-muted);
+}
+
+.pm-rat-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.pm-rat-summary-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.pm-rat-summary-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--pm-muted);
+}
+
+.pm-rat-summary-value {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--pm-fg);
+}
+
+.pm-rat-summary-scale {
+  color: var(--pm-muted);
+  font-weight: 400;
+  font-size: 11px;
+}
+
+.pm-rat-summary-text {
+  font-size: 13px;
+  color: var(--pm-fg);
+  line-height: 1.45;
+  margin: 0;
+}
+
+/* --- Blotter integration: subordinate rationale row ---------------- */
+
+.pm-exec-table-rationale-row > td {
+  padding: 8px 12px 10px;
+  background: color-mix(in srgb, var(--pm-card) 97%, var(--pm-accent) 3%);
+}
+
+/* --- Settings grid: allow wrap for the 5th card (AR-109) ---------- */
+
+/* With 5 cards the stock `repeat(2, 1fr)` leaves an orphan in the
+   bottom-left. Keeping the 2-col grid but making the Execution card
+   span both columns when it lands on a solo row looks cleanest at
+   full width. Relies on DOM order — the card must be the 5th child. */
+@media (min-width: 961px) {
+  .pm-settings-grid > :nth-child(5):nth-last-child(1) {
+    grid-column: 1 / -1;
+  }
+}

@@ -1,3 +1,5 @@
+import type { TradeRationale } from './trade';
+
 export type OrderSide = 'buy' | 'sell';
 export type OrderType = 'market' | 'limit' | 'stop' | 'stop_limit';
 export type OrderStatus = 'pending' | 'working' | 'filled' | 'cancelled' | 'rejected';
@@ -19,6 +21,14 @@ export interface Order {
     timeInForce: TimeInForce;
     placedAt: Date;
     updatedAt: Date;
+    /**
+     * Pre-trade rationale captured at submit (AR-109). Optional because
+     * legacy orders predate this feature and the settings toggle may
+     * disable the capture flow. When present, surfaces in the blotter
+     * and journal read this verbatim — never synthesize one after the
+     * fact.
+     */
+    rationale?: TradeRationale;
 }
 
 export interface Execution {

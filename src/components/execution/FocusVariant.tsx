@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, AlertTriangle, X } from "lucide-react";
 import {
     BUYING_POWER_USD,
@@ -17,6 +17,15 @@ import type {
     OrderType,
     TimeInForce,
 } from "@/types/execution";
+import { isRationaleComplete } from "@/types/trade";
+import { track } from "@/lib/analytics/events";
+import {
+    PreTradeRationale,
+    createRationaleDraft,
+    finalizeRationale,
+    type RationaleDraft,
+} from "./PreTradeRationale";
+import { RationaleSummary } from "./RationaleSummary";
 
 /**
  * Phase 7 (AR-84) Execution Focus variant.
@@ -170,6 +179,32 @@ function OrderForm({ onSubmit }: OrderFormProps) {
     // Guardrail settings (AR-89) — user prefs from the Settings store.
     // When a toggle is off, the corresponding check becomes a no-op.
     const guardrailPrefs = useSettingsStore((s) => s.guardrails);
+    // AR-109: JournalPlus pre-trade rationale. When `rationaleRequired`
+    // is on, submit is gated on a completed rationale panel.
+    const rationaleRequired = useSettingsStore(
+        (s) => s.execution.rationaleRequired,
+    );
+
+    // Rationale draft owned here so the parent can finalize it on
+    // submit and attach it to the Order. Reset after a successful
+    // submit so the next order starts fresh and `capturedAt` reflects
+    // the new render.
+    const [rationaleDraft, setRationaleDraft] = useState<RationaleDraft>(() =>
+        createRationaleDraft(),
+    );
+
+    // If the user flips rationaleRequired off, then back on mid-session,
+    // the stale `capturedAt` on the draft would produce a huge
+    // `timeToDecisionMs` that's meaningless (the panel wasn't even
+    // visible for most of it). Reset the draft on false→true so the
+    // clock starts from the moment the panel actually mounts again.
+    const prevRequiredRef = useRef(rationaleRequired);
+    useEffect(() => {
+        if (rationaleRequired && !prevRequiredRef.current) {
+            setRationaleDraft(createRationaleDraft());
+        }
+        prevRequiredRef.current = rationaleRequired;
+    }, [rationaleRequired]);
 
     const tickerUpper = ticker.toUpperCase();
     const livePrice = LIVE_PRICES[tickerUpper];
@@ -199,16 +234,35 @@ function OrderForm({ onSubmit }: OrderFormProps) {
         concentrationCapPct: guardrailPrefs.concentrationCapPct,
     });
 
+    // AR-109: the rationale block has its own completeness gate.
+    // Isolated from the other order-level gates so the Submit button's
+    // disabled state is explainable ("rationale incomplete" vs
+    // "concentration cap breached"), and so the gate can be toggled
+    // off wholesale via the settings slice without re-threading
+    // conditions through the rest of the form.
+    const rationaleComplete = isRationaleComplete(rationaleDraft);
+    const rationaleBlocksSubmit = rationaleRequired && !rationaleComplete;
+
     const submitDisabled =
         !tickerUpper ||
         !Number.isFinite(quantity) ||
         quantity <= 0 ||
         (showLimit && (!limitPrice || limitPrice <= 0)) ||
         (showStop && (!stopPrice || stopPrice <= 0)) ||
-        guardrails.some((g) => g.level === "fail");
+        guardrails.some((g) => g.level === "fail") ||
+        rationaleBlocksSubmit;
 
     const handleSubmit = () => {
         if (submitDisabled) return;
+        // Finalize the rationale if it's complete. If the setting is
+        // off and the user didn't fill one in, we stamp a "skipped"
+        // analytics event so weekly-review surfaces can still surface
+        // the miss — the audit trail matters even when the feature is
+        // disabled.
+        const rationale = rationaleComplete
+            ? finalizeRationale(rationaleDraft)
+            : undefined;
+
         const draft: Order = {
             id: `o-${Date.now().toString(36)}`,
             portfolioId: "p-growth",
@@ -227,8 +281,37 @@ function OrderForm({ onSubmit }: OrderFormProps) {
             timeInForce: tif,
             placedAt: new Date(),
             updatedAt: new Date(),
+            rationale,
         };
+        if (rationale) {
+            track("trade.rationale.submitted", {
+                ticker: tickerUpper,
+                side,
+                notionalUsd: notional,
+                setupType: rationale.setupType,
+                mood: rationale.mood,
+                conviction: rationale.conviction,
+                rationaleLength: rationale.rationale.length,
+                timeToDecisionMs: rationale.timeToDecisionMs,
+            });
+        } else {
+            // Only `setting_off` is reachable here: if the setting is on
+            // but the rationale is incomplete, `rationaleBlocksSubmit`
+            // would have disabled the button and we wouldn't be
+            // executing. The `unsupported_flow` label belongs to other
+            // surfaces (Checkout, Terminal) that will track their own
+            // skipped events when they wire rationale capture.
+            track("trade.rationale.skipped", {
+                ticker: tickerUpper,
+                side,
+                notionalUsd: notional,
+                reason: "setting_off",
+            });
+        }
         onSubmit(draft);
+        // Reset the rationale so the next ticket renders with a fresh
+        // `capturedAt` and an empty form.
+        setRationaleDraft(createRationaleDraft());
     };
 
     const submitLabel = side === "buy" ? "Review & buy" : "Review & sell";
@@ -401,6 +484,19 @@ function OrderForm({ onSubmit }: OrderFormProps) {
                 ))}
             </div>
 
+            {/* Pre-trade rationale (AR-109 / JournalPlus). Rendered only
+                when the user has the capture enabled. The parent owns
+                `rationaleDraft` so the gate on Submit sees the same
+                draft the panel is editing, and so the draft resets on
+                successful submit. */}
+            {rationaleRequired && (
+                <PreTradeRationale
+                    ticker={tickerUpper}
+                    value={rationaleDraft}
+                    onChange={setRationaleDraft}
+                />
+            )}
+
             {/* Foot */}
             <footer className="pm-exec-form-foot">
                 <button type="button" className="pm-btn pm-btn-ghost">
@@ -411,6 +507,11 @@ function OrderForm({ onSubmit }: OrderFormProps) {
                     className={submitClass}
                     disabled={submitDisabled}
                     onClick={handleSubmit}
+                    title={
+                        rationaleBlocksSubmit
+                            ? "Fill in the rationale to enable submit"
+                            : undefined
+                    }
                 >
                     {submitLabel}
                 </button>
@@ -785,7 +886,11 @@ function OrdersTable({
                             o.type === "market"
                                 ? o.averageFillPrice ?? LIVE_PRICES[o.ticker]
                                 : o.limitPrice ?? o.stopPrice;
-                        return (
+                        // AR-109: orders placed with a rationale render
+                        // a subordinate summary row beneath the main
+                        // row. Stays out of the scannable column flow
+                        // but keeps the "why" one glance away.
+                        return [
                             <tr key={o.id}>
                                 <td className="num">{formatTime(o.placedAt)}</td>
                                 <td>
@@ -816,8 +921,21 @@ function OrdersTable({
                                         </button>
                                     )}
                                 </td>
-                            </tr>
-                        );
+                            </tr>,
+                            o.rationale && (
+                                <tr
+                                    key={`${o.id}-rat`}
+                                    className="pm-exec-table-rationale-row"
+                                >
+                                    <td colSpan={8}>
+                                        <RationaleSummary
+                                            rationale={o.rationale}
+                                            compact
+                                        />
+                                    </td>
+                                </tr>
+                            ),
+                        ];
                     })}
                 </tbody>
             </table>
