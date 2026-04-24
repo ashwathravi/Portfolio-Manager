@@ -406,6 +406,16 @@ export function TerminalVariant() {
             onKeyDown={onKeyDown}
             data-ticker={ticker}
         >
+            {/* AR-92: the terminal variant was designed around a 3-col
+                L2/CLI/tape grid that's genuinely hard to fit below 900px.
+                We still render it — the user may have chosen it
+                deliberately — but show a calm "Best on desktop" hint so
+                they know the Focus variant is the better choice on narrow
+                screens. The banner self-hides at ≥900px via CSS. */}
+            <div className="pm-term-narrow-notice" role="note" aria-live="polite">
+                <span className="pm-term-narrow-notice-dot" aria-hidden="true" />
+                Terminal is best on desktop. Try the Focus variant below 900px.
+            </div>
             <Header mid={mid} totalVol={52_340_000} vwap={+(mid - 0.12).toFixed(2)} />
 
             <div className="pm-term-grid">

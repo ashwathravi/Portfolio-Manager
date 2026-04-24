@@ -7404,3 +7404,120 @@ a:focus-visible,
   white-space: nowrap;
   border: 0;
 }
+
+/* ==========================================================================
+   Phase 9 · AR-92 — Responsive breakpoints
+
+   The redesign was drawn at a 1280px desktop baseline. Most surfaces scale
+   down via grid rules already added in earlier phases (stat row collapses
+   to 2×2 at ≤1100px, dashboard 2-col / 3-col grids fall to 1fr at the
+   same breakpoint, Topbar crumbs truncate via `overflow: hidden`, Terminal
+   grid collapses at 1100 / 720). This block patches the remaining gaps:
+
+     - Table overflow for Holdings + Execution blotter on narrow widths
+     - "Best on desktop" notice for the Terminal variant (self-hides ≥900px)
+     - Topbar title/breadcrumb truncation polish on mobile
+     - Settings advanced grid → single-column below 720px
+
+   We intentionally do NOT push the sidebar to a drawer at ≤768px here —
+   the existing AR-41 drawer already handles that (`md:ml-[var(--pm-sidebar-w)]`
+   only applies at ≥768px, so below that the sidebar is hidden and the
+   drawer shell takes over). Adding more rules here would double-hide it.
+   ========================================================================== */
+
+/* --- Terminal: "Best on desktop" notice --------------------------- */
+
+/* Hidden by default on ≥900px (where the grid fits). Snaps into view
+   below that with a subtle amber dot so it reads as "advisory", not
+   "error". The notice sits inside `.pm-term` so the dark-theme scoped
+   tokens (`--term-*`) apply automatically — it doesn't need a light-
+   theme variant. */
+.pm-term-narrow-notice {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 12px 0;
+  padding: 8px 12px;
+  background: color-mix(in srgb, var(--term-accent) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--term-accent) 38%, transparent);
+  border-radius: 6px;
+  color: var(--term-fg);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+
+.pm-term-narrow-notice-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--term-accent);
+  flex-shrink: 0;
+}
+
+@media (max-width: 899px) {
+  .pm-term-narrow-notice {
+    display: flex;
+  }
+}
+
+/* --- Holdings + Execution tables: horizontal scroll on mobile ---- */
+
+/* On narrow widths the Holdings / Execution tables have too many
+   columns to fit without breaking data alignment. Wrap each in a
+   horizontally-scrollable container so the user can swipe to reach
+   columns that don't fit. We scope via `:where(...)` so we don't
+   bump specificity — table-specific rules keep winning. */
+@media (max-width: 720px) {
+  :where(.pm-holdings-table, .pm-exec-table) {
+    display: block;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    white-space: nowrap;
+  }
+
+  /* When the table becomes `display: block`, the internal thead /
+     tbody also become block, which breaks the native <table> row
+     model. Re-assert `table` semantics on the inner groups so cells
+     still align. */
+  :where(.pm-holdings-table, .pm-exec-table) > thead,
+  :where(.pm-holdings-table, .pm-exec-table) > tbody {
+    display: table;
+    width: 100%;
+    min-width: 600px;
+  }
+}
+
+/* --- Topbar: tighter title on very narrow viewports --------------- */
+
+/* The topbar title was 20px/700 — fine at 1024px, a bit heavy on a
+   phone. Drop to 16px/700 + single-line ellipsis below 560px so the
+   Topbar stays one row tall instead of wrapping. */
+@media (max-width: 560px) {
+  .pm-topbar-title {
+    font-size: 16px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .pm-topbar-sub {
+    display: none;
+  }
+
+  .pm-crumb-list {
+    font-size: 11px;
+  }
+}
+
+/* --- Settings advanced grid: single column below 720px ------------ */
+
+/* The 3-col advanced-settings grid is already defined upstream with a
+   `minmax(240px, 1fr)` repeat which auto-wraps. But at very narrow
+   widths the auto-fit leaves weird two-card rows — force single
+   column below 720px so each link renders as a clean full-width row. */
+@media (max-width: 720px) {
+  .pm-settings-advanced-grid {
+    grid-template-columns: 1fr;
+  }
+}
