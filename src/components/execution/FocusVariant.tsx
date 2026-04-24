@@ -1,6 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+    useEffect,
+    useMemo,
+    useRef,
+    useState,
+    type CSSProperties,
+} from "react";
 import { Check, AlertTriangle, X } from "lucide-react";
 import {
     BUYING_POWER_USD,
@@ -184,6 +190,12 @@ function OrderForm({ onSubmit }: OrderFormProps) {
     const rationaleRequired = useSettingsStore(
         (s) => s.execution.rationaleRequired,
     );
+    // AR-110: cooldown seconds when the caution mood is tagged. Read
+    // reactively so flipping the Settings preset mid-session takes
+    // effect on the next Submit press.
+    const cooldownSeconds = useSettingsStore(
+        (s) => s.execution.cooldownSeconds,
+    );
 
     // Rationale draft owned here so the parent can finalize it on
     // submit and attach it to the Order. Reset after a successful
@@ -205,6 +217,43 @@ function OrderForm({ onSubmit }: OrderFormProps) {
         }
         prevRequiredRef.current = rationaleRequired;
     }, [rationaleRequired]);
+
+    // AR-110 cooldown state. `cooldownEndMs` is the wall-clock moment
+    // the Submit button re-enables, or `null` when no cooldown is
+    // running. We tick `cooldownNow` every ~250ms so the remaining
+    // seconds render even though we never mutate `cooldownEndMs` during
+    // the wait — that way the timer is frame-independent and survives
+    // React strict-mode double-renders.
+    const [cooldownEndMs, setCooldownEndMs] = useState<number | null>(null);
+    const [cooldownNow, setCooldownNow] = useState<number>(() => Date.now());
+
+    useEffect(() => {
+        if (cooldownEndMs == null) return;
+        const tick = () => setCooldownNow(Date.now());
+        const id = window.setInterval(tick, 250);
+        return () => window.clearInterval(id);
+    }, [cooldownEndMs]);
+
+    // When the ticking clock catches up to the end time, clear the
+    // cooldown once — so Submit re-enables and the button label
+    // switches back.
+    useEffect(() => {
+        if (cooldownEndMs != null && cooldownNow >= cooldownEndMs) {
+            setCooldownEndMs(null);
+        }
+    }, [cooldownEndMs, cooldownNow]);
+
+    // If the user changes mood to a non-caution option mid-cooldown
+    // (e.g., realizes they weren't FOMO-ing after all), clear the
+    // cooldown immediately. The nudge is about the caution mood, not
+    // punishment for having pressed Submit.
+    const moodIsCaution =
+        rationaleDraft.mood === "fomo" || rationaleDraft.mood === "revenge";
+    useEffect(() => {
+        if (!moodIsCaution && cooldownEndMs != null) {
+            setCooldownEndMs(null);
+        }
+    }, [moodIsCaution, cooldownEndMs]);
 
     const tickerUpper = ticker.toUpperCase();
     const livePrice = LIVE_PRICES[tickerUpper];
@@ -243,6 +292,26 @@ function OrderForm({ onSubmit }: OrderFormProps) {
     const rationaleComplete = isRationaleComplete(rationaleDraft);
     const rationaleBlocksSubmit = rationaleRequired && !rationaleComplete;
 
+    // AR-110: running cooldown blocks submit too, but separately — the
+    // button gets a "Hold on… Ns" label instead of the generic disabled
+    // state so the user knows what's happening.
+    const cooldownActive = cooldownEndMs != null && cooldownNow < cooldownEndMs;
+    const cooldownRemainingSec = cooldownActive && cooldownEndMs != null
+        ? Math.max(0, Math.ceil((cooldownEndMs - cooldownNow) / 1000))
+        : 0;
+    // Fraction of the cooldown still remaining, 0..1. Drives the bar
+    // fill on the Submit button via `--pm-cooldown-progress`.
+    const cooldownFraction =
+        cooldownActive && cooldownEndMs != null && cooldownSeconds > 0
+            ? Math.max(
+                  0,
+                  Math.min(
+                      1,
+                      (cooldownEndMs - cooldownNow) / (cooldownSeconds * 1000),
+                  ),
+              )
+            : 0;
+
     const submitDisabled =
         !tickerUpper ||
         !Number.isFinite(quantity) ||
@@ -250,10 +319,38 @@ function OrderForm({ onSubmit }: OrderFormProps) {
         (showLimit && (!limitPrice || limitPrice <= 0)) ||
         (showStop && (!stopPrice || stopPrice <= 0)) ||
         guardrails.some((g) => g.level === "fail") ||
-        rationaleBlocksSubmit;
+        rationaleBlocksSubmit ||
+        cooldownActive;
 
     const handleSubmit = () => {
         if (submitDisabled) return;
+        // AR-110 cooldown gate. If the user tagged a caution mood and
+        // the cooldown preset is non-zero, the first Submit press
+        // *starts* the timer instead of firing. Second press (after
+        // the timer clears) actually submits. We deliberately don't
+        // auto-submit when the timer ends — that would violate the
+        // "never fills on click" promise and the user might have
+        // walked away.
+        if (
+            moodIsCaution &&
+            cooldownSeconds > 0 &&
+            cooldownEndMs == null
+        ) {
+            const now = Date.now();
+            setCooldownEndMs(now + cooldownSeconds * 1000);
+            setCooldownNow(now);
+            // Fire-and-forget analytics. The mood narrow is safe here —
+            // `moodIsCaution` is only true when mood is literally
+            // 'fomo' or 'revenge'.
+            track("trade.cooldown.started", {
+                ticker: tickerUpper,
+                side,
+                notionalUsd: notional,
+                mood: rationaleDraft.mood as "fomo" | "revenge",
+                cooldownSeconds,
+            });
+            return;
+        }
         // Finalize the rationale if it's complete. If the setting is
         // off and the user didn't fill one in, we stamp a "skipped"
         // analytics event so weekly-review surfaces can still surface
@@ -314,9 +411,22 @@ function OrderForm({ onSubmit }: OrderFormProps) {
         setRationaleDraft(createRationaleDraft());
     };
 
-    const submitLabel = side === "buy" ? "Review & buy" : "Review & sell";
-    const submitClass =
-        side === "buy" ? "pm-btn pm-btn-primary" : "pm-btn pm-btn-danger";
+    const baseSubmitLabel = side === "buy" ? "Review & buy" : "Review & sell";
+    const submitLabel = cooldownActive
+        ? `Hold on\u2026 ${cooldownRemainingSec}s`
+        : baseSubmitLabel;
+    const submitClass = `pm-btn ${
+        side === "buy" ? "pm-btn-primary" : "pm-btn-danger"
+    } pm-exec-submit`;
+
+    // Title attribute explains the "why" for a screen reader or a
+    // hover. Cooldown message wins over rationale because it's the
+    // more immediate reason Submit is dark.
+    const submitTitle = cooldownActive
+        ? `Cooldown: ${cooldownRemainingSec}s remaining before the ticket unlocks`
+        : rationaleBlocksSubmit
+            ? "Fill in the rationale to enable submit"
+            : undefined;
 
     return (
         <section
@@ -507,13 +617,18 @@ function OrderForm({ onSubmit }: OrderFormProps) {
                     className={submitClass}
                     disabled={submitDisabled}
                     onClick={handleSubmit}
-                    title={
-                        rationaleBlocksSubmit
-                            ? "Fill in the rationale to enable submit"
+                    title={submitTitle}
+                    data-cooldown={cooldownActive ? "true" : undefined}
+                    style={
+                        cooldownActive
+                            ? ({
+                                  ["--pm-cooldown-progress" as string]:
+                                      cooldownFraction,
+                              } as CSSProperties)
                             : undefined
                     }
                 >
-                    {submitLabel}
+                    <span>{submitLabel}</span>
                 </button>
             </footer>
         </section>

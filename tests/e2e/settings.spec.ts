@@ -78,4 +78,34 @@ test.describe('Settings page (v2 card grid)', () => {
         await expect(page.getByLabel('Light', { exact: true })).toBeVisible();
         await expect(page.getByLabel('Dark', { exact: true })).toBeVisible();
     });
+
+    test('Execution card exposes the AR-110 mood cooldown picker with 10s selected', async ({ page }) => {
+        const group = page.getByRole('radiogroup', {
+            name: /Mood cooldown duration/,
+        });
+        await expect(group).toBeVisible();
+
+        for (const label of ['Off', '10s', '30s', '60s']) {
+            await expect(group.getByRole('radio', { name: label })).toBeVisible();
+        }
+        await expect(group.getByRole('radio', { name: '10s' })).toHaveAttribute(
+            'aria-checked',
+            'true',
+        );
+    });
+
+    test('clicking a cooldown option updates the aria-checked state', async ({ page }) => {
+        const group = page.getByRole('radiogroup', {
+            name: /Mood cooldown duration/,
+        });
+        await group.getByRole('radio', { name: '30s' }).click();
+        await expect(group.getByRole('radio', { name: '30s' })).toHaveAttribute(
+            'aria-checked',
+            'true',
+        );
+        await expect(group.getByRole('radio', { name: '10s' })).toHaveAttribute(
+            'aria-checked',
+            'false',
+        );
+    });
 });

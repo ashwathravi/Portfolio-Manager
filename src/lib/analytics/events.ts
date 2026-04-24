@@ -22,7 +22,12 @@ export type AnalyticsEvent =
     | { name: 'trade.rationale.submitted'; props: TradeRationaleSubmittedProps }
     /** User submitted an order without a rationale because the setting
      *  was disabled, or because this was a non-gated code path. */
-    | { name: 'trade.rationale.skipped'; props: TradeRationaleSkippedProps };
+    | { name: 'trade.rationale.skipped'; props: TradeRationaleSkippedProps }
+    /** The AR-110 caution-mood cooldown started. Fires once per ticket
+     *  when the user hits Submit while tagged as FOMO/revenge; the
+     *  second (post-timer) press is what emits a final
+     *  `trade.rationale.submitted`. */
+    | { name: 'trade.cooldown.started'; props: TradeCooldownStartedProps };
 
 export interface TradeRationaleSubmittedProps {
     ticker: string;
@@ -44,6 +49,27 @@ export interface TradeRationaleSkippedProps {
      *  surface that hasn't yet been wired for rationale capture (e.g.
      *  Terminal keystroke path). */
     reason: 'setting_off' | 'unsupported_flow';
+}
+
+/**
+ * Fires when the AR-110 caution-mood cooldown starts. Useful signal
+ * because it answers "how often does the nudge actually fire?" —
+ * which both product and the user's own weekly review care about. We
+ * deliberately don't log a paired "cooldown.expired" event: the
+ * cooldown expiring isn't an action, and the eventual submit emits
+ * its own `trade.rationale.submitted`.
+ */
+export interface TradeCooldownStartedProps {
+    ticker: string;
+    side: 'buy' | 'sell';
+    notionalUsd: number;
+    /** `'fomo'` or `'revenge'` — the only two moods that trigger a
+     *  cooldown per AR-110. Narrow string union so downstream filters
+     *  don't have to guess the set. */
+    mood: 'fomo' | 'revenge';
+    /** Seconds the cooldown will run for. Matches the user's Settings
+     *  preset at the moment Submit was pressed. */
+    cooldownSeconds: number;
 }
 
 declare global {

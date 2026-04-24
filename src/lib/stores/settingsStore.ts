@@ -129,12 +129,38 @@ export interface GuardrailSettings {
  * them into `guardrails` would conflate two concepts that belong on
  * different settings cards.
  */
+
+/**
+ * Valid cooldown seconds. Narrowed to a union of four presets rather
+ * than left as `number` so the Settings picker can ship as a chip
+ * row without validation and so the Tweaks export (AR-65-style)
+ * stays well-typed. 0 disables the cooldown entirely.
+ */
+export type CooldownSeconds = 0 | 10 | 30 | 60;
+
+export const COOLDOWN_OPTIONS: ReadonlyArray<{
+    value: CooldownSeconds;
+    label: string;
+    desc: string;
+}> = [
+    { value: 0,  label: 'Off', desc: 'No cooldown; Submit fires immediately' },
+    { value: 10, label: '10s', desc: 'Short pause — default nudge' },
+    { value: 30, label: '30s', desc: 'Full-breath pause' },
+    { value: 60, label: '60s', desc: 'One-minute lockout' },
+];
+
 export interface ExecutionSettings {
     /** Require a completed `<PreTradeRationale>` panel before Submit
      *  becomes enabled. Default ON — the whole point of the capture is
      *  the friction, but power users may disable it once behaviors are
      *  stable. See AR-109 acceptance criteria. */
     rationaleRequired: boolean;
+
+    /** Seconds the Submit button stays locked when the trader picks a
+     *  caution mood (`fomo` or `revenge`) on the rationale panel.
+     *  Default 10 — enough to break an impulse without derailing the
+     *  flow. Users can turn it off by setting to 0. See AR-110. */
+    cooldownSeconds: CooldownSeconds;
 }
 
 export interface SettingsState {
@@ -257,12 +283,16 @@ const defaultGuardrails: GuardrailSettings = {
 };
 
 /**
- * Execution defaults (AR-109). `rationaleRequired` ships ON so the
- * JournalPlus capture happens out of the box — the whole JournalPlus
+ * Execution defaults (AR-109 + AR-110). `rationaleRequired` ships ON so
+ * the JournalPlus capture happens out of the box — the whole JournalPlus
  * value prop rests on never shipping a trade without a "why".
+ * `cooldownSeconds` defaults to 10 — a 10-second pause is enough to
+ * break an impulse trade but short enough that the nudge doesn't feel
+ * punitive during a normal session.
  */
 const defaultExecution: ExecutionSettings = {
     rationaleRequired: true,
+    cooldownSeconds: 10,
 };
 
 const defaultAccounts: ConnectedAccount[] = [
@@ -478,8 +508,13 @@ export const useSettingsStore = create<SettingsState>()(
              *        Existing users migrate to `{ rationaleRequired: true }`
              *        so pre-trade rationale capture turns on transparently
              *        — matches the out-of-the-box JournalPlus UX.
+             *   v5 — AR-110: adds `execution.cooldownSeconds`. Existing v4
+             *        users had `execution = { rationaleRequired }` only;
+             *        the migration fills in `cooldownSeconds: 10` so the
+             *        caution-mood nudge turns on without disrupting the
+             *        rationale preference they already set.
              */
-            version: 4,
+            version: 5,
             migrate: (persistedState, version) => {
                 const s = (persistedState ?? {}) as Partial<SettingsState>;
                 if (version < 2) {
@@ -501,6 +536,17 @@ export const useSettingsStore = create<SettingsState>()(
                 if (version < 4) {
                     const existing = (s.execution ?? {}) as Partial<ExecutionSettings>;
                     s.execution = { ...defaultExecution, ...existing };
+                }
+                if (version < 5) {
+                    // v4 execution slice didn't carry `cooldownSeconds`; fill
+                    // it in without clobbering the user's rationaleRequired.
+                    const existing = (s.execution ?? {}) as Partial<ExecutionSettings>;
+                    s.execution = {
+                        rationaleRequired:
+                            existing.rationaleRequired ?? defaultExecution.rationaleRequired,
+                        cooldownSeconds:
+                            existing.cooldownSeconds ?? defaultExecution.cooldownSeconds,
+                    };
                 }
                 return s as SettingsState;
             },

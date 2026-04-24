@@ -288,3 +288,184 @@ test.describe('Execution page — pre-trade rationale (AR-109)', () => {
         await expect(page.getByRole('button', { name: /Review & buy/ })).toBeEnabled();
     });
 });
+
+/**
+ * AR-110 (Mood cooldown nudge): caution moods (fomo / revenge) trigger
+ * a cooldown timer on the Submit button. First press starts the timer
+ * instead of firing; the button stays locked until the timer expires,
+ * then the user can press again to actually submit.
+ */
+test.describe('Execution page — caution-mood cooldown (AR-110)', () => {
+    test.beforeEach(async ({ page }) => {
+        await page.addInitScript(() => {
+            (window as unknown as {
+                __pmAnalytics: { events: unknown[] };
+            }).__pmAnalytics = { events: [] };
+        });
+        await page.goto('/execution');
+        await page.evaluate(() => {
+            try {
+                window.localStorage.removeItem('pm-exec-variant');
+                window.localStorage.removeItem('atlas-settings');
+            } catch {
+                /* ignore */
+            }
+        });
+        await page.reload();
+    });
+
+    test('pressing Submit with mood=FOMO starts the cooldown timer instead of firing', async ({ page }) => {
+        const panel = page.getByTestId('pre-trade-rationale');
+
+        // Complete the rationale end-to-end with mood=FOMO.
+        const thesisGroup = panel.locator(
+            'div[role="group"][aria-label="Thesis linkage"]',
+        );
+        const firstThesisChip = thesisGroup.locator('button.pm-rat-chip').first();
+        const firstClass = (await firstThesisChip.getAttribute('class')) ?? '';
+        if (
+            (await firstThesisChip.isVisible()) &&
+            !firstClass.includes('pm-rat-chip-add')
+        ) {
+            await firstThesisChip.click();
+        } else {
+            await panel.getByRole('button', { name: /New thesis/ }).click();
+            await panel.getByPlaceholder(/Why buy/).fill('Impulse test');
+            await panel.getByRole('button', { name: 'Create', exact: true }).click();
+        }
+        await panel.getByRole('button', { name: 'Breakout' }).click();
+        await panel.getByLabel(/Conviction/).fill('6');
+        await panel.getByRole('button', { name: /FOMO/ }).click();
+        await panel.getByLabel('Rationale').fill('Chasing the pump, fully aware.');
+
+        const submit = page.getByRole('button', { name: /Review & buy/ });
+        await expect(submit).toBeEnabled();
+        await submit.click();
+
+        // After one press, the button should be disabled and the label
+        // should switch into the countdown form.
+        const cooldownBtn = page.locator(
+            'button.pm-exec-submit[data-cooldown="true"]',
+        );
+        await expect(cooldownBtn).toBeVisible();
+        await expect(cooldownBtn).toBeDisabled();
+        await expect(cooldownBtn).toContainText(/Hold on/);
+
+        // Analytics sink should have captured a cooldown start.
+        const events = await page.evaluate(() => {
+            return (
+                window as unknown as {
+                    __pmAnalytics?: { events: Array<{ name: string }> };
+                }
+            ).__pmAnalytics?.events ?? [];
+        });
+        expect(events.some((e) => e.name === 'trade.cooldown.started')).toBe(
+            true,
+        );
+
+        // No rationale submission yet — the first Submit press only
+        // starts the timer.
+        expect(events.some((e) => e.name === 'trade.rationale.submitted')).toBe(
+            false,
+        );
+    });
+
+    test('switching away from caution mood mid-cooldown clears the lock', async ({ page }) => {
+        const panel = page.getByTestId('pre-trade-rationale');
+
+        // Complete the rationale with mood=Revenge.
+        const thesisGroup = panel.locator(
+            'div[role="group"][aria-label="Thesis linkage"]',
+        );
+        const firstThesisChip = thesisGroup.locator('button.pm-rat-chip').first();
+        const firstClass = (await firstThesisChip.getAttribute('class')) ?? '';
+        if (
+            (await firstThesisChip.isVisible()) &&
+            !firstClass.includes('pm-rat-chip-add')
+        ) {
+            await firstThesisChip.click();
+        } else {
+            await panel.getByRole('button', { name: /New thesis/ }).click();
+            await panel.getByPlaceholder(/Why buy/).fill('Reverse it');
+            await panel.getByRole('button', { name: 'Create', exact: true }).click();
+        }
+        await panel.getByRole('button', { name: 'Breakout' }).click();
+        await panel.getByLabel(/Conviction/).fill('7');
+        await panel.getByRole('button', { name: /Revenge/ }).click();
+        await panel.getByLabel('Rationale').fill('Getting it back from last week.');
+
+        // Press Submit → cooldown starts.
+        await page.getByRole('button', { name: /Review & buy/ }).click();
+        await expect(
+            page.locator('button.pm-exec-submit[data-cooldown="true"]'),
+        ).toBeVisible();
+
+        // Switch mood to "Focused" — cooldown should clear.
+        await panel.getByRole('button', { name: /Focused/ }).click();
+        await expect(
+            page.locator('button.pm-exec-submit[data-cooldown="true"]'),
+        ).toHaveCount(0);
+        await expect(
+            page.getByRole('button', { name: /Review & buy/ }),
+        ).toBeEnabled();
+    });
+
+    test('setting cooldown to Off in Settings bypasses the timer', async ({ page }) => {
+        // Flip cooldown to "Off".
+        await page.goto('/settings');
+        const group = page.getByRole('radiogroup', {
+            name: /Mood cooldown duration/,
+        });
+        await expect(group).toBeVisible();
+        await group.getByRole('radio', { name: 'Off' }).click();
+        await expect(group.getByRole('radio', { name: 'Off' })).toHaveAttribute(
+            'aria-checked',
+            'true',
+        );
+
+        // Back to Execution — completing a FOMO rationale and pressing
+        // Submit should fire immediately (no countdown button).
+        await page.goto('/execution');
+        const panel = page.getByTestId('pre-trade-rationale');
+        const thesisGroup = panel.locator(
+            'div[role="group"][aria-label="Thesis linkage"]',
+        );
+        const firstThesisChip = thesisGroup.locator('button.pm-rat-chip').first();
+        const firstClass = (await firstThesisChip.getAttribute('class')) ?? '';
+        if (
+            (await firstThesisChip.isVisible()) &&
+            !firstClass.includes('pm-rat-chip-add')
+        ) {
+            await firstThesisChip.click();
+        } else {
+            await panel.getByRole('button', { name: /New thesis/ }).click();
+            await panel.getByPlaceholder(/Why buy/).fill('Off test');
+            await panel.getByRole('button', { name: 'Create', exact: true }).click();
+        }
+        await panel.getByRole('button', { name: 'Breakout' }).click();
+        await panel.getByLabel(/Conviction/).fill('6');
+        await panel.getByRole('button', { name: /FOMO/ }).click();
+        await panel.getByLabel('Rationale').fill('Rip the bandaid.');
+
+        await page.getByRole('button', { name: /Review & buy/ }).click();
+
+        // No cooldown should have started; order should have been
+        // submitted (the rationale-submitted event is our proof).
+        await expect(
+            page.locator('button.pm-exec-submit[data-cooldown="true"]'),
+        ).toHaveCount(0);
+        const events = await page.evaluate(() => {
+            return (
+                window as unknown as {
+                    __pmAnalytics?: { events: Array<{ name: string }> };
+                }
+            ).__pmAnalytics?.events ?? [];
+        });
+        expect(events.some((e) => e.name === 'trade.rationale.submitted')).toBe(
+            true,
+        );
+        expect(events.some((e) => e.name === 'trade.cooldown.started')).toBe(
+            false,
+        );
+    });
+});

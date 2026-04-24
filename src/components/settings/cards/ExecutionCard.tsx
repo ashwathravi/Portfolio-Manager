@@ -1,10 +1,14 @@
 "use client";
 
 import { ScrollText } from "lucide-react";
-import { useSettingsStore } from "@/lib/stores/settingsStore";
+import {
+    useSettingsStore,
+    COOLDOWN_OPTIONS,
+    type CooldownSeconds,
+} from "@/lib/stores/settingsStore";
 
 /**
- * AR-109 Execution settings card.
+ * Execution settings card (AR-109 + AR-110).
  *
  * Houses workflow toggles that shape the *shape* of the order ticket
  * rather than risk rails (those live in `GuardrailsCard`). Keeping
@@ -12,10 +16,14 @@ import { useSettingsStore } from "@/lib/stores/settingsStore";
  * like it's touching "approval threshold" — the copy, icon, and
  * position in the grid all signal a different axis.
  *
- * Currently owns a single toggle:
+ * Currently owns:
  *
- *   - Require pre-trade rationale — gates Submit in the Focus variant
- *     behind the `<PreTradeRationale>` capture panel. Default ON.
+ *   - Require pre-trade rationale (AR-109) — gates Submit in the Focus
+ *     variant behind the `<PreTradeRationale>` capture panel. Default
+ *     ON.
+ *   - Mood cooldown (AR-110) — when the trader tags a caution mood
+ *     (`fomo` / `revenge`), Submit locks for N seconds after the first
+ *     press. Options: Off / 10s / 30s / 60s. Default 10s.
  *
  * More execution-shape toggles will land here in subsequent
  * JournalPlus tickets (AR-114 weekly review ritual, AR-113 time
@@ -49,6 +57,7 @@ export function ExecutionCard() {
             </header>
 
             <div className="pm-guard-list">
+                {/* Rationale toggle (AR-109) */}
                 <div
                     className={`pm-guard-item${
                         exec.rationaleRequired ? "" : " is-off"
@@ -77,6 +86,52 @@ export function ExecutionCard() {
                         />
                         <span />
                     </label>
+                </div>
+
+                {/* Cooldown picker (AR-110) */}
+                <div
+                    className={`pm-guard-item${
+                        exec.cooldownSeconds > 0 ? "" : " is-off"
+                    }`}
+                >
+                    <div className="pm-guard-text">
+                        <div className="pm-guard-title">Mood cooldown</div>
+                        <div className="pm-guard-desc">
+                            Lock Submit for this many seconds when the mood at
+                            entry is{" "}
+                            <strong>FOMO</strong> or <strong>Revenge</strong>.
+                            Short pause, then the ticket unlocks — nudge, not
+                            block.
+                        </div>
+                    </div>
+                    <div
+                        className="pm-cooldown-chips"
+                        role="radiogroup"
+                        aria-label="Mood cooldown duration"
+                    >
+                        {COOLDOWN_OPTIONS.map((opt) => {
+                            const selected = exec.cooldownSeconds === opt.value;
+                            return (
+                                <button
+                                    key={opt.value}
+                                    type="button"
+                                    role="radio"
+                                    aria-checked={selected}
+                                    className={`pm-cooldown-chip${
+                                        selected ? " is-on" : ""
+                                    }`}
+                                    title={opt.desc}
+                                    onClick={() =>
+                                        update({
+                                            cooldownSeconds: opt.value as CooldownSeconds,
+                                        })
+                                    }
+                                >
+                                    {opt.label}
+                                </button>
+                            );
+                        })}
+                    </div>
                 </div>
             </div>
         </section>

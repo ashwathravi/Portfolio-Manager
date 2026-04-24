@@ -11,19 +11,22 @@ import {
     defaultSectorBreakdown,
 } from "@/lib/performance/attribution";
 import type { MonthlyValuation } from "@/lib/performance/periodSummary";
+import { SEED_JOURNAL } from "@/lib/journal/seed";
 import { EquityCurveCard, type Benchmark } from "./EquityCurveCard";
 import { AttributionBarsCard } from "./AttributionBarsCard";
 import { MetricsByPeriodTable } from "./MetricsByPeriodTable";
 import { MonthlyHeatmapCard } from "./MonthlyHeatmapCard";
+import { MoodBreakdownCard } from "./MoodBreakdownCard";
 
 /**
- * Phase 4 (AR-75 / AR-76 / AR-77) Performance page wrapper.
+ * Performance page wrapper.
  *
- * Composes all four deep-dive cards:
+ * Composes all deep-dive cards:
  *   - EquityCurveCard        (AR-75, hero)
  *   - AttributionBarsCard    (AR-76, BHB decomposition)
  *   - MetricsByPeriodTable   (AR-76, period × metrics matrix)
  *   - MonthlyHeatmapCard     (AR-77, year × month intensity grid)
+ *   - MoodBreakdownCard      (AR-110, mood × realized P&L)
  *
  * All state is local to each card. The client wrapper exists purely to
  * keep the page file thin and to keep the topbar / breadcrumbs / actions
@@ -119,6 +122,8 @@ export function PerformancePageClient() {
             </div>
 
             <MonthlyHeatmapCard portfolio={portfolioMonthlySeries} />
+
+            <MoodBreakdownCard trades={SEED_JOURNAL} />
         </div>
     );
 }

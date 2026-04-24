@@ -190,3 +190,51 @@ export function isRationaleComplete(draft: RationaleDraftLike | null | undefined
     }
     return true;
 }
+
+// --------------------------------------------------------------------- //
+// Journal entries (AR-110)
+// --------------------------------------------------------------------- //
+
+/**
+ * A closed round-trip trade with its captured rationale. Where
+ * `TradeRationale` is the "what was I thinking" snapshot, `JournalEntry`
+ * is the "what happened" bookend — realized P&L once the position is
+ * unwound, holding period, and the rationale that went in with it.
+ *
+ * Emitted into the journal at the moment a position closes (the fill
+ * that brings quantity back to zero, or a manual close). The rationale
+ * is copied in verbatim from the entry order — never reconstructed,
+ * never edited after the fact. That immutability is the whole point of
+ * JournalPlus: you grade the thesis against what you wrote, not a
+ * sanitized retelling.
+ *
+ * `holdingPeriodDays` is a convenience — it's just
+ * `(closedAt - openedAt) / 86_400_000` — but we precompute it so the
+ * analytics surfaces don't repeat the arithmetic on every render.
+ */
+export interface JournalEntry {
+    id: string;
+    /** Source order id if the trade originated inside the app. Optional
+     *  because imported brokerage history won't always carry one. */
+    orderId?: string;
+    ticker: string;
+    side: 'buy' | 'sell';
+    quantity: number;
+    entryPrice: number;
+    exitPrice: number;
+    /** Notional USD at entry (quantity × entryPrice). Stored so the
+     *  analytics don't need to re-multiply on every aggregation pass. */
+    notionalUsd: number;
+    /** Realized P&L in USD, net of fees. Positive = win. */
+    realizedPnlUsd: number;
+    /** Elapsed days between open and close, float. Fractional values
+     *  are meaningful (0.04 = ~1 hour); do not round. */
+    holdingPeriodDays: number;
+    openedAt: string;
+    closedAt: string;
+    /** The pre-trade snapshot captured at entry. Required on journal
+     *  entries — if a trade didn't have a rationale captured, it won't
+     *  appear in the journal (the execution flow handles the skipped
+     *  case via analytics events, not by synthesizing a placeholder). */
+    rationale: TradeRationale;
+}
