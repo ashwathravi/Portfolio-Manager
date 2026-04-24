@@ -7210,3 +7210,97 @@
 .pm-guard-inline-pct {
   width: 5ch;
 }
+
+/* ==========================================================================
+   Phase 9 · AR-93 — Animation polish
+
+   The redesign leans on four motion primitives. Keep the list small so the
+   UI reads as calm, not performative:
+
+     pm-ping          live market dot in the sidebar      (Phase 1)
+     pm-chart-halo    AreaChart end-dot halo pulse        (Phase 2)
+     pm-co-pulse      Checkout locked-price countdown     (Phase 7)
+     pm-caret         Terminal CLI prompt blink           (this ticket)
+
+   Everything else is driven by 120–150ms ease-out `transition`s on hover,
+   focus, and state changes — short enough that fast users don't notice a
+   delay, long enough to feel intentional. We also tighten a handful of
+   surfaces that didn't have transitions yet (cards, chips), and expand
+   the `prefers-reduced-motion` escape hatch to cover every keyframe.
+   ========================================================================== */
+
+/* --- pm-caret (Terminal CLI prompt blink) -------------------------- */
+
+/* The Terminal's `>` prompt is the user's spatial anchor for the CLI.
+   A steady blink (1s cadence — same as macOS Terminal defaults) draws
+   the eye there on mount and pulses during idle moments without
+   competing with the book/tape live updates happening around it. We
+   blink the prompt character rather than synthesizing a custom block
+   caret inside the input because:
+     (a) Native `caret-color` already handles the in-input cursor.
+     (b) The prompt is `aria-hidden`, so the blink never produces SR
+         noise — it's a pure visual cue.
+     (c) Keyframing `opacity` is GPU-compositor-cheap. */
+.pm-term-cli-prompt {
+  animation: pm-caret 1s steps(2, jump-none) infinite;
+  will-change: opacity;
+}
+
+/* `.is-valid` / `.is-error` pause the blink — once the user has a parse
+   verdict, the steady prompt is the calmer signal. */
+.pm-term-cli.is-valid .pm-term-cli-prompt,
+.pm-term-cli.is-error .pm-term-cli-prompt {
+  animation: none;
+  opacity: 1;
+}
+
+@keyframes pm-caret {
+  0%, 49%   { opacity: 1; }
+  50%, 100% { opacity: 0.1; }
+}
+
+/* --- Transition polish on shared primitives ----------------------- */
+
+/* Cards and chips didn't have a transition, so hover state changes
+   popped instantly. Match the button spec (≤150ms ease-out) so cards
+   feel cohesive with the rest of the UI. We transition just the
+   properties that can change in :hover / :focus — keeping the list
+   narrow means browsers can fast-path the paint. */
+.pm-card,
+.pm-chip {
+  transition: background-color 140ms ease-out, border-color 140ms ease-out,
+              box-shadow 140ms ease-out, color 140ms ease-out;
+}
+
+/* --- prefers-reduced-motion: comprehensive sweep ------------------ */
+
+/* When the user opts out of motion (macOS: System Settings →
+   Accessibility → Display → Reduce motion; Windows: Settings → Ease
+   of Access → Display → Show animations), we disable every
+   keyframed animation site-wide. Transitions stay — they're short,
+   non-looping state changes and shouldn't trip motion sensitivity.
+   `animation: none !important` is the safe hammer here because the
+   per-element rules are the only `animation` declarations for these
+   classes. */
+@media (prefers-reduced-motion: reduce) {
+  .pm-live-dot::after,
+  .pm-tweaks-panel,
+  .pm-chart-halo,
+  .pm-co-lock-dot,
+  .pm-term-cli-prompt {
+    animation: none !important;
+  }
+
+  /* Belt-and-braces: flatten any one-off transitions that might
+     otherwise feel animated (>0) down to a no-op. We cap at 0.001s
+     rather than 0 so tests that check `getComputedStyle(...).transition`
+     still get a valid value — a flat 0 can confuse some tooling. */
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.001ms !important;
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+  }
+}
