@@ -5,7 +5,6 @@ const { performance } = require('perf_hooks');
 // Configuration
 const NUM_TRANSACTIONS = 100000;
 const NUM_PORTFOLIOS = 100;
-const TRANSACTIONS_PER_PORTFOLIO = NUM_TRANSACTIONS / NUM_PORTFOLIOS;
 
 console.log(`Setting up benchmark with ${NUM_TRANSACTIONS} transactions across ${NUM_PORTFOLIOS} portfolios...`);
 

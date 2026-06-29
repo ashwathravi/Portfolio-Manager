@@ -58,6 +58,8 @@ export function ReviewsArchiveCard({
     );
 
     useEffect(() => {
+        // Archive rows include client-only persisted review state.
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setRows(
             reviews.map((r) => {
                 const state = getReviewState(r.id);

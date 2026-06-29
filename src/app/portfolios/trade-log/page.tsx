@@ -2,12 +2,13 @@
 
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Filter, Download, Plus, ArrowUpRight, ArrowDownRight, X, ChevronRight } from 'lucide-react';
+import { Filter, Download, Plus, ArrowUpRight, ArrowDownRight, X, ChevronRight, Repeat2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { useState, useMemo } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { AddTradeModal } from '@/components/trade-log/AddTradeModal';
 import { exportToCsv } from '@/lib/exportCsv';
+import { computeChurnAnalysis } from '@/lib/risk-policy';
 import {
     Select,
     SelectContent,
@@ -102,6 +103,34 @@ const mockTrades: Trade[] = [
         strategy: 'Value Investing',
         tags: ['High Conviction'],
     },
+    {
+        id: '6',
+        date: '2026-02-02',
+        symbol: 'TSLA',
+        name: 'Tesla, Inc.',
+        type: 'SELL',
+        quantity: 28,
+        price: 210.00,
+        totalValue: 5880.00,
+        account: 'Fidelity Individual',
+        status: 'completed',
+        strategy: 'Momentum Trading',
+        tags: ['FOMO'],
+    },
+    {
+        id: '7',
+        date: '2026-01-31',
+        symbol: 'TSLA',
+        name: 'Tesla, Inc.',
+        type: 'BUY',
+        quantity: 28,
+        price: 206.50,
+        totalValue: 5782.00,
+        account: 'Fidelity Individual',
+        status: 'completed',
+        strategy: 'Momentum Trading',
+        tags: ['FOMO'],
+    },
 ];
 
 const accounts = ['All Accounts', 'Fidelity Individual', 'Vanguard Roth IRA', 'Robinhood Trading'];
@@ -133,15 +162,47 @@ function TradeLogContent() {
     const [showFilters, setShowFilters] = useState(() => {
         return !!(searchParams.get('account') || searchParams.get('strategy') || searchParams.get('tag'));
     });
+    const [showHighChurnOnly, setShowHighChurnOnly] = useState(() => {
+        return searchParams.get('churn') === 'high';
+    });
+
+    const churnAnalysis = useMemo(() => {
+        return computeChurnAnalysis(
+            trades.map((trade) => ({
+                id: trade.id,
+                date: trade.date,
+                type: trade.type.toLowerCase(),
+                ticker: trade.symbol,
+                amount: trade.totalValue,
+                quantity: trade.quantity,
+                price: trade.price,
+                account: trade.account,
+                setupType: trade.strategy === 'Value Investing' ? 'rebalance' : 'conviction_add',
+                mood: trade.tags.includes('FOMO') ? 'fomo' : undefined,
+                thesisId: trade.tags.includes('High Conviction') ? `thesis-${trade.symbol}` : undefined,
+                notes: trade.tags.join(' '),
+            })),
+            {
+                windowDays: 90,
+                watchRepeatSymbols: 1,
+                breachRepeatSymbols: 2,
+            },
+        );
+    }, [trades]);
+    const highChurnSymbols = useMemo(
+        () => new Set(churnAnalysis.rows.filter((row) => row.status !== 'inside').map((row) => row.symbol)),
+        [churnAnalysis.rows],
+    );
 
     const filteredTrades = useMemo(() => {
         return trades.filter((trade) => {
             const accountMatch = selectedAccount === 'All Accounts' || trade.account === selectedAccount;
             const strategyMatch = selectedStrategy === 'All Strategies' || trade.strategy === selectedStrategy;
             const tagMatch = selectedTag === 'All Tags' || trade.tags.includes(selectedTag);
-            return accountMatch && strategyMatch && tagMatch;
+            const churnMatch = !showHighChurnOnly || highChurnSymbols.has(trade.symbol);
+            return accountMatch && strategyMatch && tagMatch && churnMatch;
         });
-    }, [trades, selectedAccount, selectedStrategy, selectedTag]);
+    }, [trades, selectedAccount, selectedStrategy, selectedTag, showHighChurnOnly, highChurnSymbols]);
 
     const summaryStats = useMemo(() => {
         return filteredTrades.reduce(
@@ -161,11 +222,12 @@ function TradeLogContent() {
         setSelectedAccount('All Accounts');
         setSelectedStrategy('All Strategies');
         setSelectedTag('All Tags');
+        setShowHighChurnOnly(false);
     };
 
     const activeFiltersCount = [selectedAccount, selectedStrategy, selectedTag].filter(
         (filter, index) => filter !== ['All Accounts', 'All Strategies', 'All Tags'][index]
-    ).length;
+    ).length + (showHighChurnOnly ? 1 : 0);
 
     // Determine if filters are active
     const hasActiveFilters = activeFiltersCount > 0;
@@ -173,6 +235,7 @@ function TradeLogContent() {
         if (selectedAccount !== 'All Accounts') return selectedAccount;
         if (selectedStrategy !== 'All Strategies') return selectedStrategy;
         if (selectedTag !== 'All Tags') return selectedTag;
+        if (showHighChurnOnly) return 'High-churn trades';
         return '';
     };
 
@@ -235,6 +298,37 @@ function TradeLogContent() {
                     <h3 className="text-2xl font-bold">{filteredTrades.length} trades</h3>
                 </Card>
             </div>
+
+            {churnAnalysis.rows.length > 0 && (
+                <Card className="p-4" data-testid="trade-log-churn-warning">
+                    <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                        <div className="flex items-start gap-3">
+                            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-amber-500/10 text-amber-600">
+                                <Repeat2 className="h-4 w-4" />
+                            </div>
+                            <div>
+                                <p className="text-sm font-semibold">Churn and tax-friction review</p>
+                                <p className="text-sm text-muted-foreground">
+                                    {churnAnalysis.rows[0].recommendation}
+                                </p>
+                                <p className="mt-1 text-xs text-muted-foreground">
+                                    {churnAnalysis.rows[0].symbol}: score {churnAnalysis.rows[0].churnScore} · {churnAnalysis.rows[0].tradeCount} trades · ${Math.round(churnAnalysis.rows[0].turnoverUsd).toLocaleString('en-US')} turnover
+                                </p>
+                            </div>
+                        </div>
+                        <Button
+                            variant={showHighChurnOnly ? 'default' : 'outline'}
+                            size="sm"
+                            onClick={() => setShowHighChurnOnly((current) => !current)}
+                            data-testid="trade-log-high-churn-filter"
+                            aria-pressed={showHighChurnOnly}
+                        >
+                            <Repeat2 className="h-4 w-4 mr-2" />
+                            High churn
+                        </Button>
+                    </div>
+                </Card>
+            )}
 
             {/* Trade Log Table */}
             <Card className="p-6">

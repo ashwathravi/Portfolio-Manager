@@ -11,7 +11,14 @@ import { WatchlistCard } from '@/components/dashboard/WatchlistCard';
 import { ActiveThesesCard } from '@/components/dashboard/ActiveThesesCard';
 import { PatternFeed } from '@/components/dashboard/PatternFeed';
 import { WeeklyReviewCard } from '@/components/dashboard/WeeklyReviewCard';
+import { AlphaRadarDashboardCard } from '@/components/dashboard/AlphaRadarDashboardCard';
 import { mockTransactions } from '@/lib/mockData';
+import { DEFAULT_THESES as DEFAULT_RESEARCH_THESES } from '@/lib/research/thesis';
+import {
+  RiskPolicyDashboardCard,
+  type RiskPolicyDashboardCardInput,
+} from '@/components/dashboard/RiskPolicyDashboardCard';
+import { DEFAULT_OPTION_RISK_POSITIONS, computeRiskPolicyDashboard } from '@/lib/risk-policy';
 
 /**
  * Phase 3 Dashboard (AR-70/71/72/73).
@@ -111,6 +118,24 @@ export default async function Dashboard() {
     marketValue: h.marketValue || h.quantity * h.currentPrice,
   }));
 
+  const riskPolicyInput: RiskPolicyDashboardCardInput = {
+    holdings: allHoldings.map((h) => ({
+      id: h.id,
+      symbol: h.symbol,
+      name: resolveName(h.symbol),
+      quantity: h.quantity,
+      avgCost: h.avgCost,
+      currentPrice: h.currentPrice,
+      marketValue: h.marketValue || h.quantity * h.currentPrice,
+      isEmployerStock: h.symbol === 'GOOG' || h.symbol === 'GOOGL',
+    })),
+    cashTotal,
+    trades: mockTransactions,
+    optionPositions: [...DEFAULT_OPTION_RISK_POSITIONS],
+    theses: DEFAULT_RESEARCH_THESES,
+  };
+  const riskPolicySummary = computeRiskPolicyDashboard(riskPolicyInput);
+
   // ---- Recent activity: last 30 days from mock until we wire live txns ----
   const thirtyDaysAgo = new Date();
   thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
@@ -150,8 +175,12 @@ export default async function Dashboard() {
         alphaVsSp={1.8}
       />
 
+      <RiskPolicyDashboardCard summary={riskPolicySummary} input={riskPolicyInput} />
+
       {/* ---- AR-114: weekly review ritual (hero slot; hides when acked) ---- */}
-      <WeeklyReviewCard />
+      <div id="weekly-review">
+        <WeeklyReviewCard />
+      </div>
 
       <div className="pm-grid-2">
         <EquityChartCard netWorth={netWorthSeed} seed={allHoldings.length} />
@@ -171,6 +200,7 @@ export default async function Dashboard() {
       <div className="pm-grid-2-63">
         <PatternFeed />
         <div className="pm-dashboard-side-stack">
+          <AlphaRadarDashboardCard />
           <WatchlistCard rows={DEFAULT_WATCHLIST} limit={5} />
           <ActiveThesesCard rows={DEFAULT_THESES} limit={3} />
         </div>

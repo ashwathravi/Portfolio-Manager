@@ -15,7 +15,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { RotateCcw, X } from 'lucide-react';
-import type { AskMessage } from '@/lib/ask/types';
+import type { AskMessage, AskStoreShape } from '@/lib/ask/types';
 import { runAsk, buildDefaultContext } from '@/lib/ask/run';
 import {
     clearHistory,
@@ -37,6 +37,8 @@ export interface AskSheetProps {
     variant?: 'sheet' | 'page';
 }
 
+const EMPTY_SHEET_STORE: AskStoreShape = { history: [], dayBucket: '', dayCount: 0 };
+
 function uuid(): string {
     // crypto.randomUUID is in every evergreen browser; fallback for SSR /
     // test harness just in case.
@@ -48,23 +50,26 @@ function uuid(): string {
 
 export function AskSheet({ onClose, variant = 'sheet' }: AskSheetProps) {
     const [mounted, setMounted] = useState(false);
-    const [messages, setMessages] = useState<AskMessage[]>([]);
-    const [dayCount, setDayCount] = useState(0);
+    const [store, setStore] = useState<AskStoreShape>(EMPTY_SHEET_STORE);
     const endRef = useRef<HTMLDivElement>(null);
+    const messages = store.history;
+    const dayCount = store.dayCount;
 
-    // Hydration-safe read.
+    // Keep the first server/client render identical, then hydrate from
+    // localStorage after mount so persisted history does not cause a
+    // React hydration mismatch.
     useEffect(() => {
-        const store = getStore();
-        setMessages(store.history);
-        setDayCount(store.dayCount);
-        setMounted(true);
+        const next = getStore();
+        queueMicrotask(() => {
+            setStore(next);
+            setMounted(true);
+        });
     }, []);
 
     // Auto-scroll to the bottom when messages change.
     useEffect(() => {
-        if (!mounted) return;
         endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-    }, [messages, mounted]);
+    }, [messages]);
 
     const handleSubmit = useCallback((question: string) => {
         if (isRateLimited()) return;
@@ -77,7 +82,7 @@ export function AskSheet({ onClose, variant = 'sheet' }: AskSheetProps) {
             ts: now,
         };
         const after = saveMessage(userMsg);
-        setMessages(after.history);
+        setStore(after);
         incrementDayCount();
 
         // Synchronously compute the answer. The tool layer is pure and
@@ -93,14 +98,11 @@ export function AskSheet({ onClose, variant = 'sheet' }: AskSheetProps) {
             ts: Date.now(),
         };
         const after2 = saveMessage(asstMsg);
-        setMessages(after2.history);
-        setDayCount(after2.dayCount);
+        setStore(after2);
     }, []);
 
     const handleClear = () => {
-        clearHistory();
-        setMessages([]);
-        setDayCount(0);
+        setStore(clearHistory());
     };
 
     const limited = dayCount >= DAILY_LIMIT;

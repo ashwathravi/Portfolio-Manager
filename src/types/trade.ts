@@ -244,4 +244,11 @@ export interface JournalEntry {
      *  fact so the history stays honest even if a user edits rules
      *  later. */
     adherence?: import('@/lib/adherence/rules').TradeAdherence;
+    /** Risk Policy Engine exceptions captured at order submit. These
+     *  are counted by weekly review so overrides do not disappear into
+     *  the blotter once the trade closes. */
+    policyExceptions?: import('@/lib/risk-policy').RiskPolicyException[];
+    /** Sell-discipline audit events captured while managing trim,
+     *  re-underwrite, snooze, and resolve decisions. */
+    sellDisciplineEvents?: import('@/lib/risk-policy').SellDisciplineAuditEvent[];
 }

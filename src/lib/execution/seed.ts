@@ -33,11 +33,10 @@ export const BUYING_POWER_USD = 48_250.0;
 export const COMMISSION_PER_TRADE_USD = 0.0; // Commission-free broker
 export const COMMISSION_PER_SHARE_USD = 0.0;
 
-// `now` is captured at module load. The orders pretend to have been placed
-// across the last 6 hours so the blotter looks lived-in without anything
-// actually happening.
-const now = Date.now();
-const minsAgo = (m: number) => new Date(now - m * 60 * 1000);
+// Stable base time keeps the SSR and client hydration render identical.
+// The orders still pretend to span a recent six-hour blotter window.
+export const SEED_ORDER_BASE_TIME_MS = Date.parse('2026-05-16T16:00:00.000Z');
+const minsAgo = (m: number) => new Date(SEED_ORDER_BASE_TIME_MS - m * 60 * 1000);
 
 export const SEED_ORDERS: Order[] = [
     {

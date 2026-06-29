@@ -70,6 +70,7 @@ export function NewThesisModal({ open, onOpenChange, onSubmit, editing }: NewThe
     // Reset the form when the modal opens so edits and creates don't bleed into each other.
     useEffect(() => {
         if (!open) return;
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setForm(editing ? toFormData(editing) : defaultForm);
     }, [open, editing]);
 

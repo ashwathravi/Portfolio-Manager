@@ -115,6 +115,7 @@ function makeColumns(onCancel?: (id: string) => void): ColumnDef<Order>[] {
 export function OrderBlotter({ orders, onCancel }: OrderBlotterProps) {
     const columns = makeColumns(onCancel)
 
+    // eslint-disable-next-line react-hooks/incompatible-library -- TanStack Table intentionally returns table methods that React Compiler cannot memoize safely.
     const table = useReactTable({
         data: orders,
         columns,

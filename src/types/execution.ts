@@ -1,14 +1,35 @@
+import type {
+    OptionContractType,
+    PreTradeRiskPolicyImpact,
+    RiskPolicyException,
+} from '@/lib/risk-policy';
 import type { TradeRationale } from './trade';
 
 export type OrderSide = 'buy' | 'sell';
+export type OrderInstrumentType = 'equity' | 'option';
 export type OrderType = 'market' | 'limit' | 'stop' | 'stop_limit';
 export type OrderStatus = 'pending' | 'working' | 'filled' | 'cancelled' | 'rejected';
 export type TimeInForce = 'day' | 'gtc' | 'ioc' | 'fok';
+
+export interface OrderOptionDetails {
+    underlying: string;
+    contractType: OptionContractType;
+    strike: number;
+    expiry: string;
+    premium: number;
+    contractMultiplier: number;
+    premiumAtRisk: number;
+    notionalEquivalent: number;
+    maxLossAcknowledged: boolean;
+    whatMustBeTrueByExpiry: string;
+    plannedExitRule: string;
+}
 
 export interface Order {
     id: string;
     portfolioId: string;
     strategyId?: string; // Optional linking to a strategy
+    instrumentType?: OrderInstrumentType;
     ticker: string;
     side: OrderSide;
     type: OrderType;
@@ -27,8 +48,12 @@ export interface Order {
      * disable the capture flow. When present, surfaces in the blotter
      * and journal read this verbatim — never synthesize one after the
      * fact.
-     */
+    */
     rationale?: TradeRationale;
+    optionDetails?: OrderOptionDetails;
+    riskPolicyImpact?: PreTradeRiskPolicyImpact;
+    policyExceptions?: RiskPolicyException[];
+    riskPolicyOverrideReason?: string;
 }
 
 export interface Execution {

@@ -1,6 +1,6 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert';
-import { tagSchema, profileSchema, passwordChangeSchema, apiKeySchema, preferencesSchema } from './settings';
+import { tagSchema, profileSchema, passwordChangeSchema, apiKeySchema, preferencesSchema, alertRuleSchema } from './settings';
 
 // ---------------------------------------------------------------------------
 // tagSchema
@@ -419,5 +419,50 @@ describe('preferencesSchema', () => {
     test('rejects non-integer refresh seconds', () => {
         const result = preferencesSchema.safeParse({ ...validPrefs, marketDataRefreshSeconds: 30.5 });
         assert.strictEqual(result.success, false);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// alertRuleSchema
+// ---------------------------------------------------------------------------
+
+describe('alertRuleSchema', () => {
+    const validRule = {
+        name: 'Alpha Radar overlap',
+        metric: 'alpha_radar_user_overlap' as const,
+        symbol: '',
+        comparator: 'gte' as const,
+        threshold: 80,
+        enabled: true,
+        rearm: 'always' as const,
+        note: 'Review source report',
+    };
+
+    test('accepts Alpha Radar materiality score rules without a symbol', () => {
+        const result = alertRuleSchema.safeParse(validRule);
+        assert.strictEqual(result.success, true);
+    });
+
+    test('rejects Alpha Radar materiality scores outside 0-100', () => {
+        const result = alertRuleSchema.safeParse({
+            ...validRule,
+            threshold: 120,
+        });
+        assert.strictEqual(result.success, false);
+        if (!result.success) {
+            assert.strictEqual(result.error.issues[0].message, 'Alpha Radar materiality score must be between 0 and 100');
+        }
+    });
+
+    test('still requires a symbol for price metrics', () => {
+        const result = alertRuleSchema.safeParse({
+            ...validRule,
+            metric: 'price' as const,
+            symbol: '',
+        });
+        assert.strictEqual(result.success, false);
+        if (!result.success) {
+            assert.strictEqual(result.error.issues[0].message, 'Symbol is required for this metric');
+        }
     });
 });

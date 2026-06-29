@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { signOut } from "next-auth/react";
 import { MoreVertical, User, Settings, LogOut, Palette } from "lucide-react";
 import {
     DropdownMenu,
@@ -125,9 +126,10 @@ export function SidebarUserFooter() {
                     <DropdownMenuSeparator />
                     <DropdownMenuItem
                         className="text-destructive focus:text-destructive"
-                        // Placeholder — real sign-out lands alongside auth work.
-                        // Keeping the affordance visible so the menu is complete.
-                        disabled
+                        onSelect={(event) => {
+                            event.preventDefault();
+                            void signOut({ callbackUrl: "/login" });
+                        }}
                     >
                         <LogOut className="h-4 w-4" aria-hidden="true" />
                         <span>Sign out</span>

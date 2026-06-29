@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { Controller, useForm } from "react-hook-form";
+import Link from "next/link";
+import { Controller, useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -39,15 +40,21 @@ import {
 import { Plus, Pencil, Trash2, BellRing, BellOff } from "lucide-react";
 import { useAlertsStore } from "@/lib/stores/alertsStore";
 import { describeRule } from "@/lib/alerts/evaluator";
+import { isAlphaRadarAlertMetric } from "@/lib/alerts/metrics";
 import type { AlertRule, AlertMetric } from "@/lib/alerts/types";
 import { alertRuleSchema, type AlertRuleFormValues } from "@/lib/validators/settings";
 import { toast } from "sonner";
 
-const METRIC_OPTIONS: Array<{ value: AlertMetric; label: string; requiresSymbol: boolean; isPct: boolean }> = [
-    { value: "price", label: "Price", requiresSymbol: true, isPct: false },
-    { value: "price_change_pct", label: "Daily % change", requiresSymbol: true, isPct: true },
-    { value: "portfolio_value", label: "Portfolio value", requiresSymbol: false, isPct: false },
-    { value: "portfolio_day_change_pct", label: "Portfolio day change %", requiresSymbol: false, isPct: true },
+const METRIC_OPTIONS: Array<{ value: AlertMetric; label: string; requiresSymbol: boolean; unit: "money" | "pct" | "score" }> = [
+    { value: "price", label: "Price", requiresSymbol: true, unit: "money" },
+    { value: "price_change_pct", label: "Daily % change", requiresSymbol: true, unit: "pct" },
+    { value: "portfolio_value", label: "Portfolio value", requiresSymbol: false, unit: "money" },
+    { value: "portfolio_day_change_pct", label: "Portfolio day change %", requiresSymbol: false, unit: "pct" },
+    { value: "alpha_radar_new_position", label: "Alpha Radar: new position", requiresSymbol: false, unit: "score" },
+    { value: "alpha_radar_exit", label: "Alpha Radar: exit", requiresSymbol: false, unit: "score" },
+    { value: "alpha_radar_large_add", label: "Alpha Radar: large add", requiresSymbol: false, unit: "score" },
+    { value: "alpha_radar_large_trim", label: "Alpha Radar: large trim", requiresSymbol: false, unit: "score" },
+    { value: "alpha_radar_user_overlap", label: "Alpha Radar: user overlap", requiresSymbol: false, unit: "score" },
 ];
 
 const COMPARATOR_OPTIONS = [
@@ -90,14 +97,13 @@ export function AlertRulesManager() {
         register,
         handleSubmit,
         reset,
-        watch,
         formState: { errors },
     } = useForm<AlertRuleFormValues>({
         resolver: zodResolver(alertRuleSchema),
         defaultValues: defaultFormValues,
     });
 
-    const watchedMetric = watch("metric");
+    const watchedMetric = useWatch({ control, name: "metric" });
     const metricMeta = METRIC_OPTIONS.find((m) => m.value === watchedMetric);
 
     const openAdd = () => {
@@ -132,6 +138,7 @@ export function AlertRulesManager() {
             enabled: values.enabled,
             rearm: values.rearm,
             note: values.note || undefined,
+            source: isAlphaRadarAlertMetric(values.metric) ? "alpha_radar" as const : "market" as const,
         };
 
         if (editing) {
@@ -155,7 +162,10 @@ export function AlertRulesManager() {
                 <div>
                     <CardTitle>Alert Rules</CardTitle>
                     <CardDescription className="mt-1.5">
-                        Fire a notification when a price or portfolio metric crosses a threshold.
+                        Fire a notification when a price, portfolio, or Alpha Radar signal crosses a threshold.{" "}
+                        <Link href="/help#alpha-radar-v1" data-testid="alpha-radar-alert-help">
+                            Read the Alpha Radar guide.
+                        </Link>
                     </CardDescription>
                 </div>
                 <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
@@ -169,7 +179,7 @@ export function AlertRulesManager() {
                         <DialogHeader>
                             <DialogTitle>{editing ? "Edit alert" : "New alert"}</DialogTitle>
                             <DialogDescription>
-                                Threshold rules are evaluated against live market snapshots.
+                                Threshold rules are evaluated against live market snapshots and Alpha Radar 13F changes.
                             </DialogDescription>
                         </DialogHeader>
                         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
@@ -247,7 +257,7 @@ export function AlertRulesManager() {
 
                                 <div className="space-y-2">
                                     <Label htmlFor="alert-threshold">
-                                        Threshold {metricMeta?.isPct ? "(fraction, 0.05 = 5%)" : metricMeta?.value === "portfolio_value" || metricMeta?.value === "price" ? "($)" : ""}
+                                        Threshold {metricMeta?.unit === "pct" ? "(fraction, 0.05 = 5%)" : metricMeta?.unit === "money" ? "($)" : metricMeta?.unit === "score" ? "(materiality score 0-100)" : ""}
                                     </Label>
                                     <Input
                                         id="alert-threshold"

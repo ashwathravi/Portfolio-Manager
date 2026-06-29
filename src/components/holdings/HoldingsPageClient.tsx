@@ -6,11 +6,26 @@ import { ArrowUpRight, Plus, Upload } from "lucide-react";
 import { useAutoRefreshQuotes } from "@/lib/hooks/useAutoRefreshQuotes";
 import { sectorFor, type Sector } from "@/lib/holdings/sector";
 import {
+    computeBucketAllocation,
+    computeThemeExposure,
+    optionCurrentValue,
+    policyBucketLabel,
+    resolvePolicyBucketAssignment,
+    themeLabel,
+    type OptionRiskPosition,
+    themeWeightsForSymbol,
+    type PolicyBucketId,
+    type PolicyBucketStatus,
+    type ThemeId,
+    type ThemeWeight,
+} from "@/lib/risk-policy";
+import {
     HoldingsFilterRow,
     type HoldingsSortKey,
 } from "./HoldingsFilterRow";
 import { HoldingsFullTable, type HoldingsTableRow } from "./HoldingsFullTable";
 import { HoldingsSummaryStrip } from "./HoldingsSummaryStrip";
+import { OptionsRiskLedgerCard } from "./OptionsRiskLedgerCard";
 
 /**
  * Phase 4 (AR-74) Holdings page wrapper.
@@ -37,14 +52,22 @@ export interface HoldingsSeed {
     holdingDays?: number;
     /** Optional sector override — if omitted we fall back to `sectorFor(symbol)`. */
     sector?: Sector;
+    policyBucket?: PolicyBucketId;
+    themeWeights?: readonly ThemeWeight[];
 }
 
 export interface HoldingsPageClientProps {
     holdings: HoldingsSeed[];
+    optionPositions?: readonly OptionRiskPosition[];
 }
 
-export function HoldingsPageClient({ holdings }: HoldingsPageClientProps) {
+export function HoldingsPageClient({
+    holdings,
+    optionPositions = [],
+}: HoldingsPageClientProps) {
     const [sectorFilter, setSectorFilter] = useState<Sector | "All">("All");
+    const [bucketFilter, setBucketFilter] = useState<PolicyBucketId | "All">("All");
+    const [themeFilter, setThemeFilter] = useState<ThemeId | "All">("All");
     const [sortKey, setSortKey] = useState<HoldingsSortKey>("marketValue");
 
     const symbols = useMemo(
@@ -66,9 +89,13 @@ export function HoldingsPageClient({ holdings }: HoldingsPageClientProps) {
             const todayChangeAbs =
                 q?.change != null ? q.change * h.quantity : 0;
             const sector = h.sector ?? sectorFor(h.symbol);
+            const bucketAssignment = resolvePolicyBucketAssignment(h);
+            const themeWeights = themeWeightsForSymbol(h.symbol, h.themeWeights);
             return {
                 ...h,
                 sector,
+                policyBucket: bucketAssignment.bucket,
+                themeWeights,
                 last,
                 marketValue,
                 costBasis,
@@ -120,12 +147,24 @@ export function HoldingsPageClient({ holdings }: HoldingsPageClientProps) {
         };
     }, [rows, totalMV]);
 
+    const policySummary = useMemo(() => computeBucketAllocation(rows), [rows]);
+    const themeSummary = useMemo(() => computeThemeExposure(rows), [rows]);
+    const optionsCurrentValue = useMemo(
+        () => optionPositions.reduce((sum, position) => sum + optionCurrentValue(position), 0),
+        [optionPositions],
+    );
+    const totalPolicyValue = summary.marketValue + optionsCurrentValue;
+
     // ---- Filter + sort for the table ----
     const tableRows = useMemo<HoldingsTableRow[]>(() => {
-        const filtered =
-            sectorFilter === "All"
-                ? rows
-                : rows.filter((r) => r.sector === sectorFilter);
+        const filtered = rows.filter((r) => {
+            if (sectorFilter !== "All" && r.sector !== sectorFilter) return false;
+            if (bucketFilter !== "All" && r.policyBucket !== bucketFilter) return false;
+            if (themeFilter !== "All" && !r.themeWeights.some((weight) => weight.theme === themeFilter)) {
+                return false;
+            }
+            return true;
+        });
         const sorted = [...filtered].sort((a, b) => {
             switch (sortKey) {
                 case "marketValue":
@@ -143,6 +182,9 @@ export function HoldingsPageClient({ holdings }: HoldingsPageClientProps) {
             symbol: r.symbol,
             name: r.name,
             sector: r.sector,
+            policyBucket: r.policyBucket ?? "unassigned",
+            policyBucketStatus: bucketStatusForHolding(r.policyBucket ?? "unassigned", policySummary),
+            themeWeights: r.themeWeights,
             quantity: r.quantity,
             avgCost: r.avgCost,
             last: r.last,
@@ -152,7 +194,7 @@ export function HoldingsPageClient({ holdings }: HoldingsPageClientProps) {
             allocationPct: r.allocationPct,
             account: r.account,
         }));
-    }, [rows, sectorFilter, sortKey]);
+    }, [rows, sectorFilter, bucketFilter, themeFilter, sortKey, policySummary]);
 
     return (
         <div className="pm-holdings-stack">
@@ -191,9 +233,24 @@ export function HoldingsPageClient({ holdings }: HoldingsPageClientProps) {
                 concentrationTop3={summary.concentrationTop3}
             />
 
+            <PolicyExposureOverview
+                bucketSummary={policySummary}
+                themeSummary={themeSummary}
+            />
+
+            <OptionsRiskLedgerCard
+                positions={optionPositions}
+                totalPortfolioValue={totalPolicyValue}
+                liquidNetWorth={totalPolicyValue}
+            />
+
             <HoldingsFilterRow
                 sectorFilter={sectorFilter}
                 onSectorChange={setSectorFilter}
+                bucketFilter={bucketFilter}
+                onBucketChange={setBucketFilter}
+                themeFilter={themeFilter}
+                onThemeChange={setThemeFilter}
                 sortKey={sortKey}
                 onSortChange={setSortKey}
             />
@@ -213,4 +270,109 @@ export function HoldingsPageClient({ holdings }: HoldingsPageClientProps) {
             )}
         </div>
     );
+}
+
+function PolicyExposureOverview({
+    bucketSummary,
+    themeSummary,
+}: {
+    bucketSummary: ReturnType<typeof computeBucketAllocation>;
+    themeSummary: ReturnType<typeof computeThemeExposure>;
+}) {
+    const bucketRows = bucketSummary.rows.filter((row) => row.marketValue > 0 || row.status === "missing_data");
+    const themeRows = themeSummary.rows
+        .filter((row) => row.marketValue > 0 || row.status === "missing_data")
+        .sort((a, b) => b.marketValue - a.marketValue)
+        .slice(0, 5);
+
+    return (
+        <div className="pm-risk-overview-grid" aria-label="Policy and theme exposure">
+            <section className="pm-card pm-risk-overview-card" aria-label="Policy buckets">
+                <header className="pm-card-header">
+                    <div>
+                        <h3 className="pm-card-title">Policy buckets</h3>
+                        <p className="pm-card-subtitle">
+                            {bucketSummary.actionPrompts.length > 0
+                                ? bucketSummary.actionPrompts[0]
+                                : "All classified holdings are inside first-slice policy bands."}
+                        </p>
+                    </div>
+                </header>
+                <div className="pm-risk-row-list">
+                    {bucketRows.length === 0 ? (
+                        <p className="pm-card-subtitle">No policy exposure yet.</p>
+                    ) : (
+                        bucketRows.map((row) => (
+                            <RiskMiniRow
+                                key={row.bucket}
+                                label={policyBucketLabel(row.bucket)}
+                                value={fmtCurrency0(row.marketValue)}
+                                pct={row.percentOfPortfolio}
+                                status={row.status}
+                            />
+                        ))
+                    )}
+                </div>
+            </section>
+
+            <section className="pm-card pm-risk-overview-card" aria-label="Theme exposure">
+                <header className="pm-card-header">
+                    <div>
+                        <h3 className="pm-card-title">Theme exposure</h3>
+                        <p className="pm-card-subtitle">
+                            AI, mega-cap, semiconductor, and cash-equivalent exposure by weighted fallback tags.
+                        </p>
+                    </div>
+                </header>
+                <div className="pm-risk-row-list">
+                    {themeRows.length === 0 ? (
+                        <p className="pm-card-subtitle">No theme exposure yet.</p>
+                    ) : (
+                        themeRows.map((row) => (
+                            <RiskMiniRow
+                                key={row.theme}
+                                label={themeLabel(row.theme)}
+                                value={fmtCurrency0(row.marketValue)}
+                                pct={row.percentOfPortfolio}
+                                status={row.status}
+                            />
+                        ))
+                    )}
+                </div>
+            </section>
+        </div>
+    );
+}
+
+function RiskMiniRow({
+    label,
+    value,
+    pct,
+    status,
+}: {
+    label: string;
+    value: string;
+    pct: number;
+    status: PolicyBucketStatus | "inside" | "watch" | "breached" | "missing_data";
+}) {
+    return (
+        <div className="pm-risk-mini-row">
+            <div className="pm-risk-mini-main">
+                <span className={`pm-policy-chip is-${status}`}>{label}</span>
+                <span className="pm-card-subtitle">{value}</span>
+            </div>
+            <span className="pm-risk-mini-pct">{pct.toFixed(1)}%</span>
+        </div>
+    );
+}
+
+function bucketStatusForHolding(
+    bucket: PolicyBucketId,
+    bucketSummary: ReturnType<typeof computeBucketAllocation>,
+): PolicyBucketStatus {
+    return bucketSummary.rows.find((row) => row.bucket === bucket)?.status ?? "inside";
+}
+
+function fmtCurrency0(n: number): string {
+    return `$${n.toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
 }

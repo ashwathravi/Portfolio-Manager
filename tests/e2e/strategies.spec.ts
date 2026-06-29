@@ -236,10 +236,13 @@ test.describe('Strategies page — Adherence impact card (AR-111)', () => {
         const delta = card.getByTestId('adherence-impact-delta');
         const empty = card.getByTestId('adherence-impact-empty');
 
-        const deltaVisible = await delta.isVisible().catch(() => false);
-        const emptyVisible = await empty.isVisible().catch(() => false);
-        expect(deltaVisible || emptyVisible).toBe(true);
+        await expect(async () => {
+            const deltaVisible = await delta.isVisible().catch(() => false);
+            const emptyVisible = await empty.isVisible().catch(() => false);
+            expect(deltaVisible || emptyVisible).toBe(true);
+        }).toPass({ timeout: 10_000 });
 
+        const deltaVisible = await delta.isVisible().catch(() => false);
         if (deltaVisible) {
             const tone = await delta.getAttribute('data-tone');
             expect(['pos', 'neg']).toContain(tone);

@@ -21,7 +21,7 @@ const createMockProvider = (name: string, price: number, shouldFail = false): Ma
         });
         return quotes;
     },
-    getHistoricalData: async (symbol: string, timeframe: '1D' | '1H' | '1M'): Promise<HistoricalBar[]> => {
+    getHistoricalData: async (): Promise<HistoricalBar[]> => {
         if (shouldFail) throw new Error(`${name} failed`);
         return [{
             time: '2024-01-01',

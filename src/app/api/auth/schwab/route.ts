@@ -16,7 +16,7 @@ export async function GET(req: NextRequest) {
 
     try {
         // Exchange the authorization code for an OAuth token
-        const tokenResponse = await schwabClient.exchangeCodeForTokens(code);
+        await schwabClient.exchangeCodeForTokens(code);
 
         // TODO: Store tokenResponse.access_token and tokenResponse.refresh_token in the database securely for the user.
         // For now, we return it or redirect back to the app with a success flag

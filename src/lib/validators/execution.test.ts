@@ -1,6 +1,12 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert';
-import { orderSideSchema, orderTypeSchema, timeInForceSchema, orderSchema } from './execution';
+import {
+    orderInstrumentTypeSchema,
+    orderSchema,
+    orderSideSchema,
+    orderTypeSchema,
+    timeInForceSchema,
+} from './execution';
 
 describe('Execution Validators', () => {
     describe('orderSideSchema', () => {
@@ -25,6 +31,17 @@ describe('Execution Validators', () => {
 
         test('should reject invalid types', () => {
             assert.strictEqual(orderTypeSchema.safeParse('trailing_stop').success, false);
+        });
+    });
+
+    describe('orderInstrumentTypeSchema', () => {
+        test('should accept equity and option instruments', () => {
+            assert.strictEqual(orderInstrumentTypeSchema.safeParse('equity').success, true);
+            assert.strictEqual(orderInstrumentTypeSchema.safeParse('option').success, true);
+        });
+
+        test('should reject unsupported instruments', () => {
+            assert.strictEqual(orderInstrumentTypeSchema.safeParse('crypto').success, false);
         });
     });
 
@@ -181,6 +198,65 @@ describe('Execution Validators', () => {
 
                 const noStop = orderSchema.safeParse({ ...validBaseOrder, type: 'stop_limit', limitPrice: '100' });
                 assert.strictEqual(noStop.success, false);
+            });
+        });
+
+        describe('Option policy validation (AR-143)', () => {
+            const validOptionOrder = {
+                ...validBaseOrder,
+                instrumentType: 'option',
+                type: 'limit',
+                limitPrice: '4.50',
+                optionContractType: 'call',
+                optionStrike: '250',
+                optionExpiry: '2027-01-15',
+                optionPremium: '4.50',
+                linkedThesisId: 'seed-aapl',
+                maxLossAcknowledged: true,
+                whatMustBeTrueByExpiry: 'Services growth must re-rate earnings by expiry.',
+                plannedExitRule: 'Exit at 50% loss or roll 90 days before expiry.',
+            };
+
+            test('should accept a fully documented long option order', () => {
+                const result = orderSchema.safeParse(validOptionOrder);
+                assert.strictEqual(result.success, true);
+                if (result.success) {
+                    assert.strictEqual(result.data.instrumentType, 'option');
+                    assert.strictEqual(result.data.optionPremium, 4.5);
+                    assert.strictEqual(result.data.optionStrike, 250);
+                }
+            });
+
+            test('should reject option orders missing thesis, max-loss acknowledgement, and expiry rules', () => {
+                const result = orderSchema.safeParse({
+                    ...validBaseOrder,
+                    instrumentType: 'option',
+                    type: 'limit',
+                    limitPrice: '4.50',
+                    optionContractType: 'call',
+                    optionStrike: '250',
+                    optionExpiry: '2027-01-15',
+                    optionPremium: '4.50',
+                });
+                assert.strictEqual(result.success, false);
+                if (!result.success) {
+                    const paths = result.error.issues.map((issue) => issue.path.join('.'));
+                    assert.ok(paths.includes('linkedThesisId'));
+                    assert.ok(paths.includes('maxLossAcknowledged'));
+                    assert.ok(paths.includes('whatMustBeTrueByExpiry'));
+                    assert.ok(paths.includes('plannedExitRule'));
+                }
+            });
+
+            test('should reject short option orders in the v1 flow', () => {
+                const result = orderSchema.safeParse({
+                    ...validOptionOrder,
+                    side: 'sell',
+                });
+                assert.strictEqual(result.success, false);
+                if (!result.success) {
+                    assert.ok(result.error.issues.some((issue) => issue.path.includes('side')));
+                }
             });
         });
     });

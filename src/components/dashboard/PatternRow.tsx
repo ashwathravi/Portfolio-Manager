@@ -17,9 +17,9 @@ import type { Pattern, PatternSeverity } from "@/lib/patterns/types";
  *   [ glyph tile (severity colour) | headline + body | actions ]
  *
  * `dangerouslySetInnerHTML` is used on the headline because detectors
- * embed `<em>` around the key metric. The markup is generated
- * server-side in the detector (not user input), so it's safe — the
- * headline string is a literal with interpolated numbers only.
+ * embed `<em>` around the key metric. The render path sanitizes the
+ * headline first so AI-polished or future persisted strings cannot
+ * smuggle arbitrary markup into the dashboard.
  *
  * Actions:
  *   - `link`    → next/link to the href in payload
@@ -64,10 +64,9 @@ export function PatternRow({ pattern, onDismiss }: PatternRowProps) {
             <div className="pm-pattern-body">
                 <p
                     className="pm-pattern-headline"
-                    // headline is generated from known-shape strings +
-                    // numbers in `detectors.ts` — the only markup is a
-                    // hardcoded <em> wrap. Safe to render as HTML.
-                    dangerouslySetInnerHTML={{ __html: pattern.headline }}
+                    dangerouslySetInnerHTML={{
+                        __html: sanitizePatternHeadlineHtml(pattern.headline),
+                    }}
                 />
                 <p className="pm-pattern-explainer">{pattern.body}</p>
                 <div className="pm-pattern-actions">
@@ -128,4 +127,19 @@ export function PatternRow({ pattern, onDismiss }: PatternRowProps) {
             </div>
         </li>
     );
+}
+
+export function sanitizePatternHeadlineHtml(headline: string): string {
+    return escapeHtml(headline)
+        .replaceAll("&lt;em&gt;", "<em>")
+        .replaceAll("&lt;/em&gt;", "</em>");
+}
+
+function escapeHtml(value: string): string {
+    return value
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#39;");
 }

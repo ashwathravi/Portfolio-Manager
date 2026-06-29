@@ -15,9 +15,24 @@ import {
     LIVE_PRICES,
     SEED_ORDERS,
 } from "@/lib/execution/seed";
+import {
+    DEFAULT_OPTION_RISK_POSITIONS,
+    evaluateSellDiscipline,
+    evaluatePreTradeRiskPolicy,
+    evaluateOptionOrderPolicy,
+    sellDisciplineBlocksAdd,
+    type PreTradeRiskPolicyCheck,
+    type PreTradeRiskPolicyImpact,
+    type OptionContractType,
+    type OptionPolicyIssue,
+    type SellDisciplineTask,
+} from "@/lib/risk-policy";
+import { mockPortfolios } from "@/lib/mockData";
+import { DEFAULT_THESES } from "@/lib/research/thesis";
 import { useSettingsStore } from "@/lib/stores/settingsStore";
 import type {
     Order,
+    OrderInstrumentType,
     OrderSide,
     OrderStatus,
     OrderType,
@@ -79,6 +94,32 @@ const ORDER_TYPE_LABELS: Record<OrderType, string> = {
     stop_limit: "Stop-limit",
 };
 
+const INSTRUMENT_LABELS: Record<OrderInstrumentType, string> = {
+    equity: "Stock",
+    option: "Option / LEAPS",
+};
+
+const OPTION_CONTRACT_LABELS: Record<OptionContractType, string> = {
+    call: "Call",
+    put: "Put",
+};
+
+const OPTION_CONTRACT_MULTIPLIER = 100;
+const EXECUTION_NAV_USD = 250_000;
+const EXECUTION_POLICY_PORTFOLIO_VALUE = mockPortfolios[0]?.totalValue ?? EXECUTION_NAV_USD;
+const EXECUTION_RISK_POLICY_HOLDINGS = (mockPortfolios[0]?.holdings ?? []).map((holding) => ({
+    id: holding.id,
+    symbol: holding.ticker,
+    name: holding.name,
+    quantity: holding.quantity,
+    avgCost: holding.avgCost,
+    currentPrice: holding.currentPrice,
+    marketValue: holding.marketValue,
+    isEmployerStock: holding.ticker === "GOOG" || holding.ticker === "GOOGL",
+    policyBucket: holding.policyBucket,
+    themeWeights: holding.themeWeights,
+}));
+
 const TIF_OPTIONS: TimeInForce[] = ["day", "gtc", "ioc", "fok"];
 const TIF_LABELS: Record<TimeInForce, string> = {
     day: "DAY",
@@ -129,6 +170,22 @@ function effectivePrice(ticker: string, type: OrderType, limit?: number, stop?: 
     if ((type === "limit" || type === "stop_limit") && limit && limit > 0) return limit;
     if (type === "stop" && stop && stop > 0) return stop;
     return LIVE_PRICES[ticker] ?? 0;
+}
+
+function orderExposureUsd(order: Order): number {
+    if (order.instrumentType === "option" && order.optionDetails) {
+        return order.optionDetails.premiumAtRisk;
+    }
+    return (order.limitPrice ?? order.averageFillPrice ?? LIVE_PRICES[order.ticker] ?? 0) * order.quantity;
+}
+
+function orderDisplayPrice(order: Order): number | undefined {
+    if (order.instrumentType === "option" && order.optionDetails) {
+        return order.optionDetails.premium;
+    }
+    return order.type === "market"
+        ? order.averageFillPrice ?? LIVE_PRICES[order.ticker]
+        : order.limitPrice ?? order.stopPrice;
 }
 
 // --------------------------------------------------------------------- //
@@ -182,6 +239,7 @@ interface OrderFormProps {
 }
 
 function OrderForm({ onSubmit }: OrderFormProps) {
+    const [instrumentType, setInstrumentType] = useState<OrderInstrumentType>("equity");
     const [side, setSide] = useState<OrderSide>("buy");
     const [ticker, setTicker] = useState<string>("AAPL");
     const [quantity, setQuantity] = useState<number>(50);
@@ -189,10 +247,20 @@ function OrderForm({ onSubmit }: OrderFormProps) {
     const [limitPrice, setLimitPrice] = useState<number>(225.0);
     const [stopPrice, setStopPrice] = useState<number>(220.0);
     const [tif, setTif] = useState<TimeInForce>("day");
+    const [optionContractType, setOptionContractType] = useState<OptionContractType>("call");
+    const [optionStrike, setOptionStrike] = useState<number>(250);
+    const [optionExpiry, setOptionExpiry] = useState<string>("2027-01-15");
+    const [maxLossAcknowledged, setMaxLossAcknowledged] = useState(false);
+    const [whatMustBeTrueByExpiry, setWhatMustBeTrueByExpiry] = useState("");
+    const [plannedExitRule, setPlannedExitRule] = useState("");
+    const [riskPolicyOverrideReason, setRiskPolicyOverrideReason] = useState("");
 
     // Guardrail settings (AR-89) — user prefs from the Settings store.
     // When a toggle is off, the corresponding check becomes a no-op.
     const guardrailPrefs = useSettingsStore((s) => s.guardrails);
+    const riskPolicy = useSettingsStore((s) => s.riskPolicy);
+    const optionsRiskPolicy = riskPolicy.optionsRiskPolicy;
+    const sellDisciplineRules = riskPolicy.sellDisciplineRules;
     // AR-109: JournalPlus pre-trade rationale. When `rationaleRequired`
     // is on, submit is gated on a completed rationale panel.
     const rationaleRequired = useSettingsStore(
@@ -204,6 +272,33 @@ function OrderForm({ onSubmit }: OrderFormProps) {
     const cooldownSeconds = useSettingsStore(
         (s) => s.execution.cooldownSeconds,
     );
+
+    const handleInstrumentChange = (next: OrderInstrumentType) => {
+        setInstrumentType(next);
+        if (next === "option") {
+            setSide("buy");
+            setType("limit");
+            setQuantity(5);
+            setLimitPrice(4.5);
+            setStopPrice(3.5);
+            setOptionContractType("call");
+            setOptionStrike(250);
+            setOptionExpiry("2027-01-15");
+            setMaxLossAcknowledged(false);
+            setWhatMustBeTrueByExpiry("");
+            setPlannedExitRule("");
+            setRiskPolicyOverrideReason("");
+            return;
+        }
+
+        setQuantity(50);
+        setLimitPrice(225.0);
+        setStopPrice(220.0);
+        setMaxLossAcknowledged(false);
+        setWhatMustBeTrueByExpiry("");
+        setPlannedExitRule("");
+        setRiskPolicyOverrideReason("");
+    };
 
     // Rationale draft owned here so the parent can finalize it on
     // submit and attach it to the Order. Reset after a successful
@@ -220,10 +315,18 @@ function OrderForm({ onSubmit }: OrderFormProps) {
     // clock starts from the moment the panel actually mounts again.
     const prevRequiredRef = useRef(rationaleRequired);
     useEffect(() => {
+        let resetTimer: number | undefined;
         if (rationaleRequired && !prevRequiredRef.current) {
-            setRationaleDraft(createRationaleDraft());
+            resetTimer = window.setTimeout(() => {
+                setRationaleDraft(createRationaleDraft());
+            }, 0);
         }
         prevRequiredRef.current = rationaleRequired;
+        return () => {
+            if (resetTimer !== undefined) {
+                window.clearTimeout(resetTimer);
+            }
+        };
     }, [rationaleRequired]);
 
     // AR-110 cooldown state. `cooldownEndMs` is the wall-clock moment
@@ -247,8 +350,12 @@ function OrderForm({ onSubmit }: OrderFormProps) {
     // switches back.
     useEffect(() => {
         if (cooldownEndMs != null && cooldownNow >= cooldownEndMs) {
-            setCooldownEndMs(null);
+            const resetTimer = window.setTimeout(() => {
+                setCooldownEndMs(null);
+            }, 0);
+            return () => window.clearTimeout(resetTimer);
         }
+        return undefined;
     }, [cooldownEndMs, cooldownNow]);
 
     // If the user changes mood to a non-caution option mid-cooldown
@@ -259,14 +366,26 @@ function OrderForm({ onSubmit }: OrderFormProps) {
         rationaleDraft.mood === "fomo" || rationaleDraft.mood === "revenge";
     useEffect(() => {
         if (!moodIsCaution && cooldownEndMs != null) {
-            setCooldownEndMs(null);
+            const resetTimer = window.setTimeout(() => {
+                setCooldownEndMs(null);
+            }, 0);
+            return () => window.clearTimeout(resetTimer);
         }
+        return undefined;
     }, [moodIsCaution, cooldownEndMs]);
 
+    const isOptionOrder = instrumentType === "option";
     const tickerUpper = ticker.toUpperCase();
     const livePrice = LIVE_PRICES[tickerUpper];
-    const price = effectivePrice(tickerUpper, type, limitPrice, stopPrice);
-    const notional = price * (Number.isFinite(quantity) ? quantity : 0);
+    const orderTypeOptions = isOptionOrder
+        ? (["limit"] as OrderType[])
+        : (Object.keys(ORDER_TYPE_LABELS) as OrderType[]);
+    const price = isOptionOrder
+        ? limitPrice
+        : effectivePrice(tickerUpper, type, limitPrice, stopPrice);
+    const cleanQuantity = Number.isFinite(quantity) ? quantity : 0;
+    const exposureMultiplier = isOptionOrder ? OPTION_CONTRACT_MULTIPLIER : 1;
+    const notional = price * cleanQuantity * exposureMultiplier;
     const commission = COMMISSION_PER_TRADE_USD;
     const buyingPowerAfter =
         side === "buy"
@@ -274,14 +393,14 @@ function OrderForm({ onSubmit }: OrderFormProps) {
             : BUYING_POWER_USD + notional - commission;
 
     const currentPos = CURRENT_POSITIONS[tickerUpper];
-    const currentQty = currentPos?.qty ?? 0;
+    const currentQty = isOptionOrder ? 0 : currentPos?.qty ?? 0;
     const qtyDelta = side === "buy" ? quantity : -quantity;
     const positionAfter = currentQty + qtyDelta;
 
     const showLimit = type === "limit" || type === "stop_limit";
     const showStop = type === "stop" || type === "stop_limit";
 
-    const guardrails = useGuardrails({
+    const baseGuardrails = useGuardrails({
         side,
         notional,
         buyingPowerAfter,
@@ -289,7 +408,124 @@ function OrderForm({ onSubmit }: OrderFormProps) {
         ticker: tickerUpper,
         concentrationCapEnabled: guardrailPrefs.concentrationCapEnabled,
         concentrationCapPct: guardrailPrefs.concentrationCapPct,
+        positionMarketValueOverride: isOptionOrder
+            ? Math.abs(positionAfter) * price * OPTION_CONTRACT_MULTIPLIER
+            : undefined,
+        shortUnitLabel: isOptionOrder ? "contract" : "share",
     });
+
+    const optionOrderPolicy = useMemo(
+        () =>
+            evaluateOptionOrderPolicy({
+                isOption: isOptionOrder,
+                underlying: tickerUpper,
+                contractType: optionContractType,
+                strike: optionStrike,
+                expiry: optionExpiry,
+                quantity,
+                premium: price,
+                side,
+                totalPortfolioValue: EXECUTION_NAV_USD,
+                liquidNetWorth: EXECUTION_NAV_USD,
+                linkedThesisId: rationaleDraft.thesisId,
+                maxLossAcknowledged,
+                whatMustBeTrueByExpiry,
+                plannedExitRule,
+                existingPositions: DEFAULT_OPTION_RISK_POSITIONS,
+                policy: optionsRiskPolicy,
+            }),
+        [
+            isOptionOrder,
+            tickerUpper,
+            optionContractType,
+            optionStrike,
+            optionExpiry,
+            quantity,
+            price,
+            side,
+            rationaleDraft.thesisId,
+            maxLossAcknowledged,
+            whatMustBeTrueByExpiry,
+            plannedExitRule,
+            optionsRiskPolicy,
+        ],
+    );
+    const optionGuardrails = useMemo(
+        () => buildOptionGuardrails(isOptionOrder, optionOrderPolicy.checks),
+        [isOptionOrder, optionOrderPolicy.checks],
+    );
+    const sellDisciplineSummary = useMemo(
+        () =>
+            evaluateSellDiscipline({
+                rules: sellDisciplineRules,
+                holdings: EXECUTION_RISK_POLICY_HOLDINGS,
+                theses: DEFAULT_THESES,
+                portfolioValue: EXECUTION_POLICY_PORTFOLIO_VALUE,
+            }),
+        [sellDisciplineRules],
+    );
+    const sellDisciplineGuardrail = useMemo(
+        () => buildSellDisciplineGuardrail(side, tickerUpper, sellDisciplineSummary.tasks),
+        [side, tickerUpper, sellDisciplineSummary.tasks],
+    );
+    const selectedThesis = useMemo(
+        () => DEFAULT_THESES.find((thesis) => thesis.id === rationaleDraft.thesisId),
+        [rationaleDraft.thesisId],
+    );
+    const riskPolicyImpact = useMemo(
+        () =>
+            evaluatePreTradeRiskPolicy({
+                holdings: EXECUTION_RISK_POLICY_HOLDINGS,
+                portfolioValue: EXECUTION_POLICY_PORTFOLIO_VALUE,
+                trade: {
+                    ticker: tickerUpper,
+                    side,
+                    quantity,
+                    price,
+                    instrumentType,
+                    marketValue: notional,
+                    optionPremiumAtRisk: isOptionOrder ? optionOrderPolicy.premiumAtRisk : undefined,
+                    linkedThesisId: rationaleDraft.thesisId,
+                    thesisUpdatedAt: selectedThesis?.dateUpdated,
+                },
+                existingOptionPositions: DEFAULT_OPTION_RISK_POSITIONS,
+                bucketPolicies: riskPolicy.bucketPolicies,
+                themeCaps: riskPolicy.themeCaps,
+                optionsRiskPolicy,
+                maxSinglePositionPct: guardrailPrefs.concentrationCapPct,
+                overrideReason: riskPolicyOverrideReason,
+            }),
+        [
+            tickerUpper,
+            side,
+            quantity,
+            price,
+            instrumentType,
+            notional,
+            isOptionOrder,
+            optionOrderPolicy.premiumAtRisk,
+            rationaleDraft.thesisId,
+            selectedThesis?.dateUpdated,
+            riskPolicy.bucketPolicies,
+            riskPolicy.themeCaps,
+            optionsRiskPolicy,
+            guardrailPrefs.concentrationCapPct,
+            riskPolicyOverrideReason,
+        ],
+    );
+    const riskPolicyGuardrail = useMemo(
+        () => buildRiskPolicyGuardrail(riskPolicyImpact),
+        [riskPolicyImpact],
+    );
+    const guardrails = useMemo(
+        () => [
+            ...baseGuardrails,
+            ...optionGuardrails,
+            ...(sellDisciplineGuardrail ? [sellDisciplineGuardrail] : []),
+            riskPolicyGuardrail,
+        ],
+        [baseGuardrails, optionGuardrails, sellDisciplineGuardrail, riskPolicyGuardrail],
+    );
 
     // AR-111 live adherence. Resolve the strategy by mapping the draft
     // rationale's thesis id — the rationale chip row commits thesisId
@@ -313,11 +549,13 @@ function OrderForm({ onSubmit }: OrderFormProps) {
     }, [resolvedStrategyId]);
 
     const liveContext = useMemo<TradeContext>(() => {
-        const nav = 250_000;
+        const nav = EXECUTION_NAV_USD;
         // Post-trade market value of the subject position. Uses live price
         // (or effective limit/stop) so the % is computed against the same
         // dollar figure the user sees in the preview.
-        const postMarketValue = positionAfter * price;
+        const postMarketValue = isOptionOrder
+            ? positionAfter * price * OPTION_CONTRACT_MULTIPLIER
+            : positionAfter * price;
         const sector = SEED_SECTOR_BY_TICKER[tickerUpper];
         // Sector exposure post-trade. The existing concentration guardrail
         // fakes a 47% tech weight; we mirror that here so the two panels
@@ -356,6 +594,7 @@ function OrderForm({ onSubmit }: OrderFormProps) {
     }, [
         tickerUpper,
         side,
+        isOptionOrder,
         positionAfter,
         price,
         showStop,
@@ -398,6 +637,7 @@ function OrderForm({ onSubmit }: OrderFormProps) {
         quantity <= 0 ||
         (showLimit && (!limitPrice || limitPrice <= 0)) ||
         (showStop && (!stopPrice || stopPrice <= 0)) ||
+        (isOptionOrder && (!optionStrike || optionStrike <= 0 || !optionExpiry.trim())) ||
         guardrails.some((g) => g.level === "fail") ||
         rationaleBlocksSubmit ||
         cooldownActive;
@@ -459,6 +699,29 @@ function OrderForm({ onSubmit }: OrderFormProps) {
             placedAt: new Date(),
             updatedAt: new Date(),
             rationale,
+            instrumentType,
+            riskPolicyImpact,
+            policyExceptions: riskPolicyImpact.exceptionPreview.length > 0
+                ? riskPolicyImpact.exceptionPreview
+                : undefined,
+            riskPolicyOverrideReason: riskPolicyImpact.exceptionPreview.length > 0
+                ? riskPolicyOverrideReason.trim()
+                : undefined,
+            optionDetails: isOptionOrder
+                ? {
+                    underlying: tickerUpper,
+                    contractType: optionContractType,
+                    strike: optionStrike,
+                    expiry: optionExpiry,
+                    premium: price,
+                    contractMultiplier: OPTION_CONTRACT_MULTIPLIER,
+                    premiumAtRisk: optionOrderPolicy.premiumAtRisk,
+                    notionalEquivalent: optionOrderPolicy.notionalEquivalent,
+                    maxLossAcknowledged,
+                    whatMustBeTrueByExpiry: whatMustBeTrueByExpiry.trim(),
+                    plannedExitRule: plannedExitRule.trim(),
+                }
+                : undefined,
         };
         if (rationale) {
             track("trade.rationale.submitted", {
@@ -489,6 +752,12 @@ function OrderForm({ onSubmit }: OrderFormProps) {
         // Reset the rationale so the next ticket renders with a fresh
         // `capturedAt` and an empty form.
         setRationaleDraft(createRationaleDraft());
+        setRiskPolicyOverrideReason("");
+        if (isOptionOrder) {
+            setMaxLossAcknowledged(false);
+            setWhatMustBeTrueByExpiry("");
+            setPlannedExitRule("");
+        }
     };
 
     const baseSubmitLabel = side === "buy" ? "Review & buy" : "Review & sell";
@@ -520,6 +789,22 @@ function OrderForm({ onSubmit }: OrderFormProps) {
                     Draft routes to review. Never fills on click.
                 </span>
             </header>
+
+            {/* Instrument toggle */}
+            <div className="pm-exec-instrument" role="tablist" aria-label="Instrument type">
+                {(["equity", "option"] as OrderInstrumentType[]).map((next) => (
+                    <button
+                        key={next}
+                        type="button"
+                        role="tab"
+                        aria-selected={instrumentType === next}
+                        className={`pm-exec-instrument-btn${instrumentType === next ? " is-active" : ""}`}
+                        onClick={() => handleInstrumentChange(next)}
+                    >
+                        {INSTRUMENT_LABELS[next]}
+                    </button>
+                ))}
+            </div>
 
             {/* Side toggle */}
             <div className="pm-exec-side" role="tablist" aria-label="Order side">
@@ -582,7 +867,7 @@ function OrderForm({ onSubmit }: OrderFormProps) {
                         value={type}
                         onChange={(e) => setType(e.target.value as OrderType)}
                     >
-                        {(Object.keys(ORDER_TYPE_LABELS) as OrderType[]).map((t) => (
+                        {orderTypeOptions.map((t) => (
                             <option key={t} value={t}>{ORDER_TYPE_LABELS[t]}</option>
                         ))}
                     </select>
@@ -621,6 +906,94 @@ function OrderForm({ onSubmit }: OrderFormProps) {
                 </div>
             )}
 
+            {isOptionOrder && (
+                <section
+                    className="pm-exec-option-panel"
+                    aria-label="Options policy details"
+                    data-status={optionOrderPolicy.status}
+                >
+                    <div className="pm-exec-option-grid">
+                        <label className="pm-exec-field">
+                            <span className="pm-exec-field-label">Option contract</span>
+                            <select
+                                className="pm-exec-input"
+                                value={optionContractType}
+                                onChange={(e) => setOptionContractType(e.target.value as OptionContractType)}
+                            >
+                                {(Object.keys(OPTION_CONTRACT_LABELS) as OptionContractType[]).map((contractType) => (
+                                    <option key={contractType} value={contractType}>
+                                        {OPTION_CONTRACT_LABELS[contractType]}
+                                    </option>
+                                ))}
+                            </select>
+                        </label>
+
+                        <label className="pm-exec-field">
+                            <span className="pm-exec-field-label">Option strike</span>
+                            <input
+                                type="number"
+                                className="pm-exec-input num"
+                                value={optionStrike}
+                                min={0.01}
+                                step={0.01}
+                                onChange={(e) => setOptionStrike(Number(e.target.value))}
+                            />
+                        </label>
+
+                        <label className="pm-exec-field">
+                            <span className="pm-exec-field-label">Option expiry</span>
+                            <input
+                                type="date"
+                                className="pm-exec-input"
+                                value={optionExpiry}
+                                onChange={(e) => setOptionExpiry(e.target.value)}
+                            />
+                        </label>
+                    </div>
+
+                    <div className="pm-exec-option-metrics" aria-label="Option risk preview">
+                        <PreviewRow label="Premium at risk" value={formatUsd(optionOrderPolicy.premiumAtRisk)} />
+                        <PreviewRow label="Notional equivalent" value={formatUsd(optionOrderPolicy.notionalEquivalent)} />
+                        <PreviewRow label="Days to expiry" value={`${optionOrderPolicy.daysToExpiry.toLocaleString()}d`} />
+                    </div>
+
+                    <label className="pm-exec-field">
+                        <span className="pm-exec-field-label">What must be true by expiry?</span>
+                        <textarea
+                            className="pm-exec-textarea"
+                            value={whatMustBeTrueByExpiry}
+                            onChange={(e) => setWhatMustBeTrueByExpiry(e.target.value)}
+                            rows={2}
+                            maxLength={240}
+                            placeholder="Name the business or market condition the option needs before expiry."
+                        />
+                    </label>
+
+                    <label className="pm-exec-field">
+                        <span className="pm-exec-field-label">Exit / roll rule</span>
+                        <textarea
+                            className="pm-exec-textarea"
+                            value={plannedExitRule}
+                            onChange={(e) => setPlannedExitRule(e.target.value)}
+                            rows={2}
+                            maxLength={180}
+                            placeholder="Example: close at 50% loss or roll 90 days before expiry."
+                        />
+                    </label>
+
+                    <label className="pm-exec-checkbox-row">
+                        <input
+                            type="checkbox"
+                            checked={maxLossAcknowledged}
+                            onChange={(e) => setMaxLossAcknowledged(e.target.checked)}
+                        />
+                        <span>
+                            I understand the option max loss is the premium paid.
+                        </span>
+                    </label>
+                </section>
+            )}
+
             {/* TIF */}
             <div className="pm-exec-field">
                 <span className="pm-exec-field-label">Time in force</span>
@@ -642,7 +1015,10 @@ function OrderForm({ onSubmit }: OrderFormProps) {
 
             {/* Preview */}
             <div className="pm-exec-preview" role="list" aria-label="Order preview">
-                <PreviewRow label="Notional" value={formatUsd(notional)} />
+                <PreviewRow
+                    label={isOptionOrder ? "Premium debit" : "Notional"}
+                    value={formatUsd(notional)}
+                />
                 <PreviewRow
                     label="Est. commission"
                     value={commission === 0 ? "Free" : formatUsd(commission)}
@@ -654,16 +1030,22 @@ function OrderForm({ onSubmit }: OrderFormProps) {
                 />
                 <PreviewRow
                     label="Position after"
-                    value={`${positionAfter.toLocaleString()} sh`}
+                    value={`${positionAfter.toLocaleString()} ${isOptionOrder ? "ct" : "sh"}`}
                     tone={positionAfter < 0 ? "pm-num-neg" : ""}
                 />
             </div>
+
+            <RiskPolicyImpactPanel
+                impact={riskPolicyImpact}
+                overrideReason={riskPolicyOverrideReason}
+                onOverrideReasonChange={setRiskPolicyOverrideReason}
+            />
 
             {/* Guardrails */}
             <div className="pm-exec-guardrails" role="list" aria-label="Guardrails">
                 {guardrails.map((g) => (
                     <div
-                        key={g.label}
+                        key={`${g.label}-${g.message}`}
                         className={`pm-exec-guardrail is-${g.level}`}
                         role="listitem"
                     >
@@ -745,6 +1127,101 @@ function PreviewRow({
     );
 }
 
+function RiskPolicyImpactPanel({
+    impact,
+    overrideReason,
+    onOverrideReasonChange,
+}: {
+    impact: PreTradeRiskPolicyImpact;
+    overrideReason: string;
+    onOverrideReasonChange: (value: string) => void;
+}) {
+    const visibleChecks = impact.failedChecks.length > 0
+        ? impact.failedChecks
+        : impact.checks
+            .filter((check) => check.direction === "risk_reducing" || check.direction === "risk_increasing")
+            .slice(0, 3);
+    const tone = impact.decision === "allowed"
+        ? impact.direction === "risk_reducing"
+            ? "reducing"
+            : "inside"
+        : "override";
+
+    return (
+        <section
+            className="pm-exec-policy-impact"
+            data-testid="risk-policy-impact"
+            data-tone={tone}
+            aria-label="Risk policy impact"
+        >
+            <header className="pm-exec-policy-impact-head">
+                <div>
+                    <div className="pm-exec-policy-kicker">Risk policy</div>
+                    <h4 className="pm-exec-policy-title">{impact.summary}</h4>
+                </div>
+                <span className={`pm-exec-policy-pill is-${tone}`}>
+                    {impact.decision === "allowed"
+                        ? impact.direction === "risk_reducing"
+                            ? "Reducing"
+                            : "Inside"
+                        : "Override needed"}
+                </span>
+            </header>
+
+            {visibleChecks.length > 0 && (
+                <div className="pm-exec-policy-checks">
+                    {visibleChecks.map((check) => (
+                        <PolicyCheckRow key={`${check.ruleType}-${check.label}`} check={check} />
+                    ))}
+                </div>
+            )}
+
+            {impact.requiresOverride && (
+                <label className="pm-exec-field">
+                    <span className="pm-exec-field-label">Override reason</span>
+                    <textarea
+                        className="pm-exec-textarea"
+                        value={overrideReason}
+                        onChange={(event) => onOverrideReasonChange(event.target.value)}
+                        rows={2}
+                        maxLength={240}
+                        placeholder="Record why this policy exception is intentional."
+                    />
+                </label>
+            )}
+        </section>
+    );
+}
+
+function PolicyCheckRow({ check }: { check: PreTradeRiskPolicyCheck }) {
+    return (
+        <div
+            className="pm-exec-policy-check"
+            data-status={check.status}
+            data-rule-type={check.ruleType}
+        >
+            <div className="pm-exec-policy-check-main">
+                <span className="pm-exec-policy-check-label">{check.label}</span>
+                <span className="pm-exec-policy-check-msg">{check.message}</span>
+            </div>
+            <div className="pm-exec-policy-metrics" aria-label={`${check.label} exposure`}>
+                <span>
+                    <b>Now</b>
+                    {formatPolicyPct(check.currentPct)}
+                </span>
+                <span>
+                    <b>Post</b>
+                    {formatPolicyPct(check.postPct)}
+                </span>
+                <span>
+                    <b>Limit</b>
+                    {formatPolicyPct(check.thresholdPct)}
+                </span>
+            </div>
+        </div>
+    );
+}
+
 // --------------------------------------------------------------------- //
 // Guardrails — pure derivation
 // --------------------------------------------------------------------- //
@@ -764,6 +1241,8 @@ function useGuardrails({
     ticker,
     concentrationCapEnabled,
     concentrationCapPct,
+    positionMarketValueOverride,
+    shortUnitLabel = "share",
 }: {
     side: OrderSide;
     notional: number;
@@ -772,6 +1251,8 @@ function useGuardrails({
     ticker: string;
     concentrationCapEnabled: boolean;
     concentrationCapPct: number;
+    positionMarketValueOverride?: number;
+    shortUnitLabel?: string;
 }): Guardrail[] {
     return useMemo(() => {
         const bp: Guardrail =
@@ -800,7 +1281,7 @@ function useGuardrails({
         // The warn band kicks in at 80% of the hard cap so big names
         // light up amber before they block the order.
         const navUsd = 250_000;
-        const postPosValue = positionAfter * (LIVE_PRICES[ticker] ?? 0);
+        const postPosValue = positionMarketValueOverride ?? positionAfter * (LIVE_PRICES[ticker] ?? 0);
         const concentrationPct = Math.abs(postPosValue) / navUsd;
         const capFrac = concentrationCapPct / 100;
         const warnFrac = capFrac * 0.8;
@@ -863,7 +1344,7 @@ function useGuardrails({
             side === "sell" && positionAfter < 0
                 ? {
                     label: "Short sale",
-                    message: `Would open ${Math.abs(positionAfter)} share short`,
+                    message: `Would open ${Math.abs(positionAfter)} ${shortUnitLabel} short`,
                     level: "warn",
                 }
                 : null;
@@ -877,7 +1358,110 @@ function useGuardrails({
         ticker,
         concentrationCapEnabled,
         concentrationCapPct,
+        positionMarketValueOverride,
+        shortUnitLabel,
     ]);
+}
+
+function buildOptionGuardrails(
+    isOptionOrder: boolean,
+    checks: readonly OptionPolicyIssue[],
+): Guardrail[] {
+    if (!isOptionOrder) return [];
+    if (checks.length === 0) {
+        return [{
+            label: "Options policy",
+            message: "Inside premium, thesis, max-loss, and expiry rules",
+            level: "ok",
+        }];
+    }
+
+    return checks.map((check) => ({
+        label: optionIssueLabel(check.code),
+        message: check.message,
+        level: check.severity === "breached" || check.severity === "missing_data"
+            ? "fail"
+            : "warn",
+    }));
+}
+
+function buildSellDisciplineGuardrail(
+    side: OrderSide,
+    ticker: string,
+    tasks: readonly SellDisciplineTask[],
+): Guardrail | null {
+    const task = sellDisciplineBlocksAdd(tasks, ticker);
+    if (!task) return null;
+    if (side === "sell") {
+        return {
+            label: "Sell discipline",
+            message: `${task.label} is open; this ticket reduces the flagged exposure.`,
+            level: "ok",
+        };
+    }
+    return {
+        label: "Sell discipline",
+        message: `No-add rule triggered: ${task.label}`,
+        level: "fail",
+    };
+}
+
+function buildRiskPolicyGuardrail(impact: PreTradeRiskPolicyImpact): Guardrail {
+    if (impact.blocksSubmit) {
+        return {
+            label: "Risk policy",
+            message: impact.summary,
+            level: "fail",
+        };
+    }
+    if (impact.failedChecks.length > 0) {
+        return {
+            label: "Risk policy",
+            message: impact.summary,
+            level: "warn",
+        };
+    }
+    return {
+        label: "Risk policy",
+        message: impact.summary,
+        level: "ok",
+    };
+}
+
+function optionIssueLabel(code: string): string {
+    switch (code) {
+        case "missing_thesis":
+            return "Options thesis";
+        case "max_loss_ack":
+            return "Max loss ack";
+        case "expiry_truth":
+            return "Expiry thesis";
+        case "exit_rule":
+            return "Exit rule";
+        case "position_size_cap":
+        case "position_size_watch":
+            return "Position size";
+        case "total_options_cap":
+        case "loss_budget_cap":
+            return "Options budget";
+        case "near_expiry":
+        case "expired_contract":
+            return "Expiry window";
+        case "short_option":
+            return "Short option";
+        case "invalid_quantity":
+        case "invalid_premium":
+        case "invalid_strike":
+        case "invalid_expiry":
+            return "Contract details";
+        default:
+            return "Options policy";
+    }
+}
+
+function formatPolicyPct(value: number): string {
+    if (!Number.isFinite(value)) return "—";
+    return `${value.toFixed(Math.abs(value) < 10 ? 1 : 0)}%`;
 }
 
 // --------------------------------------------------------------------- //
@@ -931,8 +1515,7 @@ function OrdersPanel({
                     o.status === "pending" ||
                     (o.status === "working" &&
                         guardrailPrefs.approvalThresholdEnabled &&
-                        (o.limitPrice ?? LIVE_PRICES[o.ticker] ?? 0) * o.quantity >
-                            guardrailPrefs.approvalThresholdUsd),
+                        orderExposureUsd(o) > guardrailPrefs.approvalThresholdUsd),
             ),
         [
             orders,
@@ -1017,8 +1600,9 @@ function ApprovalBanner({
             </div>
             <ul className="pm-exec-approval-list" role="list">
                 {orders.map((o) => {
-                    const price = o.limitPrice ?? LIVE_PRICES[o.ticker] ?? 0;
-                    const notional = price * o.quantity;
+                    const price = orderDisplayPrice(o) ?? 0;
+                    const notional = orderExposureUsd(o);
+                    const unit = o.instrumentType === "option" ? "ct" : "sh";
                     return (
                         <li key={o.id} className="pm-exec-approval-row">
                             <span className={`pm-exec-side-pill is-${o.side}`}>
@@ -1026,7 +1610,7 @@ function ApprovalBanner({
                             </span>
                             <span className="pm-exec-approval-ticker">{o.ticker}</span>
                             <span className="pm-exec-approval-qty num">
-                                {o.quantity.toLocaleString()} @ {formatUsd(price)}
+                                {o.quantity.toLocaleString()} {unit} @ {formatUsd(price)}
                             </span>
                             <span className="pm-exec-approval-notional num">
                                 {formatUsd(notional)}
@@ -1088,10 +1672,11 @@ function OrdersTable({
                 </thead>
                 <tbody>
                     {orders.map((o) => {
-                        const price =
-                            o.type === "market"
-                                ? o.averageFillPrice ?? LIVE_PRICES[o.ticker]
-                                : o.limitPrice ?? o.stopPrice;
+                        const price = orderDisplayPrice(o);
+                        const optionSuffix = o.optionDetails
+                            ? ` ${o.optionDetails.strike}${o.optionDetails.contractType === "call" ? "C" : "P"}`
+                            : "";
+                        const quantityUnit = o.instrumentType === "option" ? " ct" : "";
                         // AR-109: orders placed with a rationale render
                         // a subordinate summary row beneath the main
                         // row. Stays out of the scannable column flow
@@ -1104,9 +1689,13 @@ function OrdersTable({
                                         {o.side.toUpperCase()}
                                     </span>
                                 </td>
-                                <td className="pm-exec-table-ticker">{o.ticker}</td>
+                                <td className="pm-exec-table-ticker">
+                                    {o.ticker}{optionSuffix}
+                                </td>
                                 <td>{ORDER_TYPE_LABELS[o.type]}</td>
-                                <td className="num-col num">{o.quantity.toLocaleString()}</td>
+                                <td className="num-col num">
+                                    {o.quantity.toLocaleString()}{quantityUnit}
+                                </td>
                                 <td className="num-col num">
                                     {price ? formatUsd(price) : "—"}
                                 </td>

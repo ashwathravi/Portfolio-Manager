@@ -1,3 +1,5 @@
+import type { PolicyBucketId, ThemeWeight } from "@/lib/risk-policy";
+
 export interface Portfolio {
     id: string;
     name: string;
@@ -35,4 +37,6 @@ export interface Holding {
     accountId: string;  // Which account this holding is in
     priceChart: { date: Date; price: number }[];
     linkedThesis?: string;  // Thesis ID if applicable
+    policyBucket?: PolicyBucketId;
+    themeWeights?: ThemeWeight[];
 }

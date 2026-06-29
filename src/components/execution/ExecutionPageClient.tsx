@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { usePageHeader } from "@/components/layout/PageHeaderContext";
 import {
     DEFAULT_EXECUTION_VARIANT,
@@ -39,14 +39,15 @@ export function ExecutionPageClient() {
     // is stored or storage is unavailable.
     useEffect(() => {
         const stored = readExecutionVariant();
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- This hydrates client-only localStorage state after the SSR default render.
         setVariant(stored);
         setHydrated(true);
     }, []);
 
-    const onChange = (next: ExecutionVariant) => {
+    const onChange = useCallback((next: ExecutionVariant) => {
         setVariant(next);
         writeExecutionVariant(next);
-    };
+    }, []);
 
     // Breadcrumb trail updates live with the variant so the topbar always
     // tells the user which surface they're in.
@@ -59,8 +60,7 @@ export function ExecutionPageClient() {
     // topbar's right-aligned action area — same pattern as Strategies.
     const actions = useMemo(
         () => <VariantSwitcher value={variant} onChange={onChange} />,
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-        [variant],
+        [variant, onChange],
     );
 
     usePageHeader({

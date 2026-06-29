@@ -7,7 +7,7 @@ import { test, expect } from '@playwright/test';
  * Portfolio / Research / Strategies sub-menus are gone. The sidebar
  * now has a flat "Workspace" section (Dashboard, Performance,
  * Holdings, Research, Strategies, Execution) and a "System" section
- * (Settings). Page titles moved out of the body and into the Topbar.
+ * (Settings, Help). Page titles moved out of the body and into the Topbar.
  *
  *   - Assertions use the Topbar h1 (`.pm-topbar-title`) for the page
  *     title, which is the single source of truth post-redesign.
@@ -50,6 +50,11 @@ test.describe('Sidebar navigation', () => {
         await sidebar.getByRole('link', { name: /^Settings$/ }).click();
         await expect(page).toHaveURL(/\/settings$/);
         await expect(page.locator('h1.pm-topbar-title')).toHaveText('Settings');
+
+        // Help (System section)
+        await sidebar.getByRole('link', { name: /^Help$/ }).click();
+        await expect(page).toHaveURL(/\/help$/);
+        await expect(page.locator('h1.pm-topbar-title')).toHaveText('Help');
     });
 
     test('exposes both Workspace and System section labels', async ({ page }) => {

@@ -100,7 +100,7 @@ export class SchwabClient {
      * Places a trading order for a specific account.
      * The order structure follows Schwab's specification.
      */
-    async placeOrder(accessToken: string, accountId: string, orderPayload: any) {
+    async placeOrder(accessToken: string, accountId: string, orderPayload: object) {
         const response = await fetch(`${this.baseUrl}/trader/v1/accounts/${accountId}/orders`, {
             method: 'POST',
             headers: {

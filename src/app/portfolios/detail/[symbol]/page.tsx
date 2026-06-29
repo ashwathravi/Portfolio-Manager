@@ -1,7 +1,7 @@
 import { Suspense } from 'react';
 import { db } from '@/db';
 import { holdings } from '@/db/schema';
-import { eq, sql } from 'drizzle-orm';
+import { sql } from 'drizzle-orm';
 import { marketDataEngine } from '@/lib/api/market-data';
 import { HoldingDetailView, type HoldingDetail, type AccountPosition } from '@/components/holdings/HoldingDetailView';
 

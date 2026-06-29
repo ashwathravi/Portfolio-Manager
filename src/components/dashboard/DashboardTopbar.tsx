@@ -141,6 +141,8 @@ function useRelativeUpdated(updatedAt: number | null | undefined): string | null
 
     // tick is only used to retrigger; the real computation reads the clock.
     void tick;
+    // This hook intentionally displays wall-clock relative freshness.
+    // eslint-disable-next-line react-hooks/purity
     const ageMs = Date.now() - updatedAt;
     const ageS = Math.max(0, Math.round(ageMs / 1000));
     if (ageS < 5) return "Updated just now";

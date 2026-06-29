@@ -1,4 +1,5 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
+import { gotoAppPage, reloadAppPage } from './helpers/app';
 
 /**
  * Phase 9 (AR-94) Execution tests.
@@ -16,6 +17,13 @@ import { test, expect } from '@playwright/test';
  *   - Switching variants flips the `data-variant` attribute on the shell
  */
 
+async function fillRiskPolicyOverride(page: Page) {
+    const override = page.getByTestId('risk-policy-impact').getByLabel('Override reason');
+    if (await override.isVisible()) {
+        await override.fill('Intentional policy exception after reviewing allocation risk.');
+    }
+}
+
 test.describe('Execution page (Focus variant, default)', () => {
     test.beforeEach(async ({ page }) => {
         // Clear any persisted variant so every test lands on Focus.
@@ -26,7 +34,7 @@ test.describe('Execution page (Focus variant, default)', () => {
                 /* private-mode / sandboxed — ignore */
             }
         });
-        await page.goto('/execution');
+        await gotoAppPage(page, '/execution');
     });
 
     test('renders Topbar title "Execution" and the 3-pill variant switcher', async ({ page }) => {
@@ -78,8 +86,10 @@ test.describe('Execution page (Focus variant, default)', () => {
 
     test('ticker input uppercases user input', async ({ page }) => {
         const ticker = page.getByLabel('Ticker');
-        await ticker.fill('tsla');
-        await expect(ticker).toHaveValue('TSLA');
+        await expect(async () => {
+            await ticker.fill('tsla');
+            await expect(ticker).toHaveValue('TSLA', { timeout: 1_000 });
+        }).toPass({ timeout: 10_000 });
     });
 
     test('TIF segmented group shows DAY/GTC/IOC/FOK with DAY selected', async ({ page }) => {
@@ -125,6 +135,63 @@ test.describe('Execution page (Focus variant, default)', () => {
             .click();
         await expect(page.locator('.pm-exec-page[data-variant="terminal"]')).toBeVisible();
     });
+
+    test('option orders show failed policy checks until thesis and max loss are documented', async ({ page }) => {
+        await page.getByRole('tab', { name: 'Option / LEAPS' }).click();
+
+        await page.getByLabel('Ticker').fill('RIVN');
+        await page.getByLabel('Quantity').fill('50');
+        await page.getByLabel('Limit price').fill('5');
+        await page.getByLabel('Option strike').fill('25');
+        await page.getByLabel('Option expiry').fill('2027-01-16');
+
+        const optionPanel = page.getByRole('region', { name: 'Options policy details' });
+        await expect(optionPanel).toBeVisible();
+        await expect(optionPanel).toContainText('Premium at risk');
+        await expect(optionPanel).toContainText('Notional equivalent');
+
+        const guardrails = page.locator('.pm-exec-guardrails');
+        await expect(guardrails.getByText('Options thesis')).toBeVisible();
+        await expect(guardrails.getByText('Max loss ack')).toBeVisible();
+        await expect(guardrails.getByText('Position size')).toBeVisible();
+
+        await expect(page.getByRole('button', { name: /Review & buy/ })).toBeDisabled();
+    });
+
+    test('risk policy blocks an add that worsens breached concentration until an override is captured', async ({ page }) => {
+        await page.getByLabel('Ticker').fill('NVDA');
+        await page.getByLabel('Quantity').fill('10');
+        await page.getByLabel('Limit price').fill('500');
+
+        const policy = page.getByTestId('risk-policy-impact');
+        await expect(policy).toBeVisible();
+        await expect(policy).toContainText('Override needed');
+        await expect(policy).toContainText('Now');
+        await expect(policy).toContainText('Post');
+        await expect(policy).toContainText('Limit');
+        await expect(policy.getByLabel('Override reason')).toBeVisible();
+
+        const submit = page.getByRole('button', { name: /Review & buy/ });
+        await expect(submit).toBeDisabled();
+
+        await policy
+            .getByLabel('Override reason')
+            .fill('Intentional policy exception after reviewing allocation risk.');
+        await expect(policy).toContainText('override captured');
+    });
+
+    test('risk policy permits a trim that reduces breached exposure', async ({ page }) => {
+        await page.locator('.pm-exec-side').getByRole('tab', { name: 'Sell' }).click();
+        await page.getByLabel('Ticker').fill('NVDA');
+        await page.getByLabel('Quantity').fill('10');
+        await page.getByLabel('Limit price').fill('500');
+
+        const policy = page.getByTestId('risk-policy-impact');
+        await expect(policy).toContainText('Reducing');
+        await expect(policy).toContainText('Risk-reducing trade under current policy');
+        await expect(policy.getByLabel('Override reason')).toHaveCount(0);
+        await expect(page.locator('.pm-exec-guardrails')).toContainText('Risk policy');
+    });
 });
 
 /**
@@ -151,7 +218,7 @@ test.describe('Execution page — pre-trade rationale (AR-109)', () => {
         // can reach into localStorage and reset persisted stores to
         // defaults. Subsequent navigations inside the test rehydrate
         // cleanly without re-wiping.
-        await page.goto('/execution');
+        await gotoAppPage(page, '/execution');
         await page.evaluate(() => {
             try {
                 window.localStorage.removeItem('pm-exec-variant');
@@ -162,7 +229,7 @@ test.describe('Execution page — pre-trade rationale (AR-109)', () => {
         });
         // Reload so the stores pick up the cleared state on this first
         // visit (rationaleRequired defaults back to `true`).
-        await page.reload();
+        await reloadAppPage(page);
     });
 
     test('renders the rationale panel on the Focus variant by default', async ({ page }) => {
@@ -215,6 +282,7 @@ test.describe('Execution page — pre-trade rationale (AR-109)', () => {
         await panel
             .getByLabel('Rationale')
             .fill('Gap up on upgrade, riding momentum into close.');
+        await fillRiskPolicyOverride(page);
 
         // Submit should now be enabled.
         await expect(submit).toBeEnabled();
@@ -255,6 +323,7 @@ test.describe('Execution page — pre-trade rationale (AR-109)', () => {
         await panel.getByLabel(/Conviction/).fill('6');
         await panel.getByRole('button', { name: /Calm/ }).click();
         await panel.getByLabel('Rationale').fill('Adding to winner on pullback.');
+        await fillRiskPolicyOverride(page);
 
         await page.getByRole('button', { name: /Review & buy/ }).click();
 
@@ -273,7 +342,7 @@ test.describe('Execution page — pre-trade rationale (AR-109)', () => {
 
     test('disabling the rationale requirement in Settings lifts the gate', async ({ page }) => {
         // Flip the setting off.
-        await page.goto('/settings');
+        await gotoAppPage(page, '/settings');
         const toggle = page.getByLabel(
             'Toggle pre-trade rationale requirement',
         );
@@ -282,9 +351,13 @@ test.describe('Execution page — pre-trade rationale (AR-109)', () => {
         await expect(toggle).not.toBeChecked();
 
         // Back to Execution — rationale panel should be gone and Submit
-        // should only be blocked by the regular order-form validation.
-        await page.goto('/execution');
+        // should only be blocked by the regular order-form / policy validation.
+        await gotoAppPage(page, '/execution');
         await expect(page.getByTestId('pre-trade-rationale')).toHaveCount(0);
+        await page
+            .getByTestId('risk-policy-impact')
+            .getByLabel('Override reason')
+            .fill('Intentional policy exception while testing the disabled rationale setting.');
         await expect(page.getByRole('button', { name: /Review & buy/ })).toBeEnabled();
     });
 });
@@ -302,7 +375,7 @@ test.describe('Execution page — caution-mood cooldown (AR-110)', () => {
                 __pmAnalytics: { events: unknown[] };
             }).__pmAnalytics = { events: [] };
         });
-        await page.goto('/execution');
+        await gotoAppPage(page, '/execution');
         await page.evaluate(() => {
             try {
                 window.localStorage.removeItem('pm-exec-variant');
@@ -311,7 +384,7 @@ test.describe('Execution page — caution-mood cooldown (AR-110)', () => {
                 /* ignore */
             }
         });
-        await page.reload();
+        await reloadAppPage(page);
     });
 
     test('pressing Submit with mood=FOMO starts the cooldown timer instead of firing', async ({ page }) => {
@@ -337,6 +410,7 @@ test.describe('Execution page — caution-mood cooldown (AR-110)', () => {
         await panel.getByLabel(/Conviction/).fill('6');
         await panel.getByRole('button', { name: /FOMO/ }).click();
         await panel.getByLabel('Rationale').fill('Chasing the pump, fully aware.');
+        await fillRiskPolicyOverride(page);
 
         const submit = page.getByRole('button', { name: /Review & buy/ });
         await expect(submit).toBeEnabled();
@@ -393,6 +467,7 @@ test.describe('Execution page — caution-mood cooldown (AR-110)', () => {
         await panel.getByLabel(/Conviction/).fill('7');
         await panel.getByRole('button', { name: /Revenge/ }).click();
         await panel.getByLabel('Rationale').fill('Getting it back from last week.');
+        await fillRiskPolicyOverride(page);
 
         // Press Submit → cooldown starts.
         await page.getByRole('button', { name: /Review & buy/ }).click();
@@ -402,6 +477,7 @@ test.describe('Execution page — caution-mood cooldown (AR-110)', () => {
 
         // Switch mood to "Focused" — cooldown should clear.
         await panel.getByRole('button', { name: /Focused/ }).click();
+        await fillRiskPolicyOverride(page);
         await expect(
             page.locator('button.pm-exec-submit[data-cooldown="true"]'),
         ).toHaveCount(0);
@@ -412,7 +488,7 @@ test.describe('Execution page — caution-mood cooldown (AR-110)', () => {
 
     test('setting cooldown to Off in Settings bypasses the timer', async ({ page }) => {
         // Flip cooldown to "Off".
-        await page.goto('/settings');
+        await gotoAppPage(page, '/settings');
         const group = page.getByRole('radiogroup', {
             name: /Mood cooldown duration/,
         });
@@ -425,7 +501,7 @@ test.describe('Execution page — caution-mood cooldown (AR-110)', () => {
 
         // Back to Execution — completing a FOMO rationale and pressing
         // Submit should fire immediately (no countdown button).
-        await page.goto('/execution');
+        await gotoAppPage(page, '/execution');
         const panel = page.getByTestId('pre-trade-rationale');
         const thesisGroup = panel.locator(
             'div[role="group"][aria-label="Thesis linkage"]',
@@ -445,9 +521,14 @@ test.describe('Execution page — caution-mood cooldown (AR-110)', () => {
         await panel.getByRole('button', { name: 'Breakout' }).click();
         await panel.getByLabel(/Conviction/).fill('6');
         await panel.getByRole('button', { name: /FOMO/ }).click();
+        await expect(panel.getByRole('button', { name: /FOMO/ })).toHaveAttribute('aria-pressed', 'true');
         await panel.getByLabel('Rationale').fill('Rip the bandaid.');
+        await expect(panel.getByLabel('Rationale')).toHaveValue('Rip the bandaid.');
+        await fillRiskPolicyOverride(page);
 
-        await page.getByRole('button', { name: /Review & buy/ }).click();
+        const submit = page.getByRole('button', { name: /Review & buy/ });
+        await expect(submit).toBeEnabled();
+        await submit.click();
 
         // No cooldown should have started; order should have been
         // submitted (the rationale-submitted event is our proof).
@@ -490,7 +571,7 @@ test.describe('Execution page — live adherence panel (AR-111)', () => {
                 __pmAnalytics: { events: unknown[] };
             }).__pmAnalytics = { events: [] };
         });
-        await page.goto('/execution');
+        await gotoAppPage(page, '/execution');
         await page.evaluate(() => {
             try {
                 window.localStorage.removeItem('pm-exec-variant');
@@ -499,7 +580,7 @@ test.describe('Execution page — live adherence panel (AR-111)', () => {
                 /* ignore */
             }
         });
-        await page.reload();
+        await reloadAppPage(page);
     });
 
     test('panel is hidden when no thesis is linked', async ({ page }) => {

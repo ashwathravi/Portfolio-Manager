@@ -1,3 +1,5 @@
+import type { PolicyBucketId, ThemeWeight } from '@/lib/risk-policy';
+
 export interface Portfolio {
     id: string;
     name: string;
@@ -24,6 +26,8 @@ export interface Holding {
     todayChange: number;
     todayChangePercent: number;
     allocation: number;
+    policyBucket?: PolicyBucketId;
+    themeWeights?: ThemeWeight[];
 }
 
 export interface Transaction {
@@ -72,6 +76,7 @@ export const mockPortfolios: Portfolio[] = [
                 todayChange: 625.00,
                 todayChangePercent: 0.69,
                 allocation: 18.7,
+                policyBucket: 'active',
             },
             {
                 id: '2',
@@ -86,6 +91,7 @@ export const mockPortfolios: Portfolio[] = [
                 todayChange: 1125.00,
                 todayChangePercent: 1.00,
                 allocation: 23.3,
+                policyBucket: 'active',
             },
             {
                 id: '3',
@@ -100,6 +106,7 @@ export const mockPortfolios: Portfolio[] = [
                 todayChange: 820.00,
                 todayChangePercent: 0.81,
                 allocation: 21.1,
+                policyBucket: 'active',
             },
             {
                 id: '4',
@@ -114,6 +121,7 @@ export const mockPortfolios: Portfolio[] = [
                 todayChange: 280.00,
                 todayChangePercent: 0.50,
                 allocation: 11.6,
+                policyBucket: 'active',
             },
             {
                 id: '5',
@@ -128,6 +136,7 @@ export const mockPortfolios: Portfolio[] = [
                 todayChange: 575.00,
                 todayChangePercent: 0.93,
                 allocation: 12.8,
+                policyBucket: 'speculative',
             },
             {
                 id: '6',
@@ -142,6 +151,7 @@ export const mockPortfolios: Portfolio[] = [
                 todayChange: -175.00,
                 todayChangePercent: -0.30,
                 allocation: 11.9,
+                policyBucket: 'active',
             },
         ],
     },

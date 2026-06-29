@@ -1,5 +1,9 @@
 import { test, describe, before, beforeEach } from 'node:test';
 import assert from 'node:assert';
+import type { ConnectedAccount, Tag } from './settingsStore';
+import type { PlaidConnectedAccountInput } from '@/lib/plaid/types';
+
+type SettingsStoreHook = typeof import('./settingsStore').useSettingsStore;
 
 // Zustand persist middleware needs localStorage; provide a minimal shim.
 const kvStore = new Map<string, string>();
@@ -10,8 +14,7 @@ globalThis.localStorage = {
     removeItem: (key: string) => { kvStore.delete(key); },
 };
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-let useSettingsStore: any;
+let useSettingsStore: SettingsStoreHook;
 
 describe('settingsStore', () => {
     before(async () => {
@@ -66,6 +69,38 @@ describe('settingsStore', () => {
             const n = useSettingsStore.getState().notifications;
             assert.strictEqual(n.priceAlerts, false);
             assert.strictEqual(n.portfolioUpdates, true); // default
+            assert.strictEqual(n.alphaRadarSignals, true); // default
+        });
+
+        test('should default Alpha Radar delivery to in-app only', () => {
+            const delivery = useSettingsStore.getState().alphaRadarDelivery;
+            assert.strictEqual(delivery.enabled, true);
+            assert.strictEqual(delivery.channels.inApp, true);
+            assert.strictEqual(delivery.channels.email, false);
+            assert.strictEqual(delivery.channels.slack, false);
+            assert.strictEqual(delivery.channels.telegram, false);
+            assert.strictEqual(delivery.failureSummaries, true);
+            assert.strictEqual(delivery.minMaterialityScore, 75);
+        });
+
+        test('should update Alpha Radar delivery filters without clobbering channels', () => {
+            useSettingsStore.getState().updateAlphaRadarDelivery({
+                tickerFilters: ['AAPL', 'NVDA'],
+                minMaterialityScore: 85,
+            });
+
+            const delivery = useSettingsStore.getState().alphaRadarDelivery;
+            assert.deepStrictEqual(delivery.tickerFilters, ['AAPL', 'NVDA']);
+            assert.strictEqual(delivery.minMaterialityScore, 85);
+            assert.strictEqual(delivery.channels.inApp, true);
+        });
+
+        test('should update a single Alpha Radar delivery channel', () => {
+            useSettingsStore.getState().updateAlphaRadarDeliveryChannel('slack', true);
+            const delivery = useSettingsStore.getState().alphaRadarDelivery;
+            assert.strictEqual(delivery.channels.slack, true);
+            assert.strictEqual(delivery.channels.email, false);
+            assert.strictEqual(delivery.channels.inApp, true);
         });
     });
 
@@ -164,6 +199,195 @@ describe('settingsStore', () => {
     });
 
     // -----------------------------------------------------------------------
+    // Risk Policy
+    // -----------------------------------------------------------------------
+
+    describe('updateRiskPolicy', () => {
+        test('should default Risk Policy Engine bucket and theme caps', () => {
+            const riskPolicy = useSettingsStore.getState().riskPolicy;
+
+            assert.ok(riskPolicy.bucketPolicies.find((policy) => policy.bucket === 'core'));
+            assert.strictEqual(
+                riskPolicy.bucketPolicies.find((policy) => policy.bucket === 'speculative')?.maxPct,
+                5,
+            );
+            assert.strictEqual(riskPolicy.themeCaps.ai_infrastructure, 35);
+            assert.strictEqual(riskPolicy.themeCaps.employer_linked_wealth, 25);
+            assert.deepStrictEqual(riskPolicy.cashJobs, []);
+            assert.strictEqual(riskPolicy.cashDeploymentRule.enabled, false);
+            assert.strictEqual(riskPolicy.cashDeploymentRule.percentOfExcess, 25);
+            assert.strictEqual(riskPolicy.employerStockPlan.targetAllocationPct, 20);
+            assert.deepStrictEqual(riskPolicy.employerStockPlan.symbols, ['GOOG', 'GOOGL']);
+            assert.strictEqual(riskPolicy.employerStockPlan.state, 'draft');
+            assert.strictEqual(riskPolicy.optionsRiskPolicy.maxPositionPremiumPct, 2);
+            assert.strictEqual(riskPolicy.optionsRiskPolicy.maxTotalPremiumPct, 5);
+            assert.ok(riskPolicy.sellDisciplineRules.find((rule) => rule.type === 'allocation_cap'));
+            assert.ok(riskPolicy.sellDisciplineRules.find((rule) => rule.type === 'stale_thesis'));
+            assert.strictEqual(riskPolicy.churnPolicy.windowDays, 90);
+            assert.strictEqual(riskPolicy.churnPolicy.watchRepeatSymbols, 1);
+            assert.strictEqual(riskPolicy.churnPolicy.breachRepeatSymbols, 3);
+        });
+
+        test('should update bucket policies without clobbering theme caps', () => {
+            useSettingsStore.getState().updateRiskPolicy({
+                bucketPolicies: [
+                    { bucket: 'core', targetPct: 80, minPct: 60, maxPct: 90 },
+                    { bucket: 'active', targetPct: 15, maxPct: 20 },
+                    { bucket: 'speculative', targetPct: 3, maxPct: 4 },
+                    { bucket: 'special_situation', targetPct: 1, maxPct: 2 },
+                    { bucket: 'cash_reserve', targetPct: 1, maxPct: 10 },
+                    { bucket: 'unassigned', targetPct: 0, maxPct: 0 },
+                ],
+            });
+
+            const riskPolicy = useSettingsStore.getState().riskPolicy;
+            assert.strictEqual(
+                riskPolicy.bucketPolicies.find((policy) => policy.bucket === 'speculative')?.maxPct,
+                4,
+            );
+            assert.strictEqual(riskPolicy.themeCaps.ai_infrastructure, 35);
+        });
+
+        test('should merge theme cap updates without clobbering bucket policies', () => {
+            useSettingsStore.getState().updateRiskPolicy({
+                themeCaps: { ai_infrastructure: 30 },
+            });
+
+            const riskPolicy = useSettingsStore.getState().riskPolicy;
+            assert.strictEqual(riskPolicy.themeCaps.ai_infrastructure, 30);
+            assert.ok(riskPolicy.bucketPolicies.find((policy) => policy.bucket === 'core'));
+        });
+
+        test('should update cash jobs without clobbering bucket or theme policy', () => {
+            useSettingsStore.getState().updateRiskPolicy({
+                cashJobs: [
+                    { id: 'cash-emergency', type: 'emergency_fund', label: 'Emergency fund', amount: 50_000 },
+                    { id: 'cash-deploy', type: 'scheduled_deployment', label: 'Scheduled deployment', amount: 25_000 },
+                ],
+            });
+
+            const riskPolicy = useSettingsStore.getState().riskPolicy;
+            assert.strictEqual(riskPolicy.cashJobs.length, 2);
+            assert.strictEqual(riskPolicy.cashJobs[0].amount, 50_000);
+            assert.strictEqual(riskPolicy.themeCaps.ai_infrastructure, 35);
+            assert.ok(riskPolicy.bucketPolicies.find((policy) => policy.bucket === 'core'));
+        });
+
+        test('should merge cash deployment rule updates', () => {
+            useSettingsStore.getState().updateRiskPolicy({
+                cashDeploymentRule: {
+                    enabled: true,
+                    cadence: 'monthly',
+                    percentOfExcess: 20,
+                    destination: 'Core index allocation',
+                    nextDueDate: '2026-06-01',
+                },
+            });
+            useSettingsStore.getState().updateRiskPolicy({
+                cashDeploymentRule: {
+                    ...useSettingsStore.getState().riskPolicy.cashDeploymentRule,
+                    percentOfExcess: 25,
+                },
+            });
+
+            const rule = useSettingsStore.getState().riskPolicy.cashDeploymentRule;
+            assert.strictEqual(rule.enabled, true);
+            assert.strictEqual(rule.percentOfExcess, 25);
+            assert.strictEqual(rule.destination, 'Core index allocation');
+            assert.strictEqual(rule.nextDueDate, '2026-06-01');
+        });
+
+        test('should merge options risk policy updates without clobbering cash policy', () => {
+            useSettingsStore.getState().updateRiskPolicy({
+                cashJobs: [
+                    { id: 'cash-tax', type: 'tax_reserve', label: 'Tax reserve', amount: 10_000 },
+                ],
+            });
+            useSettingsStore.getState().updateRiskPolicy({
+                optionsRiskPolicy: {
+                    ...useSettingsStore.getState().riskPolicy.optionsRiskPolicy,
+                    maxPositionPremiumPct: 1.5,
+                    maxTotalPremiumPct: 4,
+                },
+            });
+
+            const riskPolicy = useSettingsStore.getState().riskPolicy;
+            assert.strictEqual(riskPolicy.optionsRiskPolicy.maxPositionPremiumPct, 1.5);
+            assert.strictEqual(riskPolicy.optionsRiskPolicy.maxTotalPremiumPct, 4);
+            assert.strictEqual(riskPolicy.optionsRiskPolicy.watchPositionPremiumPct, 1);
+            assert.strictEqual(riskPolicy.cashJobs[0].type, 'tax_reserve');
+        });
+
+        test('should update sell discipline rules without clobbering options policy', () => {
+            useSettingsStore.getState().updateRiskPolicy({
+                sellDisciplineRules: [
+                    {
+                        id: 'sell-aapl-test',
+                        type: 'allocation_cap',
+                        label: 'AAPL trim cap',
+                        action: 'trim',
+                        state: 'active',
+                        symbol: 'AAPL',
+                        thresholdPct: 10,
+                        noAdd: true,
+                    },
+                ],
+            });
+
+            const riskPolicy = useSettingsStore.getState().riskPolicy;
+            assert.strictEqual(riskPolicy.sellDisciplineRules.length, 1);
+            assert.strictEqual(riskPolicy.sellDisciplineRules[0].symbol, 'AAPL');
+            assert.strictEqual(riskPolicy.sellDisciplineRules[0].noAdd, true);
+            assert.strictEqual(riskPolicy.optionsRiskPolicy.maxTotalPremiumPct, 5);
+        });
+
+        test('should update churn policy without clobbering sell discipline rules', () => {
+            useSettingsStore.getState().updateRiskPolicy({
+                churnPolicy: {
+                    windowDays: 45,
+                    watchRepeatSymbols: 2,
+                    breachRepeatSymbols: 4,
+                },
+            });
+
+            const riskPolicy = useSettingsStore.getState().riskPolicy;
+            assert.strictEqual(riskPolicy.churnPolicy.windowDays, 45);
+            assert.strictEqual(riskPolicy.churnPolicy.watchRepeatSymbols, 2);
+            assert.strictEqual(riskPolicy.churnPolicy.breachRepeatSymbols, 4);
+            assert.ok(riskPolicy.sellDisciplineRules.find((rule) => rule.type === 'allocation_cap'));
+        });
+
+        test('should update employer stock plan without clobbering cash or churn policy', () => {
+            useSettingsStore.getState().updateRiskPolicy({
+                cashJobs: [
+                    { id: 'cash-tax', type: 'tax_reserve', label: 'Tax reserve', amount: 25_000 },
+                ],
+                churnPolicy: {
+                    windowDays: 45,
+                    watchRepeatSymbols: 2,
+                    breachRepeatSymbols: 4,
+                },
+            });
+            useSettingsStore.getState().updateRiskPolicy({
+                employerStockPlan: {
+                    ...useSettingsStore.getState().riskPolicy.employerStockPlan,
+                    state: 'active',
+                    targetAllocationPct: 15,
+                    nextActionDate: '2026-06-01',
+                },
+            });
+
+            const riskPolicy = useSettingsStore.getState().riskPolicy;
+            assert.strictEqual(riskPolicy.employerStockPlan.state, 'active');
+            assert.strictEqual(riskPolicy.employerStockPlan.targetAllocationPct, 15);
+            assert.strictEqual(riskPolicy.employerStockPlan.nextActionDate, '2026-06-01');
+            assert.deepStrictEqual(riskPolicy.employerStockPlan.symbols, ['GOOG', 'GOOGL']);
+            assert.strictEqual(riskPolicy.cashJobs[0].type, 'tax_reserve');
+            assert.strictEqual(riskPolicy.churnPolicy.windowDays, 45);
+        });
+    });
+
+    // -----------------------------------------------------------------------
     // Tags CRUD
     // -----------------------------------------------------------------------
 
@@ -183,7 +407,7 @@ describe('settingsStore', () => {
             useSettingsStore.getState().addTag({ name: 'A', color: '#111111' });
             useSettingsStore.getState().addTag({ name: 'B', color: '#222222' });
             const tags = useSettingsStore.getState().tags;
-            const ids = tags.map((t: any) => t.id);
+            const ids = tags.map((t: Tag) => t.id);
             const unique = new Set(ids);
             assert.strictEqual(unique.size, ids.length, 'All tag IDs should be unique');
         });
@@ -194,7 +418,7 @@ describe('settingsStore', () => {
             const tags = useSettingsStore.getState().tags;
             const target = tags[0]; // 'Growth'
             useSettingsStore.getState().updateTag(target.id, { name: 'Renamed' });
-            const updated = useSettingsStore.getState().tags.find((t: any) => t.id === target.id);
+            const updated = useSettingsStore.getState().tags.find((t: Tag) => t.id === target.id);
             assert.ok(updated);
             assert.strictEqual(updated!.name, 'Renamed');
             assert.strictEqual(updated!.color, target.color); // unchanged
@@ -215,7 +439,7 @@ describe('settingsStore', () => {
             const before = tags.length;
             useSettingsStore.getState().deleteTag(target.id);
             assert.strictEqual(useSettingsStore.getState().tags.length, before - 1);
-            assert.ok(!useSettingsStore.getState().tags.find((t: any) => t.id === target.id));
+            assert.ok(!useSettingsStore.getState().tags.find((t: Tag) => t.id === target.id));
         });
 
         test('should leave list unchanged for unknown id', () => {
@@ -231,31 +455,99 @@ describe('settingsStore', () => {
 
     describe('syncAccount', () => {
         test('should update lastSynced for the given account id', () => {
-            const before = useSettingsStore.getState().accounts.find((a: any) => a.id === 'fidelity')!.lastSynced;
+            const before = useSettingsStore.getState().accounts.find((a: ConnectedAccount) => a.id === 'fidelity')!.lastSynced;
             useSettingsStore.getState().syncAccount('fidelity');
-            const after = useSettingsStore.getState().accounts.find((a: any) => a.id === 'fidelity')!.lastSynced;
+            const after = useSettingsStore.getState().accounts.find((a: ConnectedAccount) => a.id === 'fidelity')!.lastSynced;
             assert.notStrictEqual(before, after, 'lastSynced should have changed');
         });
 
         test('should not modify other accounts', () => {
-            const vanguardBefore = useSettingsStore.getState().accounts.find((a: any) => a.id === 'vanguard')!.lastSynced;
+            const vanguardBefore = useSettingsStore.getState().accounts.find((a: ConnectedAccount) => a.id === 'vanguard')!.lastSynced;
             useSettingsStore.getState().syncAccount('fidelity');
-            const vanguardAfter = useSettingsStore.getState().accounts.find((a: any) => a.id === 'vanguard')!.lastSynced;
+            const vanguardAfter = useSettingsStore.getState().accounts.find((a: ConnectedAccount) => a.id === 'vanguard')!.lastSynced;
             assert.strictEqual(vanguardBefore, vanguardAfter);
+        });
+
+        test('should not mark Plaid token-missing accounts sync-ready', () => {
+            useSettingsStore.getState().connectPlaidAccounts([
+                {
+                    id: 'plaid-token-missing-sync',
+                    provider: 'plaid',
+                    name: 'Plaid Token Missing Sync',
+                    type: 'Brokerage · Plaid Sandbox Investments',
+                    accountMask: '****2222',
+                    holdings: 1,
+                    accountValue: 42_000,
+                    lastSynced: 'May 16, 2026',
+                    status: 'needs-review',
+                    institutionId: 'ins_109508',
+                    institutionName: 'Plaid Sandbox Investments',
+                    plaidAccountId: 'plaid-token-missing-sync',
+                    plaidItemId: 'item-token-missing-sync',
+                    capabilities: ['balances', 'holdings', 'transactions', 'investments'],
+                    syncReady: false,
+                    tokenStorageMode: 'postgres',
+                    tokenStorageDurable: false,
+                    providerItemStatus: 'missing-token',
+                },
+            ]);
+
+            useSettingsStore.getState().syncAccount('plaid-token-missing-sync');
+            const account = useSettingsStore.getState().accounts.find(
+                (a: ConnectedAccount) => a.id === 'plaid-token-missing-sync',
+            )!;
+
+            assert.strictEqual(account.syncReady, false);
+            assert.strictEqual(account.providerItemStatus, 'missing-token');
         });
     });
 
     describe('reconnectAccount', () => {
-        test('should set status to reconciled and clear errorMessage', () => {
+        test('should set non-Plaid accounts to reconciled and clear errorMessage', () => {
             // ibkr starts with status 'needs-review' and an errorMessage
-            const before = useSettingsStore.getState().accounts.find((a: any) => a.id === 'ibkr')!;
+            const before = useSettingsStore.getState().accounts.find((a: ConnectedAccount) => a.id === 'ibkr')!;
             assert.strictEqual(before.status, 'needs-review');
             assert.ok(before.errorMessage);
 
             useSettingsStore.getState().reconnectAccount('ibkr');
-            const after = useSettingsStore.getState().accounts.find((a: any) => a.id === 'ibkr')!;
+            const after = useSettingsStore.getState().accounts.find((a: ConnectedAccount) => a.id === 'ibkr')!;
             assert.strictEqual(after.status, 'reconciled');
             assert.strictEqual(after.errorMessage, undefined);
+        });
+
+        test('should not mark Plaid accounts sync-ready without a fresh token exchange', () => {
+            useSettingsStore.getState().connectPlaidAccounts([
+                {
+                    id: 'plaid-token-missing',
+                    provider: 'plaid',
+                    name: 'Plaid Missing Token',
+                    type: 'Brokerage · Plaid Sandbox Investments',
+                    accountMask: '****0000',
+                    holdings: 1,
+                    accountValue: 125_430.42,
+                    lastSynced: 'May 16, 2026',
+                    status: 'reconciled',
+                    institutionId: 'ins_109508',
+                    institutionName: 'Plaid Sandbox Investments',
+                    plaidAccountId: 'plaid-token-missing',
+                    plaidItemId: 'item-token-missing',
+                    capabilities: ['balances', 'holdings', 'transactions', 'investments'],
+                    syncReady: true,
+                    tokenStorageMode: 'memory',
+                    tokenStorageDurable: false,
+                    providerItemStatus: 'active',
+                },
+            ]);
+
+            useSettingsStore.getState().reconnectAccount('plaid-token-missing');
+            const after = useSettingsStore.getState().accounts.find(
+                (a: ConnectedAccount) => a.id === 'plaid-token-missing',
+            )!;
+
+            assert.strictEqual(after.status, 'needs-review');
+            assert.strictEqual(after.syncReady, false);
+            assert.strictEqual(after.providerItemStatus, 'missing-token');
+            assert.match(after.errorMessage ?? '', /Plaid Link/);
         });
     });
 
@@ -265,13 +557,131 @@ describe('settingsStore', () => {
             useSettingsStore.getState().removeAccount('ibkr');
             const after = useSettingsStore.getState().accounts;
             assert.strictEqual(after.length, before - 1);
-            assert.ok(!after.find((a: any) => a.id === 'ibkr'));
+            assert.ok(!after.find((a: ConnectedAccount) => a.id === 'ibkr'));
         });
 
         test('should leave list unchanged for unknown id', () => {
             const before = useSettingsStore.getState().accounts.length;
             useSettingsStore.getState().removeAccount('unknown');
             assert.strictEqual(useSettingsStore.getState().accounts.length, before);
+        });
+    });
+
+    describe('connectPlaidAccounts', () => {
+        test('should append Plaid account metadata without storing secrets', () => {
+            useSettingsStore.getState().connectPlaidAccounts([
+                {
+                    id: 'plaid-plaid-growth-brokerage',
+                    provider: 'plaid',
+                    name: 'Plaid Growth Brokerage',
+                    type: 'Brokerage · Plaid Sandbox Investments',
+                    accountMask: '****0000',
+                    holdings: 1,
+                    accountValue: 125_430.42,
+                    lastSynced: 'May 16, 2026',
+                    status: 'reconciled',
+                    institutionId: 'ins_109508',
+                    institutionName: 'Plaid Sandbox Investments',
+                    plaidAccountId: 'plaid-growth-brokerage',
+                    plaidItemId: 'item-plaid-sandbox-investments',
+                    capabilities: ['balances', 'holdings', 'transactions', 'investments'],
+                    syncReady: true,
+                    tokenStorageMode: 'postgres',
+                    tokenStorageDurable: true,
+                    providerItemStatus: 'active',
+                },
+            ]);
+
+            const account = useSettingsStore.getState().accounts.find(
+                (a: ConnectedAccount) => a.plaidAccountId === 'plaid-growth-brokerage',
+            );
+
+            assert.ok(account);
+            assert.strictEqual(account!.provider, 'plaid');
+            assert.strictEqual(account!.institutionName, 'Plaid Sandbox Investments');
+            assert.ok(account!.capabilities?.includes('investments'));
+            assert.strictEqual(account!.syncReady, true);
+            assert.strictEqual(account!.tokenStorageMode, 'postgres');
+            assert.strictEqual(account!.tokenStorageDurable, true);
+            assert.ok(!JSON.stringify(account).includes('access-sandbox'));
+        });
+
+        test('should update an existing Plaid account instead of duplicating it', () => {
+            const plaidAccount: PlaidConnectedAccountInput = {
+                id: 'plaid-plaid-growth-brokerage',
+                provider: 'plaid' as const,
+                name: 'Plaid Growth Brokerage',
+                type: 'Brokerage · Plaid Sandbox Investments',
+                accountMask: '****0000',
+                holdings: 1,
+                accountValue: 125_430.42,
+                lastSynced: 'May 16, 2026',
+                status: 'reconciled' as const,
+                institutionId: 'ins_109508',
+                institutionName: 'Plaid Sandbox Investments',
+                plaidAccountId: 'plaid-growth-brokerage',
+                plaidItemId: 'item-plaid-sandbox-investments',
+                capabilities: ['balances', 'holdings', 'transactions', 'investments'],
+            };
+
+            useSettingsStore.getState().connectPlaidAccounts([plaidAccount]);
+            useSettingsStore.getState().connectPlaidAccounts([
+                {
+                    ...plaidAccount,
+                    accountValue: 130_000,
+                    lastSynced: 'May 17, 2026',
+                },
+            ]);
+
+            const matches = useSettingsStore.getState().accounts.filter(
+                (a: ConnectedAccount) => a.plaidAccountId === 'plaid-growth-brokerage',
+            );
+            assert.strictEqual(matches.length, 1);
+            assert.strictEqual(matches[0].accountValue, 130_000);
+            assert.strictEqual(matches[0].lastSynced, 'May 17, 2026');
+        });
+
+        test('should update a relinked Plaid account when Plaid returns a new account id', () => {
+            const plaidAccount: PlaidConnectedAccountInput = {
+                id: 'plaid-original-checking-id',
+                provider: 'plaid',
+                name: 'Plaid Checking',
+                type: 'Checking · First Platypus Bank',
+                accountMask: '****0000',
+                holdings: 0,
+                accountValue: 110,
+                lastSynced: 'May 16, 2026',
+                status: 'reconciled',
+                institutionId: 'ins_109508',
+                institutionName: 'First Platypus Bank',
+                plaidAccountId: 'original-checking-id',
+                plaidItemId: 'original-item-id',
+                capabilities: ['balances', 'transactions'],
+            };
+
+            useSettingsStore.getState().connectPlaidAccounts([plaidAccount]);
+            useSettingsStore.getState().connectPlaidAccounts([
+                {
+                    ...plaidAccount,
+                    id: 'plaid-relinked-checking-id',
+                    plaidAccountId: 'relinked-checking-id',
+                    plaidItemId: 'relinked-item-id',
+                    accountValue: 125,
+                    lastSynced: 'May 17, 2026',
+                },
+            ]);
+
+            const matches = useSettingsStore.getState().accounts.filter(
+                (a: ConnectedAccount) =>
+                    a.provider === 'plaid' &&
+                    a.institutionId === 'ins_109508' &&
+                    a.name === 'Plaid Checking' &&
+                    a.accountMask === '****0000',
+            );
+            assert.strictEqual(matches.length, 1);
+            assert.strictEqual(matches[0].plaidAccountId, 'relinked-checking-id');
+            assert.strictEqual(matches[0].plaidItemId, 'relinked-item-id');
+            assert.strictEqual(matches[0].accountValue, 125);
         });
     });
 
@@ -344,6 +754,8 @@ describe('settingsStore', () => {
             useSettingsStore.getState().setAccent('#6366f1');
             useSettingsStore.getState().setProviderKey('polygon', 'secret');
             useSettingsStore.getState().updatePreferences({ baseCurrency: 'EUR' });
+            useSettingsStore.getState().updateAlphaRadarDeliveryChannel('slack', true);
+            useSettingsStore.getState().updateAlphaRadarDelivery({ tickerFilters: ['AAPL'] });
             useSettingsStore.getState().deleteTag(useSettingsStore.getState().tags[0].id);
             useSettingsStore.getState().removeAccount('fidelity');
 
@@ -353,6 +765,10 @@ describe('settingsStore', () => {
             const state = useSettingsStore.getState();
             assert.strictEqual(state.profile.fullName, 'John Doe');
             assert.strictEqual(state.notifications.portfolioUpdates, true);
+            assert.strictEqual(state.notifications.alphaRadarSignals, true);
+            assert.strictEqual(state.alphaRadarDelivery.channels.inApp, true);
+            assert.strictEqual(state.alphaRadarDelivery.channels.slack, false);
+            assert.deepStrictEqual(state.alphaRadarDelivery.tickerFilters, []);
             assert.strictEqual(state.security.twoFactorEnabled, false);
             assert.strictEqual(state.appearance.theme, 'light');
             assert.strictEqual(state.appearance.density, 'comfortable');

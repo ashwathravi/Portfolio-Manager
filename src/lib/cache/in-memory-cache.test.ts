@@ -68,4 +68,31 @@ describe('InMemoryCache', () => {
         c.dispose();
         c.dispose(); // should not throw
     });
+
+    it('evicts the least recently used entry when maxEntries is reached', (t) => {
+        t.mock.method(console, 'warn', () => {});
+        const bounded = new InMemoryCache({ maxEntries: 2, warningThreshold: 1 });
+        bounded.set('a', 1, 60);
+        bounded.set('b', 2, 60);
+        assert.strictEqual(bounded.get('a'), 1); // a is now most recently used
+        bounded.set('c', 3, 60);
+
+        assert.strictEqual(bounded.get('a'), 1);
+        assert.strictEqual(bounded.get('b'), undefined);
+        assert.strictEqual(bounded.get('c'), 3);
+        assert.strictEqual(bounded.size, 2);
+    });
+
+    it('warns once when approaching capacity', (t) => {
+        const warn = t.mock.method(console, 'warn', () => {});
+        const bounded = new InMemoryCache({ maxEntries: 5, warningThreshold: 0.8 });
+        bounded.set('a', 1, 60);
+        bounded.set('b', 2, 60);
+        bounded.set('c', 3, 60);
+        assert.strictEqual(warn.mock.callCount(), 0);
+
+        bounded.set('d', 4, 60);
+        bounded.set('e', 5, 60);
+        assert.strictEqual(warn.mock.callCount(), 1);
+    });
 });

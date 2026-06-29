@@ -27,6 +27,7 @@ import type {
 import {
   PortfolioValuationEngine,
   type PortfolioValuation,
+  type PortfolioValuationOptions,
   type HoldingValuation,
 } from './portfolio-valuation-engine';
 
@@ -85,8 +86,11 @@ export class MarketDataService {
    * Delegates to PortfolioValuationEngine (AR-49) which handles batching,
    * chunking for large portfolios, and graceful error handling.
    */
-  async getPortfolioValue(portfolioId: string): Promise<PortfolioValuation> {
-    return this.valuationEngine.value(portfolioId);
+  async getPortfolioValue(
+    portfolioId: string,
+    options: PortfolioValuationOptions = {},
+  ): Promise<PortfolioValuation> {
+    return this.valuationEngine.value(portfolioId, options);
   }
 }
 

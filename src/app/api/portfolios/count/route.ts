@@ -10,26 +10,33 @@
  * Linear: AR-66
  */
 
-import { NextResponse } from "next/server";
-import { sql } from "drizzle-orm";
+import { NextRequest, NextResponse } from "next/server";
+import { eq, sql } from "drizzle-orm";
 
 import { db } from "@/db";
 import { portfolios } from "@/db/schema";
+import { internalServerError, requirePortfolioUserScope } from "@/lib/api/security";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+    const auth = requirePortfolioUserScope(request);
+    if (!auth.ok) return auth.response;
+
     try {
         // Count via SQL rather than `findMany` + `.length` — the SELECT COUNT
         // avoids hydrating every row (and every related holding if someone
         // later turns on `with: { holdings: true }` here by mistake).
-        const [row] = await db
+        const query = db
             .select({ count: sql<number>`count(*)::int` })
             .from(portfolios);
 
+        const [row] = auth.context.userId
+            ? await query.where(eq(portfolios.userId, auth.context.userId))
+            : await query;
+
         return NextResponse.json({ count: row?.count ?? 0 });
     } catch (err) {
-        const message = err instanceof Error ? err.message : "Internal error";
-        return NextResponse.json({ error: message }, { status: 500 });
+        return internalServerError(err, "Unable to count portfolios.", "PORTFOLIO_COUNT_FAILED");
     }
 }

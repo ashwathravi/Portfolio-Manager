@@ -28,7 +28,7 @@ test.describe('Trade Analytics page', () => {
 
     test('should display Trade Calendar section', async ({ page }) => {
         await expect(page.getByText('Trade Calendar').first()).toBeVisible();
-        await expect(page.getByText('February 2026').first()).toBeVisible();
+        await expect(page.getByText('Feb 2026').first()).toBeVisible();
     });
 
     test('should show calendar day-of-week headers', async ({ page }) => {
@@ -45,7 +45,7 @@ test.describe('Trade Analytics page', () => {
 
     test('should display Trade Distribution and Win/Loss Analysis sections', async ({ page }) => {
         await expect(page.getByText('Trade Distribution').first()).toBeVisible();
-        await expect(page.getByText('Win/Loss Analysis').first()).toBeVisible();
+        await expect(page.getByText('Win/Loss Ratio').first()).toBeVisible();
     });
 
     test('should display Behavioral Insights section with summary table', async ({ page }) => {

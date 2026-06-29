@@ -33,6 +33,8 @@ export function AddEvidenceModal({ open, onOpenChange, onSubmit }: AddEvidenceMo
 
     useEffect(() => {
         if (!open) return;
+        // Reset modal draft on open so edit/create state does not bleed.
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setForm(defaults);
     }, [open]);
 

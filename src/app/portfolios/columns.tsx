@@ -79,7 +79,7 @@ export const columns: ColumnDef<Portfolio>[] = [
     },
     {
         accessorKey: "cashBalance",
-        header: ({ column }) => <div className="text-right">Cash Balance</div>,
+        header: () => <div className="text-right">Cash Balance</div>,
         cell: ({ row }) => {
             const amount = parseFloat(row.getValue("cashBalance"))
             const formatted = new Intl.NumberFormat("en-US", {

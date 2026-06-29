@@ -1,4 +1,4 @@
-import { AlphaVantageProvider, alphaVantageProvider } from './alpha-vantage';
+import { alphaVantageProvider } from './alpha-vantage';
 
 export interface MarketQuote {
     symbol: string;

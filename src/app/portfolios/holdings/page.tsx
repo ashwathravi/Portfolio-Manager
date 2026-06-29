@@ -4,6 +4,7 @@ import { marketDataEngine } from "@/lib/api/market-data";
 import { HoldingsPageClient, type HoldingsSeed } from "@/components/holdings/HoldingsPageClient";
 import { PageHeaderSync } from "@/components/layout/TopBar";
 import HoldingsLoading from "./loading";
+import { DEFAULT_OPTION_RISK_POSITIONS } from "@/lib/risk-policy";
 
 /**
  * Phase 4 (AR-74) Holdings page.
@@ -48,6 +49,8 @@ async function HoldingsContent() {
         console.warn("Failed to warm quote cache for holdings page", e);
     }
 
+    // Server component: holding age is intentionally request-time derived.
+    // eslint-disable-next-line react-hooks/purity
     const now = Date.now();
     const seed: HoldingsSeed[] = dbHoldings.map((h) => {
         const qty = Number(h.quantity) || 0;
@@ -72,7 +75,7 @@ async function HoldingsContent() {
         };
     });
 
-    return <HoldingsPageClient holdings={seed} />;
+    return <HoldingsPageClient holdings={seed} optionPositions={DEFAULT_OPTION_RISK_POSITIONS} />;
 }
 
 export default function CurrentHoldingsPage() {

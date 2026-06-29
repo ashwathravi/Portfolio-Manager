@@ -2,6 +2,11 @@ import { describe, it } from 'node:test';
 import * as assert from 'node:assert';
 import { SchwabClient } from './client';
 
+function headersAsRecord(headers: HeadersInit | undefined): Record<string, string> {
+    if (!headers || Array.isArray(headers) || headers instanceof Headers) return {};
+    return headers as Record<string, string>;
+}
+
 describe('SchwabClient', () => {
     it('should generate correct authorization URL', () => {
         const client = new SchwabClient('test-client-id', 'test-client-secret', 'https://127.0.0.1:8182/callback');
@@ -13,7 +18,7 @@ describe('SchwabClient', () => {
         );
     });
 
-    it('should exchange code for tokens successfully', async (t) => {
+    it('should exchange code for tokens successfully', async () => {
         // Mock global fetch
         const originalFetch = global.fetch;
         global.fetch = async (url, options) => {
@@ -38,7 +43,7 @@ describe('SchwabClient', () => {
                     token_type: 'Bearer',
                     scope: 'readonly'
                 })
-            } as any;
+            } as Response;
         };
 
         try {
@@ -59,7 +64,7 @@ describe('SchwabClient', () => {
             return {
                 ok: false,
                 statusText: 'Unauthorized'
-            } as any;
+            } as Response;
         };
 
         try {
@@ -77,7 +82,7 @@ describe('SchwabClient', () => {
         const originalFetch = global.fetch;
         global.fetch = async (url, options) => {
             assert.strictEqual(url, 'https://api.schwabapi.com/marketdata/v1/quotes?symbols=AAPL,MSFT');
-            assert.strictEqual((options?.headers as any)?.['Authorization'], 'Bearer mock-token');
+            assert.strictEqual(headersAsRecord(options?.headers)['Authorization'], 'Bearer mock-token');
 
             return {
                 ok: true,
@@ -85,7 +90,7 @@ describe('SchwabClient', () => {
                     AAPL: { symbol: 'AAPL', lastPrice: 150.00 },
                     MSFT: { symbol: 'MSFT', lastPrice: 250.00 }
                 })
-            } as any;
+            } as Response;
         };
 
         try {
@@ -104,7 +109,7 @@ describe('SchwabClient', () => {
             return {
                 ok: false,
                 statusText: 'Internal Server Error'
-            } as any;
+            } as Response;
         };
 
         try {
@@ -125,14 +130,14 @@ describe('SchwabClient', () => {
         global.fetch = async (url, options) => {
             assert.strictEqual(url, 'https://api.schwabapi.com/trader/v1/accounts/acc-123/orders');
             assert.strictEqual(options?.method, 'POST');
-            assert.strictEqual((options?.headers as any)?.['Authorization'], 'Bearer mock-token');
-            assert.strictEqual((options?.headers as any)?.['Content-Type'], 'application/json');
+            assert.strictEqual(headersAsRecord(options?.headers)['Authorization'], 'Bearer mock-token');
+            assert.strictEqual(headersAsRecord(options?.headers)['Content-Type'], 'application/json');
             assert.strictEqual(options?.body, JSON.stringify(mockPayload));
 
             return {
                 ok: true,
                 status: 201
-            } as any;
+            } as Response;
         };
 
         try {
@@ -151,7 +156,7 @@ describe('SchwabClient', () => {
                 ok: false,
                 statusText: 'Bad Request',
                 text: async () => 'invalid payload'
-            } as any;
+            } as Response;
         };
 
         try {
@@ -169,14 +174,14 @@ describe('SchwabClient', () => {
         const originalFetch = global.fetch;
         global.fetch = async (url, options) => {
             assert.strictEqual(url, 'https://api.schwabapi.com/trader/v1/accounts');
-            assert.strictEqual((options?.headers as any)?.['Authorization'], 'Bearer valid-token');
+            assert.strictEqual(headersAsRecord(options?.headers)['Authorization'], 'Bearer valid-token');
 
             return {
                 ok: true,
                 json: async () => ([
                     { accountHash: 'hash123', accountNumber: '12345678' }
                 ])
-            } as any;
+            } as Response;
         };
 
         try {

@@ -1,0 +1,62 @@
+[
+  {
+    "cusip": "67066G104",
+    "issuerName": "Nvidia Corp",
+    "ticker": "NVDA",
+    "changeType": "new",
+    "valueDeltaUsd": 125000000,
+    "shareDelta": 2000,
+    "currentWeight": 0.357143,
+    "materialityScore": 100,
+    "portfolio": false,
+    "watchlist": false,
+    "thesis": true,
+    "reasons": ["Linked to active thesis"]
+  },
+  {
+    "cusip": "30231G102",
+    "issuerName": "Exxon Mobil Corp",
+    "ticker": "XOM",
+    "changeType": "exited",
+    "valueDeltaUsd": -50000000,
+    "shareDelta": -800,
+    "priorWeight": 0.2,
+    "materialityScore": 95,
+    "portfolio": false,
+    "watchlist": false,
+    "thesis": false,
+    "reasons": []
+  },
+  {
+    "cusip": "594918104",
+    "issuerName": "Microsoft Corp",
+    "ticker": "MSFT",
+    "changeType": "decreased",
+    "valueDeltaUsd": -25000000,
+    "shareDelta": -500,
+    "rankDelta": -2,
+    "currentWeight": 0.214286,
+    "priorWeight": 0.4,
+    "materialityScore": 87,
+    "portfolio": true,
+    "watchlist": false,
+    "thesis": false,
+    "reasons": ["Held in portfolio"]
+  },
+  {
+    "cusip": "037833100",
+    "issuerName": "Apple Inc",
+    "ticker": "AAPL",
+    "changeType": "increased",
+    "valueDeltaUsd": 50000000,
+    "shareDelta": 2500,
+    "rankDelta": 1,
+    "currentWeight": 0.428571,
+    "priorWeight": 0.4,
+    "materialityScore": 53,
+    "portfolio": false,
+    "watchlist": false,
+    "thesis": false,
+    "reasons": []
+  }
+]

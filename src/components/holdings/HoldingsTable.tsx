@@ -100,12 +100,10 @@ export function HoldingsTable({ holdings }: { holdings: Holding[] }) {
     });
 
     const [selectedStrategy, setSelectedStrategy] = useState(() => {
-        const param = searchParams.get('strategy');
         return 'All Strategies';
     });
 
     const [selectedTag, setSelectedTag] = useState(() => {
-        const param = searchParams.get('tag');
         return 'All Tags';
     });
 

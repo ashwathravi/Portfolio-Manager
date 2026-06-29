@@ -2,6 +2,13 @@
 
 import { useMemo, useState } from "react";
 import { Donut, type DonutSegment } from "@/components/charts";
+import {
+    computeBucketAllocation,
+    computeThemeExposure,
+    policyBucketLabel,
+    type PolicyBucketId,
+    type ThemeWeight,
+} from "@/lib/risk-policy";
 
 /**
  * Phase 3 (AR-71) Allocation donut card.
@@ -32,8 +39,8 @@ export interface AllocationHolding {
     symbol: string;
     /** Portfolio name (used for the "Account" grouping). */
     portfolio: string;
-    /** Optional theme / sector override — falls back to a rough ticker→theme map. */
-    theme?: string;
+    policyBucket?: PolicyBucketId;
+    themeWeights?: readonly ThemeWeight[];
     marketValue: number;
 }
 
@@ -44,7 +51,7 @@ export interface AllocationCardProps {
     className?: string;
 }
 
-type GroupBy = "theme" | "account";
+type GroupBy = "theme" | "policy" | "account";
 
 export function AllocationCard({
     holdings,
@@ -81,6 +88,15 @@ export function AllocationCard({
                         onClick={() => setGroupBy("theme")}
                     >
                         Theme
+                    </button>
+                    <button
+                        type="button"
+                        role="radio"
+                        aria-checked={groupBy === "policy"}
+                        className="pm-seg-pill-btn"
+                        onClick={() => setGroupBy("policy")}
+                    >
+                        Policy
                     </button>
                     <button
                         type="button"
@@ -150,38 +166,6 @@ export function AllocationCard({
 // Helpers
 // ---------------------------------------------------------------------------
 
-/**
- * Rough ticker → theme map. Intentionally small — this is a placeholder
- * until we pull real classifications from the aggregator. Unknown tickers
- * land in "Other".
- */
-const THEME_MAP: Record<string, string> = {
-    AAPL: "Tech",
-    MSFT: "Tech",
-    NVDA: "Tech",
-    GOOG: "Tech",
-    GOOGL: "Tech",
-    META: "Tech",
-    AMZN: "Tech",
-    TSLA: "Tech",
-    JPM: "Financials",
-    GS: "Financials",
-    BAC: "Financials",
-    XOM: "Energy",
-    CVX: "Energy",
-    JNJ: "Healthcare",
-    PFE: "Healthcare",
-    WMT: "Consumer",
-    KO: "Consumer",
-    PEP: "Consumer",
-    COIN: "Crypto",
-    BTC: "Crypto",
-    ETH: "Crypto",
-    BND: "Bonds",
-    TLT: "Bonds",
-    GLD: "Commodities",
-};
-
 function buildSegments(
     holdings: AllocationHolding[],
     groupBy: GroupBy,
@@ -190,9 +174,31 @@ function buildSegments(
     const buckets = new Map<string, number>();
 
     if (groupBy === "theme") {
-        for (const h of holdings) {
-            const key = h.theme ?? THEME_MAP[h.symbol.toUpperCase()] ?? "Other";
-            buckets.set(key, (buckets.get(key) ?? 0) + h.marketValue);
+        const exposure = computeThemeExposure([
+            ...holdings.map((h) => ({
+                symbol: h.symbol,
+                marketValue: h.marketValue,
+                policyBucket: h.policyBucket,
+                themeWeights: h.themeWeights,
+            })),
+            ...cashInputs(cashByPortfolio),
+        ]);
+        for (const row of exposure.rows) {
+            if (row.marketValue > 0) buckets.set(row.label, row.marketValue);
+        }
+    } else if (groupBy === "policy") {
+        const allocation = computeBucketAllocation([
+            ...holdings.map((h) => ({
+                symbol: h.symbol,
+                marketValue: h.marketValue,
+                policyBucket: h.policyBucket,
+            })),
+            ...cashInputs(cashByPortfolio),
+        ]);
+        for (const row of allocation.rows) {
+            if (row.marketValue > 0) {
+                buckets.set(policyBucketLabel(row.bucket), row.marketValue);
+            }
         }
     } else {
         for (const h of holdings) {
@@ -217,6 +223,24 @@ function buildSegments(
         value,
         color: PALETTE[i % PALETTE.length] as string,
     }));
+}
+
+function cashInputs(cashByPortfolio?: Record<string, number>) {
+    if (!cashByPortfolio) return [];
+    return Object.entries(cashByPortfolio)
+        .filter(([, cash]) => cash > 0)
+        .map(([portfolio, cash]) => ({
+            id: `cash-${portfolio}`,
+            symbol: "USD",
+            name: `${portfolio} cash`,
+            marketValue: cash,
+            policyBucket: "cash_reserve" as const,
+            themeWeights: [{
+                theme: "bonds_treasuries_cash_equivalent" as const,
+                weight: 1,
+                source: "explicit" as const,
+            }],
+        }));
 }
 
 function formatCompact(n: number): string {

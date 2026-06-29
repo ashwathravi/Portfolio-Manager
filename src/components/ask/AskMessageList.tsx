@@ -159,8 +159,10 @@ function ToolRunsFooter({ runs }: { runs: AskToolRun[] }) {
 
 /** Single assistant or user turn. */
 function MessageRow({ msg }: { msg: AskMessage }) {
-    const citations = msg.citations ?? [];
-    const body = useMemo(() => renderMarkdown(msg.content, citations), [msg.content, citations]);
+    const body = useMemo(
+        () => renderMarkdown(msg.content, msg.citations ?? []),
+        [msg.content, msg.citations],
+    );
 
     return (
         <article

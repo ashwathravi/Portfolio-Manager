@@ -295,6 +295,8 @@ export function TerminalVariant() {
     // hasn't edited the ticket directly after typing. Simple model: the
     // CLI wins whenever the parse succeeds.
     useEffect(() => {
+        // Parsed command tokens intentionally drive the ticket draft.
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         if (parsed.side) setSide(parsed.side);
         if (parsed.qty) setQty(parsed.qty);
         if (parsed.ticker) setTicker(parsed.ticker);

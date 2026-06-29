@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { clickUntil, gotoAppPage, reloadAppPage } from './helpers/app';
 
 /**
  * Critical user-path E2E tests (AR-33).
@@ -13,15 +14,16 @@ import { test, expect } from '@playwright/test';
 
 test.describe('Critical user paths', () => {
     test('user creates an alert rule and it persists across reload', async ({ page }) => {
-        await page.goto('/settings?tab=alerts');
+        await gotoAppPage(page, '/settings?tab=alerts');
 
         // Seed rules should render up front. Use exact match + .first() because the
         // rule name also appears in sr-only labels on the edit/delete buttons.
         await expect(page.getByText('AAPL above $200', { exact: true }).first()).toBeVisible();
 
         // Open the "New Alert" dialog.
-        await page.getByRole('button', { name: /New Alert/ }).click();
-        await expect(page.getByRole('dialog')).toBeVisible();
+        await clickUntil(page.getByRole('button', { name: /New Alert/ }), async () => {
+            await expect(page.getByRole('dialog')).toBeVisible({ timeout: 1500 });
+        });
 
         // Fill the form. Metric defaults to "price" which requires a symbol.
         const uniqueName = `E2E price alert ${Date.now()}`;
@@ -39,7 +41,7 @@ test.describe('Critical user paths', () => {
         await expect(page.getByText(uniqueName, { exact: true }).first()).toBeVisible();
 
         // Reload — zustand persist (localStorage) should restore the rule.
-        await page.reload();
+        await reloadAppPage(page);
         await expect(page.getByText(uniqueName, { exact: true }).first()).toBeVisible();
     });
 
@@ -56,7 +58,7 @@ test.describe('Critical user paths', () => {
             });
         });
 
-        await page.goto('/settings?tab=preferences');
+        await gotoAppPage(page, '/settings?tab=preferences');
 
         const refreshInput = page.getByLabel('Market data refresh (seconds)');
         await expect(refreshInput).toBeVisible();
@@ -68,17 +70,17 @@ test.describe('Critical user paths', () => {
         await page.getByRole('button', { name: /Save Preferences/ }).click();
 
         // Reload the preferences page and confirm the value was persisted by the store.
-        await page.reload();
+        await reloadAppPage(page);
         await expect(page.getByLabel('Market data refresh (seconds)')).toHaveValue('120');
 
         // Navigate to the dashboard and verify the LiveDataIndicator reflects the new interval.
         // The indicator shows "auto-refresh every Ns" in both the initial and success states.
-        await page.goto('/');
+        await gotoAppPage(page, '/');
         await expect(page.getByText(/every\s*120s/i).first()).toBeVisible({ timeout: 10_000 });
     });
 
     test('switching theme to dark applies html.dark class and persists', async ({ page }) => {
-        await page.goto('/settings?tab=appearance');
+        await gotoAppPage(page, '/settings?tab=appearance');
 
         // Select the Dark theme tile.
         await page.getByLabel('Dark', { exact: true }).click();
@@ -87,11 +89,11 @@ test.describe('Critical user paths', () => {
         await expect(page.locator('html')).toHaveClass(/(^|\s)dark(\s|$)/);
 
         // Navigate away — the class should remain since the settings store persists.
-        await page.goto('/');
+        await gotoAppPage(page, '/');
         await expect(page.locator('html')).toHaveClass(/(^|\s)dark(\s|$)/);
 
         // Reload and ensure the class is re-applied on a cold load too.
-        await page.reload();
+        await reloadAppPage(page);
         await expect(page.locator('html')).toHaveClass(/(^|\s)dark(\s|$)/);
     });
 
@@ -99,12 +101,12 @@ test.describe('Critical user paths', () => {
         const consoleErrors: string[] = [];
         page.on('pageerror', (err) => consoleErrors.push(err.message));
 
-        await page.goto('/');
+        await gotoAppPage(page, '/');
         // Post-redesign: the dashboard title lives in the Topbar, not the body.
         await expect(page.locator('h1.pm-topbar-title')).toHaveText('Dashboard');
 
         // Jump to holdings via direct URL (sidebar is covered by navigation.spec.ts).
-        await page.goto('/portfolios/holdings');
+        await gotoAppPage(page, '/portfolios/holdings');
         // The page uses Suspense — wait for table OR empty-state.
         const tableOrEmpty = page.locator('table').first().or(
             page.locator('text=/no holdings|Loading/i'),
@@ -112,7 +114,7 @@ test.describe('Critical user paths', () => {
         await expect(tableOrEmpty).toBeVisible();
 
         // Then portfolios overview.
-        await page.goto('/portfolios');
+        await gotoAppPage(page, '/portfolios');
         await expect(page.locator('h1', { hasText: 'Portfolios' })).toBeVisible();
 
         // No uncaught runtime errors surfaced during the journey.

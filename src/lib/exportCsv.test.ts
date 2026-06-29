@@ -7,9 +7,16 @@ import { exportToCsv } from './exportCsv';
 
 let createdBlobContent: string[] = [];
 let createdBlobType = '';
-let objectUrlCreated: any = null;
 let revokedUrl: string | null = null;
-let lastCreatedElement: any = null;
+let lastCreatedElement: MockAnchorElement | null = null;
+
+interface MockAnchorElement {
+    tag: string;
+    href: string;
+    download: string;
+    clicked: boolean;
+    click: () => void;
+}
 
 class MockBlob {
     content: string[];
@@ -23,8 +30,7 @@ class MockBlob {
 }
 
 const mockUrl = {
-    createObjectURL: (blob: any) => {
-        objectUrlCreated = blob;
+    createObjectURL: () => {
         return 'blob:mock-url';
     },
     revokeObjectURL: (url: string) => {
@@ -52,12 +58,9 @@ const originalBlob = globalThis.Blob;
 const originalURL = globalThis.URL;
 const originalDocument = globalThis.document;
 
-// @ts-expect-error - mocking global DOM APIs
-globalThis.Blob = MockBlob as any;
-// @ts-expect-error - mocking global DOM APIs
-globalThis.URL = mockUrl as any;
-// @ts-expect-error - mocking global DOM APIs
-globalThis.document = mockDocument as any;
+globalThis.Blob = MockBlob as unknown as typeof Blob;
+globalThis.URL = mockUrl as unknown as typeof URL;
+globalThis.document = mockDocument as unknown as Document;
 
 describe('exportToCsv', () => {
     after(() => {
@@ -69,7 +72,6 @@ describe('exportToCsv', () => {
     beforeEach(() => {
         createdBlobContent = [];
         createdBlobType = '';
-        objectUrlCreated = null;
         revokedUrl = null;
         lastCreatedElement = null;
     });
@@ -89,6 +91,7 @@ describe('exportToCsv', () => {
         const expectedCsv = 'name,age\nJohn,30\nJane,25';
         assert.strictEqual(createdBlobContent[0], expectedCsv);
         assert.strictEqual(createdBlobType, 'text/csv;charset=utf-8;');
+        assert.ok(lastCreatedElement);
         assert.strictEqual(lastCreatedElement.download, 'users.csv');
         assert.strictEqual(lastCreatedElement.clicked, true);
         assert.strictEqual(revokedUrl, 'blob:mock-url');

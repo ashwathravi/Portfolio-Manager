@@ -7,7 +7,7 @@ import { ArrowLeft, Download, RefreshCw } from "lucide-react";
 import Link from "next/link";
 import { BacktestResult } from "@/types/strategy";
 import { exportToCsv } from '@/lib/exportCsv';
-import { ResponsiveContainer, XAxis, YAxis, CartesianGrid, Tooltip, AreaChart, Area, TooltipProps } from 'recharts';
+import { ResponsiveContainer, XAxis, YAxis, CartesianGrid, Tooltip, AreaChart, Area, TooltipContentProps } from 'recharts';
 
 // Mock Data
 const mockBacktest: BacktestResult = {
@@ -49,7 +49,7 @@ const mockBacktest: BacktestResult = {
     runDate: new Date()
 };
 
-const CustomTooltip = ({ active, payload, label }: TooltipProps<number, string>) => {
+const CustomTooltip = ({ active, payload, label }: TooltipContentProps<number, string>) => {
     if (active && payload && payload.length) {
         const date = label ? new Date(label) : null;
         return (
@@ -189,7 +189,7 @@ export default function BacktestPage() {
                                     tickFormatter={(date) => new Date(date).toLocaleDateString(undefined, { month: 'short' })}
                                 />
                                 <YAxis />
-                                <Tooltip content={<CustomTooltip />} />
+                                <Tooltip content={CustomTooltip} />
                                 <Area type="monotone" dataKey="equity" stroke="#8884d8" fillOpacity={1} fill="url(#colorEquity)" />
                             </AreaChart>
                         </ResponsiveContainer>

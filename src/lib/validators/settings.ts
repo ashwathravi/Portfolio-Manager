@@ -44,7 +44,17 @@ export const preferencesSchema = z.object({
 
 export const alertRuleSchema = z.object({
     name: z.string().trim().min(1, "Name is required").max(60, "Name is too long").pipe(safeText),
-    metric: z.enum(['price', 'price_change_pct', 'portfolio_value', 'portfolio_day_change_pct']),
+    metric: z.enum([
+        'price',
+        'price_change_pct',
+        'portfolio_value',
+        'portfolio_day_change_pct',
+        'alpha_radar_new_position',
+        'alpha_radar_exit',
+        'alpha_radar_large_add',
+        'alpha_radar_large_trim',
+        'alpha_radar_user_overlap',
+    ]),
     symbol: z.string().trim().toUpperCase().max(10, "Symbol is too long").regex(/^[A-Z.\-]*$/, "Invalid symbol").optional().or(z.literal('')),
     comparator: z.enum(['gte', 'lte', 'gt', 'lt', 'eq']),
     threshold: z.number().finite(),
@@ -53,11 +63,19 @@ export const alertRuleSchema = z.object({
     note: z.string().trim().max(200, "Note is too long").optional().or(z.literal('')),
 }).superRefine((data, ctx) => {
     const needsSymbol = data.metric === 'price' || data.metric === 'price_change_pct';
+    const isAlphaRadarMetric = data.metric.startsWith('alpha_radar_');
     if (needsSymbol && !data.symbol) {
         ctx.addIssue({
             code: z.ZodIssueCode.custom,
             message: "Symbol is required for this metric",
             path: ['symbol'],
+        });
+    }
+    if (isAlphaRadarMetric && (data.threshold < 0 || data.threshold > 100)) {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "Alpha Radar materiality score must be between 0 and 100",
+            path: ['threshold'],
         });
     }
 });

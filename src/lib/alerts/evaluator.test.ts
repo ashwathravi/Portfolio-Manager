@@ -75,6 +75,16 @@ describe('observeMetric', () => {
         const rule: AlertRule = { ...baseRule, symbol: 'aapl' };
         assert.strictEqual(observeMetric(rule, baseSnapshot), 175.5);
     });
+
+    test('Alpha Radar metrics are ignored by market snapshot evaluation', () => {
+        const rule: AlertRule = {
+            ...baseRule,
+            metric: 'alpha_radar_user_overlap',
+            symbol: undefined,
+            threshold: 80,
+        };
+        assert.strictEqual(observeMetric(rule, baseSnapshot), null);
+    });
 });
 
 describe('canFire', () => {
@@ -207,6 +217,13 @@ describe('describeRule', () => {
         assert.strictEqual(
             describeRule({ metric: 'portfolio_value', comparator: 'lt', threshold: 100000 }),
             'Portfolio value < $100,000',
+        );
+    });
+
+    test('renders an Alpha Radar materiality score rule', () => {
+        assert.strictEqual(
+            describeRule({ metric: 'alpha_radar_user_overlap', comparator: 'gte', threshold: 80 }),
+            'Alpha Radar user-overlap score ≥ 80/100',
         );
     });
 });

@@ -8,36 +8,41 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 
+import { apiError, internalServerError, providerRateLimitError } from '@/lib/api/security';
 import { getMarketDataService } from '@/lib/services/market-data-service';
 import { PolygonRateLimitError } from '@/lib/providers/polygon-massive-adapter';
+import { tickerSchema, timeframeSchema } from '@/lib/validators/market-data';
 
 export async function GET(request: NextRequest) {
   const symbol = request.nextUrl.searchParams.get('symbol');
   const timeframe = request.nextUrl.searchParams.get('timeframe') || '1D';
 
   if (!symbol) {
-    return NextResponse.json(
-      { error: 'Missing required query parameter: symbol' },
-      { status: 400 },
-    );
+    return apiError('Missing required query parameter: symbol', 'MISSING_SYMBOL', 400);
+  }
+
+  const parsedSymbol = tickerSchema.safeParse(symbol.toUpperCase());
+  if (!parsedSymbol.success) {
+    return apiError(parsedSymbol.error.issues[0]?.message ?? 'Invalid symbol', 'INVALID_SYMBOL', 400);
+  }
+
+  const parsedTimeframe = timeframeSchema.safeParse(timeframe.toUpperCase());
+  if (!parsedTimeframe.success) {
+    return apiError('Invalid timeframe. Valid values: 1D, 1H, 1M', 'INVALID_TIMEFRAME', 400);
   }
 
   try {
     const service = getMarketDataService();
     const bars = await service.getHistoricalPrices(
-      symbol.toUpperCase(),
-      timeframe.toUpperCase(),
+      parsedSymbol.data,
+      parsedTimeframe.data,
     );
     return NextResponse.json({ data: bars });
   } catch (err) {
     if (err instanceof PolygonRateLimitError) {
-      return NextResponse.json(
-        { error: 'Rate limit exceeded. Please retry later.' },
-        { status: 429, headers: { 'Retry-After': String(Math.ceil(err.retryAfterMs / 1000)) } },
-      );
+      return providerRateLimitError(err.retryAfterMs / 1000);
     }
 
-    const message = err instanceof Error ? err.message : 'Internal server error';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return internalServerError(err, 'Unable to fetch historical prices.', 'MARKET_DATA_HISTORICAL_FAILED');
   }
 }

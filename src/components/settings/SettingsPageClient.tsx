@@ -16,6 +16,11 @@ import { IntegrationsCard } from "./cards/IntegrationsCard";
 import { AppearanceCard } from "./cards/AppearanceCard";
 import { GuardrailsCard } from "./cards/GuardrailsCard";
 import { ExecutionCard } from "./cards/ExecutionCard";
+import { BucketPolicyCard } from "./cards/BucketPolicyCard";
+import { ChurnPolicyCard } from "./cards/ChurnPolicyCard";
+import { CashJobsCard } from "./cards/CashJobsCard";
+import { SellDisciplineCard } from "./cards/SellDisciplineCard";
+import { EmployerStockPlanCard } from "./cards/EmployerStockPlanCard";
 
 interface AdvancedLink {
     slug: string;
@@ -74,7 +79,9 @@ const ADVANCED_LINKS: AdvancedLink[] = [
  *   ┌────────────────── Settings ───────────────────┐
  *   │  [ Profile ]        [ Connected accts ]       │
  *   │  [ Appearance ]     [ Guardrails ]            │
- *   │  [ Execution ]                                │
+ *   │  [ Execution ]      [ Bucket policy ]         │
+ *   │  [ GOOG de-risking ] [ Trading activity ]     │
+ *   │  [ Cash jobs ]       [ Sell discipline ]      │
  *   └───────────────────────────────────────────────┘
  *
  * The grid is `auto-fit` + `minmax` so a 5th card (Execution, added in
@@ -103,6 +110,11 @@ export function SettingsPageClient() {
                 <AppearanceCard />
                 <GuardrailsCard />
                 <ExecutionCard />
+                <BucketPolicyCard />
+                <EmployerStockPlanCard />
+                <ChurnPolicyCard />
+                <CashJobsCard />
+                <SellDisciplineCard />
             </div>
 
             <section

@@ -31,6 +31,8 @@ export function useThesisStore() {
     useEffect(() => {
         const stored = loadThesesFromStorage(getBrowserStorage());
         if (stored && stored.length > 0) {
+            // Hydrate client-only thesis state from localStorage.
+            // eslint-disable-next-line react-hooks/set-state-in-effect
             setTheses(stored);
         }
         setHydrated(true);

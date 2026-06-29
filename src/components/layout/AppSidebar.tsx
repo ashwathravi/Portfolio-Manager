@@ -6,6 +6,7 @@ import {
     Briefcase,
     FileText,
     Cpu,
+    CircleHelp,
     PlayCircle,
     Settings,
     Sparkles,
@@ -88,7 +89,10 @@ const NAV_SECTIONS: readonly NavSection[] = [
     },
     {
         label: 'System',
-        items: [{ title: 'Settings', icon: Settings, href: '/settings' }],
+        items: [
+            { title: 'Settings', icon: Settings, href: '/settings' },
+            { title: 'Help', icon: CircleHelp, href: '/help' },
+        ],
     },
 ];
 

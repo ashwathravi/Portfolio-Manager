@@ -120,6 +120,18 @@ test.describe('Ask Ledger — dedicated /ask page', () => {
         );
     });
 
+    test('risk-policy stress questions produce cited tool output', async ({ page }) => {
+        await page.goto('/ask');
+        const input = page.getByTestId('ask-input');
+        await input.fill('What happens if GOOG drops 40%?');
+        await page.getByTestId('ask-send').click();
+
+        const assistant = page.getByTestId('ask-msg-assistant');
+        await expect(assistant).toContainText(/GOOG -40%/);
+        await expect(assistant).toContainText(/stress_test/);
+        await expect(assistant.getByTestId('ask-cite').first()).toBeVisible();
+    });
+
     test('history persists across reload under pm-ask-v1', async ({ page }) => {
         await page.goto('/ask');
         await page

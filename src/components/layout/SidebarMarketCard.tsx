@@ -49,9 +49,13 @@ function useEtClock() {
     // `null` on the first render so SSR and the first client paint produce
     // identical output — otherwise the "9:42 AM ET" text would mismatch.
     useEffect(() => {
-        setNow(new Date());
-        const id = setInterval(() => setNow(new Date()), CLOCK_TICK_MS);
-        return () => clearInterval(id);
+        const update = () => setNow(new Date());
+        const firstTick = setTimeout(update, 0);
+        const interval = setInterval(update, CLOCK_TICK_MS);
+        return () => {
+            clearTimeout(firstTick);
+            clearInterval(interval);
+        };
     }, []);
     return now;
 }
@@ -108,7 +112,7 @@ export function SidebarMarketCard() {
                     {clock}
                 </span>
             </div>
-            <ul className="pm-market-indices">
+            <ul className="pm-market-indices" aria-label="Market Status">
                 {INDICES.map((row) => {
                     const pct = deltas[row.symbol];
                     return (

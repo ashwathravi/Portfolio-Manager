@@ -20,6 +20,8 @@ interface EnvelopeV2 {
     theses: Thesis[];
 }
 
+type StoredEnvelope = Partial<EnvelopeV1> | Partial<EnvelopeV2>;
+
 function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null;
 }
@@ -106,7 +108,7 @@ function parseEnvelope(raw: string): Thesis[] | null {
     try {
         const parsed = JSON.parse(raw);
         if (!isRecord(parsed)) return null;
-        const envelope = parsed as Partial<EnvelopeV1 & EnvelopeV2>;
+        const envelope = parsed as StoredEnvelope;
         if (envelope.version !== 1 && envelope.version !== CURRENT_VERSION) return null;
         if (!Array.isArray(envelope.theses)) return null;
         const normalized: Thesis[] = [];

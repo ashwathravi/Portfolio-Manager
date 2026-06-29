@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { clickUntil, gotoAppPage, reloadAppPage } from './helpers/app';
 
 /**
  * Phase 9 (AR-94) + AR-112 Dashboard tests.
@@ -30,7 +31,7 @@ test.describe('Dashboard page', () => {
                 /* private mode — ignore */
             }
         });
-        await page.goto('/');
+        await gotoAppPage(page, '/');
     });
 
     test('Topbar title renders "Dashboard"', async ({ page }) => {
@@ -69,6 +70,39 @@ test.describe('Dashboard page', () => {
         ).toBeVisible();
     });
 
+    test('Risk Policy dashboard renders policy dimensions, statuses, and deep links', async ({ page }) => {
+        const card = page.getByTestId('risk-policy-dashboard');
+        await expect(card).toBeVisible();
+        await expect(card.locator('#pm-risk-policy-head')).toHaveText('Portfolio risk policy');
+        await expect(card.getByRole('heading', { name: 'GOOG / employer-linked stock' })).toBeVisible();
+        await expect(card.getByRole('heading', { name: 'Cash purpose coverage' })).toBeVisible();
+
+        const dimensions = card.getByTestId('risk-policy-dimension');
+        await expect(dimensions).toHaveCount(12);
+        await expect(
+            card.locator('[data-testid="risk-policy-dimension"][data-status="breached"], [data-testid="risk-policy-dimension"][data-status="missing_data"]').first(),
+        ).toBeVisible();
+
+        await expect(card.getByTestId('risk-policy-action').first()).toBeVisible();
+        await expect(card.getByRole('link', { name: /Holdings/ })).toHaveAttribute('href', '/portfolios/holdings');
+        await expect(card.getByRole('link', { name: /Execution/ })).toHaveAttribute('href', '/execution');
+        await expect(card.getByRole('link', { name: /Research theses/ })).toHaveAttribute('href', '/research');
+        await expect(card.getByRole('link', { name: /Guardrails/ })).toHaveAttribute('href', '/settings');
+        await expect(card.getByRole('link', { name: /Weekly review/ })).toHaveAttribute('href', '/#weekly-review');
+    });
+
+    test('Risk Policy dashboard runs built-in stress scenarios', async ({ page }) => {
+        const panel = page.getByTestId('stress-test-panel');
+        await expect(panel).toBeVisible();
+        await expect(panel.getByLabel('Stress-test scenario')).toBeVisible();
+
+        await panel.getByLabel('Stress-test scenario').selectOption('ai_basket_30_down');
+        await expect(panel).toContainText('AI basket -30%');
+        await expect(panel).toContainText('Portfolio drawdown');
+        await expect(panel).toContainText(/-\$|0%|-/);
+        await expect(panel.getByRole('list', { name: 'Stress test top contributors' })).toBeVisible();
+    });
+
     test('63/37 split renders Top Holdings + Recent Activity cards', async ({ page }) => {
         await expect(
             page.locator('.pm-card-title', { hasText: /^Top Holdings$/ }),
@@ -78,14 +112,53 @@ test.describe('Dashboard page', () => {
         ).toBeVisible();
     });
 
-    test('bottom strip shows Pattern feed alongside Watchlist + Active Theses', async ({ page }) => {
+    test('bottom strip shows Pattern feed alongside Alpha Radar + Watchlist + Active Theses', async ({ page }) => {
         await expect(page.getByTestId('pattern-feed')).toBeVisible();
+        await expect(page.getByTestId('alpha-radar-dashboard-card')).toBeVisible();
         await expect(
             page.locator('.pm-card-title', { hasText: /^Watchlist$/ }),
         ).toBeVisible();
         await expect(
             page.locator('.pm-card-title', { hasText: /^Active Theses$/ }),
         ).toBeVisible();
+    });
+
+    test('Alpha Radar card shows latest reports and links into Research', async ({ page }) => {
+        const card = page.getByTestId('alpha-radar-dashboard-card');
+        await expect(card).toBeVisible();
+        await expect(card.getByTestId('alpha-radar-dashboard-row').first()).toBeVisible();
+        await expect(card.getByRole('link', { name: /Open/ })).toHaveAttribute('href', '/research?tab=alpha-radar');
+    });
+
+    test('Alpha Radar dashboard refresh exposes pending state', async ({ page }) => {
+        await page.route('**/api/alpha-radar/refresh', async (route) => {
+            await new Promise((resolve) => setTimeout(resolve, 3000));
+            await route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({
+                    data: {
+                        scope: 'all',
+                        startedAt: new Date().toISOString(),
+                        completedAt: new Date().toISOString(),
+                        totalFilers: 0,
+                        fetched: 0,
+                        skipped: 0,
+                        parsed: 0,
+                        changed: 0,
+                        memoGenerated: 0,
+                        filers: [],
+                        errors: [],
+                    },
+                }),
+            });
+        });
+
+        const refresh = page.getByTestId('alpha-radar-dashboard-refresh');
+        await expect(refresh).toBeEnabled();
+        await clickUntil(refresh, async () => {
+            await expect(refresh).toContainText('Refreshing', { timeout: 1500 });
+        });
     });
 });
 
@@ -104,7 +177,7 @@ test.describe('Pattern feed (AR-112)', () => {
                 /* ignore */
             }
         });
-        await page.goto('/');
+        await gotoAppPage(page, '/');
     });
 
     test('feed renders with heading, pill, refresh + at least one row', async ({ page }) => {
@@ -213,7 +286,7 @@ test.describe('Weekly review ritual (AR-114)', () => {
                 /* ignore */
             }
         });
-        await page.goto('/');
+        await gotoAppPage(page, '/');
     });
 
     test('card renders with eyebrow, week range, and three stat tiles', async ({ page }) => {
@@ -282,7 +355,7 @@ test.describe('Weekly review ritual (AR-114)', () => {
     test('card stays hidden on reload after acknowledgement', async ({ page }) => {
         await page.getByTestId('weekly-review-acknowledge').click();
         await expect(page.getByTestId('weekly-review-card')).toBeHidden();
-        await page.reload();
+        await reloadAppPage(page);
         await expect(page.getByTestId('weekly-review-card')).toBeHidden();
     });
 });

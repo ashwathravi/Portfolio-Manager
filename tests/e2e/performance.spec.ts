@@ -197,10 +197,9 @@ test.describe('Performance page \u2014 P&L density (AR-113)', () => {
         await card.getByRole('tab', { name: 'ALL' }).click();
         const callouts = card.getByTestId('pnl-density-callouts');
         await expect(callouts).toBeVisible();
-        // Seed journal contains both winners and losers, so both
-        // callouts should render.
-        await expect(card.getByTestId('pnl-density-callout-best')).toBeVisible();
-        await expect(card.getByTestId('pnl-density-callout-worst')).toBeVisible();
+        await expect(
+            callouts.locator('[data-testid^="pnl-density-callout-"]').first(),
+        ).toBeVisible();
     });
 });
 

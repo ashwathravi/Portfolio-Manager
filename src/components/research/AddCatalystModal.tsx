@@ -33,6 +33,8 @@ export function AddCatalystModal({ open, onOpenChange, onSubmit }: AddCatalystMo
 
     useEffect(() => {
         if (!open) return;
+        // Reset modal draft on open so edit/create state does not bleed.
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setForm(defaults);
     }, [open]);
 

@@ -20,6 +20,7 @@
 import type { JournalEntry } from '@/types/trade';
 import type { WeekBounds, WeeklyReview, ReviewStats, TradeCount, BestDecision } from './types';
 import { buildNarrative } from './narrative';
+import { computeChurnAnalysis, type ChurnTrade } from '@/lib/risk-policy/churn';
 
 /** Fallback NAV. The JournalPlus seed + pattern feed already assume
  *  $250k — keeping it identical means all JournalPlus surfaces agree
@@ -88,6 +89,54 @@ function computeBestDecision(entries: JournalEntry[]): BestDecision | undefined 
     };
 }
 
+function countPolicyExceptions(entries: JournalEntry[]): number {
+    return entries.reduce((sum, entry) => sum + (entry.policyExceptions?.length ?? 0), 0);
+}
+
+function countSellDisciplineEvents(entries: JournalEntry[], startMs: number, endMs: number): number {
+    return entries.reduce((sum, entry) => {
+        const events = entry.sellDisciplineEvents ?? [];
+        return sum + events.filter((event) => {
+            const createdAt = Date.parse(event.createdAt);
+            return Number.isFinite(createdAt) && createdAt >= startMs && createdAt <= endMs;
+        }).length;
+    }, 0);
+}
+
+function computeChurnWarnings(entries: JournalEntry[], bounds: WeekBounds): {
+    churnWarnings: number;
+    churnSymbols: string[];
+} {
+    const trades: ChurnTrade[] = entries.map((entry) => ({
+        id: entry.id,
+        date: entry.closedAt,
+        type: entry.side,
+        ticker: entry.ticker,
+        amount: entry.notionalUsd,
+        quantity: entry.quantity,
+        price: entry.entryPrice,
+        setupType: entry.rationale?.setupType,
+        mood: entry.rationale?.mood,
+        thesisId: entry.rationale?.thesisId,
+        rationale: entry.rationale,
+        adherenceScore: entry.adherence?.score,
+        holdingPeriodDays: entry.holdingPeriodDays,
+        policyExceptions: entry.policyExceptions,
+    }));
+    const analysis = computeChurnAnalysis(trades, {
+        windowDays: 7,
+        asOf: bounds.weekEnd,
+        watchRepeatSymbols: 1,
+        breachRepeatSymbols: 2,
+    });
+    const warningRows = analysis.rows.filter((row) => row.status !== "inside");
+
+    return {
+        churnWarnings: warningRows.length,
+        churnSymbols: warningRows.map((row) => row.symbol),
+    };
+}
+
 export function generateReview(
     entries: JournalEntry[],
     bounds: WeekBounds,
@@ -111,12 +160,19 @@ export function generateReview(
         ruleAdherence = Math.round(sum / windowed.length);
         exceptions = windowed.filter((e) => entryAdherenceScore(e) < 80).length;
     }
+    const policyExceptions = countPolicyExceptions(windowed);
+    const sellDisciplineEvents = countSellDisciplineEvents(entries, startMs, endMs);
+    const churn = computeChurnWarnings(windowed, bounds);
 
     const stats: ReviewStats = {
         realizedPnlUsd,
         navPctChange: Math.round(navPctChange * 100) / 100,
         ruleAdherence,
-        exceptions,
+        exceptions: exceptions + policyExceptions,
+        policyExceptions,
+        sellDisciplineEvents,
+        churnWarnings: churn.churnWarnings,
+        churnSymbols: churn.churnSymbols,
         tradeCount: computeTradeCount(windowed),
         bestDecision: computeBestDecision(windowed),
     };

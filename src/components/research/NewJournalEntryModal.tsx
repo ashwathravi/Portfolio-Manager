@@ -84,6 +84,8 @@ export function NewJournalEntryModal({
 
     useEffect(() => {
         if (!open) return;
+        // Reset modal draft on open so edit/create state does not bleed.
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setForm(editing ? toFormData(editing) : defaultForm());
     }, [open, editing]);
 

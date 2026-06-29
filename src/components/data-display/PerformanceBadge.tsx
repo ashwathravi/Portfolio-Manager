@@ -20,7 +20,6 @@ export function PerformanceBadge({
 }: PerformanceBadgeProps) {
     const isPositive = value > 0;
     const isNegative = value < 0;
-    const isNeutral = value === 0;
 
     let colorClass = "bg-muted text-muted-foreground";
     if (isPositive) colorClass = "bg-success-50 text-success-700 dark:bg-success-900/30 dark:text-success-400";

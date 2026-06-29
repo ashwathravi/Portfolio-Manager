@@ -1,5 +1,22 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import {
+    DEFAULT_BUCKET_POLICIES,
+    DEFAULT_CASH_DEPLOYMENT_RULE,
+    DEFAULT_EMPLOYER_STOCK_DERISKING_PLAN,
+    DEFAULT_SELL_DISCIPLINE_RULES,
+    DEFAULT_OPTIONS_RISK_POLICY,
+    DEFAULT_THEME_CAPS,
+    type CashDeploymentRule,
+    type CashJob,
+    type EmployerStockDeRiskingPlan,
+    type OptionsRiskPolicy,
+    type PolicyBucketPolicy,
+    type SellDisciplineRule,
+    type ThemeId,
+} from '@/lib/risk-policy';
+import { connectedPlaidAccountsMatch } from '@/lib/plaid/link';
+import type { PlaidCapability, PlaidConnectedAccountInput } from '@/lib/plaid/types';
 
 // --- Type Definitions ---
 
@@ -12,9 +29,23 @@ export interface ProfileSettings {
 export interface NotificationSettings {
     portfolioUpdates: boolean;
     priceAlerts: boolean;
+    alphaRadarSignals: boolean;
     strategySignals: boolean;
     accountSync: boolean;
     weeklySummary: boolean;
+}
+
+export type AlphaRadarDeliveryChannelPreference = 'inApp' | 'email' | 'slack' | 'telegram';
+
+export interface AlphaRadarDeliverySettings {
+    enabled: boolean;
+    channels: Record<AlphaRadarDeliveryChannelPreference, boolean>;
+    failureSummaries: boolean;
+    overlapOnly: boolean;
+    minMaterialityScore: number;
+    tickerFilters: string[];
+    fundStyleFilters: string[];
+    trackedFilerIds: string[];
 }
 
 export interface SecuritySettings {
@@ -81,6 +112,7 @@ export interface Tag {
 
 export interface ConnectedAccount {
     id: string;
+    provider?: 'manual' | 'schwab' | 'plaid';
     name: string;
     type: string;
     accountMask: string;
@@ -89,6 +121,15 @@ export interface ConnectedAccount {
     lastSynced: string;
     status: 'reconciled' | 'needs-review' | 'error';
     errorMessage?: string;
+    institutionId?: string;
+    institutionName?: string;
+    plaidAccountId?: string;
+    plaidItemId?: string;
+    capabilities?: PlaidCapability[];
+    syncReady?: boolean;
+    tokenStorageMode?: 'memory' | 'encrypted_file' | 'postgres';
+    tokenStorageDurable?: boolean;
+    providerItemStatus?: 'active' | 'missing-token' | 'revoked' | 'reconnected';
 }
 
 /**
@@ -163,10 +204,28 @@ export interface ExecutionSettings {
     cooldownSeconds: CooldownSeconds;
 }
 
+export interface RiskPolicySettings {
+    bucketPolicies: PolicyBucketPolicy[];
+    themeCaps: Partial<Record<ThemeId, number>>;
+    cashJobs: CashJob[];
+    cashDeploymentRule: CashDeploymentRule;
+    employerStockPlan: EmployerStockDeRiskingPlan;
+    optionsRiskPolicy: OptionsRiskPolicy;
+    sellDisciplineRules: SellDisciplineRule[];
+    churnPolicy: ChurnPolicySettings;
+}
+
+export interface ChurnPolicySettings {
+    windowDays: number;
+    watchRepeatSymbols: number;
+    breachRepeatSymbols: number;
+}
+
 export interface SettingsState {
     // State slices
     profile: ProfileSettings;
     notifications: NotificationSettings;
+    alphaRadarDelivery: AlphaRadarDeliverySettings;
     security: SecuritySettings;
     appearance: AppearanceSettings;
     apiKeys: ApiKeysSettings;
@@ -175,12 +234,15 @@ export interface SettingsState {
     accounts: ConnectedAccount[];
     guardrails: GuardrailSettings;
     execution: ExecutionSettings;
+    riskPolicy: RiskPolicySettings;
 
     // Actions - Profile
     updateProfile: (profile: Partial<ProfileSettings>) => void;
 
     // Actions - Notifications
     updateNotification: (key: keyof NotificationSettings, value: boolean) => void;
+    updateAlphaRadarDelivery: (updates: Partial<AlphaRadarDeliverySettings>) => void;
+    updateAlphaRadarDeliveryChannel: (channel: AlphaRadarDeliveryChannelPreference, value: boolean) => void;
 
     // Actions - Security
     toggleTwoFactor: () => void;
@@ -209,12 +271,16 @@ export interface SettingsState {
     syncAccount: (id: string) => void;
     reconnectAccount: (id: string) => void;
     removeAccount: (id: string) => void;
+    connectPlaidAccounts: (accounts: PlaidConnectedAccountInput[]) => void;
 
     // Actions - Guardrails
     updateGuardrails: (updates: Partial<GuardrailSettings>) => void;
 
     // Actions - Execution
     updateExecution: (updates: Partial<ExecutionSettings>) => void;
+
+    // Actions - Risk policy
+    updateRiskPolicy: (updates: Partial<RiskPolicySettings>) => void;
 
     // Reset
     resetSettings: () => void;
@@ -231,9 +297,26 @@ const defaultProfile: ProfileSettings = {
 const defaultNotifications: NotificationSettings = {
     portfolioUpdates: true,
     priceAlerts: true,
+    alphaRadarSignals: true,
     strategySignals: false,
     accountSync: true,
     weeklySummary: true,
+};
+
+const defaultAlphaRadarDelivery: AlphaRadarDeliverySettings = {
+    enabled: true,
+    channels: {
+        inApp: true,
+        email: false,
+        slack: false,
+        telegram: false,
+    },
+    failureSummaries: true,
+    overlapOnly: false,
+    minMaterialityScore: 75,
+    tickerFilters: [],
+    fundStyleFilters: [],
+    trackedFilerIds: [],
 };
 
 const defaultSecurity: SecuritySettings = {
@@ -295,9 +378,28 @@ const defaultExecution: ExecutionSettings = {
     cooldownSeconds: 10,
 };
 
+const defaultRiskPolicy: RiskPolicySettings = {
+    bucketPolicies: [...DEFAULT_BUCKET_POLICIES],
+    themeCaps: { ...DEFAULT_THEME_CAPS },
+    cashJobs: [],
+    cashDeploymentRule: { ...DEFAULT_CASH_DEPLOYMENT_RULE },
+    employerStockPlan: {
+        ...DEFAULT_EMPLOYER_STOCK_DERISKING_PLAN,
+        symbols: [...DEFAULT_EMPLOYER_STOCK_DERISKING_PLAN.symbols],
+    },
+    optionsRiskPolicy: { ...DEFAULT_OPTIONS_RISK_POLICY },
+    sellDisciplineRules: DEFAULT_SELL_DISCIPLINE_RULES.map((rule) => ({ ...rule })),
+    churnPolicy: {
+        windowDays: 90,
+        watchRepeatSymbols: 1,
+        breachRepeatSymbols: 3,
+    },
+};
+
 const defaultAccounts: ConnectedAccount[] = [
     {
         id: 'fidelity',
+        provider: 'manual',
         name: 'Fidelity',
         type: 'Individual Brokerage',
         accountMask: '****1234',
@@ -308,6 +410,7 @@ const defaultAccounts: ConnectedAccount[] = [
     },
     {
         id: 'vanguard',
+        provider: 'manual',
         name: 'Vanguard',
         type: 'Roth IRA',
         accountMask: '****5678',
@@ -318,6 +421,7 @@ const defaultAccounts: ConnectedAccount[] = [
     },
     {
         id: 'ibkr',
+        provider: 'manual',
         name: 'Interactive Brokers',
         type: 'Trading Account',
         accountMask: '****9012',
@@ -329,6 +433,54 @@ const defaultAccounts: ConnectedAccount[] = [
     },
 ];
 
+function mergePlaidAccounts(
+    existingAccounts: readonly ConnectedAccount[],
+    incomingAccounts: readonly PlaidConnectedAccountInput[],
+): ConnectedAccount[] {
+    const merged: ConnectedAccount[] = existingAccounts.map((account) => ({
+        ...account,
+        capabilities: account.capabilities ? [...account.capabilities] : undefined,
+    }));
+
+    for (const incoming of incomingAccounts) {
+        const existingIndex = merged.findIndex((account) =>
+            connectedPlaidAccountsMatch(account, incoming) ||
+            account.id === incoming.id
+        );
+        const next: ConnectedAccount = {
+            ...incoming,
+            capabilities: [...incoming.capabilities],
+        };
+
+        if (existingIndex >= 0) {
+            merged[existingIndex] = {
+                ...merged[existingIndex],
+                ...next,
+                errorMessage: undefined,
+            };
+        } else {
+            merged.push(next);
+        }
+    }
+
+    return merged;
+}
+
+function normalizeConnectedAccounts(accounts: ConnectedAccount[] | undefined): ConnectedAccount[] {
+    const source = accounts?.length ? accounts : defaultAccounts;
+    return source.map((account) => ({
+        ...account,
+        provider: account.provider ?? 'manual',
+        capabilities: account.capabilities ? [...account.capabilities] : undefined,
+        syncReady: account.provider === 'plaid'
+            ? account.syncReady ?? account.status === 'reconciled'
+            : account.syncReady,
+        providerItemStatus: account.provider === 'plaid'
+            ? account.providerItemStatus ?? 'active'
+            : account.providerItemStatus,
+    }));
+}
+
 // --- Store ---
 
 export const useSettingsStore = create<SettingsState>()(
@@ -337,6 +489,7 @@ export const useSettingsStore = create<SettingsState>()(
             // Initial state
             profile: defaultProfile,
             notifications: defaultNotifications,
+            alphaRadarDelivery: defaultAlphaRadarDelivery,
             security: defaultSecurity,
             appearance: defaultAppearance,
             apiKeys: defaultApiKeys,
@@ -345,6 +498,7 @@ export const useSettingsStore = create<SettingsState>()(
             accounts: defaultAccounts,
             guardrails: defaultGuardrails,
             execution: defaultExecution,
+            riskPolicy: defaultRiskPolicy,
 
             // Profile
             updateProfile: (updates) =>
@@ -356,6 +510,22 @@ export const useSettingsStore = create<SettingsState>()(
             updateNotification: (key, value) =>
                 set((state) => ({
                     notifications: { ...state.notifications, [key]: value },
+                })),
+
+            updateAlphaRadarDelivery: (updates) =>
+                set((state) => ({
+                    alphaRadarDelivery: { ...state.alphaRadarDelivery, ...updates },
+                })),
+
+            updateAlphaRadarDeliveryChannel: (channel, value) =>
+                set((state) => ({
+                    alphaRadarDelivery: {
+                        ...state.alphaRadarDelivery,
+                        channels: {
+                            ...state.alphaRadarDelivery.channels,
+                            [channel]: value,
+                        },
+                    },
                 })),
 
             // Security
@@ -447,7 +617,11 @@ export const useSettingsStore = create<SettingsState>()(
                 set((state) => ({
                     accounts: state.accounts.map((acc) =>
                         acc.id === id
-                            ? { ...acc, lastSynced: new Date().toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true }) }
+                            ? {
+                                ...acc,
+                                lastSynced: new Date().toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true }),
+                                syncReady: acc.syncReady,
+                            }
                             : acc
                     ),
                 })),
@@ -456,7 +630,21 @@ export const useSettingsStore = create<SettingsState>()(
                 set((state) => ({
                     accounts: state.accounts.map((acc) =>
                         acc.id === id
-                            ? { ...acc, status: 'reconciled' as const, errorMessage: undefined }
+                            ? acc.provider === 'plaid'
+                                ? {
+                                    ...acc,
+                                    status: 'needs-review' as const,
+                                    errorMessage: 'Reconnect with Plaid Link before provider sync can resume.',
+                                    syncReady: false,
+                                    providerItemStatus: 'missing-token' as const,
+                                }
+                                : {
+                                    ...acc,
+                                    status: 'reconciled' as const,
+                                    errorMessage: undefined,
+                                    syncReady: acc.syncReady,
+                                    providerItemStatus: acc.providerItemStatus,
+                                }
                             : acc
                     ),
                 })),
@@ -464,6 +652,11 @@ export const useSettingsStore = create<SettingsState>()(
             removeAccount: (id) =>
                 set((state) => ({
                     accounts: state.accounts.filter((acc) => acc.id !== id),
+                })),
+
+            connectPlaidAccounts: (incomingAccounts) =>
+                set((state) => ({
+                    accounts: mergePlaidAccounts(state.accounts, incomingAccounts),
                 })),
 
             // Guardrails
@@ -478,11 +671,73 @@ export const useSettingsStore = create<SettingsState>()(
                     execution: { ...state.execution, ...updates },
                 })),
 
+            // Risk policy
+            updateRiskPolicy: (updates) =>
+                set((state) => ({
+                    riskPolicy: {
+                        ...state.riskPolicy,
+                        ...updates,
+                        bucketPolicies: updates.bucketPolicies
+                            ? [...updates.bucketPolicies]
+                            : state.riskPolicy.bucketPolicies,
+                        themeCaps: updates.themeCaps
+                            ? { ...state.riskPolicy.themeCaps, ...updates.themeCaps }
+                            : state.riskPolicy.themeCaps,
+                        cashJobs: updates.cashJobs
+                            ? updates.cashJobs.map((job) => ({ ...job }))
+                            : state.riskPolicy.cashJobs,
+                        cashDeploymentRule: updates.cashDeploymentRule
+                            ? {
+                                ...DEFAULT_CASH_DEPLOYMENT_RULE,
+                                ...state.riskPolicy.cashDeploymentRule,
+                                ...updates.cashDeploymentRule,
+                            }
+                            : state.riskPolicy.cashDeploymentRule,
+                        employerStockPlan: updates.employerStockPlan
+                            ? {
+                                ...DEFAULT_EMPLOYER_STOCK_DERISKING_PLAN,
+                                ...state.riskPolicy.employerStockPlan,
+                                ...updates.employerStockPlan,
+                                symbols: updates.employerStockPlan.symbols
+                                    ? [...updates.employerStockPlan.symbols]
+                                    : [
+                                        ...(state.riskPolicy.employerStockPlan?.symbols
+                                            ?? DEFAULT_EMPLOYER_STOCK_DERISKING_PLAN.symbols),
+                                    ],
+                            }
+                            : state.riskPolicy.employerStockPlan ?? {
+                                ...DEFAULT_EMPLOYER_STOCK_DERISKING_PLAN,
+                                symbols: [...DEFAULT_EMPLOYER_STOCK_DERISKING_PLAN.symbols],
+                            },
+                        optionsRiskPolicy: updates.optionsRiskPolicy
+                            ? {
+                                ...DEFAULT_OPTIONS_RISK_POLICY,
+                                ...state.riskPolicy.optionsRiskPolicy,
+                                ...updates.optionsRiskPolicy,
+                            }
+                            : state.riskPolicy.optionsRiskPolicy,
+                        sellDisciplineRules: updates.sellDisciplineRules
+                            ? updates.sellDisciplineRules.map((rule) => ({
+                                ...rule,
+                                auditTrail: rule.auditTrail?.map((event) => ({ ...event })),
+                            }))
+                            : state.riskPolicy.sellDisciplineRules,
+                        churnPolicy: updates.churnPolicy
+                            ? {
+                                ...defaultRiskPolicy.churnPolicy,
+                                ...(state.riskPolicy.churnPolicy ?? {}),
+                                ...updates.churnPolicy,
+                            }
+                            : state.riskPolicy.churnPolicy ?? defaultRiskPolicy.churnPolicy,
+                    },
+                })),
+
             // Reset
             resetSettings: () =>
                 set({
                     profile: defaultProfile,
                     notifications: defaultNotifications,
+                    alphaRadarDelivery: defaultAlphaRadarDelivery,
                     security: defaultSecurity,
                     appearance: defaultAppearance,
                     apiKeys: defaultApiKeys,
@@ -491,6 +746,7 @@ export const useSettingsStore = create<SettingsState>()(
                     accounts: defaultAccounts,
                     guardrails: defaultGuardrails,
                     execution: defaultExecution,
+                    riskPolicy: defaultRiskPolicy,
                 }),
         }),
         {
@@ -513,8 +769,27 @@ export const useSettingsStore = create<SettingsState>()(
              *        the migration fills in `cooldownSeconds: 10` so the
              *        caution-mood nudge turns on without disrupting the
              *        rationale preference they already set.
+             *   v6 — AR-123: adds `notifications.alphaRadarSignals`.
+             *   v7 — AR-131: adds `alphaRadarDelivery` scheduler and
+             *        delivery preferences. Defaults keep the approved in-app
+             *        channel on and leave external channels disabled until
+             *        provider destinations are configured.
+             *   v8 — AR-139/AR-141: adds persisted risk policy bucket targets,
+             *        bucket caps, and theme caps for the Risk Policy Engine.
+             *   v9 — AR-144: adds cash job classifications and scheduled
+             *        cash deployment policy rules.
+             *   v10 — AR-143: adds persisted options/LEAPS risk policy caps.
+             *   v11 — AR-146: adds sell-discipline trigger rules and audit
+             *        state for trim/re-underwrite/no-add policy tasks.
+             *   v12 — adds configurable repeated-trading/churn policy
+             *        thresholds for the Risk Policy Engine.
+             *   v13 — AR-140 adds persisted GOOG/employer-stock de-risking
+             *        plan assumptions and schedule state.
+             *   v14 — AR-149 persists non-secret Plaid connected-account
+             *        metadata. Access tokens stay server-side and are not
+             *        part of this persisted client settings slice.
              */
-            version: 5,
+            version: 14,
             migrate: (persistedState, version) => {
                 const s = (persistedState ?? {}) as Partial<SettingsState>;
                 if (version < 2) {
@@ -548,6 +823,230 @@ export const useSettingsStore = create<SettingsState>()(
                             existing.cooldownSeconds ?? defaultExecution.cooldownSeconds,
                     };
                 }
+                if (version < 6) {
+                    const existing = (s.notifications ?? {}) as Partial<NotificationSettings>;
+                    s.notifications = { ...defaultNotifications, ...existing };
+                }
+                if (version < 7) {
+                    const existing = (s.alphaRadarDelivery ?? {}) as Partial<AlphaRadarDeliverySettings>;
+                    s.alphaRadarDelivery = {
+                        ...defaultAlphaRadarDelivery,
+                        ...existing,
+                        channels: {
+                            ...defaultAlphaRadarDelivery.channels,
+                            ...(existing.channels ?? {}),
+                        },
+                    };
+                }
+                if (version < 8) {
+                    const existing = (s.riskPolicy ?? {}) as Partial<RiskPolicySettings>;
+                    s.riskPolicy = {
+                        ...defaultRiskPolicy,
+                        ...existing,
+                        bucketPolicies: existing.bucketPolicies
+                            ? [...existing.bucketPolicies]
+                            : [...defaultRiskPolicy.bucketPolicies],
+                        themeCaps: {
+                            ...defaultRiskPolicy.themeCaps,
+                            ...(existing.themeCaps ?? {}),
+                        },
+                    };
+                }
+                if (version < 9) {
+                    const existing = (s.riskPolicy ?? {}) as Partial<RiskPolicySettings>;
+                    s.riskPolicy = {
+                        ...defaultRiskPolicy,
+                        ...existing,
+                        bucketPolicies: existing.bucketPolicies
+                            ? [...existing.bucketPolicies]
+                            : [...defaultRiskPolicy.bucketPolicies],
+                        themeCaps: {
+                            ...defaultRiskPolicy.themeCaps,
+                            ...(existing.themeCaps ?? {}),
+                        },
+                        cashJobs: existing.cashJobs
+                            ? existing.cashJobs.map((job) => ({ ...job }))
+                            : [],
+                        cashDeploymentRule: {
+                            ...DEFAULT_CASH_DEPLOYMENT_RULE,
+                            ...(existing.cashDeploymentRule ?? {}),
+                        },
+                        employerStockPlan: {
+                            ...DEFAULT_EMPLOYER_STOCK_DERISKING_PLAN,
+                            ...(existing.employerStockPlan ?? {}),
+                            symbols: [
+                                ...((existing.employerStockPlan?.symbols?.length
+                                    ? existing.employerStockPlan.symbols
+                                    : DEFAULT_EMPLOYER_STOCK_DERISKING_PLAN.symbols)),
+                            ],
+                        },
+                    };
+                }
+                if (version < 10) {
+                    const existing = (s.riskPolicy ?? {}) as Partial<RiskPolicySettings>;
+                    s.riskPolicy = {
+                        ...defaultRiskPolicy,
+                        ...existing,
+                        bucketPolicies: existing.bucketPolicies
+                            ? [...existing.bucketPolicies]
+                            : [...defaultRiskPolicy.bucketPolicies],
+                        themeCaps: {
+                            ...defaultRiskPolicy.themeCaps,
+                            ...(existing.themeCaps ?? {}),
+                        },
+                        cashJobs: existing.cashJobs
+                            ? existing.cashJobs.map((job) => ({ ...job }))
+                            : [],
+                        cashDeploymentRule: {
+                            ...DEFAULT_CASH_DEPLOYMENT_RULE,
+                            ...(existing.cashDeploymentRule ?? {}),
+                        },
+                        employerStockPlan: {
+                            ...DEFAULT_EMPLOYER_STOCK_DERISKING_PLAN,
+                            ...(existing.employerStockPlan ?? {}),
+                            symbols: [
+                                ...((existing.employerStockPlan?.symbols?.length
+                                    ? existing.employerStockPlan.symbols
+                                    : DEFAULT_EMPLOYER_STOCK_DERISKING_PLAN.symbols)),
+                            ],
+                        },
+                        optionsRiskPolicy: {
+                            ...DEFAULT_OPTIONS_RISK_POLICY,
+                            ...(existing.optionsRiskPolicy ?? {}),
+                        },
+                    };
+                }
+                if (version < 11) {
+                    const existing = (s.riskPolicy ?? {}) as Partial<RiskPolicySettings>;
+                    s.riskPolicy = {
+                        ...defaultRiskPolicy,
+                        ...existing,
+                        bucketPolicies: existing.bucketPolicies
+                            ? [...existing.bucketPolicies]
+                            : [...defaultRiskPolicy.bucketPolicies],
+                        themeCaps: {
+                            ...defaultRiskPolicy.themeCaps,
+                            ...(existing.themeCaps ?? {}),
+                        },
+                        cashJobs: existing.cashJobs
+                            ? existing.cashJobs.map((job) => ({ ...job }))
+                            : [],
+                        cashDeploymentRule: {
+                            ...DEFAULT_CASH_DEPLOYMENT_RULE,
+                            ...(existing.cashDeploymentRule ?? {}),
+                        },
+                        employerStockPlan: {
+                            ...DEFAULT_EMPLOYER_STOCK_DERISKING_PLAN,
+                            ...(existing.employerStockPlan ?? {}),
+                            symbols: [
+                                ...((existing.employerStockPlan?.symbols?.length
+                                    ? existing.employerStockPlan.symbols
+                                    : DEFAULT_EMPLOYER_STOCK_DERISKING_PLAN.symbols)),
+                            ],
+                        },
+                        optionsRiskPolicy: {
+                            ...DEFAULT_OPTIONS_RISK_POLICY,
+                            ...(existing.optionsRiskPolicy ?? {}),
+                        },
+                        sellDisciplineRules: existing.sellDisciplineRules
+                            ? existing.sellDisciplineRules.map((rule) => ({
+                                ...rule,
+                                auditTrail: rule.auditTrail?.map((event) => ({ ...event })),
+                            }))
+                            : defaultRiskPolicy.sellDisciplineRules.map((rule) => ({ ...rule })),
+                    };
+                }
+                if (version < 12) {
+                    const existing = (s.riskPolicy ?? {}) as Partial<RiskPolicySettings>;
+                    s.riskPolicy = {
+                        ...defaultRiskPolicy,
+                        ...existing,
+                        bucketPolicies: existing.bucketPolicies
+                            ? [...existing.bucketPolicies]
+                            : [...defaultRiskPolicy.bucketPolicies],
+                        themeCaps: {
+                            ...defaultRiskPolicy.themeCaps,
+                            ...(existing.themeCaps ?? {}),
+                        },
+                        cashJobs: existing.cashJobs
+                            ? existing.cashJobs.map((job) => ({ ...job }))
+                            : [],
+                        cashDeploymentRule: {
+                            ...DEFAULT_CASH_DEPLOYMENT_RULE,
+                            ...(existing.cashDeploymentRule ?? {}),
+                        },
+                        employerStockPlan: {
+                            ...DEFAULT_EMPLOYER_STOCK_DERISKING_PLAN,
+                            ...(existing.employerStockPlan ?? {}),
+                            symbols: [
+                                ...((existing.employerStockPlan?.symbols?.length
+                                    ? existing.employerStockPlan.symbols
+                                    : DEFAULT_EMPLOYER_STOCK_DERISKING_PLAN.symbols)),
+                            ],
+                        },
+                        optionsRiskPolicy: {
+                            ...DEFAULT_OPTIONS_RISK_POLICY,
+                            ...(existing.optionsRiskPolicy ?? {}),
+                        },
+                        sellDisciplineRules: existing.sellDisciplineRules
+                            ? existing.sellDisciplineRules.map((rule) => ({
+                                ...rule,
+                                auditTrail: rule.auditTrail?.map((event) => ({ ...event })),
+                            }))
+                            : defaultRiskPolicy.sellDisciplineRules.map((rule) => ({ ...rule })),
+                        churnPolicy: {
+                            ...defaultRiskPolicy.churnPolicy,
+                            ...(existing.churnPolicy ?? {}),
+                        },
+                    };
+                }
+                if (version < 13) {
+                    const existing = (s.riskPolicy ?? {}) as Partial<RiskPolicySettings>;
+                    s.riskPolicy = {
+                        ...defaultRiskPolicy,
+                        ...existing,
+                        bucketPolicies: existing.bucketPolicies
+                            ? [...existing.bucketPolicies]
+                            : [...defaultRiskPolicy.bucketPolicies],
+                        themeCaps: {
+                            ...defaultRiskPolicy.themeCaps,
+                            ...(existing.themeCaps ?? {}),
+                        },
+                        cashJobs: existing.cashJobs
+                            ? existing.cashJobs.map((job) => ({ ...job }))
+                            : [],
+                        cashDeploymentRule: {
+                            ...DEFAULT_CASH_DEPLOYMENT_RULE,
+                            ...(existing.cashDeploymentRule ?? {}),
+                        },
+                        employerStockPlan: {
+                            ...DEFAULT_EMPLOYER_STOCK_DERISKING_PLAN,
+                            ...(existing.employerStockPlan ?? {}),
+                            symbols: [
+                                ...((existing.employerStockPlan?.symbols?.length
+                                    ? existing.employerStockPlan.symbols
+                                    : DEFAULT_EMPLOYER_STOCK_DERISKING_PLAN.symbols)),
+                            ],
+                        },
+                        optionsRiskPolicy: {
+                            ...DEFAULT_OPTIONS_RISK_POLICY,
+                            ...(existing.optionsRiskPolicy ?? {}),
+                        },
+                        sellDisciplineRules: existing.sellDisciplineRules
+                            ? existing.sellDisciplineRules.map((rule) => ({
+                                ...rule,
+                                auditTrail: rule.auditTrail?.map((event) => ({ ...event })),
+                            }))
+                            : defaultRiskPolicy.sellDisciplineRules.map((rule) => ({ ...rule })),
+                        churnPolicy: {
+                            ...defaultRiskPolicy.churnPolicy,
+                            ...(existing.churnPolicy ?? {}),
+                        },
+                    };
+                }
+                if (version < 14) {
+                    s.accounts = normalizeConnectedAccounts(s.accounts);
+                }
                 return s as SettingsState;
             },
             // Sentinel: Only persist non-sensitive preferences. API keys are
@@ -555,10 +1054,13 @@ export const useSettingsStore = create<SettingsState>()(
             partialize: (state) => ({
                 appearance: state.appearance,
                 notifications: state.notifications,
+                alphaRadarDelivery: state.alphaRadarDelivery,
                 preferences: state.preferences,
+                accounts: state.accounts,
                 tags: state.tags,
                 guardrails: state.guardrails,
                 execution: state.execution,
+                riskPolicy: state.riskPolicy,
             }),
         }
     )

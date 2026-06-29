@@ -3,10 +3,14 @@ name: Docker Build & Push
 on:
   push:
     branches:
+      - new_feature
+      - master
       - main
       - develop
   pull_request:
     branches:
+      - new_feature
+      - master
       - main
       - develop
 
@@ -14,23 +18,29 @@ env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
 
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
       packages: write
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       - name: Log in to Container Registry
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: docker/login-action@v3
+        if: github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -38,21 +48,22 @@ jobs:
 
       - name: Extract metadata
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
             type=ref,event=branch
+            type=ref,event=pr
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=sha,prefix={{branch}}-
+            type=sha,prefix=sha-
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build and push Docker image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v5
         with:
           context: .
-          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          push: ${{ github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
@@ -60,13 +71,18 @@ jobs:
 
   lint-and-test:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '20'
           cache: 'npm'
@@ -86,13 +102,34 @@ jobs:
   e2e-tests:
     runs-on: ubuntu-latest
     needs: lint-and-test
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: atlas_wealth_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d atlas_wealth_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/atlas_wealth_test?sslmode=disable
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '20'
           cache: 'npm'
@@ -103,13 +140,62 @@ jobs:
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
 
+      - name: Prepare E2E database
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes postgresql-client
+          psql "$DATABASE_URL" <<'SQL'
+          CREATE EXTENSION IF NOT EXISTS pgcrypto;
+          DO $$
+          BEGIN
+            CREATE ROLE anon NOLOGIN;
+          EXCEPTION WHEN duplicate_object THEN
+            NULL;
+          END $$;
+          DO $$
+          BEGIN
+            CREATE ROLE authenticated NOLOGIN;
+          EXCEPTION WHEN duplicate_object THEN
+            NULL;
+          END $$;
+          SQL
+          npx drizzle-kit migrate
+          psql "$DATABASE_URL" <<'SQL'
+          INSERT INTO portfolios (id, name, description, total_value, cash_balance)
+          VALUES
+            ('00000000-0000-4000-8000-000000000001', 'Main Portfolio', 'Long-term growth portfolio', 487250.32, 12450.00),
+            ('00000000-0000-4000-8000-000000000002', 'Growth Portfolio', 'High-growth technology stocks', 152340.50, 5240.00),
+            ('00000000-0000-4000-8000-000000000003', 'Dividend Income', 'Dividend-focused investments', 98765.25, 3120.00)
+          ON CONFLICT (id) DO NOTHING;
+
+          INSERT INTO holdings (
+            id,
+            portfolio_id,
+            symbol,
+            name,
+            quantity,
+            avg_cost,
+            current_price,
+            market_value,
+            allocation
+          )
+          VALUES
+            ('00000000-0000-4000-8000-000000000101', '00000000-0000-4000-8000-000000000001', 'AAPL', 'Apple Inc.', 500, 165.30, 182.45, 91225.00, 18.7),
+            ('00000000-0000-4000-8000-000000000102', '00000000-0000-4000-8000-000000000001', 'MSFT', 'Microsoft Corporation', 300, 325.80, 378.25, 113475.00, 23.3),
+            ('00000000-0000-4000-8000-000000000103', '00000000-0000-4000-8000-000000000001', 'NVDA', 'NVIDIA Corporation', 200, 425.50, 512.80, 102560.00, 21.1),
+            ('00000000-0000-4000-8000-000000000104', '00000000-0000-4000-8000-000000000001', 'GOOGL', 'Alphabet Inc.', 400, 128.90, 141.25, 56500.00, 11.6),
+            ('00000000-0000-4000-8000-000000000105', '00000000-0000-4000-8000-000000000001', 'TSLA', 'Tesla, Inc.', 250, 205.40, 248.75, 62187.50, 12.8),
+            ('00000000-0000-4000-8000-000000000106', '00000000-0000-4000-8000-000000000001', 'AMZN', 'Amazon.com Inc.', 350, 142.30, 165.90, 58065.00, 11.9)
+          ON CONFLICT (id) DO NOTHING;
+          SQL
+
       - name: Run E2E tests
         run: npm run test:e2e
         env:
           CI: true
 
       - name: Upload Playwright report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: ${{ !cancelled() }}
         with:
           name: playwright-report

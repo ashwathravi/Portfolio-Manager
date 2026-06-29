@@ -30,10 +30,10 @@ async function seed() {
             if (p.holdings && p.holdings.length > 0) {
                 const holdingsValues = p.holdings.map(h => ({
                     portfolioId: newPorfolioId,
-                    ticker: h.ticker,
+                    symbol: h.ticker,
                     name: h.name,
-                    quantity: h.quantity,
-                    avgCost: h.avgCost,
+                    quantity: String(h.quantity),
+                    avgCost: String(h.avgCost),
                     currentPrice: h.currentPrice,
                     marketValue: h.marketValue,
                     allocation: h.allocation
@@ -45,11 +45,11 @@ async function seed() {
             if (p.id === 'main') {
                 const transactionValues = mockTransactions.map(t => ({
                     portfolioId: newPorfolioId,
-                    date: new Date(t.date),
+                    timestamp: new Date(t.date),
                     type: t.type,
-                    ticker: t.ticker,
-                    quantity: t.quantity,
-                    price: t.price,
+                    symbol: t.ticker,
+                    quantity: t.quantity == null ? null : String(t.quantity),
+                    price: t.price == null ? null : String(t.price),
                     amount: t.amount,
                     notes: t.notes
                 }));

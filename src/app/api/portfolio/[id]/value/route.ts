@@ -15,39 +15,44 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 
+import { apiError, internalServerError, providerRateLimitError, requirePortfolioUserScope } from '@/lib/api/security';
 import { getMarketDataService } from '@/lib/services/market-data-service';
+import { PortfolioAccessError } from '@/lib/services/portfolio-valuation-engine';
 import { PolygonRateLimitError } from '@/lib/providers/polygon-massive-adapter';
 
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
 
   if (!id) {
-    return NextResponse.json(
-      { error: 'Missing required path parameter: id' },
-      { status: 400 },
-    );
+    return apiError('Missing required path parameter: id', 'MISSING_PORTFOLIO_ID', 400);
   }
+
+  const auth = requirePortfolioUserScope(request);
+  if (!auth.ok) return auth.response;
 
   try {
     const service = getMarketDataService();
-    const valuation = await service.getPortfolioValue(id);
+    const valuation = await service.getPortfolioValue(id, {
+      userId: auth.context.userId,
+      requireUserScope: auth.context.authRequired,
+    });
 
     // Surface partial failures at the HTTP level while still returning data
     const status = valuation.errors.length > 0 ? 206 : 200;
 
     return NextResponse.json({ data: valuation }, { status });
   } catch (err) {
-    if (err instanceof PolygonRateLimitError) {
-      return NextResponse.json(
-        { error: 'Rate limit exceeded. Please retry later.' },
-        { status: 429, headers: { 'Retry-After': String(Math.ceil(err.retryAfterMs / 1000)) } },
-      );
+    if (err instanceof PortfolioAccessError) {
+      return apiError('Portfolio not found', 'PORTFOLIO_NOT_FOUND', 404);
     }
 
-    const message = err instanceof Error ? err.message : 'Internal server error';
-    return NextResponse.json({ error: message }, { status: 500 });
+    if (err instanceof PolygonRateLimitError) {
+      return providerRateLimitError(err.retryAfterMs / 1000);
+    }
+
+    return internalServerError(err, 'Unable to value portfolio.', 'PORTFOLIO_VALUE_FAILED');
   }
 }

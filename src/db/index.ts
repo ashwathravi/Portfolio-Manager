@@ -2,8 +2,11 @@
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import * as schema from "./schema";
+import { warnIfUnsafeProductionDatabaseUrl } from "@/lib/security/production-env";
+import { resolveDatabaseSslMode } from "./connection-options";
 
 const connectionString = process.env.DATABASE_URL;
+warnIfUnsafeProductionDatabaseUrl(connectionString);
 
 if (!connectionString) {
     // We don't throw error here to allow build process to run without env vars
@@ -11,9 +14,9 @@ if (!connectionString) {
 }
 
 // Disable prefetch as it is not supported for "Transaction" pool mode
-const postgresOptions: postgres.Options<{}> = {
+const postgresOptions: postgres.Options<Record<string, never>> = {
     prepare: false,
-    ssl: 'require',
+    ssl: resolveDatabaseSslMode(connectionString),
     connect_timeout: 10,
 };
 

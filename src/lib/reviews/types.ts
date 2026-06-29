@@ -44,6 +44,14 @@ export interface ReviewStats {
     ruleAdherence: number;
     /** Count of trades that fell short of the adherence bar. */
     exceptions: number;
+    /** Count of captured Risk Policy Engine overrides in the review window. */
+    policyExceptions: number;
+    /** Count of sell-discipline audit actions in the review window. */
+    sellDisciplineEvents: number;
+    /** Count of ticker-level churn warnings detected in the review window. */
+    churnWarnings: number;
+    /** Top repeated/churned symbols for the week, sorted by score. */
+    churnSymbols: string[];
     tradeCount: TradeCount;
     bestDecision?: BestDecision;
 }

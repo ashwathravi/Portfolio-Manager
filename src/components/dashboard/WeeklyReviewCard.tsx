@@ -59,6 +59,8 @@ export function WeeklyReviewCard({ entries = SEED_JOURNAL, now }: WeeklyReviewCa
 
     useEffect(() => {
         const state = getReviewState(review.id);
+        // Hydrates client-only review state from localStorage after mount.
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setReflection(state.reflection ?? "");
         setActive(isReviewActive(state));
         setMounted(true);

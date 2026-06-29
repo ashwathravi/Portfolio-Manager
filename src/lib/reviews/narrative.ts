@@ -30,7 +30,18 @@ function signedPct(n: number): string {
 }
 
 export function buildNarrative(stats: ReviewStats): string {
-    const { tradeCount, realizedPnlUsd, navPctChange, ruleAdherence, exceptions, bestDecision } = stats;
+    const {
+        tradeCount,
+        realizedPnlUsd,
+        navPctChange,
+        ruleAdherence,
+        exceptions,
+        policyExceptions,
+        sellDisciplineEvents,
+        churnWarnings,
+        churnSymbols,
+        bestDecision,
+    } = stats;
 
     // Sentence 1 — trade volume breakdown.
     let s1: string;
@@ -56,12 +67,25 @@ export function buildNarrative(stats: ReviewStats): string {
     const parts3: string[] = [];
     if (tradeCount.total > 0) {
         parts3.push(`Rule adherence averaged ${Math.round(ruleAdherence)}/100`);
-        if (exceptions > 0) parts3.push(`${plural(exceptions, 'exception')}`);
+        if (exceptions > 0) {
+            parts3.push(
+                policyExceptions > 0
+                    ? `${plural(exceptions, 'exception')} (${plural(policyExceptions, 'policy exception')})`
+                    : `${plural(exceptions, 'exception')}`,
+            );
+        }
     }
     if (bestDecision) {
         parts3.push(
             `best decision: ${bestDecision.label} at ${signedUsd(bestDecision.impactUsd)}`,
         );
+    }
+    if (sellDisciplineEvents > 0) {
+        parts3.push(plural(sellDisciplineEvents, 'sell-discipline action'));
+    }
+    if (churnWarnings > 0) {
+        const symbols = churnSymbols.length > 0 ? ` (${churnSymbols.slice(0, 3).join(', ')})` : '';
+        parts3.push(`${plural(churnWarnings, 'churn warning')}${symbols}`);
     }
     const s3 = parts3.length > 0 ? parts3.join(' · ') + '.' : '';
 

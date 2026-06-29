@@ -11,8 +11,25 @@
  * in v2 we swap the planner — the tools stay identical.
  */
 import type { JournalEntry } from '@/types/trade';
-import type { Holding, Portfolio } from '@/lib/mockData';
+import type { Holding, Portfolio, Transaction } from '@/lib/mockData';
 import { sectorFor } from '@/lib/holdings/sector';
+import { searchAlphaRadarSemanticChunks, type AlphaRadarSemanticChunk } from '@/lib/alpha-radar/memory';
+import { DEFAULT_THESES, findThesisByTicker, type Thesis } from '@/lib/research/thesis';
+import {
+    DEFAULT_CASH_DEPLOYMENT_RULE,
+    computeCashPolicySummary,
+    computeChurnAnalysis,
+    computeRiskPolicyDashboard,
+    computeThemeExposure,
+    computeTrimAmountToTarget,
+    findStressScenario,
+    runStressScenario,
+    type CashDeploymentRule,
+    type CashJob,
+    type ChurnTrade,
+    type RiskPolicyDashboardHolding,
+    type StressHolding,
+} from '@/lib/risk-policy';
 import type {
     AskRow,
     AskToolName,
@@ -22,7 +39,12 @@ import type {
 export interface AskContext {
     portfolios: Portfolio[];
     holdings: Holding[];
+    transactions?: Transaction[];
     entries: JournalEntry[];
+    theses?: Thesis[];
+    cashJobs?: CashJob[];
+    cashDeploymentRule?: CashDeploymentRule;
+    alphaRadarMemory?: AlphaRadarSemanticChunk[];
     /** Unix ms. Frozen per run so outputs are stable. */
     now: number;
 }
@@ -265,6 +287,314 @@ export function correlation_with(
 }
 
 // --------------------------------------------------------------------- //
+// 6. alpha_radar_evidence_search
+// --------------------------------------------------------------------- //
+
+/** Search Alpha Radar semantic memory with deterministic keyword fallback. */
+export function alpha_radar_evidence_search(
+    ctx: AskContext,
+    args: { query?: string; limit?: number } = {},
+): AskRow[] {
+    const query = args.query?.trim();
+    if (!query) return [];
+
+    const result = searchAlphaRadarSemanticChunks({
+        query,
+        chunks: ctx.alphaRadarMemory ?? [],
+        limit: args.limit ?? 5,
+    });
+
+    return result.matches.map((match) => ({
+        label: match.citation.title,
+        value: match.score.toFixed(2),
+        sub: match.text,
+        tone: 'neutral',
+        href: match.citation.url ?? '/research?tab=alpha-radar',
+    }));
+}
+
+// --------------------------------------------------------------------- //
+// 7. policy_breaches
+// --------------------------------------------------------------------- //
+
+export function policy_breaches(ctx: AskContext, _args: Record<string, unknown> = {}): AskRow[] {
+    void _args;
+    const dashboard = computeRiskPolicyDashboard({
+        holdings: riskHoldings(ctx),
+        cashTotal: cashTotal(ctx),
+        trades: ctx.transactions ?? [],
+    });
+
+    return dashboard.dimensions
+        .filter((dimension) => dimension.status !== 'inside')
+        .sort((a, b) => statusRank(b.status) - statusRank(a.status))
+        .map((dimension) => ({
+            label: dimension.label,
+            value: dimension.status.replace('_', ' '),
+            sub: `${dimension.currentLabel ?? (dimension.currentPct == null ? 'n/a' : `${dimension.currentPct.toFixed(1)}%`)} · target ${dimension.targetLabel}`,
+            tone: dimension.status === 'breached' || dimension.status === 'missing_data' ? 'warn' : 'neutral',
+            href: dimension.href,
+        }));
+}
+
+// --------------------------------------------------------------------- //
+// 8. stress_test
+// --------------------------------------------------------------------- //
+
+export function stress_test(
+    ctx: AskContext,
+    args: { scenarioId?: string } = {},
+): AskRow[] {
+    const result = runStressScenario({
+        holdings: stressHoldings(ctx),
+        cashTotal: cashTotal(ctx),
+        scenario: findStressScenario(args.scenarioId),
+    });
+
+    const rows: AskRow[] = [
+        {
+            label: result.label,
+            value: usdSigned(result.totalImpactUsd),
+            sub: `${result.portfolioImpactPct.toFixed(1)}% portfolio impact`,
+            tone: result.totalImpactUsd < 0 ? 'neg' : 'neutral',
+            href: result.mitigationHref ?? '/portfolios/holdings',
+        },
+    ];
+
+    return rows.concat(result.contributors.slice(0, 5).map((contributor) => ({
+        label: contributor.symbol,
+        value: usdSigned(contributor.impactUsd),
+        sub: `${contributor.effectiveShockPct.toFixed(1)}% shock · ${contributor.matchedTargets.join(', ')}`,
+        tone: contributor.impactUsd < 0 ? 'neg' : 'neutral',
+        href: '/portfolios/holdings',
+    })));
+}
+
+// --------------------------------------------------------------------- //
+// 9. theme_exposure
+// --------------------------------------------------------------------- //
+
+export function theme_exposure(ctx: AskContext, _args: Record<string, unknown> = {}): AskRow[] {
+    void _args;
+    const exposure = computeThemeExposure(riskHoldings(ctx));
+    return exposure.rows
+        .filter((row) => row.marketValue > 0 && row.theme !== 'unknown')
+        .sort((a, b) => b.marketValue - a.marketValue)
+        .slice(0, 8)
+        .map((row) => ({
+            label: row.label,
+            value: `${row.percentOfPortfolio.toFixed(1)}%`,
+            sub: `${usd(row.marketValue)} · ${row.status.replace('_', ' ')}`,
+            tone: row.status === 'breached' || row.status === 'watch' ? 'warn' : 'neutral',
+            href: `/portfolios/holdings?theme=${row.theme}`,
+        }));
+}
+
+// --------------------------------------------------------------------- //
+// 10. trim_to_target
+// --------------------------------------------------------------------- //
+
+export function trim_to_target(
+    ctx: AskContext,
+    args: { symbol?: string; targetPct?: number } = {},
+): AskRow[] {
+    const symbol = (args.symbol ?? 'GOOG').toUpperCase();
+    const targetPct = typeof args.targetPct === 'number' ? args.targetPct : 25;
+    const symbols = symbol === 'GOOG' ? new Set(['GOOG', 'GOOGL']) : new Set([symbol]);
+    const currentValueUsd = ctx.holdings
+        .filter((holding) => symbols.has(holding.ticker.toUpperCase()))
+        .reduce((sum, holding) => sum + holding.marketValue, 0);
+    const totalValue = portfolioValue(ctx);
+    const result = computeTrimAmountToTarget({
+        currentValueUsd,
+        portfolioValue: totalValue,
+        targetAllocationPct: targetPct,
+    });
+
+    return [
+        {
+            label: `${symbol} trim required`,
+            value: usd(result.sellUsd),
+            sub: `${result.currentAllocationPct.toFixed(1)}% now · target ${targetPct}%`,
+            tone: result.sellUsd > 0 ? 'warn' : 'neutral',
+            href: '/settings',
+        },
+        {
+            label: `${symbol} target value`,
+            value: usd(result.targetValueUsd),
+            sub: `${result.breachPct.toFixed(1)} percentage points over target`,
+            tone: result.breachPct > 0 ? 'warn' : 'neutral',
+            href: '/portfolios/holdings',
+        },
+    ];
+}
+
+// --------------------------------------------------------------------- //
+// 11. missing_theses
+// --------------------------------------------------------------------- //
+
+export function missing_theses(ctx: AskContext, _args: Record<string, unknown> = {}): AskRow[] {
+    void _args;
+    const theses = ctx.theses ?? DEFAULT_THESES;
+    return ctx.holdings
+        .filter((holding) => !findThesisByTicker(theses, holding.ticker))
+        .sort((a, b) => b.marketValue - a.marketValue)
+        .slice(0, 10)
+        .map((holding) => ({
+            label: holding.ticker,
+            value: usd(holding.marketValue),
+            sub: `${holding.name} · no active written thesis found`,
+            tone: 'warn',
+            href: '/research',
+        }));
+}
+
+// --------------------------------------------------------------------- //
+// 12. cash_jobs
+// --------------------------------------------------------------------- //
+
+export function cash_jobs(ctx: AskContext, _args: Record<string, unknown> = {}): AskRow[] {
+    void _args;
+    const summary = computeCashPolicySummary({
+        totalCash: cashTotal(ctx),
+        jobs: ctx.cashJobs ?? [],
+        deploymentRule: ctx.cashDeploymentRule ?? DEFAULT_CASH_DEPLOYMENT_RULE,
+        asOf: new Date(ctx.now),
+    });
+
+    return [
+        {
+            label: 'Unassigned cash',
+            value: usd(summary.unassignedCash),
+            sub: `${Math.round(summary.assignedPct)}% assigned · ${summary.status.replace('_', ' ')}`,
+            tone: summary.unassignedCash > 0 ? 'warn' : 'neutral',
+            href: '/settings',
+        },
+        {
+            label: 'Reserved cash',
+            value: usd(summary.reservedCash),
+            sub: `${summary.jobs.length} cash jobs configured`,
+            tone: 'neutral',
+            href: '/settings',
+        },
+        {
+            label: 'Next deployment',
+            value: usd(summary.nextDeploymentAmount),
+            sub: summary.nextDueDate ?? 'No due date set',
+            tone: summary.deploymentDue ? 'warn' : 'neutral',
+            href: '/settings',
+        },
+    ];
+}
+
+// --------------------------------------------------------------------- //
+// 13. churn_risks
+// --------------------------------------------------------------------- //
+
+export function churn_risks(ctx: AskContext, _args: Record<string, unknown> = {}): AskRow[] {
+    void _args;
+    const analysis = computeChurnAnalysis(churnTrades(ctx), {
+        asOf: new Date(ctx.now),
+        windowDays: 90,
+    });
+
+    return analysis.rows.slice(0, 8).map((row) => ({
+        label: row.symbol,
+        value: `${row.churnScore}/100`,
+        sub: `${row.tradeCount} trades · ${usd(row.turnoverUsd)} turnover · ${row.recommendation}`,
+        tone: row.status === 'breached' || row.status === 'watch' ? 'warn' : 'neutral',
+        href: '/portfolios/trade-log',
+    }));
+}
+
+// --------------------------------------------------------------------- //
+// 14. trade_policy_impact
+// --------------------------------------------------------------------- //
+
+export function trade_policy_impact(ctx: AskContext, _args: Record<string, unknown> = {}): AskRow[] {
+    void _args;
+    const dashboard = computeRiskPolicyDashboard({
+        holdings: riskHoldings(ctx),
+        cashTotal: cashTotal(ctx),
+        trades: ctx.transactions ?? [],
+    });
+    const breachedSymbols = new Set(
+        dashboard.dimensions
+            .filter((dimension) => dimension.status === 'breached' || dimension.status === 'watch')
+            .flatMap((dimension) => dimension.impactedSymbols),
+    );
+
+    return (ctx.transactions ?? [])
+        .filter((transaction) => transaction.ticker && transaction.type === 'buy')
+        .filter((transaction) => breachedSymbols.has(transaction.ticker!.toUpperCase()))
+        .slice(0, 8)
+        .map((transaction) => ({
+            label: `${transaction.type.toUpperCase()} ${transaction.ticker}`,
+            value: usd(Math.abs(transaction.amount)),
+            sub: 'Added to a name already referenced by a breached/watch policy dimension',
+            tone: 'warn',
+            href: '/execution',
+        }));
+}
+
+function riskHoldings(ctx: AskContext): RiskPolicyDashboardHolding[] {
+    return ctx.holdings.map((holding) => ({
+        id: holding.id,
+        symbol: holding.ticker,
+        name: holding.name,
+        marketValue: holding.marketValue,
+        quantity: holding.quantity,
+        avgCost: holding.avgCost,
+        currentPrice: holding.currentPrice,
+        policyBucket: holding.policyBucket,
+        themeWeights: holding.themeWeights,
+        isEmployerStock: holding.ticker === 'GOOG' || holding.ticker === 'GOOGL',
+    }));
+}
+
+function stressHoldings(ctx: AskContext): StressHolding[] {
+    return ctx.holdings.map((holding) => ({
+        id: holding.id,
+        symbol: holding.ticker,
+        name: holding.name,
+        marketValue: holding.marketValue,
+        policyBucket: holding.policyBucket,
+        themeWeights: holding.themeWeights,
+    }));
+}
+
+function cashTotal(ctx: AskContext): number {
+    return ctx.portfolios.reduce((sum, portfolio) => sum + portfolio.cashBalance, 0);
+}
+
+function portfolioValue(ctx: AskContext): number {
+    return cashTotal(ctx) + ctx.holdings.reduce((sum, holding) => sum + holding.marketValue, 0);
+}
+
+function churnTrades(ctx: AskContext): ChurnTrade[] {
+    return (ctx.transactions ?? []).map((transaction) => ({
+        id: transaction.id,
+        date: transaction.date,
+        type: transaction.type,
+        ticker: transaction.ticker,
+        amount: transaction.amount,
+        quantity: transaction.quantity,
+        price: transaction.price,
+        thesisId: transaction.ticker && transaction.notes?.toLowerCase().includes('thesis')
+            ? `thesis-${transaction.ticker}`
+            : undefined,
+        notes: transaction.notes,
+    }));
+}
+
+function statusRank(status: string): number {
+    if (status === 'breached') return 3;
+    if (status === 'missing_data') return 2;
+    if (status === 'watch') return 1;
+    return 0;
+}
+
+// --------------------------------------------------------------------- //
 // Dispatch table
 // --------------------------------------------------------------------- //
 
@@ -277,6 +607,15 @@ export const TOOLS: Record<
     sector_exposure: (ctx, args) => sector_exposure(ctx, args),
     trades_matching: (ctx, args) => trades_matching(ctx, args),
     correlation_with: (ctx, args) => correlation_with(ctx, args),
+    alpha_radar_evidence_search: (ctx, args) => alpha_radar_evidence_search(ctx, args),
+    policy_breaches: (ctx, args) => policy_breaches(ctx, args),
+    stress_test: (ctx, args) => stress_test(ctx, args),
+    theme_exposure: (ctx, args) => theme_exposure(ctx, args),
+    trim_to_target: (ctx, args) => trim_to_target(ctx, args),
+    missing_theses: (ctx, args) => missing_theses(ctx, args),
+    cash_jobs: (ctx, args) => cash_jobs(ctx, args),
+    churn_risks: (ctx, args) => churn_risks(ctx, args),
+    trade_policy_impact: (ctx, args) => trade_policy_impact(ctx, args),
 };
 
 /** Runs a tool and wraps the return in a recorded `AskToolRun`. */

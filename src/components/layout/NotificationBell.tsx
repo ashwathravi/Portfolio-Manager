@@ -111,11 +111,19 @@ export function NotificationBell() {
                                 <div className="flex-1 min-w-0">
                                     <p className="text-sm font-medium truncate">{trigger.ruleName}</p>
                                     <p className="text-xs text-muted-foreground font-mono">
-                                        {describeRule(trigger)} → {formatObservedValue(trigger.metric, trigger.observedValue)}
+                                        {trigger.message ?? `${describeRule(trigger)} → ${formatObservedValue(trigger.metric, trigger.observedValue)}`}
                                     </p>
                                     <p className="text-[11px] text-muted-foreground/70 mt-0.5">
                                         {formatRelative(trigger.triggeredAt)}
                                     </p>
+                                    {trigger.href && (
+                                        <Link
+                                            href={trigger.href}
+                                            className="mt-1 inline-flex text-[11px] font-medium text-primary hover:underline"
+                                        >
+                                            View source report
+                                        </Link>
+                                    )}
                                 </div>
                                 {!trigger.acknowledged && (
                                     <Button
@@ -145,6 +153,9 @@ export function NotificationBell() {
 }
 
 function formatObservedValue(metric: string, value: number): string {
+    if (metric.startsWith("alpha_radar_")) {
+        return `${Math.round(value)}/100`;
+    }
     if (metric === "price" || metric === "portfolio_value") {
         return `$${value.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
     }

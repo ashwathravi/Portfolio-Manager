@@ -23,13 +23,19 @@ function citationFor(run: AskToolRun, index: number): AskCitation {
     const marker = `tool:${run.name}#${index}`;
     const row = run.rows[index];
     // Prefer the row's explicit href, then a sensible default per tool.
-    const href =
-        row?.href ??
-        (run.name === 'sector_exposure'
-            ? '/portfolios/holdings'
-            : run.name === 'trades_matching'
-              ? '/trade-log'
-              : '/performance');
+    const defaultHrefByTool: Partial<Record<AskToolRun['name'], string>> = {
+        sector_exposure: '/portfolios/holdings',
+        trades_matching: '/trade-log',
+        policy_breaches: '/',
+        stress_test: '/',
+        theme_exposure: '/portfolios/holdings',
+        trim_to_target: '/settings',
+        missing_theses: '/research',
+        cash_jobs: '/settings',
+        churn_risks: '/portfolios/trade-log',
+        trade_policy_impact: '/execution',
+    };
+    const href = row?.href ?? defaultHrefByTool[run.name] ?? '/performance';
     return { marker, label: row?.label ?? run.name, href };
 }
 
@@ -61,6 +67,24 @@ function lede(intent: PlannerResult['intent'], run: AskToolRun | undefined): str
             return `You closed ${run.rows.length} ${run.rows.length === 1 ? 'loss' : 'losses'} in that window. Most recent:`;
         case 'correlation':
             return `Correlation neighbours for the requested symbol (stub — live price series lands in v2):`;
+        case 'alpha_radar_memory':
+            return `I searched Alpha Radar evidence memory and found **${run.rows[0].label}**[[tool:${run.name}#0]]. Closest matches:`;
+        case 'policy_breaches':
+            return `Current policy breaches are led by **${run.rows[0].label}** at ${run.rows[0].value}[[tool:${run.name}#0]]. Review list:`;
+        case 'stress_test':
+            return `I ran the deterministic scenario **${run.rows[0].label}**: ${run.rows[0].value}[[tool:${run.name}#0]] portfolio impact. Main drivers:`;
+        case 'theme_policy_exposure':
+            return `Theme exposure is led by **${run.rows[0].label}** at ${run.rows[0].value}[[tool:${run.name}#0]] of portfolio value. Full view:`;
+        case 'trim_to_target':
+            return `To reach the requested target, the first trim estimate is **${run.rows[0].value}**[[tool:${run.name}#0]]. Details:`;
+        case 'missing_thesis':
+            return `These positions do not have an active written thesis attached. Largest gap: **${run.rows[0].label}** at ${run.rows[0].value}[[tool:${run.name}#0]].`;
+        case 'cash_jobs':
+            return `Cash job coverage shows **${run.rows[0].label}** at ${run.rows[0].value}[[tool:${run.name}#0]]. Breakdown:`;
+        case 'churn_risks':
+            return `Churn risk is led by **${run.rows[0].label}** with a ${run.rows[0].value} score[[tool:${run.name}#0]]. Names to review:`;
+        case 'trade_policy_impact':
+            return `Recent trades that added to watch or breached policy dimensions start with **${run.rows[0].label}** at ${run.rows[0].value}[[tool:${run.name}#0]].`;
         default:
             return `Here's the current sector exposure — a useful baseline when the question is open-ended:`;
     }

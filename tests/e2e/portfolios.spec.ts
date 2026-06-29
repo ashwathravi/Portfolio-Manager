@@ -15,9 +15,9 @@ test.describe('Portfolios page', () => {
     });
 
     test('should show view-by toggles (Account, Strategy, Tag)', async ({ page }) => {
-        await expect(page.getByRole('button', { name: 'Account' })).toBeVisible();
-        await expect(page.getByRole('button', { name: 'Strategy' })).toBeVisible();
-        await expect(page.getByRole('button', { name: 'Tag' })).toBeVisible();
+        await expect(page.getByRole('button', { name: 'Account', exact: true })).toBeVisible();
+        await expect(page.getByRole('button', { name: 'Strategy', exact: true })).toBeVisible();
+        await expect(page.getByRole('button', { name: 'Tag', exact: true })).toBeVisible();
     });
 
     test('should display summary cards (Total Value, Total Cash, count)', async ({ page }) => {
@@ -26,13 +26,12 @@ test.describe('Portfolios page', () => {
     });
 
     test('should render portfolio table with columns', async ({ page }) => {
-        // Table headers
-        await expect(page.getByText('NAME')).toBeVisible();
-        await expect(page.getByText('VALUE')).toBeVisible();
-        await expect(page.getByText('DAY CHANGE')).toBeVisible();
-        await expect(page.getByText('TOTAL RETURN')).toBeVisible();
-        await expect(page.getByText('CASH BALANCE')).toBeVisible();
-        await expect(page.getByText('LAST UPDATED')).toBeVisible();
+        await expect(page.getByRole('columnheader', { name: /NAME/ })).toBeVisible();
+        await expect(page.getByRole('columnheader', { name: /VALUE/ })).toBeVisible();
+        await expect(page.getByRole('columnheader', { name: /DAY CHANGE/ })).toBeVisible();
+        await expect(page.getByRole('columnheader', { name: /TOTAL RETURN/ })).toBeVisible();
+        await expect(page.getByRole('columnheader', { name: /CASH BALANCE/ })).toBeVisible();
+        await expect(page.getByRole('columnheader', { name: 'LAST UPDATED' })).toBeVisible();
     });
 
     test('should display account data rows in the table', async ({ page }) => {
@@ -42,7 +41,7 @@ test.describe('Portfolios page', () => {
     });
 
     test('should switch views when clicking Strategy toggle', async ({ page }) => {
-        await page.getByRole('button', { name: 'Strategy' }).click();
+        await page.getByRole('button', { name: 'Strategy', exact: true }).click();
 
         // Strategy-specific data should appear
         await expect(page.getByText('Growth Tech')).toBeVisible();
@@ -51,7 +50,7 @@ test.describe('Portfolios page', () => {
     });
 
     test('should switch views when clicking Tag toggle', async ({ page }) => {
-        await page.getByRole('button', { name: 'Tag' }).click();
+        await page.getByRole('button', { name: 'Tag', exact: true }).click();
 
         // Tag-specific data should appear
         await expect(page.getByText('High Conviction')).toBeVisible();

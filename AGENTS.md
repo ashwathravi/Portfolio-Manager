@@ -70,16 +70,18 @@ Every page in the application must have a corresponding E2E spec. The current ma
 
 | Route | E2E Spec File | Key assertions |
 |-------|--------------|----------------|
-| `/` (Dashboard) | `dashboard.spec.ts` | Greeting renders, stat cards visible, market status indicator, connected accounts section |
+| `/` (Dashboard) | `dashboard.spec.ts` | Greeting renders, stat cards visible, market status indicator, connected accounts section, Alpha Radar card |
 | `/portfolios` | `portfolios.spec.ts` | Table renders with data rows, view-by toggles switch data, search filters rows, row click navigates |
 | `/portfolios/holdings` | `holdings.spec.ts` | Holdings table or empty state renders |
 | `/portfolios/trade-log` | `trade-log.spec.ts` | Trade table with BUY/SELL badges, summary stats, filter panel toggles |
 | `/execution` | `execution.spec.ts` | Order form renders, Buy/Sell tabs, price field hides for market orders, ticker uppercases, order blotter tabs |
-| `/research` | `research.spec.ts` | All 4 tabs render content (theses, watchlist, journal, archive), conviction levels, target prices |
+| `/research` | `research.spec.ts` | All 5 tabs render content (theses, watchlist, Alpha Radar, journal, archive), conviction levels, target prices, Alpha Radar refresh/report state, semantic memory search, clone tracking filters, Alpha Radar conviction ranking, external overlay filters, scheduled orchestration, exploratory backtests, thesis draft review workflow |
 | `/strategies` | `strategies.spec.ts` | Strategy cards with status badges, action buttons match status, overview stats |
 | `/analytics` | `analytics.spec.ts` | Trading activity heatmap, trade calendar, behavioral insights table, chart sections |
 | `/performance` | `performance.spec.ts` | Performance metrics cards, charts sections, performance-by-period table, risk metrics, attribution |
-| `/settings` | `settings.spec.ts` | All 7 tabs render content (Profile, Notifications, Security, Data, Appearance, Accounts, Tags) |
+| `/settings` | `settings.spec.ts` | Card grid renders, advanced deep links render legacy surfaces, notifications and alerts include Alpha Radar controls |
+| `/help` | `help.spec.ts` | Alpha Radar v1/v2 release notes and guides render, product links work, mobile layout keeps content visible |
+| `/login` | `login.spec.ts` | Google sign-in page renders without the app navigation chrome |
 | Sidebar navigation | `navigation.spec.ts` | All top-level links navigate correctly, sub-menus expand, user info visible |
 
 ### Adding E2E tests for a new page

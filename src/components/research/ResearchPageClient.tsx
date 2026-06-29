@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { Plus, Search, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useQuotesQuery } from "@/lib/api/market-data/queries";
@@ -13,6 +14,11 @@ import { NewThesisModal } from "./NewThesisModal";
 import { NewJournalEntryModal } from "./NewJournalEntryModal";
 import { ThesisListCard } from "./ThesisListCard";
 import { ThesisDetailPane } from "./ThesisDetailPane";
+import {
+    AlphaRadarDetailPane,
+    AlphaRadarFilerColumn,
+    useAlphaRadarResearchData,
+} from "./AlphaRadarResearch";
 
 /**
  * Phase 5 (AR-78) Research workspace wrapper.
@@ -29,11 +35,12 @@ import { ThesisDetailPane } from "./ThesisDetailPane";
  * state is preserved byte-for-byte from the old page.
  */
 
-export type ResearchTabKey = "theses" | "watchlist" | "journal" | "archive";
+export type ResearchTabKey = "theses" | "watchlist" | "alphaRadar" | "journal" | "archive";
 
 const TAB_LABEL: Record<ResearchTabKey, string> = {
     theses: "Theses",
     watchlist: "Watchlist",
+    alphaRadar: "Alpha Radar",
     journal: "Journal",
     archive: "Archive",
 };
@@ -92,6 +99,7 @@ const SEED_WATCHLIST: WatchlistItem[] = [
 // ---------------------------------------------------------------------------
 
 export function ResearchPageClient() {
+    const searchParams = useSearchParams();
     const {
         active,
         archived,
@@ -109,31 +117,19 @@ export function ResearchPageClient() {
         remove: removeJournal,
     } = useJournalStore();
 
-    const [tab, setTab] = useState<ResearchTabKey>("theses");
+    const [tab, setTab] = useState<ResearchTabKey>(() => parseInitialTab(searchParams.get("tab")));
     const [selectedId, setSelectedId] = useState<string | null>(null);
     const [query, setQuery] = useState("");
     const [thesisModalOpen, setThesisModalOpen] = useState(false);
     const [editingThesis, setEditingThesis] = useState<Thesis | null>(null);
     const [journalModalOpen, setJournalModalOpen] = useState(false);
     const [editingJournal, setEditingJournal] = useState<JournalEntry | null>(null);
+    const alphaRadar = useAlphaRadarResearchData();
 
     const thesesById = useMemo(
         () => new Map(theses.map((t) => [t.id, t] as const)),
         [theses],
     );
-
-    // Reset search when switching tabs so a filter from one tab doesn't
-    // silently hide everything on the next.
-    useEffect(() => {
-        setQuery("");
-    }, [tab]);
-
-    // Auto-pick the first thesis once one exists. Keeps the right pane
-    // meaningful instead of showing "select a thesis" on first paint.
-    useEffect(() => {
-        if (selectedId || active.length === 0) return;
-        setSelectedId(active[0].id);
-    }, [selectedId, active]);
 
     // Live watchlist quotes — same behavior the old WatchlistSection had.
     const watchSymbols = useMemo(
@@ -170,13 +166,18 @@ export function ResearchPageClient() {
     const counts: Record<ResearchTabKey, number> = {
         theses: active.length,
         watchlist: SEED_WATCHLIST.length,
+        alphaRadar: alphaRadar.filers.length,
         journal: journalEntries.length,
         archive: archived.length,
     };
 
+    const selectedThesisList = tab === "archive" ? archived : active;
+    const effectiveSelectedId = selectedId && selectedThesisList.some((thesis) => thesis.id === selectedId)
+        ? selectedId
+        : selectedThesisList[0]?.id ?? null;
     const selectedThesis =
-        selectedId && thesesById.has(selectedId)
-            ? thesesById.get(selectedId) ?? null
+        effectiveSelectedId && thesesById.has(effectiveSelectedId)
+            ? thesesById.get(effectiveSelectedId) ?? null
             : null;
 
     // ---- Handlers -----------------------------------------------------------
@@ -239,7 +240,7 @@ export function ResearchPageClient() {
                 <Plus size={14} aria-hidden="true" />
                 <span>New entry</span>
             </button>
-        ) : tab === "watchlist" ? null : (
+        ) : tab === "watchlist" || tab === "alphaRadar" ? null : (
             <button
                 type="button"
                 className="pm-btn pm-btn-primary"
@@ -261,7 +262,7 @@ export function ResearchPageClient() {
                     </nav>
                     <h1 className="pm-page-title">Research workspace</h1>
                     <p className="pm-page-sub">
-                        Theses, watchlist, and decision journal
+                        Theses, Alpha Radar, watchlist, and decision journal
                     </p>
                 </div>
                 <div className="pm-topbar-actions">{topbarAction}</div>
@@ -282,7 +283,10 @@ export function ResearchPageClient() {
                                 role="tab"
                                 aria-selected={tab === k}
                                 className={`pm-research-tab${tab === k ? " is-active" : ""}`}
-                                onClick={() => setTab(k)}
+                                onClick={() => {
+                                    setTab(k);
+                                    setQuery("");
+                                }}
                             >
                                 <span className="pm-research-tab-label">{TAB_LABEL[k]}</span>
                                 <span className="pm-research-tab-count">{counts[k]}</span>
@@ -305,7 +309,7 @@ export function ResearchPageClient() {
                         {tab === "theses" && (
                             <ThesesColumn
                                 list={activeFiltered}
-                                selectedId={selectedId}
+                                selectedId={effectiveSelectedId}
                                 onSelect={setSelectedId}
                                 emptyLabel="No active theses. Click New thesis to create one."
                             />
@@ -313,7 +317,7 @@ export function ResearchPageClient() {
                         {tab === "archive" && (
                             <ThesesColumn
                                 list={archivedFiltered}
-                                selectedId={selectedId}
+                                selectedId={effectiveSelectedId}
                                 onSelect={setSelectedId}
                                 dimmed
                                 emptyLabel="Nothing archived yet."
@@ -323,6 +327,12 @@ export function ResearchPageClient() {
                             <WatchlistColumn
                                 list={watchlistFiltered}
                                 quotes={watchQuotes}
+                            />
+                        )}
+                        {tab === "alphaRadar" && (
+                            <AlphaRadarFilerColumn
+                                data={alphaRadar}
+                                query={query}
                             />
                         )}
                         {tab === "journal" && (
@@ -362,6 +372,8 @@ export function ResearchPageClient() {
                             title="Watchlist detail"
                             body="Select a watchlist ticker to see its entry rationale, notes, and suggested target. (Dedicated pane coming in Phase 6.)"
                         />
+                    ) : tab === "alphaRadar" ? (
+                        <AlphaRadarDetailPane data={alphaRadar} />
                     ) : (
                         <EmptyPane
                             title="Decision journal"
@@ -598,4 +610,21 @@ function filterTheses(list: readonly Thesis[], q: string): Thesis[] {
     return list.filter((t) =>
         matchQuery(q, t.ticker, t.companyName, t.title, t.description, ...t.tags),
     );
+}
+
+function parseInitialTab(value: string | null): ResearchTabKey {
+    switch (value) {
+        case "watchlist":
+            return "watchlist";
+        case "alpha-radar":
+        case "alphaRadar":
+            return "alphaRadar";
+        case "journal":
+            return "journal";
+        case "archive":
+            return "archive";
+        case "theses":
+        default:
+            return "theses";
+    }
 }

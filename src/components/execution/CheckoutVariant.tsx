@@ -83,6 +83,8 @@ export function CheckoutVariant() {
     // current live price.
     useEffect(() => {
         const live = LIVE_PRICES[ticker];
+        // Ticker changes should reset the locally buffered limit draft.
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         if (live) setLimit(live);
     }, [ticker]);
 
@@ -744,7 +746,6 @@ function ReceiptParam({ label, value }: { label: string; value: string }) {
  */
 function useLockCountdown(initial: number, deps: unknown[]): number {
     const [s, setS] = useState(initial);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     useEffect(() => {
         setS(initial);
         const id = setInterval(() => {

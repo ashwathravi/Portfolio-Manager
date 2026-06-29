@@ -21,14 +21,14 @@ test.describe('Trade Log page', () => {
     });
 
     test('should render trade table with column headers', async ({ page }) => {
-        await expect(page.getByText('DATE')).toBeVisible();
-        await expect(page.getByText('SYMBOL')).toBeVisible();
-        await expect(page.getByText('TYPE')).toBeVisible();
-        await expect(page.getByText('QUANTITY')).toBeVisible();
-        await expect(page.getByText('PRICE')).toBeVisible();
-        await expect(page.getByText('TOTAL VALUE')).toBeVisible();
-        await expect(page.getByText('ACCOUNT')).toBeVisible();
-        await expect(page.getByText('STATUS')).toBeVisible();
+        await expect(page.getByRole('columnheader', { name: 'DATE' })).toBeVisible();
+        await expect(page.getByRole('columnheader', { name: 'SYMBOL' })).toBeVisible();
+        await expect(page.getByRole('columnheader', { name: 'TYPE' })).toBeVisible();
+        await expect(page.getByRole('columnheader', { name: 'QUANTITY' })).toBeVisible();
+        await expect(page.getByRole('columnheader', { name: 'PRICE' })).toBeVisible();
+        await expect(page.getByRole('columnheader', { name: 'TOTAL VALUE' })).toBeVisible();
+        await expect(page.getByRole('columnheader', { name: 'ACCOUNT' })).toBeVisible();
+        await expect(page.getByRole('columnheader', { name: 'STATUS' })).toBeVisible();
     });
 
     test('should display trade rows with BUY and SELL badges', async ({ page }) => {
@@ -46,13 +46,23 @@ test.describe('Trade Log page', () => {
         await expect(page.getByText('MSFT').first()).toBeVisible();
     });
 
+    test('should show churn warning and filter to high-churn names', async ({ page }) => {
+        await expect(page.getByTestId('trade-log-churn-warning')).toBeVisible();
+        await expect(page.getByTestId('trade-log-churn-warning')).toContainText('TSLA');
+
+        await page.getByTestId('trade-log-high-churn-filter').click();
+        await expect(page.getByTestId('trade-log-high-churn-filter')).toHaveAttribute('aria-pressed', 'true');
+        await expect(page.getByText('TSLA').first()).toBeVisible();
+        await expect(page.getByText('MSFT').first()).toHaveCount(0);
+    });
+
     test('should toggle filter panel via Filter button', async ({ page }) => {
         const filterButton = page.getByRole('button', { name: 'Filter' });
         await filterButton.click();
 
-        // Filter dropdowns should appear
-        await expect(page.getByText('All Accounts')).toBeVisible();
-        await expect(page.getByText('All Strategies')).toBeVisible();
-        await expect(page.getByText('All Tags')).toBeVisible();
+        const filters = page.getByRole('combobox');
+        await expect(filters.filter({ hasText: 'All Accounts' })).toBeVisible();
+        await expect(filters.filter({ hasText: 'All Strategies' })).toBeVisible();
+        await expect(filters.filter({ hasText: 'All Tags' })).toBeVisible();
     });
 });

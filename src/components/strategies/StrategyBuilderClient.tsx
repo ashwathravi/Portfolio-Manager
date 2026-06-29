@@ -103,6 +103,21 @@ export function StrategyBuilderClient() {
         [rollingScore],
     );
 
+    // Per-card rolling score so the row cards show their own adherence
+    // tier at a glance, not just the currently-selected strategy. Pure
+    // derivation — cheap, and keyed on the stable seed journal.
+    const scoreByStrategy = useMemo(() => {
+        const map: Record<string, number | null> = {};
+        for (const s of strategies) {
+            map[s.id] = rollingAdherenceScore(
+                SEED_JOURNAL,
+                s.id,
+                SEED_THESIS_TO_STRATEGY,
+            );
+        }
+        return map;
+    }, [strategies]);
+
     // -- Rule/conjunction/universe/guardrail mutators ------------------
     const updateSelected = useCallback(
         (patch: (s: Strategy) => Strategy) => {
@@ -197,21 +212,6 @@ export function StrategyBuilderClient() {
             </div>
         );
     }
-
-    // Per-card rolling score so the row cards show their own adherence
-    // tier at a glance, not just the currently-selected strategy. Pure
-    // derivation — cheap, and keyed on the stable seed journal.
-    const scoreByStrategy = useMemo(() => {
-        const map: Record<string, number | null> = {};
-        for (const s of strategies) {
-            map[s.id] = rollingAdherenceScore(
-                SEED_JOURNAL,
-                s.id,
-                SEED_THESIS_TO_STRATEGY,
-            );
-        }
-        return map;
-    }, [strategies]);
 
     return (
         <div className="pm-strategy-page">

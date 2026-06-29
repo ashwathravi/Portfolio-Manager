@@ -109,7 +109,6 @@ export function track<T extends AnalyticsEvent['name']>(
     // Dev-only console trace. Behind `NODE_ENV` so prod bundles are
     // quiet.
     if (process.env.NODE_ENV !== 'production') {
-        // eslint-disable-next-line no-console
         console.debug('[analytics]', name, props);
     }
 
@@ -127,7 +126,6 @@ export function track<T extends AnalyticsEvent['name']>(
             bucket.emit(name, propsDict);
         } catch (err) {
             if (process.env.NODE_ENV !== 'production') {
-                // eslint-disable-next-line no-console
                 console.warn('[analytics] sink threw, event kept in buffer', err);
             }
         }

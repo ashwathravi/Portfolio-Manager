@@ -1,22 +1,41 @@
 import { NextResponse } from 'next/server';
+import { apiError, authenticateApiRequest, internalServerError } from '@/lib/api/security';
 import { schwabClient } from '@/lib/api/schwab/client';
 import { orderSchema } from '@/lib/validators/execution';
 
+interface SchwabOrderPayload {
+    orderType: 'MARKET' | 'LIMIT';
+    session: 'NORMAL';
+    duration: 'DAY' | 'GOOD_TILL_CANCEL';
+    orderStrategyType: 'SINGLE';
+    orderLegCollection: Array<{
+        instruction: 'BUY' | 'SELL';
+        quantity: number;
+        instrument: {
+            symbol: string;
+            assetType: 'EQUITY';
+        };
+    }>;
+    price?: number;
+}
+
 export async function POST(request: Request) {
+    if (!process.env.INTERNAL_API_SECRET?.trim()) {
+        return apiError('API authentication is not configured.', 'API_AUTH_NOT_CONFIGURED', 503);
+    }
+
+    const auth = authenticateApiRequest(request);
+    if (!auth.ok) return auth.response;
+
     try {
-        // Security check: simple token-based authentication for the internal API
-        const apiKey = request.headers.get('X-API-Key');
-        const internalSecret = process.env.INTERNAL_API_SECRET;
-
-        if (!internalSecret || apiKey !== internalSecret) {
-            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-        }
-
         const body = await request.json();
 
         const result = orderSchema.safeParse(body.order);
         if (!result.success) {
-            return NextResponse.json({ error: 'Invalid order data', details: result.error.format() }, { status: 400 });
+            return NextResponse.json(
+                { error: 'Invalid order data', code: 'INVALID_ORDER', details: result.error.format() },
+                { status: 400 },
+            );
         }
 
         const order = result.data;
@@ -25,11 +44,11 @@ export async function POST(request: Request) {
         const accountId = process.env.SCHWAB_ACCOUNT_ID;
 
         if (!accessToken || !accountId) {
-            return NextResponse.json({ error: 'Schwab credentials not configured' }, { status: 401 });
+            return apiError('Schwab credentials not configured', 'SCHWAB_CREDENTIALS_MISSING', 401);
         }
 
         // We map our simplified app Order to Schwab's Order format
-        const schwabOrderPayload: any = {
+        const schwabOrderPayload: SchwabOrderPayload = {
             orderType: order.type === 'market' ? 'MARKET' : 'LIMIT',
             session: 'NORMAL',
             duration: order.type === 'market' ? 'DAY' : (order.timeInForce === 'gtc' ? 'GOOD_TILL_CANCEL' : 'DAY'),
@@ -54,7 +73,6 @@ export async function POST(request: Request) {
 
         return NextResponse.json({ success: true, message: 'Order submitted to broker' });
     } catch (error) {
-        console.error('Error placing order:', error);
-        return NextResponse.json({ error: 'Failed to place order' }, { status: 500 });
+        return internalServerError(error, 'Failed to place order', 'SCHWAB_ORDER_FAILED');
     }
 }

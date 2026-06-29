@@ -1,5 +1,6 @@
 import { describe, test, beforeEach } from "node:test";
 import assert from "node:assert";
+import type { KeyboardEvent } from "react";
 
 import { handleRovingRadioKey } from "./rovingRadio";
 
@@ -78,13 +79,19 @@ const ORDER = ["a", "b", "c", "d"] as const;
 // This keeps the tests deterministic and avoids flakiness.
 const originalRaf = globalThis.requestAnimationFrame;
 function installSyncRaf() {
-    (globalThis as any).requestAnimationFrame = (cb: FrameRequestCallback) => {
+    const rafHost = globalThis as typeof globalThis & { requestAnimationFrame: typeof requestAnimationFrame };
+    rafHost.requestAnimationFrame = (cb: FrameRequestCallback) => {
         cb(0);
         return 0;
     };
 }
 function restoreRaf() {
-    (globalThis as any).requestAnimationFrame = originalRaf;
+    const rafHost = globalThis as typeof globalThis & { requestAnimationFrame: typeof requestAnimationFrame };
+    rafHost.requestAnimationFrame = originalRaf;
+}
+
+function asKeyboardEvent(evt: ReturnType<typeof makeEvent>): KeyboardEvent<HTMLElement> {
+    return evt as unknown as KeyboardEvent<HTMLElement>;
 }
 
 describe("handleRovingRadioKey", () => {
@@ -96,7 +103,7 @@ describe("handleRovingRadioKey", () => {
         const siblings = makeButtons(4);
         const evt = makeEvent("ArrowRight", siblings, 0);
         let selected: string = "a";
-        handleRovingRadioKey(evt as any, ORDER, "a", (next) => {
+        handleRovingRadioKey(asKeyboardEvent(evt), ORDER, "a", (next) => {
             selected = next;
         });
         assert.strictEqual(selected, "b");
@@ -109,7 +116,7 @@ describe("handleRovingRadioKey", () => {
         const siblings = makeButtons(4);
         const evt = makeEvent("ArrowDown", siblings, 1);
         let selected: string = "b";
-        handleRovingRadioKey(evt as any, ORDER, "b", (next) => {
+        handleRovingRadioKey(asKeyboardEvent(evt), ORDER, "b", (next) => {
             selected = next;
         });
         assert.strictEqual(selected, "c");
@@ -121,7 +128,7 @@ describe("handleRovingRadioKey", () => {
         const siblings = makeButtons(4);
         const evt = makeEvent("ArrowLeft", siblings, 2);
         let selected: string = "c";
-        handleRovingRadioKey(evt as any, ORDER, "c", (next) => {
+        handleRovingRadioKey(asKeyboardEvent(evt), ORDER, "c", (next) => {
             selected = next;
         });
         assert.strictEqual(selected, "b");
@@ -133,7 +140,7 @@ describe("handleRovingRadioKey", () => {
         const siblings = makeButtons(4);
         const evt = makeEvent("ArrowUp", siblings, 0);
         let selected: string = "a";
-        handleRovingRadioKey(evt as any, ORDER, "a", (next) => {
+        handleRovingRadioKey(asKeyboardEvent(evt), ORDER, "a", (next) => {
             selected = next;
         });
         assert.strictEqual(selected, "d");
@@ -145,7 +152,7 @@ describe("handleRovingRadioKey", () => {
         const siblings = makeButtons(4);
         const evt = makeEvent("ArrowRight", siblings, 3);
         let selected: string = "d";
-        handleRovingRadioKey(evt as any, ORDER, "d", (next) => {
+        handleRovingRadioKey(asKeyboardEvent(evt), ORDER, "d", (next) => {
             selected = next;
         });
         assert.strictEqual(selected, "a");
@@ -157,7 +164,7 @@ describe("handleRovingRadioKey", () => {
         const siblings = makeButtons(4);
         const evt = makeEvent("Home", siblings, 2);
         let selected: string = "c";
-        handleRovingRadioKey(evt as any, ORDER, "c", (next) => {
+        handleRovingRadioKey(asKeyboardEvent(evt), ORDER, "c", (next) => {
             selected = next;
         });
         assert.strictEqual(selected, "a");
@@ -169,7 +176,7 @@ describe("handleRovingRadioKey", () => {
         const siblings = makeButtons(4);
         const evt = makeEvent("End", siblings, 0);
         let selected: string = "a";
-        handleRovingRadioKey(evt as any, ORDER, "a", (next) => {
+        handleRovingRadioKey(asKeyboardEvent(evt), ORDER, "a", (next) => {
             selected = next;
         });
         assert.strictEqual(selected, "d");
@@ -181,7 +188,7 @@ describe("handleRovingRadioKey", () => {
         const siblings = makeButtons(4);
         const evt = makeEvent("Enter", siblings, 0);
         let callbackFired = false;
-        handleRovingRadioKey(evt as any, ORDER, "a", () => {
+        handleRovingRadioKey(asKeyboardEvent(evt), ORDER, "a", () => {
             callbackFired = true;
         });
         assert.strictEqual(callbackFired, false);
@@ -201,7 +208,7 @@ describe("handleRovingRadioKey", () => {
         const siblings = makeButtons(4);
         const evt = makeEvent("ArrowRight", siblings, 0);
         let selected: string = "x";
-        handleRovingRadioKey(evt as any, ORDER, "z" as any, (next) => {
+        handleRovingRadioKey<string>(asKeyboardEvent(evt), ORDER, "z", (next) => {
             selected = next;
         });
         assert.strictEqual(selected, "b");

@@ -53,6 +53,8 @@ function useEtClock(): string {
     // `null` on first render so SSR and the first client paint agree.
     const [now, setNow] = useState<Date | null>(null);
     useEffect(() => {
+        // Client-only clock avoids a server/client time mismatch.
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setNow(new Date());
         const id = setInterval(() => setNow(new Date()), CLOCK_TICK_MS);
         return () => clearInterval(id);
@@ -78,6 +80,7 @@ export function TopBar({ onSearchClick }: TopBarProps) {
         // `navigator.platform` is deprecated but remains the most reliable
         // way to detect macOS vs Windows for the ⌘ vs Ctrl glyph. The modern
         // `navigator.userAgentData` is still not everywhere.
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setIsMac(/Mac|iPhone|iPad|iPod/.test(navigator.platform));
     }, []);
 

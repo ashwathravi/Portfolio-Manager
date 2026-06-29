@@ -58,7 +58,7 @@ export function ActiveThesesCard({
                 <div>
                     <h3 className="pm-card-title">Active Theses</h3>
                     <p className="pm-card-subtitle">
-                        Research ideas you're tracking
+                        Research ideas you&apos;re tracking
                     </p>
                 </div>
                 <span className="pm-pill pm-pill-muted" aria-label={`${openCount} open theses`}>

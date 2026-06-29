@@ -59,7 +59,16 @@ export type AskToolName =
     | 'pnl_attribution'
     | 'sector_exposure'
     | 'trades_matching'
-    | 'correlation_with';
+    | 'correlation_with'
+    | 'alpha_radar_evidence_search'
+    | 'policy_breaches'
+    | 'stress_test'
+    | 'theme_exposure'
+    | 'trim_to_target'
+    | 'missing_theses'
+    | 'cash_jobs'
+    | 'churn_risks'
+    | 'trade_policy_impact';
 
 /** The full assistant reply, as returned by `runAsk`. */
 export interface AskAnswer {

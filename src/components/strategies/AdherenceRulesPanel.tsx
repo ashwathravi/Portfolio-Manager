@@ -121,7 +121,7 @@ export function AdherenceRulesPanel({
             {rules.length === 0 ? (
                 <div className="pm-rb-empty" data-testid="adherence-rules-empty">
                     No discipline rules yet. Add one to start scoring every
-                    trade at submit against the rules you've agreed with
+                    trade at submit against the rules you&apos;ve agreed with
                     yourself.
                 </div>
             ) : (

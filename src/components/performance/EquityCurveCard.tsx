@@ -39,6 +39,7 @@ export interface EquityCurveCardProps {
 }
 
 const RANGES: readonly EquityRange[] = ["1M", "3M", "6M", "YTD", "1Y", "3Y", "ALL"];
+const EMPTY_BENCHMARK_SERIES: MonthlyValuation[] = [];
 
 // Our synthetic monthly series covers ~15 months. 3Y collapses to ALL for now.
 const PERIOD_FOR_RANGE: Record<EquityRange, PeriodKey> = {
@@ -57,7 +58,7 @@ export function EquityCurveCard({ portfolio, benchmarks }: EquityCurveCardProps)
 
     const activeBench =
         benchmarks.find((b) => b.key === benchKey) ?? benchmarks[0] ?? null;
-    const benchSeries = activeBench?.series ?? [];
+    const benchSeries = activeBench?.series ?? EMPTY_BENCHMARK_SERIES;
 
     const periodKey = PERIOD_FOR_RANGE[range];
 

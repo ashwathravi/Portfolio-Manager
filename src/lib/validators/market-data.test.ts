@@ -1,6 +1,13 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert';
-import { tickerSchema, symbolsSchema, timeframeSchema } from './market-data';
+import {
+    MAX_MARKET_DATA_SYMBOLS,
+    historyRangeSchema,
+    marketSearchQuerySchema,
+    tickerSchema,
+    symbolsSchema,
+    timeframeSchema,
+} from './market-data';
 
 describe('market-data validators', () => {
     describe('tickerSchema', () => {
@@ -62,6 +69,12 @@ describe('market-data validators', () => {
             assert.strictEqual(result.success, false);
         });
 
+        test('should cap batch size', () => {
+            const input = Array.from({ length: MAX_MARKET_DATA_SYMBOLS + 1 }, (_, i) => `S${i}`).join(',');
+            const result = symbolsSchema.safeParse(input);
+            assert.strictEqual(result.success, false);
+        });
+
         test('should reject null or undefined', () => {
             assert.strictEqual(symbolsSchema.safeParse(null).success, false);
             assert.strictEqual(symbolsSchema.safeParse(undefined).success, false);
@@ -83,6 +96,33 @@ describe('market-data validators', () => {
                 const result = timeframeSchema.safeParse(tf);
                 assert.strictEqual(result.success, false);
             }
+        });
+    });
+
+    describe('historyRangeSchema', () => {
+        test('should accept supported chart ranges', () => {
+            for (const range of ['1D', '5D', '1M', '3M', '6M', '1Y', '5Y', 'MAX']) {
+                assert.strictEqual(historyRangeSchema.safeParse(range).success, true, `${range} should be valid`);
+            }
+        });
+
+        test('should reject unsupported chart ranges', () => {
+            for (const range of ['2D', '10Y', 'ALL', '']) {
+                assert.strictEqual(historyRangeSchema.safeParse(range).success, false, `${range} should be invalid`);
+            }
+        });
+    });
+
+    describe('marketSearchQuerySchema', () => {
+        test('should trim safe search text', () => {
+            const result = marketSearchQuerySchema.safeParse('  apple  ');
+            assert.strictEqual(result.success, true);
+            if (result.success) assert.strictEqual(result.data, 'apple');
+        });
+
+        test('should reject unsafe or excessively long search text', () => {
+            assert.strictEqual(marketSearchQuerySchema.safeParse('<script>').success, false);
+            assert.strictEqual(marketSearchQuerySchema.safeParse('a'.repeat(81)).success, false);
         });
     });
 });

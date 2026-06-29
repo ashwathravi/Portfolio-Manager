@@ -30,6 +30,15 @@ export interface PlannerResult {
         | 'trades_win'
         | 'trades_loss'
         | 'correlation'
+        | 'alpha_radar_memory'
+        | 'policy_breaches'
+        | 'stress_test'
+        | 'theme_policy_exposure'
+        | 'trim_to_target'
+        | 'missing_thesis'
+        | 'cash_jobs'
+        | 'churn_risks'
+        | 'trade_policy_impact'
         | 'unknown';
 }
 
@@ -66,8 +75,88 @@ function extractRangeDays(q: string): number {
     return 30; // default window
 }
 
+function extractPercent(q: string): number | undefined {
+    const match = q.match(/\b(\d+(?:\.\d+)?)\s*%/);
+    if (!match) return undefined;
+    const value = Number(match[1]);
+    return Number.isFinite(value) ? value : undefined;
+}
+
+function extractPolicySymbol(q: string): string | undefined {
+    return extractSymbol(q) ?? (/\bgoogl?\b/i.test(q) ? 'GOOG' : undefined);
+}
+
 export function plan(question: string): PlannerResult {
     const q = norm(question);
+
+    // --- Risk Policy Engine ------------------------------------------
+    if (/\bwhat happens if\b|\bstress\b|\bscenario\b|\bdrawdown\b|\bdrops?\b|\bfalls?\b/.test(q)) {
+        let scenarioId = 'broad_market_20_tech_beta';
+        if (/\bgoogl?\b/.test(q)) scenarioId = 'goog_40_down';
+        else if (/\bai\b/.test(q)) scenarioId = 'ai_basket_30_down';
+        else if (/\bsemi|semiconductor|chip\b/.test(q)) scenarioId = 'semis_35_down';
+        else if (/\bcrypto|risk on|liquidity\b/.test(q)) scenarioId = 'crypto_liquidity_50_down';
+        return {
+            calls: [{ name: 'stress_test', args: { scenarioId } }],
+            intent: 'stress_test',
+        };
+    }
+
+    if (/\btrim\b|\breduce\b|\bde risk\b|\bderisk\b/.test(q) && /\btarget\b|\ballocation\b|\b%\b/.test(q)) {
+        return {
+            calls: [{
+                name: 'trim_to_target',
+                args: {
+                    symbol: extractPolicySymbol(question) ?? 'GOOG',
+                    targetPct: extractPercent(question) ?? 25,
+                },
+            }],
+            intent: 'trim_to_target',
+        };
+    }
+
+    if (/\bmissing\b|\bwithout\b|\bno\b/.test(q) && /\bthes(?:is|es)\b/.test(q)) {
+        return {
+            calls: [{ name: 'missing_theses', args: {} }],
+            intent: 'missing_thesis',
+        };
+    }
+
+    if (/\bcash\b/.test(q) && /\b(unassigned|assigned|job|reserved|deployment|deploy|excess)\b/.test(q)) {
+        return {
+            calls: [{ name: 'cash_jobs', args: {} }],
+            intent: 'cash_jobs',
+        };
+    }
+
+    if (/\bchurn\b|\brepeated(?:ly)?\b|\bround trip|overtrading|cooldown\b/.test(q)) {
+        return {
+            calls: [{ name: 'churn_risks', args: {} }],
+            intent: 'churn_risks',
+        };
+    }
+
+    if (/\btrades?\b/.test(q) && /\b(policy|breach|risk|worsen|increased)\b/.test(q)) {
+        return {
+            calls: [{ name: 'trade_policy_impact', args: {} }],
+            intent: 'trade_policy_impact',
+        };
+    }
+
+    if (/\bpolicy\b|\bbreach|breached|guardrail|above cap|over cap\b/.test(q)) {
+        return {
+            calls: [{ name: 'policy_breaches', args: {} }],
+            intent: 'policy_breaches',
+        };
+    }
+
+    if (/\btheme\b|\bfactor\b|\bai\b|\bsemi|semiconductor|mega cap|crypto\b/.test(q) &&
+        /\b(exposure|exposed|allocation|weight|portfolio|trade)\b/.test(q)) {
+        return {
+            calls: [{ name: 'theme_exposure', args: {} }],
+            intent: 'theme_policy_exposure',
+        };
+    }
 
     // --- Alpha / hurt-helped holdings --------------------------------
     // "which holdings have hurt my alpha this year?"
@@ -110,6 +199,19 @@ export function plan(question: string): PlannerResult {
                 },
             ],
             intent: 'pnl_source',
+        };
+    }
+
+    // --- Alpha Radar evidence memory --------------------------------
+    if (/\balpha radar\b|\b13f\b|\bfiler\b|\bfiling\b|\bberkshire\b|\btheme\b|\bevidence\b/.test(q)) {
+        return {
+            calls: [
+                {
+                    name: 'alpha_radar_evidence_search',
+                    args: { query: question, limit: 5 },
+                },
+            ],
+            intent: 'alpha_radar_memory',
         };
     }
 

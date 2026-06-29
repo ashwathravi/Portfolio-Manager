@@ -47,6 +47,8 @@ export function ProfileCard() {
     // a reset). Stale inputs after a reset would silently re-apply the
     // old values on blur, which is worse than the re-render.
     useEffect(() => {
+        // Keep local text drafts aligned with external profile resets.
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setFullName(profile.fullName);
         setEmail(profile.email);
     }, [profile.fullName, profile.email]);

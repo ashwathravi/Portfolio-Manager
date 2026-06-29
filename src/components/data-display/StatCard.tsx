@@ -26,7 +26,6 @@ export function StatCard({
     icon,
     color = "primary",
     trend,
-    loading,
     className,
 }: StatCardProps) {
     // Resolve aliases

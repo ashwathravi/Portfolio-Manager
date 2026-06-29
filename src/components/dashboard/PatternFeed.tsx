@@ -63,6 +63,8 @@ export function PatternFeed({
     // return and set state when it resolves.
     useEffect(() => {
         let cancelled = false;
+        // Async detector run needs a visible first-load state.
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setLoading(true);
         generatePatterns(entries, {
             nav,

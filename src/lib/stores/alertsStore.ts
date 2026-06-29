@@ -42,6 +42,18 @@ const defaultRules: AlertRule[] = [
         rearm: 'daily',
         createdAt: '2026-04-01T09:30:00Z',
     },
+    {
+        id: 'seed-alpha-radar-overlap',
+        name: 'Alpha Radar overlap score ≥ 80',
+        metric: 'alpha_radar_user_overlap',
+        comparator: 'gte',
+        threshold: 80,
+        enabled: true,
+        rearm: 'always',
+        note: 'Review the source 13F report before acting.',
+        source: 'alpha_radar',
+        createdAt: '2026-04-01T09:30:00Z',
+    },
 ];
 
 export const useAlertsStore = create<AlertsState>()(

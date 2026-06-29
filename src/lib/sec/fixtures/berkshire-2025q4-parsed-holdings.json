@@ -1,0 +1,39 @@
+{
+  "filingId": "22222222-2222-4222-8222-222222222222",
+  "accessionNumber": "0000950123-26-000001",
+  "reportPeriod": "2025-Q4",
+  "totalValueUsd": 192000000000,
+  "holdings": [
+    {
+      "issuerName": "APPLE INC",
+      "cusip": "037833100",
+      "ticker": "AAPL",
+      "valueUsd": 174000000000,
+      "shares": 915600000,
+      "securityType": "COM",
+      "investmentDiscretion": "SOLE",
+      "votingAuthoritySole": 915600000,
+      "votingAuthorityShared": 0,
+      "votingAuthorityNone": 0,
+      "positionRank": 1,
+      "rawValue": "174000000",
+      "valueUnit": "thousands_usd"
+    },
+    {
+      "issuerName": "CHEVRON CORP NEW",
+      "cusip": "166764100",
+      "ticker": "CVX",
+      "valueUsd": 18000000000,
+      "shares": 12609326,
+      "securityType": "COM",
+      "investmentDiscretion": "DFND",
+      "putCall": "put",
+      "votingAuthoritySole": 12000000,
+      "votingAuthorityShared": 100,
+      "votingAuthorityNone": 609226,
+      "positionRank": 2,
+      "rawValue": "18000000",
+      "valueUnit": "thousands_usd"
+    }
+  ]
+}

@@ -32,7 +32,7 @@ class FakeProvider implements MarketDataProvider {
         return symbols.map((s) => quote(s, this.priceBySymbol.get(s) ?? 0));
     }
 
-    async getHistoricalPrices(_symbol: string, _range: string): Promise<OHLC[]> {
+    async getHistoricalPrices(): Promise<OHLC[]> {
         this.getHistoricalCalls++;
         return [{ timestamp: '2026-04-19', open: 1, high: 2, low: 0.5, close: 1.5, volume: 100 }];
     }
@@ -72,6 +72,24 @@ describe('CachedMarketDataProvider', () => {
             await provider.getQuote('AAPL');
             assert.strictEqual(inner.getQuoteCalls, 1);
         });
+
+        it('shares one upstream fetch across concurrent cache misses', async () => {
+            inner.getQuote = async (symbol: string): Promise<Quote> => {
+                inner.getQuoteCalls++;
+                await new Promise((resolve) => setTimeout(resolve, 5));
+                return quote(symbol, inner.priceBySymbol.get(symbol) ?? 0);
+            };
+
+            const [a, b, c] = await Promise.all([
+                provider.getQuote('AAPL'),
+                provider.getQuote('aapl'),
+                provider.getQuote('AAPL'),
+            ]);
+
+            assert.strictEqual(inner.getQuoteCalls, 1);
+            assert.deepStrictEqual(a, b);
+            assert.deepStrictEqual(b, c);
+        });
     });
 
     describe('getBatchQuotes', () => {
@@ -98,6 +116,23 @@ describe('CachedMarketDataProvider', () => {
             const out = await provider.getBatchQuotes(['AAPL', 'MSFT']);
             assert.strictEqual(out.length, 2);
             assert.strictEqual(inner.getBatchCalls.length, 0);
+        });
+
+        it('deduplicates overlapping concurrent batch misses by symbol', async () => {
+            inner.getBatchQuotes = async (symbols: string[]): Promise<Quote[]> => {
+                inner.getBatchCalls.push([...symbols]);
+                await new Promise((resolve) => setTimeout(resolve, 5));
+                return symbols.map((s) => quote(s, inner.priceBySymbol.get(s) ?? 0));
+            };
+
+            const [first, second] = await Promise.all([
+                provider.getBatchQuotes(['AAPL', 'MSFT']),
+                provider.getBatchQuotes(['MSFT', 'AAPL']),
+            ]);
+
+            assert.strictEqual(inner.getBatchCalls.length, 1);
+            assert.deepStrictEqual(first.map((q) => q.symbol), ['AAPL', 'MSFT']);
+            assert.deepStrictEqual(second.map((q) => q.symbol), ['MSFT', 'AAPL']);
         });
     });
 

@@ -55,9 +55,13 @@ export function GuardrailsCard() {
     // reset). Otherwise stale drafts would quietly clobber the fresh
     // values the next time the user blurs.
     useEffect(() => {
+        // Keep local numeric draft aligned with external store resets.
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setDollarDraft(g.approvalThresholdUsd.toString());
     }, [g.approvalThresholdUsd]);
     useEffect(() => {
+        // Keep local numeric draft aligned with external store resets.
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setPctDraft(g.concentrationCapPct.toString());
     }, [g.concentrationCapPct]);
 

@@ -4,11 +4,22 @@
  * when a rule fires.
  */
 
-export type AlertMetric =
+export type MarketAlertMetric =
     | 'price'           // raw quote price in the rule symbol's currency
     | 'price_change_pct' // daily % change vs previous close
     | 'portfolio_value'  // total portfolio market value
     | 'portfolio_day_change_pct'; // portfolio day change %
+
+export type AlphaRadarAlertMetric =
+    | 'alpha_radar_new_position'
+    | 'alpha_radar_exit'
+    | 'alpha_radar_large_add'
+    | 'alpha_radar_large_trim'
+    | 'alpha_radar_user_overlap';
+
+export type AlertMetric = MarketAlertMetric | AlphaRadarAlertMetric;
+
+export type AlertSource = 'market' | 'alpha_radar';
 
 export type AlertComparator = 'gte' | 'lte' | 'gt' | 'lt' | 'eq';
 
@@ -40,10 +51,26 @@ export interface AlertRule {
     rearm: 'once' | 'always' | 'daily';
     /** Optional free-text note shown with the notification. */
     note?: string;
+    /** Optional source discriminator. Older persisted market rules omit it. */
+    source?: AlertSource;
     /** ISO timestamp when the rule was created. */
     createdAt: string;
     /** ISO timestamp of the most recent trigger, if any. */
     lastTriggeredAt?: string;
+}
+
+export interface AlphaRadarAlertContext {
+    trackedFilerId: string;
+    filerName: string;
+    reportId?: string;
+    reportPeriod: string;
+    filingId?: string;
+    issuerName: string;
+    ticker?: string;
+    cusip: string;
+    changeType: string;
+    materialityScore: number;
+    relevanceReasons: string[];
 }
 
 export interface AlertTrigger {
@@ -60,6 +87,14 @@ export interface AlertTrigger {
     triggeredAt: string;
     /** Whether the user has dismissed the trigger from the inbox. */
     acknowledged: boolean;
+    /** Optional source discriminator. Older triggers omit it. */
+    source?: AlertSource;
+    /** User-facing notification copy. */
+    message?: string;
+    /** Destination for the source object that produced this alert. */
+    href?: string;
+    /** Source metadata for richer notification rendering and tests. */
+    alphaRadar?: AlphaRadarAlertContext;
 }
 
 export interface MarketSnapshot {

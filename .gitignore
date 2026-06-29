@@ -12,6 +12,8 @@
 
 # testing
 /coverage
+/playwright-report
+/test-results
 
 # next.js
 /.next/
@@ -32,6 +34,7 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
 
 # vercel
 .vercel
@@ -45,7 +48,9 @@ New Atlas Wealth/
 
 # Ignoring lint reports
 lint_report_*.txt
+/reports/
 .gstack/
+.runtime/
 
 # Claude Code scratch worktrees
 .claude/worktrees/

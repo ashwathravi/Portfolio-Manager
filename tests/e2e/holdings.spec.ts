@@ -24,4 +24,38 @@ test.describe('Holdings page', () => {
         );
         await expect(tableOrEmpty).toBeVisible();
     });
+
+    test('should expose risk policy bucket and theme controls', async ({ page }) => {
+        await page.waitForLoadState('networkidle');
+
+        await expect(page.getByRole('heading', { name: 'Policy buckets' })).toBeVisible();
+        await expect(page.getByRole('heading', { name: 'Theme exposure' })).toBeVisible();
+        await expect(page.getByRole('columnheader', { name: 'Policy' })).toBeVisible();
+        await expect(page.getByRole('columnheader', { name: 'Themes' })).toBeVisible();
+
+        const bucketFilter = page.getByLabel('Filter holdings by policy bucket');
+        await expect(bucketFilter).toBeVisible();
+        await bucketFilter.selectOption('active');
+        await expect(bucketFilter).toHaveValue('active');
+
+        const themeFilter = page.getByLabel('Filter holdings by theme');
+        await expect(themeFilter).toBeVisible();
+        await themeFilter.selectOption('ai_infrastructure');
+        await expect(themeFilter).toHaveValue('ai_infrastructure');
+    });
+
+    test('should render the options risk ledger with breached LEAPS policy rows', async ({ page }) => {
+        await page.waitForLoadState('networkidle');
+
+        const ledger = page.getByTestId('options-risk-ledger');
+        await expect(ledger).toBeVisible();
+        await expect(ledger).toContainText('LEAPS and option premium at risk');
+        await expect(ledger).toContainText('AAPL 2027-01-15 250C');
+        await expect(ledger).toContainText('RIVN 2027-01-16 25C');
+        await expect(ledger).toContainText('Premium risk');
+        await expect(ledger).toContainText('Notional equiv.');
+        await expect(
+            ledger.locator('[data-testid="options-risk-row"][data-status="breached"]'),
+        ).toBeVisible();
+    });
 });

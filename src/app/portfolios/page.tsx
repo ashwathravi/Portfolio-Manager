@@ -31,7 +31,7 @@ export default function PortfoliosPage() {
     const handleCreatePortfolio = () => {
         if (!newPortfolioName.trim()) return;
         const newEntry = {
-            id: String(Date.now()),
+            id: `local-${accountsData.length + 1}`,
             name: newPortfolioName.trim(),
             value: 0,
             dayChange: 0,
@@ -298,50 +298,60 @@ export default function PortfoliosPage() {
                     <table className="w-full">
                         <thead className="bg-accent/50">
                             <tr>
-                                <th className="text-left py-4 px-4">
+                                <th
+                                    className="text-left py-4 px-4"
+                                    aria-sort={sortField === 'name' ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none'}
+                                >
                                     <button
                                         onClick={() => handleSort('name')}
-                                        aria-sort={sortField === 'name' ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none'}
                                         className="flex items-center gap-2 text-xs text-muted-foreground font-medium hover:text-foreground transition-colors"
                                     >
                                         NAME
                                         <ArrowUpDown className="h-3 w-3" />
                                     </button>
                                 </th>
-                                <th className="text-right py-4 px-4">
+                                <th
+                                    className="text-right py-4 px-4"
+                                    aria-sort={sortField === 'value' ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none'}
+                                >
                                     <button
                                         onClick={() => handleSort('value')}
-                                        aria-sort={sortField === 'value' ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none'}
                                         className="flex items-center gap-2 ml-auto text-xs text-muted-foreground font-medium hover:text-foreground transition-colors"
                                     >
                                         VALUE
                                         <ArrowUpDown className="h-3 w-3" />
                                     </button>
                                 </th>
-                                <th className="hidden sm:table-cell text-right py-4 px-4">
+                                <th
+                                    className="hidden sm:table-cell text-right py-4 px-4"
+                                    aria-sort={sortField === 'dayChange' ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none'}
+                                >
                                     <button
                                         onClick={() => handleSort('dayChange')}
-                                        aria-sort={sortField === 'dayChange' ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none'}
                                         className="flex items-center gap-2 ml-auto text-xs text-muted-foreground font-medium hover:text-foreground transition-colors"
                                     >
                                         DAY CHANGE
                                         <ArrowUpDown className="h-3 w-3" />
                                     </button>
                                 </th>
-                                <th className="hidden sm:table-cell text-right py-4 px-4">
+                                <th
+                                    className="hidden sm:table-cell text-right py-4 px-4"
+                                    aria-sort={sortField === 'totalReturn' ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none'}
+                                >
                                     <button
                                         onClick={() => handleSort('totalReturn')}
-                                        aria-sort={sortField === 'totalReturn' ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none'}
                                         className="flex items-center gap-2 ml-auto text-xs text-muted-foreground font-medium hover:text-foreground transition-colors"
                                     >
                                         TOTAL RETURN
                                         <ArrowUpDown className="h-3 w-3" />
                                     </button>
                                 </th>
-                                <th className="hidden md:table-cell text-right py-4 px-4">
+                                <th
+                                    className="hidden md:table-cell text-right py-4 px-4"
+                                    aria-sort={sortField === 'cashBalance' ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none'}
+                                >
                                     <button
                                         onClick={() => handleSort('cashBalance')}
-                                        aria-sort={sortField === 'cashBalance' ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none'}
                                         className="flex items-center gap-2 ml-auto text-xs text-muted-foreground font-medium hover:text-foreground transition-colors"
                                     >
                                         CASH BALANCE

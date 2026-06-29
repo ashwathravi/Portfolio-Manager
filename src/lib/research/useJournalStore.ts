@@ -24,6 +24,8 @@ export function useJournalStore() {
     useEffect(() => {
         const stored = loadJournalFromStorage(getBrowserStorage());
         if (stored && stored.length > 0) {
+            // Hydrate client-only journal state from localStorage.
+            // eslint-disable-next-line react-hooks/set-state-in-effect
             setEntries(stored);
         }
         setHydrated(true);

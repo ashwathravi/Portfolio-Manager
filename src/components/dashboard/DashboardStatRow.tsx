@@ -8,6 +8,7 @@ import {
     Droplets,
 } from "lucide-react";
 import { StatCard } from "./StatCard";
+import { LiveDataIndicator } from "@/components/data-display/LiveDataIndicator";
 import { useAutoRefreshQuotes } from "@/lib/hooks/useAutoRefreshQuotes";
 
 /**
@@ -65,7 +66,8 @@ export function DashboardStatRow({
         [holdings],
     );
 
-    const { quotes } = useAutoRefreshQuotes(symbols);
+    const { quotes, isFetching, isError, refreshMs, refetch, lastUpdatedAt } =
+        useAutoRefreshQuotes(symbols);
 
     const { totalNetWorth, todayChange, hasLiveData } = useMemo(() => {
         let netHoldings = 0;
@@ -125,48 +127,59 @@ export function DashboardStatRow({
     );
 
     return (
-        <div className="pm-grid-stats" aria-label="Dashboard key stats">
-            <StatCard
-                label="Net Worth"
-                value={fmtCurrency(totalNetWorth)}
-                delta="+1.2%"
-                sub="vs last month"
-                icon={<Wallet size={14} aria-hidden="true" />}
-                sparkSeed={sparkNet}
-            />
-            <StatCard
-                label="Today's P&L"
-                value={`${todayChange >= 0 ? "+" : "−"}${fmtCurrency(Math.abs(todayChange))}`}
-                delta={`${todayChange >= 0 ? "+" : "−"}${todayChangePercent.toFixed(2)}%`}
-                sub={hasLiveData ? "Live quotes" : "Awaiting live quotes"}
-                positive={todayChange >= 0}
-                icon={<TrendingUp size={14} aria-hidden="true" />}
-                sparkSeed={sparkPnl}
-            />
-            <StatCard
-                label="Alpha vs S&P"
-                value={alphaVsSp != null ? `${alphaVsSp >= 0 ? "+" : "−"}${Math.abs(alphaVsSp).toFixed(2)} pp` : "—"}
-                delta={alphaVsSp != null ? (alphaVsSp >= 0 ? "Outperforming" : "Trailing") : undefined}
-                sub="Trailing 12 months"
-                positive={alphaVsSp != null ? alphaVsSp >= 0 : undefined}
-                icon={<Gauge size={14} aria-hidden="true" />}
-                sparkSeed={sparkAlpha}
-            />
-            <StatCard
-                label="Cash Runway"
-                value={
-                    Number.isFinite(runwayMonths)
-                        ? `${runwayMonths.toFixed(1)} mo`
-                        : "∞"
-                }
-                delta={Number.isFinite(runwayMonths) && runwayMonths < 6 ? "Low" : undefined}
-                sub={`At $${monthlyBurn.toLocaleString("en-US")}/mo burn`}
-                positive={
-                    Number.isFinite(runwayMonths) ? runwayMonths >= 6 : true
-                }
-                icon={<Droplets size={14} aria-hidden="true" />}
-                sparkSeed={sparkRunway}
-            />
+        <div className="space-y-3">
+            <div className="flex items-center justify-end">
+                <LiveDataIndicator
+                    isFetching={isFetching}
+                    isError={isError && !hasLiveData}
+                    refreshMs={refreshMs}
+                    lastUpdatedAt={lastUpdatedAt}
+                    onRefresh={() => void refetch()}
+                />
+            </div>
+            <div className="pm-grid-stats" aria-label="Dashboard key stats">
+                <StatCard
+                    label="Net Worth"
+                    value={fmtCurrency(totalNetWorth)}
+                    delta="+1.2%"
+                    sub="vs last month"
+                    icon={<Wallet size={14} aria-hidden="true" />}
+                    sparkSeed={sparkNet}
+                />
+                <StatCard
+                    label="Today's P&L"
+                    value={`${todayChange >= 0 ? "+" : "−"}${fmtCurrency(Math.abs(todayChange))}`}
+                    delta={`${todayChange >= 0 ? "+" : "−"}${todayChangePercent.toFixed(2)}%`}
+                    sub={hasLiveData ? "Live quotes" : "Awaiting live quotes"}
+                    positive={todayChange >= 0}
+                    icon={<TrendingUp size={14} aria-hidden="true" />}
+                    sparkSeed={sparkPnl}
+                />
+                <StatCard
+                    label="Alpha vs S&P"
+                    value={alphaVsSp != null ? `${alphaVsSp >= 0 ? "+" : "−"}${Math.abs(alphaVsSp).toFixed(2)} pp` : "—"}
+                    delta={alphaVsSp != null ? (alphaVsSp >= 0 ? "Outperforming" : "Trailing") : undefined}
+                    sub="Trailing 12 months"
+                    positive={alphaVsSp != null ? alphaVsSp >= 0 : undefined}
+                    icon={<Gauge size={14} aria-hidden="true" />}
+                    sparkSeed={sparkAlpha}
+                />
+                <StatCard
+                    label="Cash Runway"
+                    value={
+                        Number.isFinite(runwayMonths)
+                            ? `${runwayMonths.toFixed(1)} mo`
+                            : "∞"
+                    }
+                    delta={Number.isFinite(runwayMonths) && runwayMonths < 6 ? "Low" : undefined}
+                    sub={`At $${monthlyBurn.toLocaleString("en-US")}/mo burn`}
+                    positive={
+                        Number.isFinite(runwayMonths) ? runwayMonths >= 6 : true
+                    }
+                    icon={<Droplets size={14} aria-hidden="true" />}
+                    sparkSeed={sparkRunway}
+                />
+            </div>
         </div>
     );
 }

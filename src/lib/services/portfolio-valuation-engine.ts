@@ -11,10 +11,10 @@
  * Linear: AR-49
  */
 
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 
 import { db } from '@/db';
-import { holdings } from '@/db/schema';
+import { holdings, portfolios } from '@/db/schema';
 import type { MarketDataProvider, Quote } from '@/types/market-data';
 
 // ---------------------------------------------------------------------------
@@ -44,6 +44,18 @@ export interface PortfolioValuation {
   errors: string[]; // symbols that failed to price
 }
 
+export class PortfolioAccessError extends Error {
+  constructor(message = 'Portfolio not found') {
+    super(message);
+    this.name = 'PortfolioAccessError';
+  }
+}
+
+export interface PortfolioValuationOptions {
+  userId?: string | null;
+  requireUserScope?: boolean;
+}
+
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
@@ -65,8 +77,27 @@ export class PortfolioValuationEngine {
   /**
    * Compute the live valuation of every holding in a portfolio.
    */
-  async value(portfolioId: string): Promise<PortfolioValuation> {
+  async value(
+    portfolioId: string,
+    options: PortfolioValuationOptions = {},
+  ): Promise<PortfolioValuation> {
     const valuedAt = Date.now();
+
+    if (options.requireUserScope && !options.userId) {
+      throw new PortfolioAccessError('Portfolio user scope is required');
+    }
+
+    if (options.userId) {
+      const [allowedPortfolio] = await db
+        .select({ id: portfolios.id })
+        .from(portfolios)
+        .where(and(eq(portfolios.id, portfolioId), eq(portfolios.userId, options.userId)))
+        .limit(1);
+
+      if (!allowedPortfolio) {
+        throw new PortfolioAccessError();
+      }
+    }
 
     // 1. Fetch holdings from DB
     const rows = await db

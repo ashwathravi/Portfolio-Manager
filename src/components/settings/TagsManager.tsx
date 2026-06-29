@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useForm } from "react-hook-form";
+import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -62,7 +62,7 @@ export function TagsManager() {
         handleSubmit,
         reset,
         setValue,
-        watch,
+        control,
         formState: { errors },
     } = useForm<TagFormValues>({
         resolver: zodResolver(tagSchema),
@@ -72,8 +72,8 @@ export function TagsManager() {
         },
     });
 
-    const watchedName = watch("name");
-    const watchedColor = watch("color");
+    const watchedName = useWatch({ control, name: "name" });
+    const watchedColor = useWatch({ control, name: "color" });
 
     const openAddDialog = () => {
         setEditingTag(null);

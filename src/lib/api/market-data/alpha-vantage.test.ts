@@ -17,7 +17,7 @@ describe('AlphaVantageProvider', () => {
                         '06. volume': '50000000'
                     }
                 })
-            } as any;
+            } as Response;
         };
 
         try {
@@ -41,7 +41,7 @@ describe('AlphaVantageProvider', () => {
             return {
                 ok: false,
                 statusText: 'Forbidden'
-            } as any;
+            } as Response;
         };
 
         try {
@@ -61,7 +61,7 @@ describe('AlphaVantageProvider', () => {
             return {
                 ok: false,
                 statusText: 'Service Unavailable'
-            } as any;
+            } as Response;
         };
 
         try {
@@ -83,7 +83,7 @@ describe('AlphaVantageProvider', () => {
                 json: async () => ({
                     'Information': 'Thank you for using Alpha Vantage! Our standard API call frequency is 25 requests per day. Please visit https://www.alphavantage.co/premium/ if you would like to target a higher API call frequency.'
                 })
-            } as any;
+            } as Response;
         };
 
         try {
@@ -105,7 +105,7 @@ describe('AlphaVantageProvider', () => {
                 json: async () => ({
                     'Note': 'Thank you for using Alpha Vantage! Our standard API call frequency is 5 calls per minute and 500 calls per day. Please visit https://www.alphavantage.co/premium/ if you would like to target a higher API call frequency.'
                 })
-            } as any;
+            } as Response;
         };
 
         try {
@@ -122,7 +122,7 @@ describe('AlphaVantageProvider', () => {
     it('returns empty quotes without fetching when no api key is configured', async () => {
         const originalFetch = global.fetch;
         let fetchCalled = false;
-        global.fetch = async () => { fetchCalled = true; return { ok: true, json: async () => ({}) } as any; };
+        global.fetch = async () => { fetchCalled = true; return { ok: true, json: async () => ({}) } as Response; };
         try {
             const provider = new AlphaVantageProvider('');
             const quotes = await provider.getQuotes(['AAPL', 'MSFT']);
@@ -133,10 +133,48 @@ describe('AlphaVantageProvider', () => {
         }
     });
 
+    it('fetches quotes with a bounded concurrency limit instead of a sequential waterfall', async () => {
+        const originalFetch = global.fetch;
+        let active = 0;
+        let maxActive = 0;
+        let calls = 0;
+        global.fetch = async (url) => {
+            calls++;
+            active++;
+            maxActive = Math.max(maxActive, active);
+            await new Promise((resolve) => setTimeout(resolve, 5));
+            active--;
+            const symbol = new URL(String(url)).searchParams.get('symbol') ?? 'UNKNOWN';
+            return {
+                ok: true,
+                json: async () => ({
+                    'Global Quote': {
+                        '01. symbol': symbol,
+                        '05. price': '150.00',
+                        '09. change': '2.00',
+                        '10. change percent': '1.35%',
+                        '06. volume': '50000000'
+                    }
+                })
+            } as Response;
+        };
+
+        try {
+            const provider = new AlphaVantageProvider('demo', { quoteConcurrency: 2 });
+            const quotes = await provider.getQuotes(['AAPL', 'MSFT', 'GOOG', 'NVDA']);
+
+            assert.strictEqual(calls, 4);
+            assert.strictEqual(maxActive, 2);
+            assert.strictEqual(Object.keys(quotes).length, 4);
+        } finally {
+            global.fetch = originalFetch;
+        }
+    });
+
     it('returns empty bars without fetching when no api key is configured', async () => {
         const originalFetch = global.fetch;
         let fetchCalled = false;
-        global.fetch = async () => { fetchCalled = true; return { ok: true, json: async () => ({}) } as any; };
+        global.fetch = async () => { fetchCalled = true; return { ok: true, json: async () => ({}) } as Response; };
         try {
             const provider = new AlphaVantageProvider('');
             const bars = await provider.getHistoricalData('AAPL', '1D');
@@ -170,7 +208,7 @@ describe('AlphaVantageProvider', () => {
                         }
                     }
                 })
-            } as any;
+            } as Response;
         };
 
         try {

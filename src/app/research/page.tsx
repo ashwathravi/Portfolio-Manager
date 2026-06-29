@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { PageHeaderSync } from "@/components/layout/TopBar";
 import { ResearchPageClient } from "@/components/research/ResearchPageClient";
 
@@ -17,10 +18,12 @@ export default function ResearchPage() {
         <>
             <PageHeaderSync
                 title="Research"
-                subtitle="Theses, watchlist, and decision journal"
+                subtitle="Theses, Alpha Radar, watchlist, and decision journal"
                 crumbs={["Workspace", "Research"]}
             />
-            <ResearchPageClient />
+            <Suspense fallback={null}>
+                <ResearchPageClient />
+            </Suspense>
         </>
     );
 }
