@@ -19,6 +19,7 @@ import {
   type RiskPolicyDashboardCardInput,
 } from '@/components/dashboard/RiskPolicyDashboardCard';
 import { DEFAULT_OPTION_RISK_POSITIONS, computeRiskPolicyDashboard } from '@/lib/risk-policy';
+import { loadDashboardPortfolios } from '@/lib/dashboard-portfolios';
 
 /**
  * Phase 3 Dashboard (AR-70/71/72/73).
@@ -32,9 +33,11 @@ import { DEFAULT_OPTION_RISK_POSITIONS, computeRiskPolicyDashboard } from '@/lib
 export const dynamic = 'force-dynamic';
 
 export default async function Dashboard() {
-  const allPortfolios = await db.query.portfolios.findMany({
-    with: { holdings: true },
-  });
+  const allPortfolios = await loadDashboardPortfolios(() =>
+    db.query.portfolios.findMany({
+      with: { holdings: true },
+    }),
+  );
 
   // ---- Initial server-side quote fetch (warms the TanStack Query cache) ----
   let liveQuotes: Record<string, {

@@ -38,6 +38,14 @@ test.describe('Dashboard page', () => {
         await expect(page.locator('h1.pm-topbar-title')).toHaveText('Dashboard');
     });
 
+    test('dashboard renders its empty state when persistence is unavailable', async ({ page }) => {
+        const main = page.getByRole('main');
+
+        await expect(main).not.toContainText('Something went wrong');
+        await expect(page.locator('h1.pm-topbar-title')).toHaveText('Dashboard');
+        await expect(page.getByTestId('risk-policy-dashboard')).toBeVisible();
+    });
+
     test('DashboardTopbar renders greeting + market-state subtitle', async ({ page }) => {
         // `<h1 class="pm-greeting">Good {morning|afternoon|evening}, {firstName}</h1>`
         await expect(page.locator('h1.pm-greeting')).toContainText(
