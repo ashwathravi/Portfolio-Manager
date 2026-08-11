@@ -4,8 +4,12 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:keychain": "bash ./scripts/with-keychain-env.sh npm run dev",
     "build": "next build",
     "start": "next start",
+    "start:keychain": "bash ./scripts/with-keychain-env.sh npm run start",
+    "keychain:store": "bash ./scripts/keychain-store-database-url.sh",
+    "keychain:sync-github": "bash ./scripts/sync-keychain-to-github.sh",
     "lint": "eslint",
     "test": "find src -name '*.test.ts' -print0 | xargs -0 node --import tsx --test",
     "test:e2e": "playwright test",

@@ -97,6 +97,8 @@ jobs:
         run: npm test
 
       - name: Build Next.js
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: npm run build
 
   e2e-tests:
