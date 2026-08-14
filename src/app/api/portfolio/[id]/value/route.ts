@@ -17,6 +17,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { requireSessionApiUserScope } from '@/lib/api/session-security';
 import { apiError, internalServerError, providerRateLimitError } from '@/lib/api/security';
+import { buildOwnedPortfolioQuery } from '@/lib/portfolio-repository';
 import { getMarketDataService } from '@/lib/services/market-data-service';
 import { PortfolioAccessError } from '@/lib/services/portfolio-valuation-engine';
 import { PolygonRateLimitError } from '@/lib/providers/polygon-massive-adapter';
@@ -35,6 +36,15 @@ export async function GET(
   if (!auth.ok) return auth.response;
 
   try {
+    // Verify ownership before constructing the provider-backed service. The
+    // default market-data adapter validates its configuration eagerly, so an
+    // unauthorized portfolio must be rejected before provider setup can turn
+    // the tenant-safe 404 into an unrelated configuration error.
+    const [ownedPortfolio] = await buildOwnedPortfolioQuery(auth.context.userId, id);
+    if (!ownedPortfolio) {
+      throw new PortfolioAccessError();
+    }
+
     const service = getMarketDataService();
     const valuation = await service.getPortfolioValue(id, {
       userId: auth.context.userId,
