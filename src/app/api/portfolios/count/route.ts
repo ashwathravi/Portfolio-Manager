@@ -11,29 +11,21 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { eq, sql } from "drizzle-orm";
-
-import { db } from "@/db";
-import { portfolios } from "@/db/schema";
-import { internalServerError, requirePortfolioUserScope } from "@/lib/api/security";
+import { requireSessionApiUserScope } from "@/lib/api/session-security";
+import { internalServerError } from "@/lib/api/security";
+import { buildUserPortfolioCountQuery } from "@/lib/portfolio-repository";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
-    const auth = requirePortfolioUserScope(request);
+    const auth = await requireSessionApiUserScope(request);
     if (!auth.ok) return auth.response;
 
     try {
         // Count via SQL rather than `findMany` + `.length` — the SELECT COUNT
         // avoids hydrating every row (and every related holding if someone
         // later turns on `with: { holdings: true }` here by mistake).
-        const query = db
-            .select({ count: sql<number>`count(*)::int` })
-            .from(portfolios);
-
-        const [row] = auth.context.userId
-            ? await query.where(eq(portfolios.userId, auth.context.userId))
-            : await query;
+        const [row] = await buildUserPortfolioCountQuery(auth.context.userId);
 
         return NextResponse.json({ count: row?.count ?? 0 });
     } catch (err) {

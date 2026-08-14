@@ -15,7 +15,8 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 
-import { apiError, internalServerError, providerRateLimitError, requirePortfolioUserScope } from '@/lib/api/security';
+import { requireSessionApiUserScope } from '@/lib/api/session-security';
+import { apiError, internalServerError, providerRateLimitError } from '@/lib/api/security';
 import { getMarketDataService } from '@/lib/services/market-data-service';
 import { PortfolioAccessError } from '@/lib/services/portfolio-valuation-engine';
 import { PolygonRateLimitError } from '@/lib/providers/polygon-massive-adapter';
@@ -30,14 +31,13 @@ export async function GET(
     return apiError('Missing required path parameter: id', 'MISSING_PORTFOLIO_ID', 400);
   }
 
-  const auth = requirePortfolioUserScope(request);
+  const auth = await requireSessionApiUserScope(request);
   if (!auth.ok) return auth.response;
 
   try {
     const service = getMarketDataService();
     const valuation = await service.getPortfolioValue(id, {
       userId: auth.context.userId,
-      requireUserScope: auth.context.authRequired,
     });
 
     // Surface partial failures at the HTTP level while still returning data

@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 
+import type { AuthEnvironment } from "@/lib/auth/access";
+
 export interface ApiAuthContext {
     userId: string | null;
     authRequired: boolean;
@@ -40,8 +42,11 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-
 const rateBuckets = new Map<string, RateBucket>();
 let nextSweepAt = 0;
 
-export function applyApiSecurity(request: ApiRequestLike): NextResponse | undefined {
-    const auth = authenticateApiRequest(request);
+export function applyApiSecurity(
+    request: ApiRequestLike,
+    env: AuthEnvironment = process.env,
+): NextResponse | undefined {
+    const auth = authenticateApiRequest(request, env);
     if (!auth.ok) return auth.response;
 
     const rateLimited = rateLimitApiRequest(request, auth.context);
@@ -50,9 +55,12 @@ export function applyApiSecurity(request: ApiRequestLike): NextResponse | undefi
     return undefined;
 }
 
-export function authenticateApiRequest(request: ApiRequestLike): AuthSuccess | AuthFailure {
-    const configuredSecret = process.env.INTERNAL_API_SECRET?.trim();
-    const authRequired = Boolean(configuredSecret) || process.env.NODE_ENV === "production";
+export function authenticateApiRequest(
+    request: ApiRequestLike,
+    env: AuthEnvironment = process.env,
+): AuthSuccess | AuthFailure {
+    const configuredSecret = env.INTERNAL_API_SECRET?.trim();
+    const authRequired = Boolean(configuredSecret) || env.NODE_ENV === "production";
     const userId = readUserId(request);
 
     if (!authRequired) {

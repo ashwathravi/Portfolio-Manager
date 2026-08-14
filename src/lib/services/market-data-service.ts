@@ -88,7 +88,7 @@ export class MarketDataService {
    */
   async getPortfolioValue(
     portfolioId: string,
-    options: PortfolioValuationOptions = {},
+    options: PortfolioValuationOptions,
   ): Promise<PortfolioValuation> {
     return this.valuationEngine.value(portfolioId, options);
   }

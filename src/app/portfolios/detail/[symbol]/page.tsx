@@ -1,14 +1,14 @@
 import { Suspense } from 'react';
-import { db } from '@/db';
-import { holdings } from '@/db/schema';
-import { sql } from 'drizzle-orm';
 import { marketDataEngine } from '@/lib/api/market-data';
+import { requirePageUserId } from '@/lib/auth/request-user';
+import { buildUserHoldingPositionsQuery } from '@/lib/portfolio-repository';
 import { HoldingDetailView, type HoldingDetail, type AccountPosition } from '@/components/holdings/HoldingDetailView';
 
 export const dynamic = 'force-dynamic';
 
 async function HoldingDetailContent({ symbol }: { symbol: string }) {
     const upper = symbol.toUpperCase();
+    const userId = await requirePageUserId();
 
     let rows: Array<{
         id: string;
@@ -17,15 +17,12 @@ async function HoldingDetailContent({ symbol }: { symbol: string }) {
         avgCost: string;
         name: string;
         currentPrice: number | null;
-        portfolio: { id: string; name: string | null } | null;
+        portfolioName: string;
     }> = [];
 
     try {
         // Case-insensitive match so URL /detail/aapl and /detail/AAPL both work
-        rows = await db.query.holdings.findMany({
-            where: sql`upper(${holdings.symbol}) = ${upper}`,
-            with: { portfolio: true },
-        }) as typeof rows;
+        rows = await buildUserHoldingPositionsQuery(userId, upper);
     } catch (error) {
         console.warn('Holding detail DB fetch failed:', error);
     }
@@ -61,24 +58,25 @@ async function HoldingDetailContent({ symbol }: { symbol: string }) {
     const currentPrice = livePrice ?? firstRow.currentPrice ?? Number(firstRow.avgCost);
 
     // Aggregate across accounts (portfolios) to get per-symbol totals and cost basis
-    let totalShares = 0;
-    let totalCostBasis = 0;
     const accountPositions: AccountPosition[] = rows.map((h) => {
         const qty = Number(h.quantity);
         const avg = Number(h.avgCost);
         const value = qty * currentPrice;
         const cost = qty * avg;
-        totalShares += qty;
-        totalCostBasis += cost;
         return {
             portfolioId: h.portfolioId,
-            name: h.portfolio?.name ?? 'Unknown Portfolio',
+            name: h.portfolioName,
             shares: qty,
             avgCost: avg,
             value,
             gain: value - cost,
         };
     });
+    const totalShares = accountPositions.reduce((sum, position) => sum + position.shares, 0);
+    const totalCostBasis = rows.reduce(
+        (sum, holding) => sum + Number(holding.quantity) * Number(holding.avgCost),
+        0,
+    );
 
     const totalEquity = totalShares * currentPrice;
     const totalReturn = totalEquity - totalCostBasis;

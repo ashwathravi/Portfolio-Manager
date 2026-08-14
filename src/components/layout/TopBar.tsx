@@ -225,7 +225,8 @@ export function TopBar({ onSearchClick }: TopBarProps) {
  * `usePageHeader` directly. It's a tiny client-only shim:
  *
  *   export default async function HoldingsPage() {
- *       const data = await db.query.holdings.findMany();
+ *       const userId = await requirePageUserId();
+ *       const data = await buildUserHoldingsQuery(userId);
  *       return (
  *           <>
  *               <PageHeaderSync
