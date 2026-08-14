@@ -26,7 +26,7 @@ Atlas Wealth is a comprehensive wealth management platform built for individuals
 
 ### Prerequisites
 
-- Node.js 20+
+- Node.js 20.9+
 - Docker & Docker Compose
 
 This repository uses **npm** as its canonical package manager. Commit changes to
