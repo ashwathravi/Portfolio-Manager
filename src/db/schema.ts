@@ -164,7 +164,9 @@ export const plaidAccounts = pgTable("plaid_accounts", {
 // ---------------------------------------------------------------------------
 export const portfolios = pgTable("portfolios", {
     id: uuid("id").default(sql`gen_random_uuid()`).primaryKey(),
-    userId: uuid("user_id"),
+    userId: text("user_id")
+        .notNull()
+        .references(() => authUsers.id, { onDelete: "restrict" }),
     name: text("name").notNull(),
     description: text("description"),
     // Snapshot fields (denormalized for quick dashboard access)
@@ -172,7 +174,8 @@ export const portfolios = pgTable("portfolios", {
     cashBalance: doublePrecision("cash_balance").default(0),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
-}, () => ({
+}, (table) => ({
+    userIdIdx: index("portfolios_user_id_idx").on(table.userId),
     serverOnlyNoClientAccess: serverOnlyNoClientAccessPolicy(),
 })).enableRLS();
 
@@ -403,7 +406,11 @@ export const alphaRadarSemanticChunks = pgTable("alpha_radar_semantic_chunks", {
     serverOnlyNoClientAccess: serverOnlyNoClientAccessPolicy(),
 })).enableRLS();
 
-export const portfoliosRelations = relations(portfolios, ({ many }) => ({
+export const portfoliosRelations = relations(portfolios, ({ one, many }) => ({
+    user: one(authUsers, {
+        fields: [portfolios.userId],
+        references: [authUsers.id],
+    }),
     holdings: many(holdings),
     transactions: many(transactions),
 }));

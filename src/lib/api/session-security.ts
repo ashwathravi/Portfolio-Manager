@@ -1,5 +1,11 @@
+import type { Session } from "next-auth";
+
 import { auth } from "@/auth";
-import { isAuthConfigured } from "@/lib/auth/access";
+import {
+    authRuntimeMode,
+    getLocalDevUserId,
+    type AuthEnvironment,
+} from "@/lib/auth/access";
 import {
     apiError,
     authenticateApiRequest,
@@ -19,44 +25,65 @@ interface AuthFailure {
     response: Response;
 }
 
+interface SessionScopeOptions {
+    env?: AuthEnvironment;
+    getSession?: () => Promise<Session | null>;
+}
+
 export async function requireSessionApiUserScope(
     request: ApiRequestLike,
+    {
+        env = process.env,
+        getSession = auth,
+    }: SessionScopeOptions = {},
 ): Promise<ScopedAuthSuccess | AuthFailure> {
     const ipLimited = rateLimitApiRequest(request, { userId: null, authRequired: true });
     if (ipLimited) return { ok: false, response: ipLimited };
 
-    const authConfigured = isAuthConfigured();
-    if (authConfigured) {
-        const session = await auth();
-        if (session?.user?.id) {
-            const userLimited = rateLimitApiRequest(
-                request,
-                { userId: session.user.id, authRequired: true },
-                { skipIp: true },
-            );
-            if (userLimited) return { ok: false, response: userLimited };
+    const mode = authRuntimeMode(env);
+    if (mode === "local-bypass") {
+        return authorizeUser(request, getLocalDevUserId(env), true);
+    }
 
-            return {
-                ok: true,
-                context: {
-                    userId: session.user.id,
-                    authRequired: true,
-                },
-            };
+    if (mode === "configured") {
+        const session = await getSession();
+        if (session?.user?.id) {
+            return authorizeUser(request, session.user.id, true);
         }
 
-        if (!process.env.INTERNAL_API_SECRET?.trim()) {
+        if (!env.INTERNAL_API_SECRET?.trim()) {
             return {
                 ok: false,
                 response: apiError("Unauthorized", "UNAUTHORIZED", 401),
             };
         }
+    } else if (!env.INTERNAL_API_SECRET?.trim()) {
+        return {
+            ok: false,
+            response: apiError(
+                "Authentication is not configured.",
+                "AUTH_CONFIGURATION_ERROR",
+                503,
+            ),
+        };
     }
 
-    const internalAuth = authenticateApiRequest(request);
+    const internalAuth = authenticateApiRequest(request, env);
     if (!internalAuth.ok) return internalAuth;
 
-    if (!internalAuth.context.userId) {
+    return authorizeUser(
+        request,
+        internalAuth.context.userId,
+        internalAuth.context.authRequired,
+    );
+}
+
+function authorizeUser(
+    request: ApiRequestLike,
+    userId: string | null,
+    authRequired: boolean,
+): ScopedAuthSuccess | AuthFailure {
+    if (!userId) {
         return {
             ok: false,
             response: apiError("User scope is required.", "USER_SCOPE_REQUIRED", 401),
@@ -65,13 +92,13 @@ export async function requireSessionApiUserScope(
 
     const userLimited = rateLimitApiRequest(
         request,
-        { userId: internalAuth.context.userId, authRequired: internalAuth.context.authRequired },
+        { userId, authRequired },
         { skipIp: true },
     );
     if (userLimited) return { ok: false, response: userLimited };
 
     return {
         ok: true,
-        context: { ...internalAuth.context, userId: internalAuth.context.userId },
+        context: { userId, authRequired },
     };
 }

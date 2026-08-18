@@ -9,6 +9,18 @@ export interface GoogleAccessPolicy {
     allowedDomains?: string;
 }
 
+export interface AuthEnvironment {
+    NODE_ENV?: string;
+    AUTH_SECRET?: string;
+    AUTH_GOOGLE_ID?: string;
+    AUTH_GOOGLE_SECRET?: string;
+    AUTH_LOCAL_DEV_BYPASS?: string;
+    AUTH_LOCAL_DEV_USER_ID?: string;
+    INTERNAL_API_SECRET?: string;
+}
+
+export type AuthRuntimeMode = "configured" | "local-bypass" | "invalid";
+
 export function isGoogleProfileAllowed(
     profile: GoogleAuthProfile | undefined,
     policy: GoogleAccessPolicy = {
@@ -30,12 +42,36 @@ export function isGoogleProfileAllowed(
     return allowedDomains.includes(hostedDomain);
 }
 
-export function isAuthConfigured(): boolean {
-    return Boolean(
-        process.env.AUTH_SECRET?.trim()
-        && process.env.AUTH_GOOGLE_ID?.trim()
-        && process.env.AUTH_GOOGLE_SECRET?.trim(),
-    );
+export function authRuntimeMode(env: AuthEnvironment = process.env): AuthRuntimeMode {
+    const authValues = [
+        env.AUTH_SECRET?.trim(),
+        env.AUTH_GOOGLE_ID?.trim(),
+        env.AUTH_GOOGLE_SECRET?.trim(),
+    ];
+    if (authValues.every(Boolean)) return "configured";
+
+    const authIsAbsent = authValues.every((value) => !value);
+    const localBypassEnabled = env.AUTH_LOCAL_DEV_BYPASS?.trim() === "1";
+    const localUserId = env.AUTH_LOCAL_DEV_USER_ID?.trim();
+    if (
+        authIsAbsent
+        && env.NODE_ENV !== "production"
+        && localBypassEnabled
+        && localUserId
+    ) {
+        return "local-bypass";
+    }
+
+    return "invalid";
+}
+
+export function isAuthConfigured(env: AuthEnvironment = process.env): boolean {
+    return authRuntimeMode(env) === "configured";
+}
+
+export function getLocalDevUserId(env: AuthEnvironment = process.env): string | null {
+    if (authRuntimeMode(env) !== "local-bypass") return null;
+    return env.AUTH_LOCAL_DEV_USER_ID?.trim() || null;
 }
 
 function parseCsv(value: string | undefined): string[] {

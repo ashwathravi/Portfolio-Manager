@@ -3,10 +3,15 @@ import assert from "node:assert";
 import { loadDashboardPortfolios } from "./dashboard-portfolios.ts";
 
 describe("loadDashboardPortfolios", () => {
-    test("returns portfolios when the query succeeds", async () => {
-        const portfolios = await loadDashboardPortfolios(async () => [{ id: "portfolio-1" }]);
+    test("passes the required user scope to the query", async () => {
+        const seenUserIds: string[] = [];
+        const portfolios = await loadDashboardPortfolios("user-a", async (userId) => {
+            seenUserIds.push(userId);
+            return [{ id: "portfolio-1" }];
+        });
 
         assert.deepStrictEqual(portfolios, [{ id: "portfolio-1" }]);
+        assert.deepStrictEqual(seenUserIds, ["user-a"]);
     });
 
     test("returns an empty list when persistence is unavailable", async () => {
@@ -15,7 +20,7 @@ describe("loadDashboardPortfolios", () => {
         console.warn = (...args: unknown[]) => warnings.push(args);
 
         try {
-            const portfolios = await loadDashboardPortfolios(async () => {
+            const portfolios = await loadDashboardPortfolios("user-a", async () => {
                 throw new Error("database unavailable");
             });
 

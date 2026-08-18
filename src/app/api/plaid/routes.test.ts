@@ -67,6 +67,7 @@ describe("Plaid API routes", () => {
 
     test("rate limits repeated Plaid link attempts before provider calls", async (t) => {
         t.mock.timers.enable({ apis: ["Date"], now: 0 });
+        process.env.INTERNAL_API_SECRET = "test-secret";
 
         const request = () => new Request("https://atlas.test/api/plaid/link-token", {
             method: "POST",

@@ -1,6 +1,7 @@
 import { Suspense } from "react";
-import { db } from "@/db";
 import { marketDataEngine } from "@/lib/api/market-data";
+import { requirePageUserId } from "@/lib/auth/request-user";
+import { buildUserHoldingsQuery } from "@/lib/portfolio-repository";
 import { HoldingsPageClient, type HoldingsSeed } from "@/components/holdings/HoldingsPageClient";
 import { PageHeaderSync } from "@/components/layout/TopBar";
 import HoldingsLoading from "./loading";
@@ -17,6 +18,7 @@ import { DEFAULT_OPTION_RISK_POSITIONS } from "@/lib/risk-policy";
 export const dynamic = "force-dynamic";
 
 async function HoldingsContent() {
+    const userId = await requirePageUserId();
     let dbHoldings: Array<{
         id: string;
         symbol: string;
@@ -26,12 +28,10 @@ async function HoldingsContent() {
         currentPrice: number | null;
         marketValue: number | null;
         createdAt: Date;
-        portfolio?: { name: string } | null;
+        portfolioName: string;
     }> = [];
     try {
-        dbHoldings = await db.query.holdings.findMany({
-            with: { portfolio: true },
-        });
+        dbHoldings = await buildUserHoldingsQuery(userId);
     } catch (e) {
         console.warn("Holdings fetch failed — showing empty table.", e);
     }
@@ -70,7 +70,7 @@ async function HoldingsContent() {
             avgCost: avg,
             currentPrice: last,
             marketValue,
-            account: h.portfolio?.name ?? "Unknown Portfolio",
+            account: h.portfolioName,
             holdingDays,
         };
     });

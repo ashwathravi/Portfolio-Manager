@@ -1,7 +1,8 @@
 import { expect, test } from '@playwright/test';
 
 test.describe('Login', () => {
-  test('renders the Google sign-in page without the app chrome', async ({ page }) => {
+  test('renders the Google sign-in page without the app chrome', async ({ context, page }) => {
+    await context.clearCookies();
     await page.goto('/login');
 
     await expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible();

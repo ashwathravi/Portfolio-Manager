@@ -64,6 +64,13 @@
       "when": 1782742151017,
       "tag": "0008_server_only_rls_policies",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1786683150097,
+      "tag": "0009_enforce_portfolio_ownership",
+      "breakpoints": true
     }
   ]
 }

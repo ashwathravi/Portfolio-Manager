@@ -65,6 +65,32 @@ POLYGON_API_KEY=""
 SEC_EDGAR_USER_AGENT="Portfolio-Manager local contact@example.com"
 ```
 
+Auth.js (required for any network-reachable environment):
+
+```bash
+AUTH_SECRET="replace-with-a-managed-random-secret"
+AUTH_GOOGLE_ID="your_google_oauth_client_id"
+AUTH_GOOGLE_SECRET="your_google_oauth_client_secret"
+```
+
+Missing or partial Auth.js configuration fails closed for browser access.
+Machine API callers may still use a validated `INTERNAL_API_SECRET` together
+with an explicit `x-user-id`; a browser session identity always takes
+precedence over that header. Fixture-only local and E2E use may opt into one
+fixed principal; this bypass is ignored in production:
+
+```bash
+AUTH_LOCAL_DEV_BYPASS="1"
+AUTH_LOCAL_DEV_USER_ID="the-exact-seeded-auth_users-id"
+```
+
+Set `SEED_USER_ID` (or the same `AUTH_LOCAL_DEV_USER_ID`) to an existing
+`auth_users.id` before running `node --import tsx scripts/seed.ts`. The command
+refuses to create an Auth.js identity, and atomically replaces only that user's
+portfolios. Before deploying the ownership constraint over an existing
+database, follow `docs/portfolio-ownership-migration.md`; the migration stops
+rather than guessing an owner for legacy rows.
+
 Plaid sandbox:
 
 ```bash
@@ -95,6 +121,7 @@ Production secrets:
 
 - Do not deploy `.env` or `.env.local`; configure production values through the hosting platform or a secrets manager such as Vercel environment variables, AWS Secrets Manager, or 1Password CLI.
 - `DATABASE_URL` must be a production database credential with SSL enabled. Local-style hosts such as `localhost`, `127.0.0.1`, `postgres`, or `db` are treated as misconfiguration in production.
+- Configure all three Auth.js values (`AUTH_SECRET`, `AUTH_GOOGLE_ID`, and `AUTH_GOOGLE_SECRET`). Missing or partial production auth returns a closed configuration error; `AUTH_LOCAL_DEV_BYPASS` can never enable production access.
 - Keep Plaid and broker access tokens server-side only. The encrypted local Plaid vault is a development bridge; production sync needs user-scoped durable storage and managed key rotation.
 - Set `INTERNAL_API_SECRET` before network-visible deployment so API middleware can enforce authenticated requests and per-user rate limits.
 

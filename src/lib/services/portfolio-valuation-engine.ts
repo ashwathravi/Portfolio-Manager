@@ -11,10 +11,10 @@
  * Linear: AR-49
  */
 
-import { and, eq } from 'drizzle-orm';
-
-import { db } from '@/db';
-import { holdings, portfolios } from '@/db/schema';
+import {
+  buildOwnedPortfolioHoldingsQuery,
+  buildOwnedPortfolioQuery,
+} from '@/lib/portfolio-repository';
 import type { MarketDataProvider, Quote } from '@/types/market-data';
 
 // ---------------------------------------------------------------------------
@@ -52,8 +52,7 @@ export class PortfolioAccessError extends Error {
 }
 
 export interface PortfolioValuationOptions {
-  userId?: string | null;
-  requireUserScope?: boolean;
+  userId: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -79,31 +78,22 @@ export class PortfolioValuationEngine {
    */
   async value(
     portfolioId: string,
-    options: PortfolioValuationOptions = {},
+    options: PortfolioValuationOptions,
   ): Promise<PortfolioValuation> {
     const valuedAt = Date.now();
 
-    if (options.requireUserScope && !options.userId) {
+    if (!options.userId) {
       throw new PortfolioAccessError('Portfolio user scope is required');
     }
 
-    if (options.userId) {
-      const [allowedPortfolio] = await db
-        .select({ id: portfolios.id })
-        .from(portfolios)
-        .where(and(eq(portfolios.id, portfolioId), eq(portfolios.userId, options.userId)))
-        .limit(1);
+    const [allowedPortfolio] = await buildOwnedPortfolioQuery(options.userId, portfolioId);
 
-      if (!allowedPortfolio) {
-        throw new PortfolioAccessError();
-      }
+    if (!allowedPortfolio) {
+      throw new PortfolioAccessError();
     }
 
     // 1. Fetch holdings from DB
-    const rows = await db
-      .select()
-      .from(holdings)
-      .where(eq(holdings.portfolioId, portfolioId));
+    const rows = await buildOwnedPortfolioHoldingsQuery(options.userId, portfolioId);
 
     // Early return for empty portfolio
     if (rows.length === 0) {

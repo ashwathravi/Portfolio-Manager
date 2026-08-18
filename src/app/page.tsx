@@ -1,4 +1,3 @@
-import { db } from '@/db';
 import { marketDataEngine } from '@/lib/api/market-data';
 import { PageHeaderSync } from '@/components/layout/TopBar';
 import { DashboardTopbar } from '@/components/dashboard/DashboardTopbar';
@@ -20,6 +19,8 @@ import {
 } from '@/components/dashboard/RiskPolicyDashboardCard';
 import { DEFAULT_OPTION_RISK_POSITIONS, computeRiskPolicyDashboard } from '@/lib/risk-policy';
 import { loadDashboardPortfolios } from '@/lib/dashboard-portfolios';
+import { requirePageUserId } from '@/lib/auth/request-user';
+import { buildDashboardPortfoliosQuery } from '@/lib/portfolio-repository';
 
 /**
  * Phase 3 Dashboard (AR-70/71/72/73).
@@ -33,10 +34,10 @@ import { loadDashboardPortfolios } from '@/lib/dashboard-portfolios';
 export const dynamic = 'force-dynamic';
 
 export default async function Dashboard() {
-  const allPortfolios = await loadDashboardPortfolios(() =>
-    db.query.portfolios.findMany({
-      with: { holdings: true },
-    }),
+  const userId = await requirePageUserId();
+  const allPortfolios = await loadDashboardPortfolios(
+    userId,
+    buildDashboardPortfoliosQuery,
   );
 
   // ---- Initial server-side quote fetch (warms the TanStack Query cache) ----
