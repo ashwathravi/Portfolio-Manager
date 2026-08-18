@@ -28,9 +28,19 @@ resolve_pg_bin() {
     return 1
 }
 
-PG_BIN="$(resolve_pg_bin)"
-export PG_BIN
-export PATH="$PG_BIN:$PATH"
+# Resolve the bin directory now if PostgreSQL is already installed. When it is
+# not yet installed (fresh base image), this stays empty and install.sh installs
+# PostgreSQL and then calls refresh_pg_path. Kept non-fatal so sourcing under
+# `set -e` never aborts before the install step has a chance to run.
+refresh_pg_path() {
+    PG_BIN="$(resolve_pg_bin 2>/dev/null || true)"
+    export PG_BIN
+    if [ -n "$PG_BIN" ]; then
+        export PATH="$PG_BIN:$PATH"
+    fi
+}
+
+refresh_pg_path
 
 pg_is_running() {
     pg_ctl -D "$PGDATA" status >/dev/null 2>&1

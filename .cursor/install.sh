@@ -10,6 +10,23 @@ cd "$(dirname "$0")/.."
 # shellcheck source=.cursor/lib.sh
 source ".cursor/lib.sh"
 
+echo "==> Ensuring PostgreSQL is installed"
+# Normally provided by the environment's base image/snapshot. Install it here as
+# a fallback so this script also bootstraps a plain base image. Idempotent.
+if [ -z "${PG_BIN:-}" ]; then
+    if command -v sudo >/dev/null 2>&1; then
+        sudo apt-get update -qq
+        sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq postgresql postgresql-client
+        # The apt package auto-creates a "main" cluster on port 5432; drop it so
+        # our user-owned cluster owns the port.
+        sudo pg_dropcluster --stop 16 main 2>/dev/null || true
+    else
+        echo "ERROR: PostgreSQL is not installed and sudo is unavailable." >&2
+        exit 1
+    fi
+    refresh_pg_path
+fi
+
 echo "==> Installing Node dependencies (npm ci)"
 npm ci
 
