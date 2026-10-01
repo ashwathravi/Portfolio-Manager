@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { SEED_JOURNAL } from "@/lib/journal/seed";
 import { SampleDataNotice } from "@/components/data-display/SampleDataNotice";
 import { SampleEmptyState } from "@/components/data-display/SampleEmptyState";
@@ -16,6 +17,23 @@ import { ReviewsArchiveCard } from "./ReviewsArchiveCard";
  * bottom of the Returns view.
  */
 export function BehaviourPageClient() {
+    // These cards bucket trades by the viewer's local day, hour, and week,
+    // so they render after mount; a server render in another timezone
+    // would otherwise fail hydration.
+    const [mounted, setMounted] = useState(false);
+    useEffect(() => {
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- client-only render gate
+        setMounted(true);
+    }, []);
+
+    if (!mounted) {
+        return (
+            <div className="pm-perf-stack" aria-busy="true">
+                <p className="pm-empty-line">Loading your trading patterns…</p>
+            </div>
+        );
+    }
+
     return (
         <div className="pm-perf-stack">
             <SampleGate

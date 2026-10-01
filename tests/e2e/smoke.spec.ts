@@ -32,3 +32,20 @@ test('regression: the app font is loaded (IBM Plex), not a silent system fallbac
     const loaded = await page.evaluate(() => [...document.fonts].some((f) => /IBM Plex Sans/i.test(f.family) && f.status === 'loaded'));
     expect(loaded).toBe(true);
 });
+
+test.describe('Hydration across viewer timezones', () => {
+    // Regression: dates and times formatted in the server's timezone made
+    // Behaviour, Research, and Trade fail hydration for viewers elsewhere.
+    test.use({ timezoneId: 'Asia/Tokyo' });
+
+    for (const path of ['/', '/performance', '/performance/behaviour', '/research', '/research/thesis/NVDA', '/execution', '/strategies', '/portfolios/activity']) {
+        test(`${path} hydrates without mismatches`, async ({ page }) => {
+            const errors: string[] = [];
+            page.on('pageerror', (e) => errors.push(String(e)));
+            page.on('console', (m) => { if (m.type() === 'error' && /Hydration|did not match/i.test(m.text())) errors.push(m.text()); });
+            await page.goto(path);
+            await page.waitForTimeout(1500);
+            expect(errors.filter((e) => /Hydration|did not match/i.test(e))).toEqual([]);
+        });
+    }
+});

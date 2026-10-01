@@ -563,10 +563,13 @@ function fmtMoney(x: number): string {
 function formatDate(iso: string): string {
     const d = new Date(iso);
     if (Number.isNaN(d.getTime())) return iso;
-    return d.toLocaleDateString(undefined, {
+    // Fixed locale + UTC: ISO dates are UTC midnight, and the server and
+    // browser must format them identically for hydration.
+    return d.toLocaleDateString("en-US", {
         month: "short",
         day: "numeric",
         year: "numeric",
+        timeZone: "UTC",
     });
 }
 
@@ -581,10 +584,11 @@ function formatCatalystDate(raw: string): string {
     if (Number.isNaN(d.getTime())) return raw;
     // ISO dates are 10 chars (YYYY-MM-DD) — otherwise fall through.
     if (/^\d{4}-\d{2}-\d{2}/.test(raw)) {
-        return d.toLocaleDateString(undefined, {
+        return d.toLocaleDateString("en-US", {
             month: "short",
             day: "numeric",
             year: "numeric",
+            timeZone: "UTC",
         });
     }
     return raw;

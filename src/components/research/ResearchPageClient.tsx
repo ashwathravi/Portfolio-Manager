@@ -544,9 +544,10 @@ function JournalColumn({
                                 )}
                             </div>
                             <span className="pm-journal-date">
-                                {new Date(entry.date).toLocaleDateString(undefined, {
+                                {new Date(entry.date).toLocaleDateString("en-US", {
                                     month: "short",
                                     day: "numeric",
+                                    timeZone: "UTC",
                                 })}
                             </span>
                         </header>

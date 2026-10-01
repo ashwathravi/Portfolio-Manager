@@ -160,11 +160,14 @@ function formatUsd(n: number, digits = 2): string {
     });
 }
 
+/** Blotter times in market time (ET), like the app clock — also keeps the
+ *  server render and hydration identical across viewer timezones. */
 function formatTime(d: Date): string {
     return d.toLocaleTimeString("en-US", {
         hour: "2-digit",
         minute: "2-digit",
         hour12: false,
+        timeZone: "America/New_York",
     });
 }
 

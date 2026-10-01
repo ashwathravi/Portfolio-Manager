@@ -176,9 +176,12 @@ function fmtMoney(x: number): string {
 function formatDate(iso: string): string {
     const d = new Date(iso);
     if (Number.isNaN(d.getTime())) return iso;
-    return d.toLocaleDateString(undefined, {
+    // Fixed locale + UTC: ISO dates are UTC midnight, and the server and
+    // browser must format them identically for hydration.
+    return d.toLocaleDateString("en-US", {
         month: "short",
         day: "numeric",
         year: "numeric",
+        timeZone: "UTC",
     });
 }
