@@ -329,3 +329,51 @@
   background: color-mix(in srgb, var(--pm-warn) 10%, var(--pm-card));
   border: 1px solid color-mix(in srgb, var(--pm-warn) 35%, var(--pm-border));
 }
+
+/* --- Trade ticket ---------------------------------------------------------- */
+/* Buy/Sell is the decision that matters, so it gets solid colour; the
+   instrument and time-in-force toggles stay quiet and neutral. */
+.pm-exec-side-btn { padding: 10px 0; font-size: 14px; }
+.pm-exec-side-btn.is-buy.is-active { background: var(--pm-success); color: #fff; border-color: transparent; box-shadow: none; }
+.pm-exec-side-btn.is-sell.is-active { background: var(--pm-danger); color: #fff; border-color: transparent; box-shadow: none; }
+.pm-exec-instrument-btn { padding: 6px 6px; font-size: 12.5px; font-weight: 600; }
+.pm-exec-instrument-btn.is-active {
+  background: var(--pm-card);
+  color: var(--pm-fg);
+  border-color: var(--pm-border);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+
+/* Summary + submit stay on screen while the long ticket scrolls. */
+.pm-exec-form-foot {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  align-items: center;
+  margin: 0 -20px -20px;
+  padding: 12px 20px;
+  background: var(--pm-card);
+  border-top: 1px solid var(--pm-border);
+  border-radius: 0 0 var(--pm-radius) var(--pm-radius);
+}
+.pm-exec-form-foot > .pm-btn { flex: 0 1 auto; min-width: 160px; }
+.pm-exec-foot-summary { flex: 1; font-size: 13px; font-weight: 600; color: var(--pm-fg); }
+
+/* Working orders are neutral (in the market, nothing happened yet);
+   green is reserved for fills. */
+.pm-exec-status-working {
+  background: var(--pm-neutral-100);
+  color: var(--pm-fg);
+  border-color: var(--pm-border);
+}
+
+/* Phone: the ticket and blotter stack and never exceed the viewport. */
+.pm-exec-focus > * { min-width: 0; }
+@media (max-width: 767px) {
+  .pm-exec-page { padding: 16px; }
+  .pm-exec-focus { grid-template-columns: minmax(0, 1fr); }
+  .pm-exec-form { padding: 16px; }
+  .pm-exec-form-foot { margin: 0 -16px -16px; padding: 12px 16px; }
+  .pm-exec-form-foot > .pm-btn { min-width: 0; flex: 1; }
+  .pm-exec-blotter { overflow-x: auto; }
+}

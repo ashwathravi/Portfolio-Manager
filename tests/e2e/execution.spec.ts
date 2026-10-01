@@ -37,18 +37,26 @@ test.describe('Execution page (Focus variant, default)', () => {
         await gotoAppPage(page, '/execution');
     });
 
-    test('renders Topbar title "Execution" and the 3-pill variant switcher', async ({ page }) => {
-        await expect(page.locator('h1.pm-topbar-title')).toHaveText('Execution');
-
-        const switcher = page.locator('.pm-variant-switch');
-        await expect(switcher).toBeVisible();
-        await expect(switcher.getByRole('tab', { name: /Focus/ })).toBeVisible();
-        await expect(switcher.getByRole('tab', { name: /Checkout/ })).toBeVisible();
-        await expect(switcher.getByRole('tab', { name: /Terminal/ })).toBeVisible();
+    test('renders the Trade title with a single ticket design (no variant switcher)', async ({ page }) => {
+        await expect(page.locator('h1.pm-topbar-title')).toHaveText('Trade');
+        await expect(page.locator('.pm-variant-switch')).toHaveCount(0);
+        await expect(page.locator('.pm-exec-page[data-variant="focus"]')).toBeVisible();
     });
 
-    test('lands on the Focus variant by default', async ({ page }) => {
-        await expect(page.locator('.pm-exec-page[data-variant="focus"]')).toBeVisible();
+    test('labels prices, buying power, and the blotter as example data', async ({ page }) => {
+        await expect(page.getByTestId('sample-data-notice')).toBeVisible();
+    });
+
+    test('regression: the dead "Save draft" button is gone; the summary bar names the order', async ({ page }) => {
+        await expect(page.getByRole('button', { name: 'Save draft' })).toHaveCount(0);
+        await expect(page.locator('.pm-exec-foot-summary')).toHaveText('Buy 50 AAPL');
+    });
+
+    test('regression: blotter rows are in time order, newest first', async ({ page }) => {
+        const times = await page.locator('.pm-exec-blotter tbody tr td:first-child').allTextContents();
+        expect(times.length).toBeGreaterThan(1);
+        const sorted = [...times].sort().reverse();
+        expect(times).toEqual(sorted);
     });
 
     test('Focus variant shows both the New order form and Today\'s orders blotter', async ({ page }) => {
@@ -118,22 +126,6 @@ test.describe('Execution page (Focus variant, default)', () => {
                 chips.getByRole('tab', { name: new RegExp(`^${label}`) }),
             ).toBeVisible();
         }
-    });
-
-    test('switching to Checkout variant flips the shell data-variant attribute', async ({ page }) => {
-        await page
-            .locator('.pm-variant-switch')
-            .getByRole('tab', { name: /Checkout/ })
-            .click();
-        await expect(page.locator('.pm-exec-page[data-variant="checkout"]')).toBeVisible();
-    });
-
-    test('switching to Terminal variant flips the shell data-variant attribute', async ({ page }) => {
-        await page
-            .locator('.pm-variant-switch')
-            .getByRole('tab', { name: /Terminal/ })
-            .click();
-        await expect(page.locator('.pm-exec-page[data-variant="terminal"]')).toBeVisible();
     });
 
     test('option orders show failed policy checks until thesis and max loss are documented', async ({ page }) => {
@@ -667,5 +659,31 @@ test.describe('Execution page — live adherence panel (AR-111)', () => {
             expect(['hard', 'soft']).toContain(severity);
             expect(ruleType).toBeTruthy();
         }
+    });
+});
+
+test.describe('Trade — prefilled ticket', () => {
+    test('?symbol=&side= pre-fills the order ticket', async ({ page }) => {
+        await gotoAppPage(page, '/execution?symbol=nvda&side=sell');
+        await expect(page.getByLabel('Ticker')).toHaveValue('NVDA');
+        await expect(page.locator('.pm-exec-side').getByRole('tab', { name: 'Sell' })).toHaveAttribute('aria-selected', 'true');
+    });
+
+    test('an invalid symbol is ignored', async ({ page }) => {
+        await gotoAppPage(page, '/execution?symbol=%3Cscript%3E');
+        await expect(page.getByLabel('Ticker')).toHaveValue('AAPL');
+    });
+});
+
+test.describe('Trade — phone layout', () => {
+    test.use({ viewport: { width: 390, height: 844 } });
+
+    test('regression: the ticket fits the viewport without sideways scrolling', async ({ page }) => {
+        await gotoAppPage(page, '/execution');
+        const overflow = await page.evaluate(() => {
+            const main = document.querySelector('main');
+            return main ? main.scrollWidth - main.clientWidth : 0;
+        });
+        expect(overflow).toBeLessThanOrEqual(1);
     });
 });
