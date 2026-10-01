@@ -20,11 +20,33 @@ test.describe('Strategies page — Phase 6 builder shell', () => {
         await page.goto('/strategies');
     });
 
-    test('renders the topbar title and builder subtitle', async ({ page }) => {
-        await expect(page.locator('h1.pm-topbar-title')).toHaveText('Strategy builder');
-        await expect(
-            page.getByText(/Rules → backtest → robustness → paper → live/),
-        ).toBeVisible();
+    test('renders the Strategies title without automation copy', async ({ page }) => {
+        await expect(page.locator('h1.pm-topbar-title')).toHaveText('Strategies');
+        await expect(page.getByText(/Earn automation/)).toHaveCount(0);
+        await expect(page.getByText(/Deploy live/i)).toHaveCount(0);
+    });
+
+    test('labels the strategies as example data', async ({ page }) => {
+        await expect(page.getByTestId('sample-data-notice')).toBeVisible();
+    });
+
+    test('regression: Duplicate creates and selects a copy (was a dead button)', async ({ page }) => {
+        const cards = page.locator('.pm-strategy-card');
+        await expect(cards).toHaveCount(3);
+        await page.getByRole('button', { name: 'Duplicate' }).click();
+        await expect(cards).toHaveCount(4);
+        await expect(cards.nth(3)).toHaveAttribute('aria-pressed', 'true');
+        await expect(cards.nth(3)).toContainText('Momentum + Value (copy)');
+    });
+
+    test('regression: there is no inert "Run backtest" button', async ({ page }) => {
+        await expect(page.getByRole('button', { name: 'Run backtest' })).toHaveCount(0);
+    });
+
+    test('editing a rule flags the backtest as out of date', async ({ page }) => {
+        await expect(page.getByTestId('backtest-stale')).toHaveCount(0);
+        await page.getByLabel('Value').first().fill('0.95');
+        await expect(page.getByTestId('backtest-stale')).toBeVisible();
     });
 
     test('renders three seed strategy cards in the top row', async ({ page }) => {

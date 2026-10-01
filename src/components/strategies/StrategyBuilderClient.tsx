@@ -1,10 +1,17 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
+import { Copy } from "lucide-react";
+import { usePageHeader } from "@/components/layout/PageHeaderContext";
+import { SampleDataNotice } from "@/components/data-display/SampleDataNotice";
+import { SampleEmptyState } from "@/components/data-display/SampleEmptyState";
+import { useShowSampleData } from "@/lib/hooks/useShowSampleData";
 import { SEED_STRATEGIES } from "@/lib/strategies/seed";
 import { resolveSelectedStrategyId } from "@/lib/strategies/routes";
 import {
     addRule,
+    duplicateStrategy,
+    hasUnbacktestedChanges,
     removeRule,
     setConjunction,
     setGuardrail,
@@ -85,6 +92,42 @@ export function StrategyBuilderClient({ initialStrategyId }: { initialStrategyId
         () => strategies.find((s) => s.id === selectedId) ?? strategies[0],
         [strategies, selectedId],
     );
+
+    // The rules each backtest was run against. Editing rules has no
+    // backtest engine behind it yet, so the panel flags stale results
+    // instead of presenting them as current.
+    const [backtestedById, setBacktestedById] = useState<Record<string, Strategy>>(() =>
+        Object.fromEntries(SEED_STRATEGIES.map((s) => [s.id, s])),
+    );
+    const backtestStale = selected
+        ? hasUnbacktestedChanges(selected, backtestedById[selected.id] ?? selected)
+        : false;
+
+    const onDuplicate = useCallback(() => {
+        if (!selected) return;
+        const copy = duplicateStrategy(selected, strategies);
+        setStrategies((prev) => [...prev, copy]);
+        setBacktestedById((prev) => ({ ...prev, [copy.id]: backtestedById[selected.id] ?? selected }));
+        setAdherenceByStrategy((prev) => ({ ...prev, [copy.id]: prev[selected.id] ?? [] }));
+        setSelectedId(copy.id);
+    }, [selected, strategies, backtestedById]);
+
+    const headerActions = useMemo(
+        () => (
+            <button type="button" className="pm-btn pm-btn-ghost pm-strategy-dup-btn" onClick={onDuplicate}>
+                <Copy size={14} aria-hidden="true" />
+                <span>Duplicate</span>
+            </button>
+        ),
+        [onDuplicate],
+    );
+    usePageHeader({
+        title: "Strategies",
+        subtitle: "Write entry rules, backtest them, and hold your orders to them",
+        crumbs: ["Strategies", selected?.name ?? "Builder"],
+        actions: headerActions,
+    });
+    const showSample = useShowSampleData();
 
     const selectedAdherenceRules = selected
         ? adherenceByStrategy[selected.id] ?? []
@@ -206,6 +249,17 @@ export function StrategyBuilderClient({ initialStrategyId }: { initialStrategyId
         [selectedId],
     );
 
+    if (!showSample) {
+        return (
+            <div className="pm-strategy-page">
+                <SampleEmptyState
+                    title="No strategies yet"
+                    body="Strategies are rule sets you backtest before trusting them with real orders. The examples are hidden; show them to explore the builder."
+                />
+            </div>
+        );
+    }
+
     if (!selected) {
         return (
             <div className="pm-strategy-page">
@@ -218,6 +272,9 @@ export function StrategyBuilderClient({ initialStrategyId }: { initialStrategyId
 
     return (
         <div className="pm-strategy-page">
+            <SampleDataNotice>
+                These strategies and their backtests are examples. Edits stay in this tab until strategies are saved to your account.
+            </SampleDataNotice>
             <section className="pm-strategy-row" aria-label="Strategies">
                 {strategies.map((s) => (
                     <StrategyCard
@@ -249,7 +306,7 @@ export function StrategyBuilderClient({ initialStrategyId }: { initialStrategyId
                         adherenceTier={rollingTier}
                     />
                 </div>
-                <BacktestPanel strategy={selected} />
+                <BacktestPanel strategy={selected} stale={backtestStale} />
             </section>
 
             <AdherenceImpactCard entries={SEED_JOURNAL} />

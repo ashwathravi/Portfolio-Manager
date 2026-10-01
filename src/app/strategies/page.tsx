@@ -1,4 +1,3 @@
-import { PageHeaderSync } from "@/components/layout/TopBar";
 import { StrategyBuilderClient } from "@/components/strategies/StrategyBuilderClient";
 import { SEED_STRATEGIES } from "@/lib/strategies/seed";
 import { STRATEGY_QUERY_PARAM, resolveSelectedStrategyId } from "@/lib/strategies/routes";
@@ -11,9 +10,8 @@ import { STRATEGY_QUERY_PARAM, resolveSelectedStrategyId } from "@/lib/strategie
  * so future persistence (draft strategies from the backend) can hydrate
  * on every request without SSR caching surprises.
  *
- * Breadcrumbs, title, subtitle, and header actions are all synced from
- * here via `PageHeaderSync` so the top bar matches the rest of the Phase
- * 4/5 redesigned surface.
+ * The client owns the page header (title, crumbs, and the Duplicate
+ * action, which needs the selected strategy).
  */
 
 export const dynamic = "force-dynamic";
@@ -31,21 +29,6 @@ export default async function StrategiesPage({
     );
     return (
         <>
-            <PageHeaderSync
-                title="Strategy builder"
-                subtitle="Rules → backtest → robustness → paper → live. Earn automation."
-                crumbs={["Workspace", "Strategies", "Builder"]}
-                actions={
-                    <div className="pm-strategy-topbar-actions">
-                        <button type="button" className="pm-btn pm-btn-ghost">
-                            Duplicate
-                        </button>
-                        <button type="button" className="pm-btn pm-btn-primary">
-                            Run backtest
-                        </button>
-                    </div>
-                }
-            />
             <StrategyBuilderClient initialStrategyId={initialStrategyId} />
         </>
     );

@@ -289,3 +289,43 @@
 .pm-position-price { margin: 2px 0 0; font-size: 28px; font-weight: 600; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
 .pm-position-price span { font-size: 14px; font-weight: 500; letter-spacing: 0; }
 .pm-position-thesis-title { margin: 0; font-weight: 600; }
+
+/* --- Strategies: compact switcher instead of three equal cards ----------- */
+.pm-strategy-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  grid-template-columns: none;
+}
+.pm-strategy-row .pm-strategy-card {
+  flex: 0 1 260px;
+  min-width: 200px;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  box-shadow: none;
+}
+.pm-strategy-row .pm-strategy-card.is-selected {
+  border-color: var(--pm-fg);
+  box-shadow: 0 0 0 1px var(--pm-fg);
+}
+.pm-strategy-card-top, .pm-strategy-card-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.pm-strategy-row .pm-strategy-name { font-size: 14px; font-weight: 600; }
+.pm-strategy-return { font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.pm-strategy-row .pm-strategy-adherence { padding: 1px 6px; font-size: 11px; }
+.pm-strategy-dup-btn { white-space: nowrap; }
+
+.pm-bt-stale {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  color: var(--pm-fg);
+  background: color-mix(in srgb, var(--pm-warn) 10%, var(--pm-card));
+  border: 1px solid color-mix(in srgb, var(--pm-warn) 35%, var(--pm-border));
+}
