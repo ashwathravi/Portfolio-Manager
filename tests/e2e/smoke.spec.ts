@@ -17,7 +17,7 @@ test('homepage has title, topbar heading, and sidebar chrome', async ({ page }) 
     await expect(page).toHaveTitle(/Atlas Wealth|Portfolio Manager/);
 
     // Post-redesign page title lives in the Topbar, not the body.
-    await expect(page.locator('h1.pm-topbar-title')).toHaveText('Dashboard');
+    await expect(page.locator('h1.pm-topbar-title')).toHaveText('Today');
 
     // Sidebar chrome: aside + brand wordmark.
     await expect(page.locator('aside.pm-sidebar')).toBeVisible();

@@ -1057,6 +1057,7 @@ export const useSettingsStore = create<SettingsState>()(
             // Sentinel: Only persist non-sensitive preferences. API keys are
             // intentionally excluded so they don't end up in localStorage.
             partialize: (state) => ({
+                profile: state.profile,
                 appearance: state.appearance,
                 notifications: state.notifications,
                 alphaRadarDelivery: state.alphaRadarDelivery,

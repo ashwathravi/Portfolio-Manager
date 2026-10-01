@@ -52,3 +52,18 @@ export function collectConsoleErrors(page: Page): string[] {
     page.on('pageerror', (err) => errors.push(String(err)));
     return errors;
 }
+
+/**
+ * On Today, the full risk-policy checks sit behind the policy strip and
+ * only render when the user has holdings. Opens the strip and returns
+ * true, or returns false when the book is empty (callers then skip).
+ */
+export async function openPolicyChecks(page: Page): Promise<boolean> {
+    const hero = page.getByTestId('today-hero');
+    await expect(hero).toBeVisible();
+    if ((await hero.getAttribute('data-empty')) === 'true') return false;
+    const strip = page.getByTestId('policy-strip');
+    if ((await strip.getAttribute('open')) === null) await strip.locator('summary').click();
+    await expect(page.getByTestId('risk-policy-dashboard')).toBeVisible();
+    return true;
+}

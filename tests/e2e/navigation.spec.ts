@@ -50,9 +50,12 @@ test.describe('Sidebar navigation', () => {
         }
     });
 
-    test('shows the user footer with a plan line', async ({ page }) => {
-        await page.goto('/');
-        await expect(page.locator('.pm-user-plan')).toContainText(/Pro/);
+    test('regression: the user footer shows the signed-in identity, not a placeholder', async ({ page }) => {
+        await gotoAppPage(page, '/');
+        const name = page.locator('.pm-user-name');
+        await expect(name).not.toHaveText('');
+        await expect(name).not.toHaveText('John Doe');
+        await expect(page.locator('.pm-user-plan')).not.toContainText('Pro');
     });
 });
 

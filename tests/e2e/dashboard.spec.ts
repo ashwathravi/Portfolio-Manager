@@ -2,25 +2,28 @@ import { test, expect } from '@playwright/test';
 import { clickUntil, collectConsoleErrors, gotoAppPage, reloadAppPage } from './helpers/app';
 
 /**
- * Phase 9 (AR-94) + AR-112 Dashboard tests.
+ * Today (/) — formerly the Dashboard.
  *
- * Phase 3 (AR-70/71/72/73) replaced the legacy "Good Morning / stat card
- * / connected accounts / Add Asset" layout with a new workflow:
- *
- *   Topbar h1 ............. "Dashboard" (via PageHeaderSync)
- *   DashboardTopbar ....... crumbs + greeting + market-state subtitle
- *                            + Reconcile / New order actions
- *   DashboardStatRow ...... 4 StatCards (Net Worth, Today's P&L,
- *                            Alpha vs S&P, Cash Runway)
- *   2-col split ........... EquityChartCard + AllocationCard
- *   63/37 split ........... TopHoldingsCard + RecentActivityCard
- *   63/37 bottom strip .... PatternFeed (wide) + side stack with
- *                            WatchlistCard + ActiveThesesCard (AR-112
- *                            replaced the old DailyBriefCard with the
- *                            pattern feed)
+ *   Top bar ............... title "Today", greeting · date · market state,
+ *                           "New order" → /execution
+ *   Hero .................. net worth + today's change from real holdings
+ *                           (empty state with "Connect an account" when none)
+ *   Needs your attention .. ranked triage list (policy, theses, review)
+ *   Risk policy strip ..... one line; full checks behind a disclosure
+ *                           (only when there are holdings)
+ *   Holdings + allocation . real data, only when there are holdings
+ *   Recent activity ....... real transactions
+ *   Review & research ..... example-data cards (weekly review, equity curve,
+ *                           theses, patterns, Alpha Radar, watchlist)
  */
 
-test.describe('Dashboard page', () => {
+async function hasHoldings(page: import('@playwright/test').Page): Promise<boolean> {
+    const hero = page.getByTestId('today-hero');
+    await expect(hero).toBeVisible();
+    return (await hero.getAttribute('data-empty')) !== 'true';
+}
+
+test.describe('Today page', () => {
     test.beforeEach(async ({ page }) => {
         // Clear pattern snooze state so dismissal tests are deterministic
         // across runs.
@@ -34,103 +37,87 @@ test.describe('Dashboard page', () => {
         await gotoAppPage(page, '/');
     });
 
-    test('Topbar title renders "Dashboard"', async ({ page }) => {
-        await expect(page.locator('h1.pm-topbar-title')).toHaveText('Dashboard');
+    test('top bar shows "Today" with a single page heading', async ({ page }) => {
+        await expect(page.locator('h1.pm-topbar-title')).toHaveText('Today');
+        await expect(page.locator('h1')).toHaveCount(1);
+        // Regression: the in-page greeting block duplicated the top bar.
+        await expect(page.locator('.pm-dashboard-topbar')).toHaveCount(0);
     });
 
-    test('dashboard renders its empty state when persistence is unavailable', async ({ page }) => {
-        const main = page.getByRole('main');
-
-        await expect(main).not.toContainText('Something went wrong');
-        await expect(page.locator('h1.pm-topbar-title')).toHaveText('Dashboard');
-        await expect(page.getByTestId('risk-policy-dashboard')).toBeVisible();
+    test('renders without errors when persistence is unavailable', async ({ page }) => {
+        await expect(page.getByRole('main')).not.toContainText('Something went wrong');
+        await expect(page.getByTestId('today-hero')).toBeVisible();
+        await expect(page.getByTestId('today-triage')).toBeVisible();
     });
 
-    test('DashboardTopbar renders greeting + market-state subtitle', async ({ page }) => {
-        // `<h1 class="pm-greeting">Good {morning|afternoon|evening}, {firstName}</h1>`
-        await expect(page.locator('h1.pm-greeting')).toContainText(
-            /Good (morning|afternoon|evening)/,
-        );
-        // Subtitle: "{Weekday} · Markets {open|closed}[ · Updated Ns ago]"
-        await expect(page.locator('.pm-greeting-sub')).toContainText(/Markets (open|closed)/);
+    test('subtitle carries the greeting, date, and market state', async ({ page }) => {
+        await expect(page.locator('.pm-topbar-sub')).toHaveText(/^Good (morning|afternoon|evening).* · .* · Markets (open|closed)$/);
     });
 
-    test('DashboardTopbar exposes Reconcile + New order quick-actions', async ({ page }) => {
-        await expect(page.getByRole('link', { name: /Reconcile/ })).toBeVisible();
-        await expect(page.getByRole('link', { name: /New order/ })).toBeVisible();
-        // Regression: "New order" used to open the legacy /portfolios page.
+    test('regression: "New order" opens the Trade ticket', async ({ page }) => {
         await expect(page.getByRole('link', { name: /New order/ })).toHaveAttribute('href', '/execution');
     });
 
-    test('stat row renders the four headline cards', async ({ page }) => {
-        const stats = page.locator('.pm-grid-stats');
-        await expect(stats).toBeVisible();
-        await expect(stats.getByText('Net Worth', { exact: true })).toBeVisible();
-        await expect(stats.getByText("Today's P&L")).toBeVisible();
-        await expect(stats.getByText('Alpha vs S&P')).toBeVisible();
-        await expect(stats.getByText('Cash Runway')).toBeVisible();
+    test('regression: the hero shows no made-up deltas or sparklines', async ({ page }) => {
+        await expect(page.getByText('+1.2%')).toHaveCount(0);
+        await expect(page.getByText('vs last month')).toHaveCount(0);
+        await expect(page.locator('.pm-grid-stats')).toHaveCount(0);
     });
 
-    test('middle row renders Equity Curve + Allocation cards', async ({ page }) => {
-        await expect(
-            page.locator('.pm-card-title', { hasText: /^Equity Curve$/ }),
-        ).toBeVisible();
-        await expect(
-            page.locator('.pm-card-title', { hasText: /^Allocation$/ }),
-        ).toBeVisible();
+    test('empty book: the hero offers to connect an account; no policy or holdings cards', async ({ page }) => {
+        test.skip(await hasHoldings(page), 'database has holdings');
+        await expect(page.getByTestId('today-hero').getByRole('link', { name: 'Connect an account' })).toHaveAttribute('href', '/settings#accounts');
+        await expect(page.getByTestId('policy-strip')).toHaveCount(0);
+        await expect(page.getByText('$10,050')).toHaveCount(0);
     });
 
-    test('Risk Policy dashboard renders policy dimensions, statuses, and deep links', async ({ page }) => {
-        const card = page.getByTestId('risk-policy-dashboard');
-        await expect(card).toBeVisible();
-        await expect(card.locator('#pm-risk-policy-head')).toHaveText('Portfolio risk policy');
-        await expect(card.getByRole('heading', { name: 'GOOG / employer-linked stock' })).toBeVisible();
-        await expect(card.getByRole('heading', { name: 'Cash purpose coverage' })).toBeVisible();
-
-        const dimensions = card.getByTestId('risk-policy-dimension');
-        await expect(dimensions).toHaveCount(12);
-        await expect(
-            card.locator('[data-testid="risk-policy-dimension"][data-status="breached"], [data-testid="risk-policy-dimension"][data-status="missing_data"]').first(),
-        ).toBeVisible();
-
-        await expect(card.getByTestId('risk-policy-action').first()).toBeVisible();
-        await expect(card.getByRole('link', { name: /Holdings/ })).toHaveAttribute('href', '/portfolios/holdings');
-        await expect(card.getByRole('link', { name: /Execution/ })).toHaveAttribute('href', '/execution');
-        await expect(card.getByRole('link', { name: /Research theses/ })).toHaveAttribute('href', '/research');
-        await expect(card.getByRole('link', { name: /Guardrails/ })).toHaveAttribute('href', '/settings');
-        await expect(card.getByRole('link', { name: /Weekly review/ })).toHaveAttribute('href', '/#weekly-review');
+    test('with holdings: net worth, policy strip, and the full checks behind a disclosure', async ({ page }) => {
+        test.skip(!(await hasHoldings(page)), 'no holdings in this database');
+        await expect(page.getByTestId('today-networth')).toHaveText(/^\$[\d,]+\.\d{2}$/);
+        const strip = page.getByTestId('policy-strip');
+        await expect(strip).toBeVisible();
+        await expect(page.getByTestId('risk-policy-dashboard')).toBeHidden();
+        await strip.locator('summary').click();
+        await expect(page.getByTestId('risk-policy-dashboard')).toBeVisible();
+        await expect(page.getByTestId('risk-policy-dimension')).toHaveCount(12);
     });
 
-    test('Risk Policy dashboard runs built-in stress scenarios', async ({ page }) => {
-        const panel = page.getByTestId('stress-test-panel');
-        await expect(panel).toBeVisible();
-        await expect(panel.getByLabel('Stress-test scenario')).toBeVisible();
-
-        await panel.getByLabel('Stress-test scenario').selectOption('ai_basket_30_down');
-        await expect(panel).toContainText('AI basket -30%');
-        await expect(panel).toContainText('Portfolio drawdown');
-        await expect(panel).toContainText(/-\$|0%|-/);
-        await expect(panel.getByRole('list', { name: 'Stress test top contributors' })).toBeVisible();
+    test('needs-your-attention lists ranked items, each with one link', async ({ page }) => {
+        const triage = page.getByTestId('today-triage');
+        const items = triage.getByTestId('today-triage-item');
+        await expect(items.first().or(triage.getByTestId('today-triage-empty'))).toBeVisible();
+        const count = await items.count();
+        const order = { breach: 0, warn: 1, info: 2 } as Record<string, number>;
+        let last = -1;
+        for (let i = 0; i < count; i++) {
+            const sev = order[(await items.nth(i).getAttribute('data-severity')) ?? 'info'];
+            expect(sev).toBeGreaterThanOrEqual(last);
+            last = sev;
+            await expect(items.nth(i).getByRole('link')).toHaveCount(1);
+        }
     });
 
-    test('63/37 split renders Top Holdings + Recent Activity cards', async ({ page }) => {
-        await expect(
-            page.locator('.pm-card-title', { hasText: /^Top Holdings$/ }),
-        ).toBeVisible();
-        await expect(
-            page.locator('.pm-card-title', { hasText: /^Recent Activity$/ }),
-        ).toBeVisible();
+    test('recent activity comes from real transactions (no mock rows)', async ({ page }) => {
+        await expect(page.locator('.pm-card-title', { hasText: /^Recent Activity$/ })).toBeVisible();
     });
 
-    test('bottom strip shows Pattern feed alongside Alpha Radar + Watchlist + Active Theses', async ({ page }) => {
+    test('example-data cards are grouped, labelled, and hideable', async ({ page }) => {
+        const examples = page.getByTestId('today-examples');
+        await expect(examples).toBeVisible();
+        await expect(examples.getByTestId('sample-data-notice')).toBeVisible();
         await expect(page.getByTestId('pattern-feed')).toBeVisible();
         await expect(page.getByTestId('alpha-radar-dashboard-card')).toBeVisible();
-        await expect(
-            page.locator('.pm-card-title', { hasText: /^Watchlist$/ }),
-        ).toBeVisible();
-        await expect(
-            page.locator('.pm-card-title', { hasText: /^Active Theses$/ }),
-        ).toBeVisible();
+        await expect(page.locator('.pm-card-title', { hasText: /^Watchlist$/ })).toBeVisible();
+        await expect(page.locator('.pm-card-title', { hasText: /^Active Theses$/ })).toBeVisible();
+
+        await examples.getByRole('button', { name: 'hide examples' }).click();
+        await expect(page.getByTestId('today-examples')).toHaveCount(0);
+        await expect(page.getByTestId('today-hero')).toBeVisible();
+    });
+
+    test('active theses on Today match the Research store', async ({ page }) => {
+        const card = page.locator('section', { has: page.locator('.pm-card-title', { hasText: /^Active Theses$/ }) });
+        await expect(card.getByRole('link', { name: /AI Infrastructure Dominance/ })).toHaveAttribute('href', '/research/thesis/NVDA');
     });
 
     test('Alpha Radar card shows latest reports and links into Research', async ({ page }) => {
@@ -374,7 +361,9 @@ test.describe('Dashboard console hygiene', () => {
     test('regression: charts do not log invalid <svg> height errors', async ({ page }) => {
         const errors = collectConsoleErrors(page);
         await gotoAppPage(page, '/');
-        await page.waitForLoadState('networkidle');
+        // The example equity curve and pattern feed render the shared SVG charts.
+        await expect(page.getByTestId('today-examples').locator('svg').first()).toBeVisible();
+        await page.waitForTimeout(500);
         expect(errors.filter((e) => e.includes('<svg> attribute height'))).toEqual([]);
     });
 });

@@ -7,6 +7,8 @@ import { ThemeProvider } from "@/components/providers/ThemeProvider";
 import { QueryProvider } from "@/components/providers/QueryProvider";
 import { Toaster } from "@/components/ui/sonner";
 import { AppFrame } from "@/components/layout/AppFrame";
+import { IdentityProvider } from "@/components/providers/IdentityProvider";
+import { resolveViewerIdentity } from "@/lib/auth/viewer";
 
 // Self-hosted via next/font so text never silently falls back to system
 // fonts. Plex has true tabular figures, which every money column relies on.
@@ -43,11 +45,12 @@ export const metadata: Metadata = {
  * the sidebar's actual fixed width of 248px — 8px tighter than the old
  * 256px (md:ml-64) to buy back a bit of content width on 13" laptops.
  */
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const identity = await resolveViewerIdentity();
   return (
     <html lang="en" suppressHydrationWarning className={cn(appSans.variable, appMono.variable)}>
       <body
@@ -57,7 +60,9 @@ export default function RootLayout({
       >
         <QueryProvider>
           <ThemeProvider>
-            <AppFrame>{children}</AppFrame>
+            <IdentityProvider identity={identity}>
+              <AppFrame>{children}</AppFrame>
+            </IdentityProvider>
           </ThemeProvider>
         </QueryProvider>
         <Toaster />

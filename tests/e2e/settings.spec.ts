@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { clickUntil, gotoAppPage, reloadAppPage } from './helpers/app';
+import { clickUntil, gotoAppPage, openPolicyChecks, reloadAppPage } from './helpers/app';
 
 /**
  * Phase 9 (AR-94) Settings tests, refreshed for JournalPlus (AR-109).
@@ -280,6 +280,7 @@ test.describe('Settings page (v2 card grid)', () => {
         await expect(page.getByTestId('cash-jobs-classified-total')).toHaveText('$999,999');
 
         await gotoAppPage(page, '/');
+        test.skip(!(await openPolicyChecks(page)), 'risk policy checks need holdings');
         const cashDimension = page.locator(
             '[data-testid="risk-policy-dimension"][data-policy-id="cash_purpose_coverage"]',
         );
@@ -345,6 +346,7 @@ test.describe('Settings page (v2 card grid)', () => {
         await expect(card).toContainText('Planning output only');
 
         await gotoAppPage(page, '/');
+        test.skip(!(await openPolicyChecks(page)), 'risk policy checks need holdings');
         await expect(page.getByTestId('employer-stock-plan-task')).toBeVisible();
         await expect(page.getByTestId('employer-stock-plan-task')).toContainText(/GOOG trim due|Review GOOG/);
     });
@@ -368,9 +370,12 @@ test.describe('Settings page (v2 card grid)', () => {
         await expect(aaplRule).toHaveAttribute('data-state', 'triggered');
 
         await gotoAppPage(page, '/');
-        await expect(
-            page.getByTestId('sell-discipline-task').filter({ hasText: 'AAPL Allocation cap' }).first(),
-        ).toBeVisible();
+        // Today only runs policy checks against real holdings.
+        if (await openPolicyChecks(page)) {
+            await expect(
+                page.getByTestId('sell-discipline-task').filter({ hasText: 'AAPL Allocation cap' }).first(),
+            ).toBeVisible();
+        }
 
         await gotoAppPage(page, '/execution');
         const guardrails = page.locator('.pm-exec-guardrails');

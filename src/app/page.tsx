@@ -1,117 +1,94 @@
 import { marketDataEngine } from '@/lib/api/market-data';
-import { PageHeaderSync } from '@/components/layout/TopBar';
-import { DashboardTopbar } from '@/components/dashboard/DashboardTopbar';
-import { DashboardStatRow, type DashboardStatRowHolding } from '@/components/dashboard/DashboardStatRow';
 import { EquityChartCard } from '@/components/dashboard/EquityChartCard';
 import { AllocationCard, type AllocationHolding } from '@/components/dashboard/AllocationCard';
 import { TopHoldingsCard, type TopHoldingsRow } from '@/components/dashboard/TopHoldingsCard';
-import { RecentActivityCard, type ActivityRow } from '@/components/dashboard/RecentActivityCard';
+import { RecentActivityCard } from '@/components/dashboard/RecentActivityCard';
 import { WatchlistCard } from '@/components/dashboard/WatchlistCard';
-import { ActiveThesesCard } from '@/components/dashboard/ActiveThesesCard';
 import { PatternFeed } from '@/components/dashboard/PatternFeed';
 import { WeeklyReviewCard } from '@/components/dashboard/WeeklyReviewCard';
 import { AlphaRadarDashboardCard } from '@/components/dashboard/AlphaRadarDashboardCard';
-import { mockTransactions } from '@/lib/mockData';
-import { DEFAULT_THESES as DEFAULT_RESEARCH_THESES } from '@/lib/research/thesis';
-import {
-  RiskPolicyDashboardCard,
-  type RiskPolicyDashboardCardInput,
-} from '@/components/dashboard/RiskPolicyDashboardCard';
-import { DEFAULT_OPTION_RISK_POSITIONS, computeRiskPolicyDashboard } from '@/lib/risk-policy';
+import type { RiskPolicyDashboardCardInput } from '@/components/dashboard/RiskPolicyDashboardCard';
+import { SampleDataNotice } from '@/components/data-display/SampleDataNotice';
+import { SampleGate } from '@/components/data-display/SampleGate';
+import { TodayHeader } from '@/components/today/TodayHeader';
+import { TodayHero, type TodayHeroHolding } from '@/components/today/TodayHero';
+import { TodayTriage } from '@/components/today/TodayTriage';
+import { PolicyStrip } from '@/components/today/PolicyStrip';
+import { TodayTheses } from '@/components/today/TodayTheses';
+import { computeRiskPolicyDashboard } from '@/lib/risk-policy';
 import { loadDashboardPortfolios } from '@/lib/dashboard-portfolios';
 import { requirePageUserId } from '@/lib/auth/request-user';
-import { buildDashboardPortfoliosQuery } from '@/lib/portfolio-repository';
+import { buildDashboardPortfoliosQuery, buildUserTransactionsQuery } from '@/lib/portfolio-repository';
+import { toActivityRows, type TransactionRowInput } from '@/lib/portfolio/activity';
+import { toTodayActivity } from '@/lib/today/rows';
 
 /**
- * Phase 3 Dashboard (AR-70/71/72/73).
+ * Today (/).
  *
- * This is a server component by design — it does the live-quotes fetch for
- * the initial paint, builds the derived dashboard data, and hands each
- * section off to a client component. All live-polling + interactivity is
- * contained in the client children.
+ * Ordered by what the user needs first:
+ *   1. Money — net worth and today's change from their own holdings.
+ *   2. Needs your attention — policy breaches, theses due for review, the
+ *      weekly review. Each row links to where it gets resolved.
+ *   3. A one-line risk-policy strip (full checks behind a disclosure).
+ *   4. Holdings, allocation, and recent activity — all from the database.
+ *   5. Review & research — example-data cards, labelled and hideable.
+ *
+ * Every figure in 1–4 comes from the user's portfolios and transactions;
+ * the risk policy is computed from real holdings, cash, and trades only
+ * (no example option positions or theses mixed in).
  */
 
 export const dynamic = 'force-dynamic';
 
-export default async function Dashboard() {
+export default async function Today() {
   const userId = await requirePageUserId();
-  const allPortfolios = await loadDashboardPortfolios(
-    userId,
-    buildDashboardPortfoliosQuery,
-  );
+  const allPortfolios = await loadDashboardPortfolios(userId, buildDashboardPortfoliosQuery);
 
-  // ---- Initial server-side quote fetch (warms the TanStack Query cache) ----
-  let liveQuotes: Record<string, {
-    price: number;
-    change?: number;
-    changePercent?: number;
-  }> = {};
+  let transactionRows: TransactionRowInput[] = [];
   try {
-    const symbols = Array.from(
-      new Set<string>(
-        allPortfolios
-          .flatMap((p) => p.holdings)
-          .map((h: { symbol: string }) => h.symbol)
-          .filter(Boolean),
-      ),
-    );
-    if (symbols.length > 0) {
-      liveQuotes = await marketDataEngine.getQuotes(symbols);
-    }
+    transactionRows = await buildUserTransactionsQuery(userId);
   } catch (e) {
-    console.warn('Failed to fetch live quotes for dashboard', e);
+    console.warn('Today: transactions fetch failed — showing no recent activity.', e);
+  }
+  const activity = toActivityRows(transactionRows);
+
+  // Warm quotes for the first paint; the hero keeps polling client-side.
+  let liveQuotes: Record<string, { price: number; change?: number; changePercent?: number }> = {};
+  try {
+    const symbols = Array.from(new Set(allPortfolios.flatMap((p) => p.holdings.map((h) => h.symbol)).filter(Boolean)));
+    if (symbols.length > 0) liveQuotes = await marketDataEngine.getQuotes(symbols);
+  } catch (e) {
+    console.warn('Failed to fetch live quotes for Today', e);
   }
 
-  // ---- Derive once, pass everywhere ----
   const cashTotal = allPortfolios.reduce((s, p) => s + (p.cashBalance || 0), 0);
-
-  // Drizzle returns numeric columns as strings, so we coerce inside the map
-  // (don't annotate h — the schema type is what matters).
   const allHoldings = allPortfolios.flatMap((p) =>
-    p.holdings.map((h) => ({
-      id: h.id,
-      portfolio: p.name,
-      symbol: h.symbol,
-      quantity: Number(h.quantity) || 0,
-      avgCost: Number(h.avgCost) || 0,
-      currentPrice: Number(liveQuotes[h.symbol]?.price ?? h.currentPrice ?? 0),
-      marketValue: Number(h.marketValue) || 0,
-    })),
+    p.holdings.map((h) => {
+      const quantity = Number(h.quantity) || 0;
+      const currentPrice = Number(liveQuotes[h.symbol]?.price ?? h.currentPrice ?? 0);
+      return {
+        id: h.id,
+        portfolio: p.name,
+        symbol: h.symbol,
+        quantity,
+        avgCost: Number(h.avgCost) || 0,
+        currentPrice,
+        marketValue: Number(h.marketValue) || quantity * currentPrice,
+      };
+    }),
   );
 
-  // Today's P&L fallback for before the client poll lands.
-  let todayChange = 0;
-  if (Object.keys(liveQuotes).length > 0) {
-    todayChange = allHoldings.reduce((sum, h) => {
-      const q = liveQuotes[h.symbol];
-      if (q?.change != null) return sum + q.change * h.quantity;
-      return sum;
-    }, 0);
-  }
-
-  const netWorthSeed = cashTotal + allHoldings.reduce(
-    (sum, h) => sum + (h.marketValue || h.quantity * h.currentPrice),
-    0,
-  );
-
-  const statRowHoldings: DashboardStatRowHolding[] = allHoldings
+  const heroHoldings: TodayHeroHolding[] = allHoldings
     .filter((h) => h.symbol)
-    .map((h) => ({
-      symbol: h.symbol,
-      quantity: h.quantity,
-      currentPrice: h.currentPrice,
-      marketValue: h.marketValue,
-    }));
+    .map(({ symbol, quantity, currentPrice, marketValue }) => ({ symbol, quantity, currentPrice, marketValue }));
+  const netWorth = cashTotal + allHoldings.reduce((sum, h) => sum + h.marketValue, 0);
 
   const allocationHoldings: AllocationHolding[] = allHoldings.map((h) => ({
     symbol: h.symbol,
     portfolio: h.portfolio,
-    marketValue: h.marketValue || h.quantity * h.currentPrice,
+    marketValue: h.marketValue,
   }));
-  const cashByPortfolio = Object.fromEntries(
-    allPortfolios.map((p) => [p.name, p.cashBalance || 0]),
-  );
-
+  const cashByPortfolio = Object.fromEntries(allPortfolios.map((p) => [p.name, p.cashBalance || 0]));
   const topHoldingsRows: TopHoldingsRow[] = allHoldings.map((h) => ({
     id: h.id,
     symbol: h.symbol,
@@ -119,7 +96,7 @@ export default async function Dashboard() {
     quantity: h.quantity,
     avgCost: h.avgCost,
     currentPrice: h.currentPrice,
-    marketValue: h.marketValue || h.quantity * h.currentPrice,
+    marketValue: h.marketValue,
   }));
 
   const riskPolicyInput: RiskPolicyDashboardCardInput = {
@@ -130,91 +107,67 @@ export default async function Dashboard() {
       quantity: h.quantity,
       avgCost: h.avgCost,
       currentPrice: h.currentPrice,
-      marketValue: h.marketValue || h.quantity * h.currentPrice,
+      marketValue: h.marketValue,
       isEmployerStock: h.symbol === 'GOOG' || h.symbol === 'GOOGL',
     })),
     cashTotal,
-    trades: mockTransactions,
-    optionPositions: [...DEFAULT_OPTION_RISK_POSITIONS],
-    theses: DEFAULT_RESEARCH_THESES,
+    trades: activity
+      .filter((a) => a.side === 'BUY' || a.side === 'SELL')
+      .map((a) => ({ id: a.id, date: a.date, type: a.side.toLowerCase(), ticker: a.symbol ?? undefined, quantity: a.quantity ?? undefined, amount: a.value })),
   };
   const riskPolicySummary = computeRiskPolicyDashboard(riskPolicyInput);
 
-  // ---- Recent activity: last 30 days from mock until we wire live txns ----
-  const thirtyDaysAgo = new Date();
-  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-  const activities: ActivityRow[] = mockTransactions
-    .filter((t) => new Date(t.date) >= thirtyDaysAgo)
-    .map((t) => ({
-      id: t.id,
-      type: t.type,
-      date: new Date(t.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-      ticker: t.ticker,
-      quantity: t.quantity,
-      amount: t.amount,
-      notes: t.notes,
-    }));
-
-  const greetingSubtitle = `${new Date().toLocaleDateString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-  })}`;
-
   return (
     <div className="pm-dashboard-stack p-6">
-      <PageHeaderSync
-        title="Dashboard"
-        subtitle={greetingSubtitle}
-        crumbs={['Home', 'Dashboard']}
-      />
+      <TodayHeader />
 
-      {/* ---- AR-71: topbar + stat row + chart/allocation split ---- */}
-      <DashboardTopbar />
-
-      <DashboardStatRow
-        cashTotal={cashTotal}
-        holdings={statRowHoldings}
-        fallbackTodayChange={todayChange}
-        alphaVsSp={1.8}
-      />
-
-      <RiskPolicyDashboardCard summary={riskPolicySummary} input={riskPolicyInput} />
-
-      {/* ---- AR-114: weekly review ritual (hero slot; hides when acked) ---- */}
-      <div id="weekly-review">
-        <WeeklyReviewCard />
+      <div className="pm-today-top">
+        <TodayHero holdings={heroHoldings} cashTotal={cashTotal} />
+        {/* Policy checks only mean something once there are holdings to check. */}
+        <TodayTriage policyActions={allHoldings.length > 0 ? riskPolicySummary.nextActions : []} />
       </div>
 
-      <div className="pm-grid-2">
-        <EquityChartCard netWorth={netWorthSeed} seed={allHoldings.length} />
-        <AllocationCard
-          holdings={allocationHoldings}
-          cashByPortfolio={cashByPortfolio}
-        />
-      </div>
+      {allHoldings.length > 0 && <PolicyStrip summary={riskPolicySummary} input={riskPolicyInput} />}
 
-      {/* ---- AR-72: 63/37 holdings + activity split ---- */}
-      <div className="pm-grid-2-63">
-        <TopHoldingsCard rows={topHoldingsRows} limit={6} />
-        <RecentActivityCard activities={activities} limit={8} />
-      </div>
-
-      {/* ---- AR-73 + AR-112: bottom row — watchlist + theses + pattern feed ---- */}
-      <div className="pm-grid-2-63">
-        <PatternFeed />
-        <div className="pm-dashboard-side-stack">
-          <AlphaRadarDashboardCard />
-          <WatchlistCard rows={DEFAULT_WATCHLIST} limit={5} />
-          <ActiveThesesCard rows={DEFAULT_THESES} limit={3} />
+      {allHoldings.length > 0 && (
+        <div className="pm-grid-2-63">
+          <TopHoldingsCard rows={topHoldingsRows} limit={6} />
+          <AllocationCard holdings={allocationHoldings} cashByPortfolio={cashByPortfolio} />
         </div>
-      </div>
+      )}
+
+      <RecentActivityCard activities={toTodayActivity(activity)} limit={8} />
+
+      <SampleGate>
+        <section className="pm-today-examples" aria-labelledby="pm-today-examples-head" data-testid="today-examples">
+          <header className="pm-today-section-head">
+            <h2 id="pm-today-examples-head" className="pm-today-section-title">Review &amp; research</h2>
+            <SampleDataNotice>
+              The weekly review, equity curve, patterns, watchlist, theses, and Alpha Radar below use example data.
+            </SampleDataNotice>
+          </header>
+          <div id="weekly-review">
+            <WeeklyReviewCard />
+          </div>
+          <div className="pm-grid-2-63">
+            <EquityChartCard netWorth={netWorth || 250_000} seed={allHoldings.length} />
+            <TodayTheses limit={4} />
+          </div>
+          <div className="pm-grid-2-63">
+            <PatternFeed />
+            <div className="pm-dashboard-side-stack">
+              <AlphaRadarDashboardCard />
+              <WatchlistCard rows={DEFAULT_WATCHLIST} limit={5} />
+            </div>
+          </div>
+        </section>
+      </SampleGate>
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Seed data (replace with live sources as those features come online)
+// Static lookups
 // ---------------------------------------------------------------------------
 
 /**
@@ -252,38 +205,3 @@ const DEFAULT_WATCHLIST = [
   { symbol: 'META', name: 'Meta Platforms', fallbackPrice: 512.45, fallbackChangePct: -0.72 },
   { symbol: 'COIN', name: 'Coinbase Global', fallbackPrice: 214.30, fallbackChangePct: 3.55 },
 ];
-
-const DEFAULT_THESES = [
-  {
-    id: 'th-1',
-    tag: 'SEMI',
-    name: 'AI capex cycle extends into 2026',
-    state: 'Watching',
-    conviction: 'High' as const,
-    spark: [100, 102, 101, 104, 108, 106, 110, 114, 117, 120],
-    href: '/research',
-  },
-  {
-    id: 'th-2',
-    tag: 'CONSUMER',
-    name: 'Apple margin compression risk',
-    state: 'Active',
-    conviction: 'Med' as const,
-    spark: [100, 99, 101, 98, 97, 95, 96, 93, 94, 92],
-    href: '/research',
-  },
-  {
-    id: 'th-3',
-    tag: 'MACRO',
-    name: 'Fed pivot: rate cuts Q3',
-    state: 'Fading',
-    conviction: 'Low' as const,
-    spark: [100, 101, 100, 101, 102, 101, 100, 99, 100, 99],
-    href: '/research',
-  },
-];
-
-// AR-112: the dashboard's "Daily Brief" decision list was superseded
-// by the PatternFeed card. `DailyBriefCard` still exports from
-// `@/components/dashboard/DailyBriefCard` for any external consumer,
-// but this page no longer renders it.

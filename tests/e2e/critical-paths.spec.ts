@@ -103,7 +103,7 @@ test.describe('Critical user paths', () => {
 
         await gotoAppPage(page, '/');
         // Post-redesign: the dashboard title lives in the Topbar, not the body.
-        await expect(page.locator('h1.pm-topbar-title')).toHaveText('Dashboard');
+        await expect(page.locator('h1.pm-topbar-title')).toHaveText('Today');
 
         // Jump to holdings via direct URL (sidebar is covered by navigation.spec.ts).
         await gotoAppPage(page, '/portfolios/holdings');
