@@ -1,15 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import {
-    Bell,
-    BellRing,
-    Key,
-    Database,
-    Tag as TagIcon,
-    Shield,
-    ChevronRight,
-} from "lucide-react";
+import { useEffect } from "react";
+import { useSearchParams } from "next/navigation";
 import { usePageHeader } from "@/components/layout/PageHeaderContext";
 import { ProfileCard } from "./cards/ProfileCard";
 import { IntegrationsCard } from "./cards/IntegrationsCard";
@@ -21,144 +14,94 @@ import { ChurnPolicyCard } from "./cards/ChurnPolicyCard";
 import { CashJobsCard } from "./cards/CashJobsCard";
 import { SellDisciplineCard } from "./cards/SellDisciplineCard";
 import { EmployerStockPlanCard } from "./cards/EmployerStockPlanCard";
-
-interface AdvancedLink {
-    slug: string;
-    label: string;
-    desc: string;
-    Icon: typeof Bell;
-}
-
-const ADVANCED_LINKS: AdvancedLink[] = [
-    {
-        slug: "notifications",
-        label: "Notifications",
-        desc: "Portfolio, price, sync alerts",
-        Icon: Bell,
-    },
-    {
-        slug: "alerts",
-        label: "Alert rules",
-        desc: "Custom price / signal rules",
-        Icon: BellRing,
-    },
-    {
-        slug: "api-keys",
-        label: "API keys",
-        desc: "Polygon, Alpha Vantage, Schwab",
-        Icon: Key,
-    },
-    {
-        slug: "security",
-        label: "Security",
-        desc: "Two-factor, session keys",
-        Icon: Shield,
-    },
-    {
-        slug: "data",
-        label: "Data & privacy",
-        desc: "Export, import, delete",
-        Icon: Database,
-    },
-    {
-        slug: "tags",
-        label: "Tags",
-        desc: "Custom labels across portfolios",
-        Icon: TagIcon,
-    },
-];
+import { SignInCard } from "./cards/SignInCard";
+import { ExampleDataCard } from "./cards/ExampleDataCard";
+import { PreferencesSettings } from "./PreferencesSettings";
+import { NotificationPreferences } from "./NotificationPreferences";
+import { AlertRulesManager } from "./AlertRulesManager";
+import { ApiKeysSettings } from "./ApiKeysSettings";
+import { DataManagement } from "./DataManagement";
+import { TagsManager } from "./TagsManager";
+import { SETTINGS_SECTIONS, sectionForTab } from "@/lib/settings/sections";
 
 /**
- * Phase 8 Settings redesign (AR-87/88/89) + JournalPlus (AR-109).
+ * Settings — one column of sections with an anchor rail.
  *
- * Replaces the old tabbed surface with a card grid. Each card reads
- * and writes directly to the existing `useSettingsStore`, so
- * preferences stay backward-compatible — the server-side shape is
- * unchanged; only the UI is rebuilt.
- *
- *   ┌────────────────── Settings ───────────────────┐
- *   │  [ Profile ]        [ Connected accts ]       │
- *   │  [ Appearance ]     [ Guardrails ]            │
- *   │  [ Execution ]      [ Bucket policy ]         │
- *   │  [ GOOG de-risking ] [ Trading activity ]     │
- *   │  [ Cash jobs ]       [ Sell discipline ]      │
- *   └───────────────────────────────────────────────┘
- *
- * The grid is `auto-fit` + `minmax` so a 5th card (Execution, added in
- * AR-109) flows onto a new row at wide widths and collapses to 1
- * column below ~960px. Each card is self-contained and never needs
- * siblings to render correctly.
- *
- * Deeper tabs (notifications, API keys, data & privacy, tags, alerts)
- * are still reachable via the "Advanced settings" link at the bottom,
- * which falls through to `/settings?tab=…` — same route, the old
- * tabbed layout surfaces when the URL has a tab query string.
+ * Replaces the two-column card masonry plus the separate legacy tabbed
+ * layout. Old `?tab=<slug>` links still work: they scroll to the
+ * matching section (see lib/settings/sections.ts).
  */
 
+const HEADER = { title: "Settings", subtitle: "Account, data, trading rules, and appearance", crumbs: ["Settings"] };
+
 export function SettingsPageClient() {
-    usePageHeader({
-        title: "Settings",
-        subtitle: "Profile, integrations, appearance.",
-        crumbs: ["System", "Settings"],
-    });
+    usePageHeader(HEADER);
+    const searchParams = useSearchParams();
+    const tab = searchParams?.get("tab") ?? null;
+
+    useEffect(() => {
+        const id = sectionForTab(tab) ?? (typeof window !== "undefined" ? window.location.hash.slice(1) || null : null);
+        if (!id) return;
+        const el = document.getElementById(id);
+        if (el) requestAnimationFrame(() => el.scrollIntoView({ block: "start" }));
+    }, [tab]);
 
     return (
-        <div className="pm-settings-v2">
-            <div className="pm-settings-grid">
-                <ProfileCard />
-                <IntegrationsCard />
-                <AppearanceCard />
-                <GuardrailsCard />
-                <ExecutionCard />
-                <BucketPolicyCard />
-                <EmployerStockPlanCard />
-                <ChurnPolicyCard />
-                <CashJobsCard />
-                <SellDisciplineCard />
-            </div>
+        <div className="pm-settings-layout">
+            <nav className="pm-settings-rail" aria-label="Settings sections">
+                {SETTINGS_SECTIONS.map((s) => (
+                    <a key={s.id} href={`#${s.id}`} className="pm-settings-rail-link">
+                        {s.label}
+                    </a>
+                ))}
+                <Link href="/help" className="pm-settings-rail-link">Help &amp; glossary</Link>
+            </nav>
 
-            <section
-                className="pm-settings-advanced"
-                aria-labelledby="pm-settings-advanced-head"
-            >
-                <header className="pm-settings-advanced-head">
-                    <h2
-                        id="pm-settings-advanced-head"
-                        className="pm-settings-advanced-title"
-                    >
-                        Advanced settings
-                    </h2>
-                    <p className="pm-settings-advanced-sub">
-                        Deeper preference areas still on the legacy tabbed layout.
-                    </p>
-                </header>
-                <div className="pm-settings-advanced-grid">
-                    {ADVANCED_LINKS.map((l) => (
-                        <Link
-                            key={l.slug}
-                            href={`/settings?tab=${l.slug}`}
-                            className="pm-settings-advanced-link"
-                        >
-                            <l.Icon
-                                className="pm-settings-advanced-icon"
-                                aria-hidden="true"
-                            />
-                            <div className="pm-settings-advanced-text">
-                                <span className="pm-settings-advanced-label">
-                                    {l.label}
-                                </span>
-                                <span className="pm-settings-advanced-desc">
-                                    {l.desc}
-                                </span>
-                            </div>
-                            <ChevronRight
-                                className="pm-settings-advanced-chev"
-                                aria-hidden="true"
-                            />
-                        </Link>
-                    ))}
-                </div>
-            </section>
+            <div className="pm-settings-sections">
+                <Section id="account" title="Account">
+                    <ProfileCard />
+                    <SignInCard />
+                </Section>
+                <Section id="accounts" title="Connected accounts">
+                    <IntegrationsCard />
+                </Section>
+                <Section id="data" title="Data">
+                    <ExampleDataCard />
+                    <DataManagement />
+                </Section>
+                <Section id="trading" title="Trading rules">
+                    <GuardrailsCard />
+                    <ExecutionCard />
+                </Section>
+                <Section id="risk-policy" title="Risk policy">
+                    <BucketPolicyCard />
+                    <EmployerStockPlanCard />
+                    <ChurnPolicyCard />
+                    <CashJobsCard />
+                    <SellDisciplineCard />
+                </Section>
+                <Section id="notifications" title="Notifications & alerts">
+                    <NotificationPreferences />
+                    <AlertRulesManager />
+                </Section>
+                <Section id="preferences" title="Preferences">
+                    <AppearanceCard />
+                    <PreferencesSettings />
+                    <TagsManager />
+                </Section>
+                <Section id="api-keys" title="Market data keys">
+                    <ApiKeysSettings />
+                </Section>
+            </div>
         </div>
+    );
+}
+
+function Section({ id, title, children }: { id: string; title: string; children: React.ReactNode }) {
+    return (
+        <section id={id} className="pm-settings-section" aria-labelledby={`${id}-head`}>
+            <h2 id={`${id}-head`} className="pm-settings-section-title">{title}</h2>
+            <div className="pm-settings-section-body">{children}</div>
+        </section>
     );
 }

@@ -1,5 +1,6 @@
 "use client";
 
+import { SampleTag } from "@/components/data-display/SampleTag";
 import { useMemo } from "react";
 import { Repeat2 } from "lucide-react";
 import { mockTransactions } from "@/lib/mockData";
@@ -54,6 +55,7 @@ export function ChurnPolicyCard() {
                         className="pm-settings-card-title"
                     >
                         Trading activity
+                        <SampleTag label="Example preview" title="The preview runs your rule against example holdings until an account is connected." />
                     </h2>
                 </div>
                 <span className="pm-settings-card-sub">

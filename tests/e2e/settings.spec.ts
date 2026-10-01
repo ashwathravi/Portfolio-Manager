@@ -15,42 +15,56 @@ import { clickUntil, gotoAppPage, openPolicyChecks, reloadAppPage } from './help
  * managed until they get their own cards.
  */
 
-test.describe('Settings page (v2 card grid)', () => {
+test.describe('Settings page', () => {
     test.beforeEach(async ({ page }) => {
         await gotoAppPage(page, '/settings');
     });
 
-    test('renders Topbar title and the primary cards', async ({ page }) => {
+    test('renders one column of sections with an anchor rail', async ({ page }) => {
         await expect(page.locator('h1.pm-topbar-title')).toHaveText('Settings');
-
-        // Grid container (single `role="list"`-like semantics).
-        await expect(page.locator('.pm-settings-grid')).toBeVisible();
-
-        // Each primary card by its card title.
-        await expect(page.locator('.pm-settings-card-title', { hasText: /^Profile$/ })).toBeVisible();
-        await expect(page.locator('.pm-settings-card-title', { hasText: /^Connected accounts$/i })).toBeVisible();
-        await expect(page.locator('.pm-settings-card-title', { hasText: /^Appearance$/ })).toBeVisible();
-        await expect(page.locator('.pm-settings-card-title', { hasText: /^Guardrails$/ })).toBeVisible();
-        await expect(page.locator('.pm-settings-card-title', { hasText: /^Execution$/ })).toBeVisible();
-        await expect(page.locator('.pm-settings-card-title', { hasText: /^Bucket policy$/ })).toBeVisible();
-        await expect(page.locator('.pm-settings-card-title', { hasText: /^GOOG de-risking$/ })).toBeVisible();
-        await expect(page.locator('.pm-settings-card-title', { hasText: /^Trading activity$/ })).toBeVisible();
-        await expect(page.locator('.pm-settings-card-title', { hasText: /^Cash jobs$/ })).toBeVisible();
-        await expect(page.locator('.pm-settings-card-title', { hasText: /^Sell discipline$/ })).toBeVisible();
+        const rail = page.getByRole('navigation', { name: 'Settings sections' });
+        for (const label of ['Account', 'Connected accounts', 'Data', 'Trading rules', 'Risk policy', 'Notifications & alerts', 'Preferences', 'Market data keys']) {
+            await expect(rail.getByRole('link', { name: label, exact: true })).toBeVisible();
+        }
+        await expect(rail.getByRole('link', { name: 'Help & glossary' })).toHaveAttribute('href', '/help');
+        for (const title of [/^Profile$/, /^Connected accounts$/i, /^Appearance$/, /^Guardrails$/, /^Execution$/, /^Bucket policy/, /^GOOG de-risking/, /^Trading activity/, /^Cash jobs$/, /^Sell discipline/]) {
+            await expect(page.locator('.pm-settings-card-title', { hasText: title })).toBeVisible();
+        }
     });
 
-    test('exposes an Advanced settings section linking to legacy tabs', async ({ page }) => {
-        // Section landmark uses the aria-labelledby heading.
-        await expect(page.locator('h2#pm-settings-advanced-head')).toHaveText('Advanced settings');
+    test('regression: no separate legacy tabbed layout or "Advanced settings" detour', async ({ page }) => {
+        await expect(page.getByText('Advanced settings')).toHaveCount(0);
+        await expect(page.locator('.pm-settings-advanced-grid')).toHaveCount(0);
+    });
 
-        // Each advanced link should link out to /settings?tab=<slug>.
-        const advanced = page.locator('.pm-settings-advanced-grid');
-        await expect(advanced.locator('a[href="/settings?tab=notifications"]')).toBeVisible();
-        await expect(advanced.locator('a[href="/settings?tab=alerts"]')).toBeVisible();
-        await expect(advanced.locator('a[href="/settings?tab=api-keys"]')).toBeVisible();
-        await expect(advanced.locator('a[href="/settings?tab=security"]')).toBeVisible();
-        await expect(advanced.locator('a[href="/settings?tab=data"]')).toBeVisible();
-        await expect(advanced.locator('a[href="/settings?tab=tags"]')).toBeVisible();
+    test('regression: no fake password form; sign-in is described honestly', async ({ page }) => {
+        await expect(page.getByLabel('Current password')).toHaveCount(0);
+        await expect(page.getByTestId('signin-card')).toContainText(/Google|Local development/);
+    });
+
+    test('connected accounts start empty — no seeded Fidelity/Vanguard/IBKR rows', async ({ page }) => {
+        const section = page.locator('#accounts');
+        await expect(section).toBeVisible();
+        await expect(section.getByText('****1234')).toHaveCount(0);
+        await expect(section.getByText('Interactive Brokers')).toHaveCount(0);
+    });
+
+    test('profile shows the signed-in identity instead of John Doe', async ({ page }) => {
+        await expect(page.getByText('john@example.com')).toHaveCount(0);
+        await expect(page.getByTestId('profile-email')).not.toHaveText('');
+    });
+
+    test('example data can be hidden and shown again', async ({ page }) => {
+        const card = page.getByTestId('example-data-card');
+        const toggle = card.getByRole('checkbox');
+        await expect(toggle).toBeChecked();
+        await clickUntil(card.locator('label.pm-switch'), async () => {
+            await expect(toggle).not.toBeChecked({ timeout: 1000 });
+        });
+        await gotoAppPage(page, '/strategies');
+        await expect(page.getByTestId('sample-empty-state')).toBeVisible();
+        await page.getByRole('button', { name: 'Show example data' }).click();
+        await expect(page.locator('.pm-strategy-card').first()).toBeVisible();
     });
 
     test('Plaid Link flow discovers and connects selected accounts', async ({ page }) => {
@@ -163,8 +177,10 @@ test.describe('Settings page (v2 card grid)', () => {
         const card = page.getByTestId('integrations-card');
         await expect(card).toBeVisible();
 
-        await card.getByRole('button', { name: /^Connect$/ }).click();
         const panel = card.getByTestId('plaid-link-panel');
+        await clickUntil(card.getByRole('button', { name: /^Connect$/ }), async () => {
+            await expect(panel).toBeVisible({ timeout: 1500 });
+        });
         await expect(panel).toHaveAttribute('data-state', 'review');
         await expect(panel).toContainText('Plaid Sandbox Investments');
         await expect(panel).toContainText('Access token stored server-side');
@@ -180,15 +196,10 @@ test.describe('Settings page (v2 card grid)', () => {
         await expect(card.locator('.pm-integration-provider')).toHaveCount(2);
     });
 
-    test('deep-links via ?tab=notifications render the legacy tabbed surface', async ({ page }) => {
+    test('legacy ?tab=notifications links land on the Notifications section', async ({ page }) => {
         await gotoAppPage(page, '/settings?tab=notifications');
 
-        // Legacy header is preserved with its own h2 at the top of the page.
-        await expect(page.locator('h2', { hasText: 'Advanced settings' })).toBeVisible();
-
-        // The tab UI is still there — the Notifications tab becomes the
-        // active one when `?tab=notifications` is in the URL.
-        await expect(page.getByRole('tab', { name: /Notifications/ })).toBeVisible();
+        await expect(page.locator('#notifications')).toBeInViewport();
         await expect(page.getByText('Portfolio Updates').first()).toBeVisible();
         await expect(page.getByText('Alpha Radar Signals').first()).toBeVisible();
         await expect(page.getByTestId('alpha-radar-delivery-preferences')).toBeVisible();
@@ -217,24 +228,22 @@ test.describe('Settings page (v2 card grid)', () => {
         await expect(page.getByRole('option', { name: 'Alpha Radar: large add' })).toBeVisible();
     });
 
-    test('deep-links via ?tab=tags show the tags manager content', async ({ page }) => {
+    test('legacy ?tab=tags links land on Preferences with the tags manager', async ({ page }) => {
         await gotoAppPage(page, '/settings?tab=tags');
 
-        await expect(page.getByRole('tab', { name: /Tags/ })).toBeVisible();
+        await expect(page.locator('#preferences')).toBeInViewport();
         // Default tags from the store.
         await expect(page.getByText('Growth').first()).toBeVisible();
         await expect(page.getByText('Dividend').first()).toBeVisible();
         await expect(page.getByText('Speculative').first()).toBeVisible();
     });
 
-    test('deep-links via ?tab=appearance expose theme controls', async ({ page }) => {
+    test('legacy ?tab=appearance links expose theme controls', async ({ page }) => {
         await gotoAppPage(page, '/settings?tab=appearance');
 
-        // AppearanceSettings card renders inside the legacy surface too.
-        await expect(page.getByText('Theme').first()).toBeVisible();
-        // Theme radio tiles (Light / Dim / Dark / Auto).
-        await expect(page.getByLabel('Light', { exact: true })).toBeVisible();
-        await expect(page.getByLabel('Dark', { exact: true })).toBeVisible();
+        const themes = page.getByRole('radiogroup', { name: 'Color theme' });
+        await expect(themes.getByRole('radio', { name: 'Light', exact: true })).toBeVisible();
+        await expect(themes.getByRole('radio', { name: 'Dark', exact: true })).toBeVisible();
     });
 
     test('Execution card exposes the AR-110 mood cooldown picker with 10s selected', async ({ page }) => {
@@ -256,11 +265,11 @@ test.describe('Settings page (v2 card grid)', () => {
         const group = page.getByRole('radiogroup', {
             name: /Mood cooldown duration/,
         });
-        await group.getByRole('radio', { name: '30s' }).click();
-        await expect(group.getByRole('radio', { name: '30s' })).toHaveAttribute(
-            'aria-checked',
-            'true',
-        );
+        // The settings sections hydrate inside a Suspense boundary; retry the
+        // click until React has attached handlers.
+        await clickUntil(group.getByRole('radio', { name: '30s' }), async () => {
+            await expect(group.getByRole('radio', { name: '30s' })).toHaveAttribute('aria-checked', 'true', { timeout: 1000 });
+        });
         await expect(group.getByRole('radio', { name: '10s' })).toHaveAttribute(
             'aria-checked',
             'false',

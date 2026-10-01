@@ -1,5 +1,6 @@
 "use client";
 
+import { SampleTag } from "@/components/data-display/SampleTag";
 import { useMemo } from "react";
 import { Layers } from "lucide-react";
 import {
@@ -82,6 +83,7 @@ export function BucketPolicyCard() {
                         className="pm-settings-card-title"
                     >
                         Bucket policy
+                        <SampleTag label="Example preview" title="The preview runs your rule against example holdings until an account is connected." />
                     </h2>
                 </div>
                 <span className="pm-settings-card-sub">

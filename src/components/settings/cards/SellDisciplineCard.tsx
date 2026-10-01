@@ -1,5 +1,6 @@
 "use client";
 
+import { SampleTag } from "@/components/data-display/SampleTag";
 import { useMemo, useState } from "react";
 import { ShieldAlert } from "lucide-react";
 import {
@@ -121,6 +122,7 @@ export function SellDisciplineCard() {
                         className="pm-settings-card-title"
                     >
                         Sell discipline
+                        <SampleTag label="Example preview" title="The preview runs your rule against example holdings until an account is connected." />
                     </h2>
                 </div>
                 <span className="pm-settings-card-sub">

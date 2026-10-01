@@ -15,13 +15,11 @@ import { resolveViewerIdentity } from "@/lib/auth/viewer";
 const appSans = IBM_Plex_Sans({
   subsets: ["latin"],
   weight: ["400", "500", "600", "700"],
-  variable: "--font-app-sans",
   display: "swap",
 });
 const appMono = IBM_Plex_Mono({
   subsets: ["latin"],
   weight: ["400", "500", "600"],
-  variable: "--font-app-mono",
   display: "swap",
 });
 
@@ -52,7 +50,13 @@ export default async function RootLayout({
 }>) {
   const identity = await resolveViewerIdentity();
   return (
-    <html lang="en" suppressHydrationWarning className={cn(appSans.variable, appMono.variable)}>
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        {/* Font variables are set here rather than via a className on <html>:
+            ThemeProvider toggles `dark` on <html>, and a React-owned className
+            there would overwrite it on re-render. */}
+        <style>{`:root{--font-app-sans:${appSans.style.fontFamily};--font-app-mono:${appMono.style.fontFamily}}`}</style>
+      </head>
       <body
         className={cn(
           "min-h-screen bg-background font-sans antialiased overflow-hidden",

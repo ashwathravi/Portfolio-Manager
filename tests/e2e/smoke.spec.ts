@@ -23,3 +23,12 @@ test('homepage has title, topbar heading, and sidebar chrome', async ({ page }) 
     await expect(page.locator('aside.pm-sidebar')).toBeVisible();
     await expect(page.locator('.pm-sidebar-title', { hasText: 'Atlas Wealth' })).toBeVisible();
 });
+
+test('regression: the app font is loaded (IBM Plex), not a silent system fallback', async ({ page }) => {
+    await page.goto('/');
+    const family = await page.evaluate(() => getComputedStyle(document.body).fontFamily);
+    expect(family).toMatch(/IBM Plex Sans/i);
+    await page.evaluate(() => document.fonts.ready);
+    const loaded = await page.evaluate(() => [...document.fonts].some((f) => /IBM Plex Sans/i.test(f.family) && f.status === 'loaded'));
+    expect(loaded).toBe(true);
+});

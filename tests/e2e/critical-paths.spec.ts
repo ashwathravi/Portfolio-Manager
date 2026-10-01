@@ -27,12 +27,13 @@ test.describe('Critical user paths', () => {
 
         // Fill the form. Metric defaults to "price" which requires a symbol.
         const uniqueName = `E2E price alert ${Date.now()}`;
-        await page.getByLabel('Name').fill(uniqueName);
-        await page.getByLabel('Symbol', { exact: false }).fill('tsla');
-        await page.getByLabel('Threshold', { exact: false }).fill('250');
+        const dialog = page.getByRole('dialog');
+        await dialog.getByLabel('Name').fill(uniqueName);
+        await dialog.getByLabel('Symbol', { exact: false }).fill('tsla');
+        await dialog.getByLabel('Threshold', { exact: false }).fill('250');
 
         // Submit.
-        await page.getByRole('button', { name: 'Create', exact: true }).click();
+        await dialog.getByRole('button', { name: 'Create', exact: true }).click();
 
         // Dialog closes and the new rule is rendered in the list. The name also
         // appears in the toast and in sr-only labels on edit/delete buttons, so
@@ -82,8 +83,8 @@ test.describe('Critical user paths', () => {
     test('switching theme to dark applies html.dark class and persists', async ({ page }) => {
         await gotoAppPage(page, '/settings?tab=appearance');
 
-        // Select the Dark theme tile.
-        await page.getByLabel('Dark', { exact: true }).click();
+        // Select the Dark theme option.
+        await page.getByRole('radiogroup', { name: 'Color theme' }).getByRole('radio', { name: 'Dark', exact: true }).click();
 
         // ThemeProvider runs a useEffect that toggles `html.dark`. Wait for it.
         await expect(page.locator('html')).toHaveClass(/(^|\s)dark(\s|$)/);
