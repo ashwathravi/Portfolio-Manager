@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { connection } from "next/server";
 import { IBM_Plex_Mono, IBM_Plex_Sans } from "next/font/google";
 import "./globals.css";
 import "../styles/ledger-refinements.css";
@@ -48,6 +49,9 @@ export default async function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // Every page is per-viewer: render at request time so the identity is
+  // never baked into a statically prerendered page.
+  await connection();
   const identity = await resolveViewerIdentity();
   return (
     <html lang="en" suppressHydrationWarning>
