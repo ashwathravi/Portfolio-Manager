@@ -697,3 +697,12 @@
   border-radius: 4px;
   background: var(--pm-neutral-100);
 }
+
+/* --- Performance hero ------------------------------------------------------ */
+.pm-perf-hero { display: flex; flex-direction: column; gap: 2px; margin: 6px 0 0; }
+.pm-perf-hero-twr { font-size: clamp(30px, 3.6vw, 42px); font-weight: 600; letter-spacing: -0.03em; line-height: 1.05; font-variant-numeric: tabular-nums; }
+.pm-perf-hero-sub { font-size: 13px; color: var(--pm-fg-muted); font-variant-numeric: tabular-nums; }
+/* KPI strip: label and value share one left edge; tabular sans, not mono. */
+.pm-perf-readouts { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 0; background: transparent; border: 0; border-top: 1px solid var(--pm-border); padding: 0; border-radius: 0; }
+.pm-perf-readouts > * { align-items: flex-start !important; text-align: left !important; padding: 10px 14px 0 0; }
+.pm-perf-readouts * { font-family: inherit; font-variant-numeric: tabular-nums; }

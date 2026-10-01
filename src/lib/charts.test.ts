@@ -118,3 +118,16 @@ test('calculateSparklinePoints - handles NaN at the start', () => {
 test('calculateSparklinePoints - returns empty string for only non-finite values', () => {
     assert.strictEqual(calculateSparklinePoints([NaN, Infinity, -Infinity]), '');
 });
+
+test('monthAxisLabels - regression: labels come from the data, not fixed Jan…Dec slots', async () => {
+    const { monthAxisLabels } = await import('./charts');
+    const months = Array.from({ length: 13 }, (_, i) => ({ year: 2025 + Math.floor((9 + i) / 12), month: (9 + i) % 12 }));
+    assert.deepStrictEqual(monthAxisLabels(months), ['Oct 25', 'Jan 26', 'Apr 26', 'Jul 26', 'Oct 26']);
+});
+
+test('monthAxisLabels - short and empty series', async () => {
+    const { monthAxisLabels } = await import('./charts');
+    assert.deepStrictEqual(monthAxisLabels([]), []);
+    assert.deepStrictEqual(monthAxisLabels([{ year: 2026, month: 0 }]), ['Jan 26']);
+    assert.deepStrictEqual(monthAxisLabels([{ year: 2026, month: 0 }, { year: 2026, month: 1 }]), ['Jan 26', 'Feb 26']);
+});

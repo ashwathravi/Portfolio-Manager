@@ -244,3 +244,13 @@ describe("computeRiskPolicyDashboard", () => {
         assert.strictEqual(active.status, "inside");
     });
 });
+
+test('regression: policy targets use the ≤ symbol, not ASCII "<="', () => {
+    const summary = computeRiskPolicyDashboard({
+        holdings: [{ symbol: 'AAPL', marketValue: 1000 }, { symbol: 'MSFT', marketValue: 500 }],
+        cashTotal: 0,
+    });
+    const labels = summary.dimensions.map((d) => d.targetLabel ?? '');
+    assert.ok(labels.some((l) => l.startsWith('≤ ')), labels.join(' | '));
+    assert.ok(labels.every((l) => !l.includes('<=')), labels.join(' | '));
+});

@@ -6,23 +6,49 @@ import type { MonthlyValuation } from './periodSummary';
  * for derived metrics so the numbers shown are internally consistent across
  * charts, Stat cards, and the period-breakdown table.
  */
-const MONTHLY_SAMPLES: ReadonlyArray<{ year: number; month: number; account: number; benchmark: number; deployed: number }> = [
-    { year: 2025, month: 0, account: 100000, benchmark: 100000, deployed: 55000 },
-    { year: 2025, month: 1, account: 101850, benchmark: 101200, deployed: 58000 },
-    { year: 2025, month: 2, account: 105270, benchmark: 102800, deployed: 62000 },
-    { year: 2025, month: 3, account: 104170, benchmark: 102200, deployed: 60000 },
-    { year: 2025, month: 4, account: 106950, benchmark: 103700, deployed: 67000 },
-    { year: 2025, month: 5, account: 111100, benchmark: 106100, deployed: 72000 },
-    { year: 2025, month: 6, account: 110420, benchmark: 105400, deployed: 68000 },
-    { year: 2025, month: 7, account: 114320, benchmark: 107900, deployed: 74000 },
-    { year: 2025, month: 8, account: 119530, benchmark: 110800, deployed: 80000 },
-    { year: 2025, month: 9, account: 121160, benchmark: 111900, deployed: 78000 },
-    { year: 2025, month: 10, account: 120240, benchmark: 111100, deployed: 82000 },
-    { year: 2025, month: 11, account: 124720, benchmark: 113600, deployed: 88000 },
-    { year: 2026, month: 0, account: 131060, benchmark: 117000, deployed: 92000 },
-    { year: 2026, month: 1, account: 133560, benchmark: 118500, deployed: 96820 },
-    { year: 2026, month: 2, account: 137410, benchmark: 120800, deployed: 99500 },
-];
+// Example monthly returns (%) for the portfolio and the S&P 500 benchmark,
+// oldest first. Shaped like a real concentrated growth book: mostly up,
+// with genuine drawdowns (a -6.8% month inside a two-month slide), so the
+// derived Sharpe, Sortino, and max drawdown look plausible.
+const PORTFOLIO_RETURNS_PCT = [1.9, 3.1, -2.4, 2.7, 3.8, -4.6, 3.2, 4.1, -1.2, -6.8, 5.3, 4.9, 1.4, 2.6, -3.1, 2.2, 3.9, -1.7, 2.8, 1.1, -2.9, 3.6, 2.4, 1.8];
+const BENCHMARK_RETURNS_PCT = [1.2, 1.6, -1.5, 1.9, 2.1, -2.8, 2.0, 2.4, -0.9, -4.1, 3.6, 2.7, 0.9, 1.5, -1.8, 1.4, 2.2, -0.8, 1.6, 0.7, -1.9, 2.3, 1.2, 1.1];
+
+/**
+ * Builds the example series so the last point is the most recent complete
+ * month before `now` (UTC). Deterministic within a calendar month, so the
+ * server render and hydration agree.
+ */
+export function buildMonthlySamples(now: number): Array<{ year: number; month: number; account: number; benchmark: number; deployed: number }> {
+    const d = new Date(now);
+    let year = d.getUTCFullYear();
+    let month = d.getUTCMonth() - 1; // last complete month
+    if (month < 0) {
+        month = 11;
+        year -= 1;
+    }
+    const points = PORTFOLIO_RETURNS_PCT.length + 1;
+    const startIndex = year * 12 + month - (points - 1);
+    let account = 100_000;
+    let benchmark = 100_000;
+    const out = [];
+    for (let i = 0; i < points; i++) {
+        if (i > 0) {
+            account *= 1 + PORTFOLIO_RETURNS_PCT[i - 1] / 100;
+            benchmark *= 1 + BENCHMARK_RETURNS_PCT[i - 1] / 100;
+        }
+        const idx = startIndex + i;
+        out.push({
+            year: Math.floor(idx / 12),
+            month: idx % 12,
+            account: Math.round(account),
+            benchmark: Math.round(benchmark),
+            deployed: Math.round(account * (0.55 + 0.3 * (i / (points - 1)))),
+        });
+    }
+    return out;
+}
+
+const MONTHLY_SAMPLES = buildMonthlySamples(Date.now());
 
 const MONTH_LABEL = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 

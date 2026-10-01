@@ -112,4 +112,20 @@ describe('computeRiskSnapshot', () => {
         const snapshot = computeRiskSnapshot(flatUp, flatBench);
         assert.strictEqual(snapshot.sortinoRatio, 0);
     });
+
+    test('regression: Sortino uses downside deviation over all months, not the spread of losing months', () => {
+        // Monthly returns: +10%, -1%, +10%, -1.1% (two near-identical losses).
+        const values = [100, 110, 108.9, 119.79, 118.47231];
+        const snapshot = computeRiskSnapshot(monthly(values), monthly(values));
+        // Target semideviation: sqrt((0.01^2 + 0.011^2) / 4) ≈ 0.007433 → ×√12 ≈ 0.025749.
+        // Mean monthly return ≈ 0.04475 → ×12 ≈ 0.537. Sortino ≈ 20.9.
+        // The old formula (stddev of the two losses ≈ 0.000707) gave ≈ 219.
+        assert.ok(snapshot.sortinoRatio > 15 && snapshot.sortinoRatio < 25, `got ${snapshot.sortinoRatio}`);
+    });
+
+    test('a single losing month still produces a finite Sortino', () => {
+        const values = [100, 102, 101, 103, 105];
+        const snapshot = computeRiskSnapshot(monthly(values), monthly(values));
+        assert.ok(Number.isFinite(snapshot.sortinoRatio) && snapshot.sortinoRatio > 0);
+    });
 });
