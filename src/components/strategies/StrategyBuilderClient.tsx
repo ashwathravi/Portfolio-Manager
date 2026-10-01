@@ -2,6 +2,7 @@
 
 import { useCallback, useMemo, useState } from "react";
 import { SEED_STRATEGIES } from "@/lib/strategies/seed";
+import { resolveSelectedStrategyId } from "@/lib/strategies/routes";
 import {
     addRule,
     removeRule,
@@ -61,9 +62,11 @@ import { AdherenceImpactCard } from "./AdherenceImpactCard";
  * follows for free.
  */
 
-export function StrategyBuilderClient() {
+export function StrategyBuilderClient({ initialStrategyId }: { initialStrategyId?: string } = {}) {
     const [strategies, setStrategies] = useState<Strategy[]>(SEED_STRATEGIES);
-    const [selectedId, setSelectedId] = useState<string>(strategies[0]?.id ?? "");
+    const [selectedId, setSelectedId] = useState<string>(
+        () => resolveSelectedStrategyId(initialStrategyId, SEED_STRATEGIES),
+    );
 
     // AR-111. Per-strategy adherence rules. Seeded from the hardcoded
     // palette so every strategy shows meaningful rows on first render;

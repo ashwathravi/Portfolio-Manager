@@ -39,3 +39,16 @@ export async function clickUntil(
         await assertion();
     }).toPass({ timeout });
 }
+
+/**
+ * Starts collecting browser console errors and uncaught page errors.
+ * Call before navigation; read the returned array after the page settles.
+ */
+export function collectConsoleErrors(page: Page): string[] {
+    const errors: string[] = [];
+    page.on('console', (msg) => {
+        if (msg.type() === 'error') errors.push(msg.text());
+    });
+    page.on('pageerror', (err) => errors.push(String(err)));
+    return errors;
+}

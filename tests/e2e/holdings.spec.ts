@@ -59,3 +59,13 @@ test.describe('Holdings page', () => {
         ).toBeVisible();
     });
 });
+
+test.describe('Holdings layout', () => {
+    test('regression: holdings content keeps a page gutter instead of touching the sidebar', async ({ page }) => {
+        await page.goto('/portfolios/holdings');
+        const stack = page.locator('.pm-holdings-stack');
+        await expect(stack).toBeVisible();
+        const paddingLeft = await stack.evaluate((el) => parseFloat(getComputedStyle(el).paddingLeft));
+        expect(paddingLeft).toBeGreaterThanOrEqual(16);
+    });
+});

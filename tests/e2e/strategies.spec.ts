@@ -255,3 +255,32 @@ test.describe('Strategies page — Adherence impact card (AR-111)', () => {
         }
     });
 });
+
+/**
+ * Regression: /strategies/[id] and /strategies/[id]/backtest used to render
+ * "Strategy not found" for every seeded strategy. They now open the
+ * workspace with that strategy selected.
+ */
+test.describe('Strategies page — legacy strategy URLs', () => {
+    test('/strategies/<seeded id> selects that strategy in the workspace', async ({ page }) => {
+        await page.goto('/strategies/strategy-mean-reversion');
+        await expect(page).toHaveURL(/\/strategies\?strategy=strategy-mean-reversion$/);
+        await expect(page.getByText('Strategy not found')).toHaveCount(0);
+        const cards = page.locator('.pm-strategy-card');
+        await expect(cards.nth(1)).toHaveAttribute('aria-pressed', 'true');
+    });
+
+    test('/strategies/<seeded id>/backtest lands on the same workspace', async ({ page }) => {
+        await page.goto('/strategies/strategy-sector-rotation/backtest');
+        await expect(page).toHaveURL(/\/strategies\?strategy=strategy-sector-rotation$/);
+        await expect(page.locator('.pm-strategy-card').nth(2)).toHaveAttribute('aria-pressed', 'true');
+        await expect(page.locator('.pm-bt-panel').first()).toBeVisible();
+    });
+
+    test('an unknown strategy id shows the 404 page', async ({ page }) => {
+        // The /strategies segment streams a loading shell first, so the HTTP
+        // status is not reliable in dev; assert on the rendered 404 instead.
+        await page.goto('/strategies/does-not-exist');
+        await expect(page.getByText('Page not found')).toBeVisible();
+    });
+});

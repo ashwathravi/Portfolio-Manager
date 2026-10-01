@@ -27,6 +27,18 @@ describe('market-data validators', () => {
             }
         });
 
+        test('should accept crypto and share-class tickers with a hyphen', () => {
+            for (const ticker of ['BTC-USD', 'ETH-USD', 'BRK-B']) {
+                assert.strictEqual(tickerSchema.safeParse(ticker).success, true, `Failed for ${ticker}`);
+            }
+        });
+
+        test('should reject leading, trailing, or doubled separators', () => {
+            for (const ticker of ['-BTC', 'BTC-', 'BTC--USD', '.AAPL', 'BRK..B', 'BTC.-USD']) {
+                assert.strictEqual(tickerSchema.safeParse(ticker).success, false, `Accepted invalid ticker ${ticker}`);
+            }
+        });
+
         test('should reject tickers that are too long', () => {
             const invalid = 'VERYLONGTICKER';
             const result = tickerSchema.safeParse(invalid);
@@ -56,6 +68,12 @@ describe('market-data validators', () => {
             if (result.success) {
                 assert.deepStrictEqual(result.data, ['AAPL']);
             }
+        });
+
+        test('regression: sidebar market card batch with BTC-USD is accepted', () => {
+            const result = symbolsSchema.safeParse('SPY,QQQ,BTC-USD');
+            assert.strictEqual(result.success, true);
+            if (result.success) assert.deepStrictEqual(result.data, ['SPY', 'QQQ', 'BTC-USD']);
         });
 
         test('should reject if any symbol is invalid', () => {

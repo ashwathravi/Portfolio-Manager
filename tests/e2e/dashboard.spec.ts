@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { clickUntil, gotoAppPage, reloadAppPage } from './helpers/app';
+import { clickUntil, collectConsoleErrors, gotoAppPage, reloadAppPage } from './helpers/app';
 
 /**
  * Phase 9 (AR-94) + AR-112 Dashboard tests.
@@ -58,6 +58,8 @@ test.describe('Dashboard page', () => {
     test('DashboardTopbar exposes Reconcile + New order quick-actions', async ({ page }) => {
         await expect(page.getByRole('link', { name: /Reconcile/ })).toBeVisible();
         await expect(page.getByRole('link', { name: /New order/ })).toBeVisible();
+        // Regression: "New order" used to open the legacy /portfolios page.
+        await expect(page.getByRole('link', { name: /New order/ })).toHaveAttribute('href', '/execution');
     });
 
     test('stat row renders the four headline cards', async ({ page }) => {
@@ -365,5 +367,14 @@ test.describe('Weekly review ritual (AR-114)', () => {
         await expect(page.getByTestId('weekly-review-card')).toBeHidden();
         await reloadAppPage(page);
         await expect(page.getByTestId('weekly-review-card')).toBeHidden();
+    });
+});
+
+test.describe('Dashboard console hygiene', () => {
+    test('regression: charts do not log invalid <svg> height errors', async ({ page }) => {
+        const errors = collectConsoleErrors(page);
+        await gotoAppPage(page, '/');
+        await page.waitForLoadState('networkidle');
+        expect(errors.filter((e) => e.includes('<svg> attribute height'))).toEqual([]);
     });
 });

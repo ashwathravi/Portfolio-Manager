@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Plus, RefreshCw } from "lucide-react";
 import { useSettingsStore } from "@/lib/stores/settingsStore";
+import { marketStateLabel as computeMarketStateLabel } from "@/lib/markets/market-hours";
 
 /**
  * Phase 3 (AR-71) Dashboard topbar.
@@ -29,16 +30,16 @@ export interface DashboardTopbarProps {
     marketStateLabel?: string;
     /** Epoch-ms the live-quote layer last refreshed. Renders "Updated Ns ago". */
     lastUpdatedAt?: number | null;
-    /** Primary action href; defaults to /portfolios. */
+    /** Primary action href; defaults to /execution. */
     newOrderHref?: string;
     /** Secondary action href; defaults to /portfolios/holdings. */
     reconcileHref?: string;
 }
 
 export function DashboardTopbar({
-    marketStateLabel = "Markets open",
+    marketStateLabel,
     lastUpdatedAt,
-    newOrderHref = "/portfolios",
+    newOrderHref = "/execution",
     reconcileHref = "/portfolios/holdings",
 }: DashboardTopbarProps) {
     const fullName = useSettingsStore((s) => s.profile.fullName);
@@ -47,6 +48,8 @@ export function DashboardTopbar({
     const greeting = useTimeOfDayGreeting();
     const dayLabel = useWeekdayLabel();
     const updated = useRelativeUpdated(lastUpdatedAt);
+    const liveMarketState = useMarketStateLabel();
+    const marketState = marketStateLabel ?? liveMarketState;
 
     return (
         <header className="pm-dashboard-topbar">
@@ -58,7 +61,7 @@ export function DashboardTopbar({
                 </nav>
                 <h1 className="pm-greeting">Good {greeting}, {firstName}</h1>
                 <p className="pm-greeting-sub">
-                    {dayLabel} · {marketStateLabel}
+                    {dayLabel}{marketState ? ` · ${marketState}` : ""}
                     {updated ? ` · ${updated}` : ""}
                 </p>
             </div>
@@ -100,6 +103,24 @@ function computeGreeting(): string {
     if (h < 12) return "morning";
     if (h < 18) return "afternoon";
     return "evening";
+}
+
+/**
+ * Live NYSE state, computed client-side only (null during SSR) so the
+ * server render and first client paint match.
+ */
+function useMarketStateLabel(): string | null {
+    const [label, setLabel] = useState<string | null>(null);
+    useEffect(() => {
+        const update = () => setLabel(computeMarketStateLabel());
+        const first = setTimeout(update, 0);
+        const id = setInterval(update, 60 * 1000);
+        return () => {
+            clearTimeout(first);
+            clearInterval(id);
+        };
+    }, []);
+    return label;
 }
 
 /** Renders "Tuesday" / "Friday" etc. Recomputes at midnight for kept-open tabs. */

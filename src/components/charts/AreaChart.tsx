@@ -89,6 +89,10 @@ const PAD_RIGHT = 16;
 const PAD_BOTTOM = 28;
 const PAD_LEFT = 44;
 
+// `height="auto"` is not a valid SVG length (browsers log an error and
+// ignore it). CSS `height: auto` gives the intended viewBox-ratio sizing.
+const SVG_AUTO_HEIGHT = { height: "auto" } as const;
+
 export function AreaChart({
     data,
     benchmark,
@@ -128,7 +132,7 @@ export function AreaChart({
                 <svg
                     viewBox={`0 0 ${width} ${height}`}
                     width="100%"
-                    height="auto"
+                    style={SVG_AUTO_HEIGHT}
                     role="img"
                     aria-hidden={!ariaLabel}
                     preserveAspectRatio="none"
@@ -146,7 +150,7 @@ export function AreaChart({
             <svg
                 viewBox={`0 0 ${width} ${height}`}
                 width="100%"
-                height="auto"
+                style={SVG_AUTO_HEIGHT}
                 role="img"
                 aria-label={ariaLabel}
                 preserveAspectRatio="none"

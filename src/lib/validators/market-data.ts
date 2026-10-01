@@ -6,7 +6,8 @@ export const MAX_MARKET_DATA_SYMBOLS = 100;
 export const tickerSchema = z.string()
     .min(1, "Ticker is required")
     .max(10, "Ticker symbol too long")
-    .regex(/^[A-Z0-9.]+$/, "Ticker must be uppercase alphanumeric or dots")
+    // Letters/digits joined by single dots or hyphens: AAPL, BRK.B, BTC-USD.
+    .regex(/^[A-Z0-9]+(?:[.-][A-Z0-9]+)*$/, "Ticker must be uppercase letters or digits, optionally joined by dots or hyphens")
     .pipe(safeText);
 
 export const symbolsSchema = z.string()

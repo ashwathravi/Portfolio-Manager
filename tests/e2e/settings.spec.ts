@@ -421,3 +421,21 @@ function plaidE2EAccount({
         verificationStatus: 'automatically_verified',
     };
 }
+
+test.describe('Settings card layout', () => {
+    test('regression: guardrail and execution rows are inset from the card edge', async ({ page }) => {
+        await gotoAppPage(page, '/settings');
+        const lists = page.locator('.pm-guard-list');
+        await expect(lists.first()).toBeVisible();
+        const count = await lists.count();
+        expect(count).toBeGreaterThan(0);
+        for (let i = 0; i < count; i++) {
+            const padding = await lists.nth(i).evaluate((el) => {
+                const cs = getComputedStyle(el);
+                return { left: parseFloat(cs.paddingLeft), right: parseFloat(cs.paddingRight) };
+            });
+            expect(padding.left).toBeGreaterThanOrEqual(12);
+            expect(padding.right).toBeGreaterThanOrEqual(12);
+        }
+    });
+});
