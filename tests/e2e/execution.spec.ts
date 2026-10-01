@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { gotoAppPage, reloadAppPage } from './helpers/app';
+import { clickUntil, gotoAppPage, reloadAppPage } from './helpers/app';
 
 /**
  * Phase 9 (AR-94) Execution tests.
@@ -339,8 +339,10 @@ test.describe('Execution page — pre-trade rationale (AR-109)', () => {
             'Toggle pre-trade rationale requirement',
         );
         await expect(toggle).toBeChecked();
-        await toggle.click();
-        await expect(toggle).not.toBeChecked();
+        // Settings sections hydrate inside a Suspense boundary; retry until handlers attach.
+        await clickUntil(toggle, async () => {
+            await expect(toggle).not.toBeChecked({ timeout: 1000 });
+        });
 
         // Back to Execution — rationale panel should be gone and Submit
         // should only be blocked by the regular order-form / policy validation.
@@ -485,11 +487,9 @@ test.describe('Execution page — caution-mood cooldown (AR-110)', () => {
             name: /Mood cooldown duration/,
         });
         await expect(group).toBeVisible();
-        await group.getByRole('radio', { name: 'Off' }).click();
-        await expect(group.getByRole('radio', { name: 'Off' })).toHaveAttribute(
-            'aria-checked',
-            'true',
-        );
+        await clickUntil(group.getByRole('radio', { name: 'Off' }), async () => {
+            await expect(group.getByRole('radio', { name: 'Off' })).toHaveAttribute('aria-checked', 'true', { timeout: 1000 });
+        });
 
         // Back to Execution — completing a FOMO rationale and pressing
         // Submit should fire immediately (no countdown button).

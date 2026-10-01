@@ -257,6 +257,7 @@ test.describe('Performance › Behaviour — Reviews archive (AR-114)', () => {
         const card = page.getByTestId('reviews-archive');
         const rows = card.getByTestId('reviews-archive-row');
         const empty = card.getByTestId('reviews-archive-empty');
+        await expect(rows.first().or(empty)).toBeVisible();
 
         const rowCount = await rows.count();
         const emptyVisible = await empty.isVisible().catch(() => false);
@@ -297,6 +298,7 @@ test.describe('Performance › Behaviour — Reviews archive (AR-114)', () => {
     test('archive rows carry three mini-stats (Realized / Adherence / Trades)', async ({ page }) => {
         const card = page.getByTestId('reviews-archive');
         const rows = card.getByTestId('reviews-archive-row');
+        await expect(rows.first().or(card.getByTestId('reviews-archive-empty'))).toBeVisible();
         const rowCount = await rows.count();
         if (rowCount === 0) test.skip();
         const first = rows.first();
