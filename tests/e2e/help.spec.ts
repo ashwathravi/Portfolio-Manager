@@ -69,8 +69,9 @@ test.describe('Help page', () => {
         await gotoAppPage(page, '/settings?tab=notifications');
         const helpLink = page.getByTestId('alpha-radar-delivery-help');
         await expect(helpLink).toHaveAttribute('href', '/help#alpha-radar-v2');
-        await helpLink.click();
-        await expect(page).toHaveURL(/\/help#alpha-radar-v2$/);
+        await clickUntil(helpLink, async () => {
+            await expect(page).toHaveURL(/\/help#alpha-radar-v2$/, { timeout: 1500 });
+        });
         await expect(page.getByTestId('alpha-radar-help-v2')).toBeVisible();
     });
 

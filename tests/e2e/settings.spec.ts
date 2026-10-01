@@ -342,7 +342,10 @@ test.describe('Settings page', () => {
         const card = page.getByTestId('employer-stock-plan-card');
         await expect(card).toBeVisible();
 
-        await page.getByLabel('Employer-stock plan state').selectOption('active');
+        await expect(async () => {
+            await page.getByLabel('Employer-stock plan state').selectOption('active');
+            await expect(page.getByLabel('Employer-stock plan state')).toHaveValue('active', { timeout: 1000 });
+        }).toPass({ timeout: 10_000 });
         await page.getByLabel('Employer target allocation').fill('5');
         await page.getByLabel('Employer intermediate target allocation').fill('8');
         await page.getByLabel('Employer trim amount').fill('10000');

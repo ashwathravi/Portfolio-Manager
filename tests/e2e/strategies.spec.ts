@@ -52,9 +52,11 @@ test.describe('Strategies page — Phase 6 builder shell', () => {
     test('renders three seed strategy cards in the top row', async ({ page }) => {
         const cards = page.locator('.pm-strategy-card');
         await expect(cards).toHaveCount(3);
-        await expect(page.getByText('Momentum + Value')).toBeVisible();
-        await expect(page.getByText('Mean Reversion')).toBeVisible();
-        await expect(page.getByText('Sector Rotation')).toBeVisible();
+        // Scoped to the switcher: the selected name is also in the breadcrumb.
+        const row = page.locator('.pm-strategy-row');
+        await expect(row.getByText('Momentum + Value')).toBeVisible();
+        await expect(row.getByText('Mean Reversion')).toBeVisible();
+        await expect(row.getByText('Sector Rotation')).toBeVisible();
     });
 
     test('selects the first strategy by default and updates on click', async ({ page }) => {

@@ -25,8 +25,10 @@ export async function reloadAppPage(page: Page) {
 export async function selectAppTab(page: Page, name: string | RegExp) {
     const tab = page.getByRole('tab', { name });
     await expect(tab).toBeVisible();
-    await tab.click();
-    await expect(tab).toHaveAttribute('aria-selected', 'true');
+    await expect(async () => {
+        await tab.click();
+        await expect(tab).toHaveAttribute('aria-selected', 'true', { timeout: 1000 });
+    }).toPass({ timeout: 10_000 });
 }
 
 export async function clickUntil(

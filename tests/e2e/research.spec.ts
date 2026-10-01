@@ -17,14 +17,17 @@ test.describe('Research page', () => {
     test('regression: research tabs sit on one row (Alpha Radar no longer wraps)', async ({ page }) => {
         const tabs = page.getByRole('tablist', { name: 'Research section' }).getByRole('tab');
         await expect(tabs).toHaveCount(5);
-        const count = await tabs.count();
-        const tops = new Set<number>();
-        for (let i = 0; i < count; i++) {
-            const box = await tabs.nth(i).boundingBox();
-            expect(box?.height ?? 0).toBeLessThan(40);
-            tops.add(Math.round(box?.y ?? 0));
-        }
-        expect(tops.size).toBe(1);
+        await page.evaluate(() => document.fonts.ready);
+        // Measure once layout settles (fonts swap in after hydration).
+        await expect(async () => {
+            const tops = new Set<number>();
+            for (let i = 0; i < 5; i++) {
+                const box = await tabs.nth(i).boundingBox();
+                expect(box?.height ?? 0).toBeLessThan(40);
+                tops.add(Math.round(box?.y ?? 0));
+            }
+            expect(tops.size).toBe(1);
+        }).toPass({ timeout: 5000 });
     });
 
     test('regression: delete lives in an overflow menu, not beside Edit', async ({ page }) => {

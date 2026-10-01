@@ -84,10 +84,14 @@ test.describe('Critical user paths', () => {
         await gotoAppPage(page, '/settings?tab=appearance');
 
         // Select the Dark theme option.
-        await page.getByRole('radiogroup', { name: 'Color theme' }).getByRole('radio', { name: 'Dark', exact: true }).click();
-
-        // ThemeProvider runs a useEffect that toggles `html.dark`. Wait for it.
-        await expect(page.locator('html')).toHaveClass(/(^|\s)dark(\s|$)/);
+        // Settings hydrates inside a Suspense boundary; retry until the click lands.
+        // ThemeProvider runs a useEffect that toggles `html.dark`.
+        await clickUntil(
+            page.getByRole('radiogroup', { name: 'Color theme' }).getByRole('radio', { name: 'Dark', exact: true }),
+            async () => {
+                await expect(page.locator('html')).toHaveClass(/(^|\s)dark(\s|$)/, { timeout: 1000 });
+            },
+        );
 
         // Navigate away — the class should remain since the settings store persists.
         await gotoAppPage(page, '/');

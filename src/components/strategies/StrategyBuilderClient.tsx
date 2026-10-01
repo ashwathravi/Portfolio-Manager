@@ -30,7 +30,7 @@ import {
     rollingAdherenceScore,
     adherenceTier,
 } from "@/lib/adherence/impact";
-import { SEED_JOURNAL } from "@/lib/journal/seed";
+import { SEED_JOURNAL, SEED_JOURNAL_ANCHOR_MS } from "@/lib/journal/seed";
 import { StrategyCard } from "./StrategyCard";
 import { RuleBuilderPanel } from "./RuleBuilderPanel";
 import { BacktestPanel } from "./BacktestPanel";
@@ -142,6 +142,9 @@ export function StrategyBuilderClient({ initialStrategyId }: { initialStrategyId
             SEED_JOURNAL,
             selected.id,
             SEED_THESIS_TO_STRATEGY,
+            30,
+            // Same anchor as the example journal, so server and client agree.
+            SEED_JOURNAL_ANCHOR_MS,
         );
     }, [selected]);
     const rollingTier = useMemo(
@@ -159,6 +162,8 @@ export function StrategyBuilderClient({ initialStrategyId }: { initialStrategyId
                 SEED_JOURNAL,
                 s.id,
                 SEED_THESIS_TO_STRATEGY,
+                30,
+                SEED_JOURNAL_ANCHOR_MS,
             );
         }
         return map;
