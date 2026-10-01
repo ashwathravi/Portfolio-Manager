@@ -1,10 +1,12 @@
 import { test, expect } from '@playwright/test';
+import { gotoAppPage } from './helpers/app';
 
 /**
  * AR-115 — Ask Ledger (NL queries with tool-calling).
  *
  * Coverage:
- *   - ⌘K opens the overlay, Escape closes it, backdrop click closes it
+ *   - ⌘K / the top-bar search box opens the command palette; questions
+ *     are handed to the Ask overlay; Escape closes
  *   - Dedicated `/ask` page renders the sheet inline
  *   - Suggested prompts submit and produce a recognisable answer
  *   - History persists across reload under `pm-ask-v1`
@@ -15,7 +17,17 @@ import { test, expect } from '@playwright/test';
  * seed data, so the assistant reply is the same on every run.
  */
 
-test.describe('Ask Ledger — shortcut overlay', () => {
+const modifier = () => (process.platform === 'darwin' ? 'Meta' : 'Control');
+
+/** ⌘K → choose "Ask Ledger" (first item for an empty query). */
+async function openAskOverlay(page: import('@playwright/test').Page) {
+    await page.keyboard.press(`${modifier()}+KeyK`);
+    await expect(page.getByTestId('command-palette')).toBeVisible();
+    await page.keyboard.press('Enter');
+    await expect(page.getByTestId('ask-overlay')).toBeVisible();
+}
+
+test.describe('Ask Ledger — ⌘K command palette', () => {
     test.beforeEach(async ({ page }) => {
         // Reset persisted chat so every test starts with an empty sheet.
         await page.addInitScript(() => {
@@ -29,35 +41,54 @@ test.describe('Ask Ledger — shortcut overlay', () => {
                 /* ignore */
             }
         });
-        await page.goto('/');
+        await gotoAppPage(page, '/');
     });
 
-    test('Cmd+K (or Ctrl+K) opens the Ask overlay', async ({ page }) => {
-        await expect(page.getByTestId('ask-overlay')).toHaveCount(0);
-        const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
-        await page.keyboard.press(`${modifier}+KeyK`);
-        await expect(page.getByTestId('ask-overlay')).toBeVisible();
-        await expect(page.getByTestId('ask-sheet')).toBeVisible();
+    test('regression: the top-bar search box opens the command palette (was inert)', async ({ page }) => {
+        await page.getByRole('button', { name: 'Search or jump to' }).click();
+        await expect(page.getByTestId('command-palette')).toBeVisible();
     });
 
-    test('Escape closes the overlay once open', async ({ page }) => {
-        const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
-        await page.keyboard.press(`${modifier}+KeyK`);
-        await expect(page.getByTestId('ask-overlay')).toBeVisible();
+    test('Cmd+K opens the palette; Escape closes it', async ({ page }) => {
+        await expect(page.getByTestId('command-palette')).toHaveCount(0);
+        await page.keyboard.press(`${modifier()}+KeyK`);
+        await expect(page.getByTestId('command-palette')).toBeVisible();
         await page.keyboard.press('Escape');
-        await expect(page.getByTestId('ask-overlay')).toHaveCount(0);
+        await expect(page.getByTestId('command-palette')).toHaveCount(0);
     });
 
-    test('Close button dismisses the overlay', async ({ page }) => {
-        const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
-        await page.keyboard.press(`${modifier}+KeyK`);
+    test('typing a page name and pressing Enter navigates there', async ({ page }) => {
+        await page.keyboard.press(`${modifier()}+KeyK`);
+        await page.getByLabel('Search or jump to').last().fill('activity');
+        await page.keyboard.press('Enter');
+        await expect(page).toHaveURL(/\/portfolios\/activity$/);
+        await expect(page.getByTestId('command-palette')).toHaveCount(0);
+    });
+
+    test('a ticker opens its position detail', async ({ page }) => {
+        await page.keyboard.press(`${modifier()}+KeyK`);
+        await page.getByLabel('Search or jump to').last().fill('nvda');
+        await page.getByTestId('command-item').filter({ hasText: 'Open NVDA' }).click();
+        await expect(page).toHaveURL(/\/portfolios\/detail\/NVDA$/);
+    });
+
+    test('a question is handed to Ask Ledger and answered', async ({ page }) => {
+        await page.keyboard.press(`${modifier()}+KeyK`);
+        await page.getByLabel('Search or jump to').last().fill('Am I overexposed to AI?');
+        await page.keyboard.press('Enter');
+        await expect(page.getByTestId('ask-overlay')).toBeVisible();
+        await expect(page.getByTestId('ask-msg-user')).toContainText('Am I overexposed to AI?');
+        await expect(page.getByTestId('ask-msg-assistant')).toHaveCount(1);
+    });
+
+    test('Close button dismisses the Ask overlay', async ({ page }) => {
+        await openAskOverlay(page);
         await page.getByTestId('ask-close').click();
         await expect(page.getByTestId('ask-overlay')).toHaveCount(0);
     });
 
     test('Suggested prompt produces a deterministic assistant reply', async ({ page }) => {
-        const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
-        await page.keyboard.press(`${modifier}+KeyK`);
+        await openAskOverlay(page);
 
         // Click the "hurt my alpha" suggestion — keyword planner routes
         // this to `top_alpha_contributors` with direction=negative.
@@ -165,9 +196,9 @@ test.describe('Ask Ledger — dedicated /ask page', () => {
 });
 
 test.describe('Ask Ledger — sidebar nav', () => {
-    test('sidebar exposes Ask Ledger link with Beta pill', async ({ page }) => {
+    test('sidebar exposes the Ask link with Beta pill', async ({ page }) => {
         await page.goto('/');
-        const link = page.getByRole('link', { name: /Ask Ledger/i });
+        const link = page.locator('aside.pm-sidebar').getByRole('link', { name: /^Ask\b/ });
         await expect(link).toBeVisible();
         await expect(link).toContainText(/Beta/i);
         await link.click();

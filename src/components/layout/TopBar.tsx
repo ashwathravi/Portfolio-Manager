@@ -64,16 +64,10 @@ function useEtClock(): string {
     return now ? formatEtClock(now) : '';
 }
 
-interface TopBarProps {
-    /** Optional callback for the ⌘K command palette. If not wired, the
-     *  search button is inert (but still keyboard-focusable). Phase 2 lands
-     *  the real palette. */
-    onSearchClick?: () => void;
-}
-
-export function TopBar({ onSearchClick }: TopBarProps) {
+export function TopBar() {
     const toggleSidebar = useUiStore((s) => s.toggleSidebar);
     const toggleTweaks = useUiStore((s) => s.toggleTweaks);
+    const openCommand = useUiStore((s) => s.openCommand);
     const header = useCurrentPageHeader();
     const clock = useEtClock();
     const pathname = usePathname() ?? '/';
@@ -89,20 +83,7 @@ export function TopBar({ onSearchClick }: TopBarProps) {
         setIsMac(/Mac|iPhone|iPad|iPod/.test(navigator.platform));
     }, []);
 
-    // Global ⌘K / Ctrl+K listener. Lives here rather than in a dedicated
-    // provider because the Topbar is the only consumer today; when the
-    // command palette ships we can promote this to a hook.
-    useEffect(() => {
-        if (!onSearchClick) return;
-        const handler = (e: KeyboardEvent) => {
-            if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
-                e.preventDefault();
-                onSearchClick();
-            }
-        };
-        window.addEventListener('keydown', handler);
-        return () => window.removeEventListener('keydown', handler);
-    }, [onSearchClick]);
+    // ⌘K / Ctrl+K is handled by <CommandCenter> in AppFrame.
 
     const hasHeader = header !== null;
     const crumbs = header?.crumbs ?? [];
@@ -162,7 +143,7 @@ export function TopBar({ onSearchClick }: TopBarProps) {
                 <div className="pm-topbar-utils">
                     <button
                         type="button"
-                        onClick={onSearchClick}
+                        onClick={openCommand}
                         className="pm-topbar-search"
                         aria-label="Search or jump to"
                     >

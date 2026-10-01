@@ -16,6 +16,16 @@ interface UiState {
     openTweaks: () => void;
     closeTweaks: () => void;
     toggleTweaks: () => void;
+
+    // ⌘K command center: the search palette, or Ask Ledger seeded with a
+    // question handed over from the palette.
+    commandOpen: boolean;
+    commandMode: 'search' | 'ask';
+    askSeed: string | null;
+    openCommand: () => void;
+    openAsk: (question?: string) => void;
+    closeCommand: () => void;
+    toggleCommand: () => void;
 }
 
 export const useUiStore = create<UiState>((set) => ({
@@ -28,4 +38,12 @@ export const useUiStore = create<UiState>((set) => ({
     openTweaks: () => set({ tweaksOpen: true }),
     closeTweaks: () => set({ tweaksOpen: false }),
     toggleTweaks: () => set((s) => ({ tweaksOpen: !s.tweaksOpen })),
+
+    commandOpen: false,
+    commandMode: 'search',
+    askSeed: null,
+    openCommand: () => set({ commandOpen: true, commandMode: 'search', askSeed: null }),
+    openAsk: (question) => set({ commandOpen: true, commandMode: 'ask', askSeed: question?.trim() || null }),
+    closeCommand: () => set({ commandOpen: false, askSeed: null }),
+    toggleCommand: () => set((s) => (s.commandOpen ? { commandOpen: false, askSeed: null } : { commandOpen: true, commandMode: 'search', askSeed: null })),
 }));

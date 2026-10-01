@@ -5,7 +5,7 @@
  *
  * Used by two callsites:
  *   - `/ask` page (full bleed)
- *   - ⌘K overlay (`AskShortcut` portal)
+ *   - ⌘K overlay (`CommandCenter`, ask mode)
  *
  * Owns the conversation state: it reads from `storage.getStore()` on
  * mount (hydration-safe), appends new turns via `saveMessage`, and
@@ -35,9 +35,20 @@ export interface AskSheetProps {
     onClose?: () => void;
     /** Tweaks the header copy + rendering for the page variant. */
     variant?: 'sheet' | 'page';
+    /** Question handed over from the ⌘K palette; asked once after mount. */
+    initialQuestion?: string | null;
 }
 
 const EMPTY_SHEET_STORE: AskStoreShape = { history: [], dayBucket: '', dayCount: 0 };
+
+// A worked example for the empty state, computed once from the same
+// deterministic tool layer (frozen clock so SSR and hydration agree).
+const EXAMPLE = (() => {
+    const question = 'Am I overexposed to AI?';
+    const text = runAsk(question, buildDefaultContext(Date.UTC(2026, 0, 15))).text;
+    const firstPara = text.split(/\n\n/)[0] ?? text;
+    return { question, answer: firstPara.length > 260 ? `${firstPara.slice(0, 257).trimEnd()}…` : firstPara };
+})();
 
 function uuid(): string {
     // crypto.randomUUID is in every evergreen browser; fallback for SSR /
@@ -48,7 +59,7 @@ function uuid(): string {
     return `msg-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
-export function AskSheet({ onClose, variant = 'sheet' }: AskSheetProps) {
+export function AskSheet({ onClose, variant = 'sheet', initialQuestion = null }: AskSheetProps) {
     const [mounted, setMounted] = useState(false);
     const [store, setStore] = useState<AskStoreShape>(EMPTY_SHEET_STORE);
     const endRef = useRef<HTMLDivElement>(null);
@@ -101,12 +112,22 @@ export function AskSheet({ onClose, variant = 'sheet' }: AskSheetProps) {
         setStore(after2);
     }, []);
 
+    // Ask the palette's question once, after history has hydrated.
+    const askedSeed = useRef(false);
+    useEffect(() => {
+        if (!mounted || askedSeed.current || !initialQuestion) return;
+        askedSeed.current = true;
+        // Deferred like the history hydration above so it runs after paint.
+        queueMicrotask(() => handleSubmit(initialQuestion));
+    }, [mounted, initialQuestion, handleSubmit]);
+
     const handleClear = () => {
         setStore(clearHistory());
     };
 
+    // The daily cap is a safety net, not a feature — it is only mentioned
+    // once it is actually hit (no "N of 30 left" counter).
     const limited = dayCount >= DAILY_LIMIT;
-    const remaining = Math.max(0, DAILY_LIMIT - dayCount);
     const rateLimitMessage = limited
         ? `You've hit today's limit of ${DAILY_LIMIT} questions. Resets at midnight.`
         : undefined;
@@ -127,14 +148,8 @@ export function AskSheet({ onClose, variant = 'sheet' }: AskSheetProps) {
                             : 'What do you want to know?'}
                     </h2>
                     <p className="pm-ask-sub">
-                        {mounted && !limited ? (
-                            <>
-                                {remaining} of {DAILY_LIMIT} questions left today · demo
-                                answers come from a deterministic tool catalog.
-                            </>
-                        ) : (
-                            <>Answers come from a deterministic tool catalog — no PII leaves the page.</>
-                        )}
+                        Answers cite the tools they ran over your holdings, journal, and performance
+                        (example data until an account is connected).
                     </p>
                 </div>
                 <div className="pm-ask-head-actions">
@@ -167,10 +182,14 @@ export function AskSheet({ onClose, variant = 'sheet' }: AskSheetProps) {
             <div className="pm-ask-body">
                 {mounted && messages.length === 0 && (
                     <div className="pm-ask-empty" data-testid="ask-empty">
-                        <p className="pm-ask-empty-title">No questions yet.</p>
-                        <p className="pm-ask-empty-sub">
-                            Try one of the prompts below, or type your own.
-                        </p>
+                        <p className="pm-ask-empty-title">Ask about your book in plain words.</p>
+                        <div className="pm-ask-example" data-testid="ask-example">
+                            <p className="pm-ask-example-q">
+                                <span className="pm-sample-tag">Example</span> {EXAMPLE.question}
+                            </p>
+                            <p className="pm-ask-example-a">{EXAMPLE.answer}</p>
+                        </div>
+                        <p className="pm-ask-empty-sub">Pick a prompt below or type your own.</p>
                     </div>
                 )}
                 <AskMessageList messages={messages} />

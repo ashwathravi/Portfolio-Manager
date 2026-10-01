@@ -534,3 +534,60 @@
 .pm-policy-strip-body > .pm-card { border: 0; box-shadow: none; padding: 0; }
 .pm-today-hero-emptyhead { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; }
 .pm-today-hero[data-empty="true"] .pm-today-hero-live { grid-column: auto; grid-row: auto; }
+
+/* --- ⌘K command palette ---------------------------------------------------- */
+.pm-cmd {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: 640px;
+  max-height: min(70vh, 560px);
+  display: flex;
+  flex-direction: column;
+  background: var(--pm-card);
+  color: var(--pm-fg);
+  border: 1px solid var(--pm-border);
+  border-radius: 14px;
+  box-shadow: var(--pm-shadow-lg, 0 24px 60px rgba(0, 0, 0, 0.25));
+  overflow: hidden;
+}
+.pm-cmd-input-row { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--pm-border); color: var(--pm-fg-muted); }
+.pm-cmd-input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--pm-fg); font: inherit; font-size: 15px; }
+.pm-cmd-list { list-style: none; margin: 0; padding: 6px; overflow-y: auto; }
+.pm-cmd-group { margin: 8px 8px 4px; font-size: 11px; font-weight: 600; color: var(--pm-fg-subtle); }
+.pm-cmd-item {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--pm-fg);
+  font: inherit;
+  font-size: 13.5px;
+  text-align: left;
+  cursor: pointer;
+}
+.pm-cmd-item.is-active { background: var(--pm-neutral-100); }
+.pm-cmd-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pm-cmd-hint { font-size: 12px; color: var(--pm-fg-subtle); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 260px; }
+.pm-cmd-empty { padding: 16px; font-size: 13px; color: var(--pm-fg-muted); }
+@media (max-width: 600px) { .pm-cmd-hint { display: none; } }
+
+.pm-ask-example {
+  margin: 12px auto 4px;
+  max-width: 520px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--pm-border);
+  background: var(--pm-bg-2);
+  text-align: left;
+}
+.pm-ask-example-q { margin: 0 0 6px; font-size: 13px; font-weight: 600; color: var(--pm-fg); }
+.pm-ask-example-q .pm-sample-tag { margin: 0 6px 0 0; }
+.pm-ask-example-a { margin: 0; font-size: 13px; line-height: 1.5; color: var(--pm-fg-muted); }
+
+.pm-not-found { max-width: 560px; margin: 8vh auto 0; }

@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { AppSidebar } from "@/components/layout/AppSidebar";
 import { TopBar } from "@/components/layout/TopBar";
 import { TweaksPanel } from "@/components/layout/TweaksPanel";
-import { AskShortcut } from "@/components/ask/AskShortcut";
+import { CommandCenter } from "@/components/command/CommandCenter";
 import { PageHeaderProvider } from "@/components/layout/PageHeaderContext";
 
 export function AppFrame({ children }: { children: React.ReactNode }) {
@@ -42,7 +42,7 @@ export function AppFrame({ children }: { children: React.ReactNode }) {
                 </div>
             </div>
             <TweaksPanel />
-            <AskShortcut />
+            <CommandCenter />
         </PageHeaderProvider>
     );
 }
