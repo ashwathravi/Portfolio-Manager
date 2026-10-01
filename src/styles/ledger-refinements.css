@@ -718,3 +718,56 @@
   .pm-perf-equity-controls { flex-wrap: wrap; }
   .pm-strategy-row .pm-strategy-card { flex: 1 1 100%; min-width: 0; }
 }
+
+/* ==========================================================================
+ * Green restraint (design review A6)
+ *
+ * Green now means two things: the primary action, and gains (plus live
+ * state and switches that are on). Selection, filters, eyebrows, icons,
+ * and conviction move to the neutral ink so the signal reads again.
+ * Same selectors as globals.css; later in the cascade, so they win.
+ * ========================================================================== */
+.pm-nav-item.is-active { background: var(--pm-neutral-100); color: var(--pm-fg); }
+.pm-nav-item.is-active .pm-nav-icon { color: var(--pm-fg); }
+.pm-nav-pill,
+.pm-nav-item.is-active .pm-nav-pill { background: transparent; color: var(--pm-fg-muted); border-color: var(--pm-border-strong); }
+.pm-user-avatar { background: var(--pm-neutral-100); color: var(--pm-fg); }
+.pm-stat-icon { background: var(--pm-neutral-100); color: var(--pm-fg-muted); }
+.pm-card-link { color: var(--pm-fg); }
+.pm-settings-card-icon,
+.pm-help-section-icon,
+.pm-integration-logo { color: var(--pm-fg-muted); background: var(--pm-neutral-100); }
+.pm-risk-policy-eyebrow,
+.pm-alpha-eyebrow,
+.pm-review-eyebrow,
+.pm-help-eyebrow { color: var(--pm-fg-muted); }
+
+.pm-chip-conv-high { background: var(--pm-fg); color: var(--pm-card); border-color: var(--pm-fg); }
+
+.pm-chip-btn.is-active, .pm-chip-btn[aria-checked="true"],
+.pm-alpha-filter-chip.is-active,
+.pm-rb-universe-chip.is-on,
+.pm-rat-chip.is-on,
+.pm-cooldown-chip.is-on,
+.pm-exec-chip.is-active {
+  background: var(--pm-neutral-100);
+  color: var(--pm-fg);
+  border-color: var(--pm-fg);
+}
+.pm-exec-chip.is-active .pm-exec-chip-count { color: var(--pm-fg); background: var(--pm-card); }
+.pm-exec-tif-btn.is-active { background: var(--pm-card); color: var(--pm-fg); border-color: var(--pm-border); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06); }
+.pm-rb-conj.is-and { background: var(--pm-neutral-100); color: var(--pm-fg); border-color: var(--pm-border-strong); }
+.pm-rb-add-rule { background: transparent; color: var(--pm-fg); border-color: var(--pm-border-strong); }
+
+.pm-thesis-list-card.is-selected,
+.pm-alpha-filer-card.is-selected { border-color: var(--pm-fg); box-shadow: 0 0 0 1px var(--pm-fg); background: var(--pm-card); }
+.pm-thesis-list-card:hover,
+.pm-alpha-filer-card:hover,
+.pm-strategy-card:hover { border-color: var(--pm-border-strong); }
+.pm-thesis-list-progress-fill { background: var(--pm-fg-muted); }
+
+.pm-table-full tbody tr:hover td,
+.pm-exec-table tbody tr:hover { background: var(--pm-neutral-100); }
+.pm-pattern-row[data-severity="info"] { border-color: var(--pm-border); }
+.pm-pattern-row[data-severity="info"] .pm-pattern-glyph { color: var(--pm-fg-muted); background: var(--pm-neutral-100); }
+.pm-pattern-feed-pill { background: var(--pm-neutral-100); color: var(--pm-fg-muted); }
