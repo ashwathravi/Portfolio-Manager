@@ -49,3 +49,25 @@ test.describe('Hydration across viewer timezones', () => {
         });
     }
 });
+
+test.describe('Phone layout', () => {
+    // Regression: 11 routes scrolled sideways at 390px (the content column
+    // grew to the top bar's min-content width).
+    test.use({ viewport: { width: 390, height: 844 } });
+
+    for (const path of ['/', '/portfolios/holdings', '/portfolios/accounts', '/portfolios/activity', '/portfolios/detail/NVDA', '/performance', '/performance/behaviour', '/research', '/research/thesis/NVDA', '/strategies', '/execution', '/ask', '/settings', '/help']) {
+        test(`${path} has no horizontal overflow`, async ({ page }) => {
+            await page.goto(path);
+            await page.waitForTimeout(1200);
+            const overflow = await page.evaluate(() => {
+                const main = document.querySelector('main');
+                return {
+                    doc: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+                    main: main ? main.scrollWidth - main.clientWidth : 0,
+                };
+            });
+            expect(overflow.doc).toBeLessThanOrEqual(1);
+            expect(overflow.main).toBeLessThanOrEqual(1);
+        });
+    }
+});

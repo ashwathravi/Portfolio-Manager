@@ -30,7 +30,9 @@ export function AppFrame({ children }: { children: React.ReactNode }) {
             </a>
             <div className="flex h-screen w-full bg-muted/40">
                 <AppSidebar />
-                <div className="flex-1 flex flex-col h-full md:ml-[var(--pm-sidebar-w)] transition-all duration-300 ease-in-out">
+                {/* min-w-0: without it this flex item grows to the top bar's
+                    min-content width and pushes pages wider than a phone. */}
+                <div className="flex-1 min-w-0 flex flex-col h-full md:ml-[var(--pm-sidebar-w)] transition-all duration-300 ease-in-out">
                     <TopBar />
                     <main
                         id="pm-main-content"

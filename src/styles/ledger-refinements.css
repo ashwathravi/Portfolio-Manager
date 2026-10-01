@@ -706,3 +706,15 @@
 .pm-perf-readouts { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 0; background: transparent; border: 0; border-top: 1px solid var(--pm-border); padding: 0; border-radius: 0; }
 .pm-perf-readouts > * { align-items: flex-start !important; text-align: left !important; padding: 10px 14px 0 0; }
 .pm-perf-readouts * { font-family: inherit; font-variant-numeric: tabular-nums; }
+
+/* --- Phone: top bar title row wraps instead of widening the page ---------- */
+@media (max-width: 767px) {
+  .pm-topbar-row-bottom { flex-wrap: wrap; gap: 8px; }
+  .pm-topbar-row-bottom .pm-topbar-heading { min-width: 0; flex: 1 1 100%; }
+  .pm-topbar-actions { flex-wrap: wrap; }
+  .pm-topbar-crumbs { min-width: 0; overflow: hidden; }
+  .pm-crumb-list { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pm-perf-equity-head { flex-wrap: wrap; }
+  .pm-perf-equity-controls { flex-wrap: wrap; }
+  .pm-strategy-row .pm-strategy-card { flex: 1 1 100%; min-width: 0; }
+}
