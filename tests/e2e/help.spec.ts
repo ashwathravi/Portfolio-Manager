@@ -6,6 +6,20 @@ test.describe('Help page', () => {
         await gotoAppPage(page, '/help');
     });
 
+    test('opens with getting started and a glossary; one page heading', async ({ page }) => {
+        await expect(page.locator('h1')).toHaveCount(1);
+        await expect(page.locator('h1.pm-topbar-title')).toHaveText('Help');
+        const steps = page.getByTestId('help-getting-started').locator('ol > li');
+        await expect(steps).toHaveCount(5);
+        await expect(steps.first().getByRole('link', { name: /Connect an account/ })).toHaveAttribute('href', '/settings#accounts');
+        const glossary = page.getByTestId('help-glossary');
+        for (const term of ['Bucket', 'Churn', 'Re-underwrite', 'Sample']) {
+            await expect(glossary.locator('dt', { hasText: new RegExp(`^${term}$`) })).toBeVisible();
+        }
+        // Regression: nested <main> landmarks.
+        await expect(page.locator('main main')).toHaveCount(0);
+    });
+
     test('renders Alpha Radar v1 and v2 release notes and guides', async ({ page }) => {
         await expect(page.getByTestId('help-page')).toBeVisible();
         await expect(page.getByRole('heading', { name: 'Alpha Radar release notes and guide' })).toBeVisible();

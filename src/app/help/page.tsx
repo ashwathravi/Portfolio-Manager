@@ -1,10 +1,11 @@
 import Link from "next/link";
 import { ArrowRight, BookOpen, BrainCircuit, CalendarClock, LineChart, Radar, ShieldCheck } from "lucide-react";
 import { PageHeaderSync } from "@/components/layout/TopBar";
+import { GETTING_STARTED, GLOSSARY } from "@/lib/help/content";
 
 const SURFACE_LINKS = [
     { href: "/research?tab=alpha-radar", label: "Open Alpha Radar in Research" },
-    { href: "/", label: "View the Dashboard card" },
+    { href: "/", label: "View the Today card" },
     { href: "/settings?tab=alerts", label: "Configure alert rules" },
     { href: "/settings?tab=notifications", label: "Configure delivery" },
 ];
@@ -93,14 +94,48 @@ export default function HelpPage() {
         <>
             <PageHeaderSync
                 title="Help"
-                subtitle="Release notes and operating guides"
-                crumbs={["System", "Help"]}
+                subtitle="Getting started, glossary, and what’s new"
+                crumbs={["Help"]}
             />
-            <main className="pm-help" data-testid="help-page">
-                <section className="pm-help-intro" aria-labelledby="help-heading">
+            <div className="pm-help" data-testid="help-page">
+                <nav className="pm-help-version-nav" aria-label="Help sections">
+                    <a href="#getting-started">Getting started</a>
+                    <a href="#glossary">Glossary</a>
+                    <a href="#whats-new">What’s new</a>
+                    <a href="#alpha-radar-limits">Data and decision limits</a>
+                </nav>
+
+                <section id="getting-started" className="pm-help-section" aria-labelledby="getting-started-heading" data-testid="help-getting-started">
+                    <h2 id="getting-started-heading">Getting started</h2>
+                    <ol className="pm-help-steps">
+                        {GETTING_STARTED.map((step) => (
+                            <li key={step.title}>
+                                <h3>{step.title}</h3>
+                                <p>{step.body}</p>
+                                <Link href={step.href} className="pm-help-step-link">
+                                    {step.cta} <ArrowRight size={13} aria-hidden="true" />
+                                </Link>
+                            </li>
+                        ))}
+                    </ol>
+                </section>
+
+                <section id="glossary" className="pm-help-section" aria-labelledby="glossary-heading" data-testid="help-glossary">
+                    <h2 id="glossary-heading">Glossary</h2>
+                    <dl className="pm-help-glossary">
+                        {GLOSSARY.map((g) => (
+                            <div key={g.term}>
+                                <dt>{g.href ? <Link href={g.href}>{g.term}</Link> : g.term}</dt>
+                                <dd>{g.definition}</dd>
+                            </div>
+                        ))}
+                    </dl>
+                </section>
+
+                <section id="whats-new" className="pm-help-intro" aria-labelledby="help-heading">
                     <div>
-                        <span className="pm-help-eyebrow">Portfolio Manager Help</span>
-                        <h1 id="help-heading">Alpha Radar release notes and guide</h1>
+                        <span className="pm-help-eyebrow">What’s new</span>
+                        <h2 id="help-heading">Alpha Radar release notes and guide</h2>
                         <p>
                             Learn what shipped in Alpha Radar v1 and v2, where to find each workflow, and what limits to keep in mind before acting on a 13F signal.
                         </p>
@@ -114,12 +149,6 @@ export default function HelpPage() {
                         ))}
                     </div>
                 </section>
-
-                <nav className="pm-help-version-nav" aria-label="Alpha Radar help sections">
-                    <a href="#alpha-radar-v1">Alpha Radar v1</a>
-                    <a href="#alpha-radar-v2">Alpha Radar v2</a>
-                    <a href="#alpha-radar-limits">Data and decision limits</a>
-                </nav>
 
                 <ReleaseSection
                     id="alpha-radar-v1"
@@ -162,7 +191,7 @@ export default function HelpPage() {
                         ))}
                     </div>
                 </section>
-            </main>
+            </div>
         </>
     );
 }
