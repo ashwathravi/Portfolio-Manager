@@ -1,5 +1,6 @@
 "use client";
 
+import { SampleTag } from "@/components/data-display/SampleTag";
 import { AlertTriangle, ShieldCheck } from "lucide-react";
 import { useMemo } from "react";
 import {
@@ -13,6 +14,8 @@ export interface OptionsRiskLedgerCardProps {
     positions: readonly OptionRiskPosition[];
     totalPortfolioValue: number;
     liquidNetWorth?: number;
+    /** Tags the card as example data. */
+    isSample?: boolean;
 }
 
 const STATUS_LABELS: Record<OptionRiskStatus, string> = {
@@ -26,6 +29,7 @@ export function OptionsRiskLedgerCard({
     positions,
     totalPortfolioValue,
     liquidNetWorth,
+    isSample = false,
 }: OptionsRiskLedgerCardProps) {
     const optionsRiskPolicy = useSettingsStore((s) => s.riskPolicy.optionsRiskPolicy);
     const ledger = useMemo(
@@ -58,6 +62,7 @@ export function OptionsRiskLedgerCard({
                     </p>
                     <h3 id="pm-options-ledger-head" className="pm-card-title">
                         LEAPS and option premium at risk
+                        {isSample && <SampleTag />}
                     </h3>
                     <p className="pm-card-subtitle">
                         {ledger.actionPrompts[0]}

@@ -69,3 +69,34 @@ describe('Ask Ledger Risk Policy Engine integration', () => {
         assert.ok(answer.citations.some((citation) => citation.href.includes('/research')));
     });
 });
+
+describe('Ask Ledger citation links', () => {
+    test('regression: every citation and row link points at a live destination', async () => {
+        const { activeDestination } = await import('@/lib/navigation');
+        const questions = [
+            "What's my Sharpe by sector?",
+            'Am I overexposed to AI?',
+            "Where did last month's P&L come from?",
+            'Which holdings have hurt my alpha this year?',
+            'Where am I repeatedly trading the same names?',
+            'Show my FOMO trades',
+            'What happens if GOOG drops 40%?',
+            'Which positions have no written thesis?',
+            'How much cash is unassigned to jobs?',
+            'Which trades increased policy risk?',
+            'Which risk policy guardrails are breached?',
+        ];
+        const ctx = buildDefaultContext(Date.UTC(2026, 4, 13));
+        for (const q of questions) {
+            const answer = runAsk(q, ctx);
+            const hrefs = [
+                ...answer.citations.map((c) => c.href),
+                ...answer.toolRuns.flatMap((r) => r.rows.map((row) => row.href).filter((h): h is string => Boolean(h))),
+            ];
+            for (const href of hrefs) {
+                const path = href.split(/[?#]/)[0];
+                assert.ok(activeDestination(path), `"${q}" links to dead route ${href}`);
+            }
+        }
+    });
+});

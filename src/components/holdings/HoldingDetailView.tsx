@@ -1,12 +1,9 @@
 'use client';
 
-import { useState } from 'react';
-import { Bell, Plus } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { useRouter } from 'next/navigation';
+import Link from 'next/link';
+import { useThesisStore } from '@/lib/research/useThesisStore';
+import { findThesisByTicker } from '@/lib/research/thesis';
+import { formatPct, formatQty, formatUsd } from '@/lib/format';
 
 export interface AccountPosition {
     portfolioId: string;
@@ -30,177 +27,134 @@ export interface HoldingDetail {
     totalReturn: number;
     returnPercent: number;
     accounts: AccountPosition[];
-    priceHistory: Array<{ date: string; price: number }>;
 }
 
-export function HoldingDetailView({ holding }: { holding: HoldingDetail }) {
-    const router = useRouter();
-    const [selectedPeriod, setSelectedPeriod] = useState('1M');
-    const gainIsPositive = holding.totalReturn >= 0;
+export interface SymbolQuote {
+    price: number;
+    change: number;
+    changePercent: number;
+}
+
+/**
+ * Position detail (/portfolios/detail/[symbol]).
+ *
+ * Works for any symbol: when you hold it, it shows the position across
+ * accounts; when you don't, it shows the quote (if available) and the two
+ * useful next steps — read or write the thesis, or draft an order —
+ * instead of the old "No holdings" dead end.
+ */
+export function HoldingDetailView({
+    symbol,
+    holding,
+    quote,
+}: {
+    symbol: string;
+    holding: HoldingDetail | null;
+    quote: SymbolQuote | null;
+}) {
+    const { theses } = useThesisStore();
+    const thesis = findThesisByTicker(theses, symbol);
+    const price = holding?.price ?? quote?.price ?? null;
+    const change = holding?.changePercent ?? quote?.changePercent ?? null;
 
     return (
-        <div className="space-y-6 p-6">
-            {/* Breadcrumb */}
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <button onClick={() => router.push('/portfolios')} className="hover:text-foreground transition-colors">Portfolio</button>
-                <span>›</span>
-                <button onClick={() => router.push('/portfolios/holdings')} className="hover:text-foreground transition-colors">Current Holdings</button>
-                <span>›</span>
-                <span className="text-foreground font-medium">{holding.symbol}</span>
-            </div>
-
-            {/* Header */}
-            <div className="flex items-start justify-between">
-                <div>
-                    <h1 className="text-3xl font-bold tracking-tight mb-1">
-                        {holding.name} ({holding.symbol})
-                    </h1>
-                    <div className="flex items-center gap-4 mb-4">
-                        <div className="flex items-baseline gap-2">
-                            <span className="text-4xl font-bold">${holding.price.toFixed(2)}</span>
-                            <Badge
-                                variant="default"
-                                className={holding.change >= 0 ? 'bg-primary text-primary-foreground' : 'bg-destructive text-destructive-foreground'}
-                            >
-                                {holding.change >= 0 ? '+' : ''}{holding.changePercent.toFixed(2)}% (${holding.change.toFixed(2)})
-                            </Badge>
-                        </div>
-                    </div>
-                </div>
-                <div className="flex items-center gap-2">
-                    <Button variant="outline" size="sm">
-                        <Bell className="h-4 w-4 mr-2" />
-                        Alert
-                    </Button>
-                    <Button className="bg-primary hover:bg-primary/90">
-                        <Plus className="h-4 w-4 mr-2" />
-                        Trade
-                    </Button>
-                </div>
-            </div>
-
-            {/* Position Summary — Per-symbol breakdown and cost basis */}
-            <Card className="p-6">
-                <h3 className="font-bold text-lg mb-4">Position Summary</h3>
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-                    <div className="p-4 rounded-lg bg-accent/30">
-                        <p className="text-xs text-muted-foreground mb-1">Total Shares</p>
-                        <p className="text-lg font-bold">{holding.totalShares.toLocaleString()}</p>
-                    </div>
-                    <div className="p-4 rounded-lg bg-accent/30">
-                        <p className="text-xs text-muted-foreground mb-1">Market Value</p>
-                        <p className="text-lg font-bold">${holding.totalEquity.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
-                    </div>
-                    <div className="p-4 rounded-lg bg-accent/30">
-                        <p className="text-xs text-muted-foreground mb-1">Avg Cost</p>
-                        <p className="text-lg font-bold">${holding.avgCost.toFixed(2)}</p>
-                    </div>
-                    <div className="p-4 rounded-lg bg-accent/30">
-                        <p className="text-xs text-muted-foreground mb-1">Cost Basis</p>
-                        <p className="text-lg font-bold">${holding.costBasis.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
-                    </div>
-                    <div className="p-4 rounded-lg bg-accent/30">
-                        <p className="text-xs text-muted-foreground mb-1">Total Return</p>
-                        <p className={`text-lg font-bold ${gainIsPositive ? 'text-primary' : 'text-destructive'}`}>
-                            {gainIsPositive ? '+' : ''}${holding.totalReturn.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+        <div className="pm-page" data-testid="position-detail">
+            <section className="pm-card pm-card-stack">
+                <header className="pm-position-head">
+                    <div>
+                        <p className="pm-card-subtitle">{holding?.name ?? 'Quote'}</p>
+                        <p className="pm-position-price" data-testid="position-price">
+                            {price === null ? 'Quote unavailable' : formatUsd(price)}
+                            {change !== null && price !== null && (
+                                <span className={change > 0 ? 'pm-pos' : change < 0 ? 'pm-neg' : 'pm-metric-note'}>
+                                    {' '}{formatPct(change, { signed: true, decimals: 2 })} today
+                                </span>
+                            )}
                         </p>
                     </div>
-                    <div className="p-4 rounded-lg bg-accent/30">
-                        <p className="text-xs text-muted-foreground mb-1">Return %</p>
-                        <p className={`text-lg font-bold ${gainIsPositive ? 'text-primary' : 'text-destructive'}`}>
-                            {gainIsPositive ? '+' : ''}{holding.returnPercent.toFixed(2)}%
-                        </p>
+                    <div className="pm-empty-actions">
+                        <Link href={`/execution?symbol=${encodeURIComponent(symbol)}`} className="pm-btn pm-btn-primary">
+                            Draft order
+                        </Link>
                     </div>
-                </div>
-            </Card>
+                </header>
 
-            {/* Price History Chart */}
-            {holding.priceHistory.length > 0 && (
-                <Card className="p-6">
-                    <div className="flex items-center justify-between mb-6">
-                        <h3 className="font-bold text-lg">Price History</h3>
-                        <div className="flex items-center gap-2">
-                            {['1D', '1W', '1M', '1Y', 'ALL'].map((period) => (
-                                <button
-                                    key={period}
-                                    onClick={() => setSelectedPeriod(period)}
-                                    className={`px-3 py-1 rounded-lg text-sm transition-colors ${selectedPeriod === period
-                                        ? 'bg-primary text-primary-foreground'
-                                        : 'hover:bg-accent'
-                                        }`}
-                                >
-                                    {period}
-                                </button>
-                            ))}
+                {holding ? (
+                    <dl className="pm-metric-strip" data-testid="position-summary">
+                        <div><dt>Shares</dt><dd>{formatQty(holding.totalShares)}</dd></div>
+                        <div><dt>Market value</dt><dd>{formatUsd(holding.totalEquity)}</dd></div>
+                        <div><dt>Avg cost</dt><dd>{formatUsd(holding.avgCost)}</dd></div>
+                        <div><dt>Cost basis</dt><dd>{formatUsd(holding.costBasis)}</dd></div>
+                        <div>
+                            <dt>Unrealized</dt>
+                            <dd className={holding.totalReturn > 0 ? 'is-pos' : holding.totalReturn < 0 ? 'is-neg' : undefined}>
+                                {formatUsd(holding.totalReturn, { signed: true })}{' '}
+                                <span className="pm-metric-note">{formatPct(holding.returnPercent, { signed: true })}</span>
+                            </dd>
                         </div>
+                    </dl>
+                ) : (
+                    <p className="pm-empty-line" data-testid="position-not-held">
+                        You don&apos;t hold {symbol} in any connected account.
+                    </p>
+                )}
+            </section>
+
+            {holding && holding.accounts.length > 0 && (
+                <section className="pm-card pm-card-stack" aria-labelledby="pm-position-accounts">
+                    <h2 id="pm-position-accounts" className="pm-card-title">By account</h2>
+                    <div className="pm-table-scroll">
+                        <table className="pm-table-full">
+                            <thead>
+                                <tr>
+                                    <th scope="col">Account</th>
+                                    <th scope="col" className="num">Shares</th>
+                                    <th scope="col" className="num">Avg cost</th>
+                                    <th scope="col" className="num">Value</th>
+                                    <th scope="col" className="num">Unrealized</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {holding.accounts.map((a) => (
+                                    <tr key={a.portfolioId}>
+                                        <td>{a.name}</td>
+                                        <td className="num">{formatQty(a.shares)}</td>
+                                        <td className="num">{formatUsd(a.avgCost)}</td>
+                                        <td className="num">{formatUsd(a.value)}</td>
+                                        <td className={`num ${a.gain > 0 ? 'pm-pos' : a.gain < 0 ? 'pm-neg' : ''}`}>
+                                            {formatUsd(a.gain, { signed: true })}
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
                     </div>
-                    <ResponsiveContainer width="100%" height={300}>
-                        <LineChart data={holding.priceHistory}>
-                            <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-                            <XAxis
-                                dataKey="date"
-                                tick={{ fill: 'var(--muted-foreground)', fontSize: 12 }}
-                                axisLine={{ stroke: 'var(--border)' }}
-                                tickLine={false}
-                            />
-                            <YAxis
-                                tick={{ fill: 'var(--muted-foreground)', fontSize: 12 }}
-                                axisLine={false}
-                                tickLine={false}
-                                domain={['dataMin - 5', 'dataMax + 5']}
-                            />
-                            <Tooltip
-                                contentStyle={{
-                                    backgroundColor: 'var(--card)',
-                                    border: '1px solid var(--border)',
-                                    borderRadius: '8px',
-                                }}
-                                labelStyle={{ color: 'var(--foreground)' }}
-                                formatter={(value: number | undefined) => (value !== undefined ? [`$${value.toFixed(2)}`, 'Price'] : ['-', 'Price'])}
-                            />
-                            <Line
-                                type="monotone"
-                                dataKey="price"
-                                stroke="#17cf54"
-                                strokeWidth={2}
-                                dot={{ fill: '#17cf54', r: 4 }}
-                                activeDot={{ r: 6 }}
-                            />
-                        </LineChart>
-                    </ResponsiveContainer>
-                </Card>
+                </section>
             )}
 
-            {/* Account Breakdown */}
-            <Card className="p-6">
-                <h3 className="font-bold text-lg mb-4">Holdings by Account</h3>
-                <div className="space-y-3">
-                    {holding.accounts.map((account) => (
-                        <div
-                            key={account.portfolioId}
-                            className="flex items-center justify-between p-4 rounded-lg border border-border hover:border-primary/40 transition-colors"
-                        >
-                            <div className="flex items-center gap-3">
-                                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 text-sm font-bold">
-                                    {account.name.charAt(0)}
-                                </div>
-                                <div>
-                                    <p className="font-medium">{account.name}</p>
-                                    <p className="text-sm text-muted-foreground">
-                                        {account.shares.toLocaleString()} shares @ ${account.avgCost.toFixed(2)}
-                                    </p>
-                                </div>
-                            </div>
-                            <div className="text-right">
-                                <p className="font-medium">${account.value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
-                                <p className={`text-sm ${account.gain >= 0 ? 'text-primary' : 'text-destructive'}`}>
-                                    {account.gain >= 0 ? '+' : ''}${account.gain.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                </p>
-                            </div>
+            <section className="pm-card pm-card-stack" data-testid="position-thesis" aria-labelledby="pm-position-thesis">
+                <h2 id="pm-position-thesis" className="pm-card-title">Thesis</h2>
+                {thesis ? (
+                    <>
+                        <p className="pm-position-thesis-title">{thesis.title}</p>
+                        <p className="pm-card-subtitle">
+                            {thesis.conviction} conviction · target {formatUsd(thesis.targetPrice)} · {thesis.timeHorizon}
+                        </p>
+                        <div className="pm-empty-actions">
+                            <Link href={`/research/thesis/${encodeURIComponent(symbol)}`} className="pm-btn pm-btn-ghost">
+                                Open thesis
+                            </Link>
                         </div>
-                    ))}
-                </div>
-            </Card>
+                    </>
+                ) : (
+                    <>
+                        <p className="pm-empty-line">No written thesis for {symbol}. Write one before adding to the position.</p>
+                        <div className="pm-empty-actions">
+                            <Link href="/research?tab=theses" className="pm-btn pm-btn-ghost">Write a thesis</Link>
+                        </div>
+                    </>
+                )}
+            </section>
         </div>
     );
 }

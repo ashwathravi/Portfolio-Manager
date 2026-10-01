@@ -1,79 +1,109 @@
 import { test, expect } from '@playwright/test';
+import { gotoAppPage } from './helpers/app';
 
 /**
- * Phase 9 (AR-94) sidebar navigation tests.
+ * Sidebar + information architecture.
  *
- * The Phase 1 redesign flattened the sidebar — the expandable
- * Portfolio / Research / Strategies sub-menus are gone. The sidebar
- * now has a flat "Workspace" section (Dashboard, Performance,
- * Holdings, Research, Strategies, Execution) and a "System" section
- * (Settings, Help). Page titles moved out of the body and into the Topbar.
- *
- *   - Assertions use the Topbar h1 (`.pm-topbar-title`) for the page
- *     title, which is the single source of truth post-redesign.
- *   - Sub-page navigation happens INSIDE each landing page (not via
- *     sidebar submenus), so those journeys belong in per-section specs.
+ * The design review collapsed 21 routes into eight destinations
+ * (src/lib/navigation.ts). The sidebar lists Today, Portfolio,
+ * Performance, Research, Strategies, Trade, and Ask under Workspace, with
+ * Settings and Help under System. Portfolio and Performance expose their
+ * views as section tabs under the page title. Retired routes redirect.
  */
 
 test.describe('Sidebar navigation', () => {
-    test('navigates to all top-level routes from the flat sidebar', async ({ page }) => {
-        await page.goto('/');
-
+    test('navigates to every destination from the sidebar', async ({ page }) => {
+        await gotoAppPage(page, '/');
         const sidebar = page.locator('aside.pm-sidebar');
         await expect(sidebar).toBeVisible();
+        await expect(sidebar.getByRole('link', { name: /^Today$/ })).toHaveAttribute('aria-current', 'page');
 
-        // Dashboard (home) is active by default on '/'.
-        await expect(sidebar.getByRole('link', { name: /^Dashboard$/ })).toBeVisible();
-
-        // Performance
-        await sidebar.getByRole('link', { name: /^Performance$/ }).click();
-        await expect(page).toHaveURL(/\/performance$/);
-        await expect(page.locator('h1.pm-topbar-title')).toHaveText('Performance');
-
-        // Holdings (flat link — no longer behind a Portfolio sub-menu)
-        await sidebar.getByRole('link', { name: /^Holdings$/ }).click();
-        await expect(page).toHaveURL(/\/portfolios\/holdings$/);
-
-        // Research (flat link)
-        await sidebar.getByRole('link', { name: /^Research$/ }).click();
-        await expect(page).toHaveURL(/\/research(\/|$)/);
-
-        // Strategies (flat link)
-        await sidebar.getByRole('link', { name: /^Strategies$/ }).click();
-        await expect(page).toHaveURL(/\/strategies(\/|$)/);
-
-        // Execution (flat link)
-        await sidebar.getByRole('link', { name: /^Execution$/ }).click();
-        await expect(page).toHaveURL(/\/execution(\/|$)/);
-
-        // Settings (System section)
-        await sidebar.getByRole('link', { name: /^Settings$/ }).click();
-        await expect(page).toHaveURL(/\/settings$/);
-        await expect(page.locator('h1.pm-topbar-title')).toHaveText('Settings');
-
-        // Help (System section)
-        await sidebar.getByRole('link', { name: /^Help$/ }).click();
-        await expect(page).toHaveURL(/\/help$/);
-        await expect(page.locator('h1.pm-topbar-title')).toHaveText('Help');
+        const journey: Array<[RegExp, RegExp]> = [
+            [/^Portfolio$/, /\/portfolios\/holdings$/],
+            [/^Performance$/, /\/performance$/],
+            [/^Research$/, /\/research(\?|$)/],
+            [/^Strategies$/, /\/strategies(\?|$)/],
+            [/^Trade$/, /\/execution$/],
+            [/^Ask\b/, /\/ask$/],
+            [/^Settings$/, /\/settings$/],
+            [/^Help$/, /\/help$/],
+        ];
+        for (const [name, url] of journey) {
+            await sidebar.getByRole('link', { name }).click();
+            await expect(page).toHaveURL(url);
+            await expect(sidebar.getByRole('link', { name })).toHaveAttribute('aria-current', 'page');
+        }
     });
 
     test('exposes both Workspace and System section labels', async ({ page }) => {
         await page.goto('/');
-
         const sidebar = page.locator('aside.pm-sidebar');
-        // Case-insensitive because the CSS applies text-transform:
-        // uppercase; the DOM text stays as "Workspace" / "System".
         await expect(sidebar.locator('.pm-nav-label', { hasText: /^Workspace$/i })).toBeVisible();
         await expect(sidebar.locator('.pm-nav-label', { hasText: /^System$/i })).toBeVisible();
     });
 
-    test('shows the user footer with identity + plan line', async ({ page }) => {
+    test('retired destinations are no longer in the sidebar', async ({ page }) => {
         await page.goto('/');
+        const sidebar = page.locator('aside.pm-sidebar');
+        for (const name of [/^Dashboard$/, /^Holdings$/, /^Execution$/, /^Analytics$/]) {
+            await expect(sidebar.getByRole('link', { name })).toHaveCount(0);
+        }
+    });
 
-        // Default store fullName is "John Doe". The plan line shows
-        // "Pro" while the portfolio count query is in-flight and
-        // "Pro · N accounts" once it resolves.
-        await expect(page.getByText('John Doe')).toBeVisible();
+    test('shows the user footer with a plan line', async ({ page }) => {
+        await page.goto('/');
         await expect(page.locator('.pm-user-plan')).toContainText(/Pro/);
     });
+});
+
+test.describe('Section tabs', () => {
+    test('Portfolio shows Holdings · Accounts · Activity and marks the current view', async ({ page }) => {
+        await gotoAppPage(page, '/portfolios/holdings');
+        const tabs = page.getByRole('navigation', { name: 'Section' });
+        await expect(tabs.getByRole('link')).toHaveText(['Holdings', 'Accounts', 'Activity']);
+        await expect(tabs.getByRole('link', { name: 'Holdings' })).toHaveAttribute('aria-current', 'page');
+
+        await tabs.getByRole('link', { name: 'Accounts' }).click();
+        await expect(page).toHaveURL(/\/portfolios\/accounts$/);
+        await expect(tabs.getByRole('link', { name: 'Accounts' })).toHaveAttribute('aria-current', 'page');
+
+        await tabs.getByRole('link', { name: 'Activity' }).click();
+        await expect(page).toHaveURL(/\/portfolios\/activity$/);
+        await expect(tabs.getByRole('link', { name: 'Activity' })).toHaveAttribute('aria-current', 'page');
+    });
+
+    test('Performance shows Returns · Behaviour', async ({ page }) => {
+        await gotoAppPage(page, '/performance/behaviour');
+        const tabs = page.getByRole('navigation', { name: 'Section' });
+        await expect(tabs.getByRole('link')).toHaveText(['Returns', 'Behaviour']);
+        await expect(tabs.getByRole('link', { name: 'Behaviour' })).toHaveAttribute('aria-current', 'page');
+    });
+
+    test('position detail keeps Portfolio › Holdings selected', async ({ page }) => {
+        await gotoAppPage(page, '/portfolios/detail/AAPL');
+        await expect(page.locator('aside.pm-sidebar').getByRole('link', { name: /^Portfolio$/ })).toHaveAttribute('aria-current', 'page');
+        await expect(page.getByRole('navigation', { name: 'Section' }).getByRole('link', { name: 'Holdings' })).toHaveAttribute('aria-current', 'page');
+    });
+
+    test('single-view destinations have no section tabs', async ({ page }) => {
+        await gotoAppPage(page, '/research');
+        await expect(page.getByRole('navigation', { name: 'Section' })).toHaveCount(0);
+    });
+});
+
+test.describe('Legacy route redirects', () => {
+    const cases: Array<[string, RegExp]> = [
+        ['/portfolios', /\/portfolios\/holdings$/],
+        ['/portfolios/trade-log', /\/portfolios\/activity$/],
+        ['/analytics', /\/performance\/behaviour$/],
+        ['/research/journal', /\/research\?tab=journal$/],
+        ['/strategies/builder', /\/strategies$/],
+        ['/strategies/deploy', /\/strategies$/],
+    ];
+    for (const [from, to] of cases) {
+        test(`${from} redirects to its replacement`, async ({ page }) => {
+            await page.goto(from);
+            await expect(page).toHaveURL(to);
+        });
+    }
 });

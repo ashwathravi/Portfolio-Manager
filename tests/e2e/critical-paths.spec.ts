@@ -97,7 +97,7 @@ test.describe('Critical user paths', () => {
         await expect(page.locator('html')).toHaveClass(/(^|\s)dark(\s|$)/);
     });
 
-    test('user navigates dashboard → holdings → portfolios without errors', async ({ page }) => {
+    test('user navigates dashboard → holdings → accounts without errors', async ({ page }) => {
         const consoleErrors: string[] = [];
         page.on('pageerror', (err) => consoleErrors.push(err.message));
 
@@ -113,9 +113,9 @@ test.describe('Critical user paths', () => {
         );
         await expect(tableOrEmpty).toBeVisible();
 
-        // Then portfolios overview.
-        await gotoAppPage(page, '/portfolios');
-        await expect(page.locator('h1', { hasText: 'Portfolios' })).toBeVisible();
+        // Then the accounts view (replaced the old /portfolios overview).
+        await gotoAppPage(page, '/portfolios/accounts');
+        await expect(page.getByTestId('accounts-view')).toBeVisible();
 
         // No uncaught runtime errors surfaced during the journey.
         expect(consoleErrors).toEqual([]);

@@ -25,14 +25,14 @@ function citationFor(run: AskToolRun, index: number): AskCitation {
     // Prefer the row's explicit href, then a sensible default per tool.
     const defaultHrefByTool: Partial<Record<AskToolRun['name'], string>> = {
         sector_exposure: '/portfolios/holdings',
-        trades_matching: '/trade-log',
+        trades_matching: '/portfolios/activity',
         policy_breaches: '/',
         stress_test: '/',
         theme_exposure: '/portfolios/holdings',
         trim_to_target: '/settings',
         missing_theses: '/research',
         cash_jobs: '/settings',
-        churn_risks: '/portfolios/trade-log',
+        churn_risks: '/portfolios/activity',
         trade_policy_impact: '/execution',
     };
     const href = row?.href ?? defaultHrefByTool[run.name] ?? '/performance';

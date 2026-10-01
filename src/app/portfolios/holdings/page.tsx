@@ -75,16 +75,32 @@ async function HoldingsContent() {
         };
     });
 
-    return <HoldingsPageClient holdings={seed} optionPositions={DEFAULT_OPTION_RISK_POSITIONS} />;
+    const marketValue = seed.reduce((sum, h) => sum + h.marketValue, 0);
+    const subtitle = seed.length === 0
+        ? "Every position across every account"
+        : `${seed.length} ${seed.length === 1 ? "position" : "positions"} · $${Math.round(marketValue).toLocaleString("en-US")} market value`;
+
+    return (
+        <>
+            <PageHeaderSync title="Portfolio" subtitle={subtitle} crumbs={["Portfolio", "Holdings"]} />
+            {/* No options feed exists yet, so the LEAPS ledger runs on example
+                positions and is tagged as such. */}
+            <HoldingsPageClient
+                holdings={seed}
+                optionPositions={DEFAULT_OPTION_RISK_POSITIONS}
+                optionPositionsAreSample
+            />
+        </>
+    );
 }
 
 export default function CurrentHoldingsPage() {
     return (
         <>
             <PageHeaderSync
-                title="Holdings"
+                title="Portfolio"
                 subtitle="Every position across every account"
-                crumbs={["Workspace", "Holdings"]}
+                crumbs={["Portfolio", "Holdings"]}
             />
             <Suspense fallback={<HoldingsLoading />}>
                 <HoldingsContent />

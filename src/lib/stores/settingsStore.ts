@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { migrateLandingPage, stripSeededDemoAccounts, type LandingPage } from './settingsMigrations';
 import { persist } from 'zustand/middleware';
 import {
     DEFAULT_BUCKET_POLICIES,
@@ -94,7 +95,7 @@ export interface ApiKeysSettings {
 export type CurrencyCode = 'USD' | 'EUR' | 'GBP' | 'CAD' | 'AUD' | 'JPY' | 'CHF' | 'INR';
 export type DateFormat = 'MM/DD/YYYY' | 'DD/MM/YYYY' | 'YYYY-MM-DD';
 export type NumberFormat = 'en-US' | 'en-GB' | 'de-DE' | 'fr-FR';
-export type DefaultLandingPage = '/' | '/performance' | '/analytics' | '/portfolios' | '/research' | '/strategies';
+export type DefaultLandingPage = LandingPage;
 
 export interface PreferencesSettings {
     baseCurrency: CurrencyCode;
@@ -221,6 +222,14 @@ export interface ChurnPolicySettings {
     breachRepeatSymbols: number;
 }
 
+/**
+ * Example-data display. Sample-backed cards always carry a "Sample" tag;
+ * turning this off hides them so only the user's own data remains.
+ */
+export interface DemoSettings {
+    showSampleData: boolean;
+}
+
 export interface SettingsState {
     // State slices
     profile: ProfileSettings;
@@ -235,6 +244,7 @@ export interface SettingsState {
     guardrails: GuardrailSettings;
     execution: ExecutionSettings;
     riskPolicy: RiskPolicySettings;
+    demo: DemoSettings;
 
     // Actions - Profile
     updateProfile: (profile: Partial<ProfileSettings>) => void;
@@ -282,16 +292,22 @@ export interface SettingsState {
     // Actions - Risk policy
     updateRiskPolicy: (updates: Partial<RiskPolicySettings>) => void;
 
+    // Actions - Example data
+    setShowSampleData: (show: boolean) => void;
+
     // Reset
     resetSettings: () => void;
 }
 
 // --- Defaults ---
 
+// Empty by default: the signed-in identity (Google) fills name and email.
+// Earlier builds shipped a "John Doe" placeholder that showed up across the
+// app as if it were the user.
 const defaultProfile: ProfileSettings = {
-    fullName: 'John Doe',
-    email: 'john@example.com',
-    phone: '+1 (555) 123-4567',
+    fullName: '',
+    email: '',
+    phone: '',
 };
 
 const defaultNotifications: NotificationSettings = {
@@ -396,42 +412,12 @@ const defaultRiskPolicy: RiskPolicySettings = {
     },
 };
 
-const defaultAccounts: ConnectedAccount[] = [
-    {
-        id: 'fidelity',
-        provider: 'manual',
-        name: 'Fidelity',
-        type: 'Individual Brokerage',
-        accountMask: '****1234',
-        holdings: 12,
-        accountValue: 324500.75,
-        lastSynced: 'Feb 6, 10:30 AM',
-        status: 'reconciled',
-    },
-    {
-        id: 'vanguard',
-        provider: 'manual',
-        name: 'Vanguard',
-        type: 'Roth IRA',
-        accountMask: '****5678',
-        holdings: 8,
-        accountValue: 162749.57,
-        lastSynced: 'Feb 6, 9:15 AM',
-        status: 'reconciled',
-    },
-    {
-        id: 'ibkr',
-        provider: 'manual',
-        name: 'Interactive Brokers',
-        type: 'Trading Account',
-        accountMask: '****9012',
-        holdings: 0,
-        accountValue: 0,
-        lastSynced: 'Feb 5, 3:45 PM',
-        status: 'needs-review',
-        errorMessage: 'Connection error. Please re-authenticate this account.',
-    },
-];
+const defaultDemo: DemoSettings = { showSampleData: true };
+
+// No example accounts: connected accounts only ever come from the user
+// (Plaid Link or manual entry). v15 strips the three demo rows older
+// builds seeded into every install.
+const defaultAccounts: ConnectedAccount[] = [];
 
 function mergePlaidAccounts(
     existingAccounts: readonly ConnectedAccount[],
@@ -467,7 +453,7 @@ function mergePlaidAccounts(
 }
 
 function normalizeConnectedAccounts(accounts: ConnectedAccount[] | undefined): ConnectedAccount[] {
-    const source = accounts?.length ? accounts : defaultAccounts;
+    const source = accounts ?? defaultAccounts;
     return source.map((account) => ({
         ...account,
         provider: account.provider ?? 'manual',
@@ -499,6 +485,7 @@ export const useSettingsStore = create<SettingsState>()(
             guardrails: defaultGuardrails,
             execution: defaultExecution,
             riskPolicy: defaultRiskPolicy,
+            demo: defaultDemo,
 
             // Profile
             updateProfile: (updates) =>
@@ -672,6 +659,9 @@ export const useSettingsStore = create<SettingsState>()(
                 })),
 
             // Risk policy
+            setShowSampleData: (show) =>
+                set((state) => ({ demo: { ...state.demo, showSampleData: show } })),
+
             updateRiskPolicy: (updates) =>
                 set((state) => ({
                     riskPolicy: {
@@ -747,6 +737,7 @@ export const useSettingsStore = create<SettingsState>()(
                     guardrails: defaultGuardrails,
                     execution: defaultExecution,
                     riskPolicy: defaultRiskPolicy,
+                    demo: defaultDemo,
                 }),
         }),
         {
@@ -788,8 +779,12 @@ export const useSettingsStore = create<SettingsState>()(
              *   v14 — AR-149 persists non-secret Plaid connected-account
              *        metadata. Access tokens stay server-side and are not
              *        part of this persisted client settings slice.
+             *   v15 — Design review IA consolidation: remaps landing pages
+             *        for retired routes (/analytics, /portfolios) and removes
+             *        the seeded example brokerage accounts; adds the `demo`
+             *        slice (show/hide example data, default shown).
              */
-            version: 14,
+            version: 15,
             migrate: (persistedState, version) => {
                 const s = (persistedState ?? {}) as Partial<SettingsState>;
                 if (version < 2) {
@@ -1047,6 +1042,16 @@ export const useSettingsStore = create<SettingsState>()(
                 if (version < 14) {
                     s.accounts = normalizeConnectedAccounts(s.accounts);
                 }
+                if (version < 15) {
+                    s.demo = { ...defaultDemo, ...(s.demo ?? {}) };
+                    s.accounts = stripSeededDemoAccounts(s.accounts);
+                    if (s.preferences) {
+                        s.preferences = {
+                            ...s.preferences,
+                            defaultLandingPage: migrateLandingPage(s.preferences.defaultLandingPage),
+                        };
+                    }
+                }
                 return s as SettingsState;
             },
             // Sentinel: Only persist non-sensitive preferences. API keys are
@@ -1061,6 +1066,7 @@ export const useSettingsStore = create<SettingsState>()(
                 guardrails: state.guardrails,
                 execution: state.execution,
                 riskPolicy: state.riskPolicy,
+                demo: state.demo,
             }),
         }
     )

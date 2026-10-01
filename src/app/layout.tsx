@@ -1,10 +1,27 @@
 import type { Metadata } from "next";
+import { IBM_Plex_Mono, IBM_Plex_Sans } from "next/font/google";
 import "./globals.css";
+import "../styles/ledger-refinements.css";
 import { cn } from "@/lib/utils";
 import { ThemeProvider } from "@/components/providers/ThemeProvider";
 import { QueryProvider } from "@/components/providers/QueryProvider";
 import { Toaster } from "@/components/ui/sonner";
 import { AppFrame } from "@/components/layout/AppFrame";
+
+// Self-hosted via next/font so text never silently falls back to system
+// fonts. Plex has true tabular figures, which every money column relies on.
+const appSans = IBM_Plex_Sans({
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
+  variable: "--font-app-sans",
+  display: "swap",
+});
+const appMono = IBM_Plex_Mono({
+  subsets: ["latin"],
+  weight: ["400", "500", "600"],
+  variable: "--font-app-mono",
+  display: "swap",
+});
 
 export const metadata: Metadata = {
   title: "Atlas Wealth | Personal Investment Operating System",
@@ -32,7 +49,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en" suppressHydrationWarning className={cn(appSans.variable, appMono.variable)}>
       <body
         className={cn(
           "min-h-screen bg-background font-sans antialiased overflow-hidden",

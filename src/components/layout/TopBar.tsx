@@ -2,6 +2,7 @@
 
 import { useEffect, useState, type ReactNode } from 'react';
 import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import {
     Menu,
     Search,
@@ -17,6 +18,7 @@ import {
 } from '@/components/layout/PageHeaderContext';
 import { formatEtClock } from '@/lib/markets/market-hours';
 import { cn } from '@/lib/utils';
+import { activeSectionTab, sectionTabsFor } from '@/lib/navigation';
 
 /**
  * TopBar (AR-67)
@@ -74,6 +76,9 @@ export function TopBar({ onSearchClick }: TopBarProps) {
     const toggleTweaks = useUiStore((s) => s.toggleTweaks);
     const header = useCurrentPageHeader();
     const clock = useEtClock();
+    const pathname = usePathname() ?? '/';
+    const sectionTabs = sectionTabsFor(pathname);
+    const currentTab = activeSectionTab(pathname);
 
     const [isMac, setIsMac] = useState(false);
     useEffect(() => {
@@ -214,6 +219,23 @@ export function TopBar({ onSearchClick }: TopBarProps) {
                     )}
                 </div>
             )}
+
+            {/* Row 3: section tabs for multi-view destinations
+                (Portfolio, Performance). Driven by lib/navigation. */}
+            {sectionTabs.length > 0 && (
+                <nav className="pm-section-tabs" aria-label="Section">
+                    {sectionTabs.map((tab) => (
+                        <Link
+                            key={tab.href}
+                            href={tab.href}
+                            className="pm-section-tab"
+                            aria-current={currentTab?.href === tab.href ? 'page' : undefined}
+                        >
+                            {tab.label}
+                        </Link>
+                    ))}
+                </nav>
+            )}
         </header>
     );
 }
@@ -251,9 +273,3 @@ export function PageHeaderSync(props: {
     return null;
 }
 
-// Re-export `<Link>` so the breadcrumb trail can become interactive in a
-// follow-up (right now all crumbs are plain text — pages set them as
-// strings). When we add a `href?: string` field to `PageHeader.crumbs`,
-// the list item renders a `<Link>` for crumbs that have one and a span
-// otherwise. Keeping the import co-located here.
-void Link;

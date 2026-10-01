@@ -1,12 +1,10 @@
 import { PageHeaderSync } from "@/components/layout/TopBar";
 import { PerformancePageClient } from "@/components/performance/PerformancePageClient";
+import { PerformanceExportButton } from "@/components/performance/PerformanceExportButton";
 
 /**
- * Phase 4 (AR-75 / AR-76 / AR-77) Performance page.
- *
- * The heavy lifting lives in the client child. The server half only wires
- * the app-shell topbar to the new page header so the rest of the Workspace
- * chrome stays in sync.
+ * Performance › Returns — equity curve vs. benchmark, attribution, period
+ * metrics, and the monthly heatmap. Behaviour lives at /performance/behaviour.
  */
 
 export const dynamic = "force-dynamic";
@@ -17,7 +15,8 @@ export default function PerformancePage() {
             <PageHeaderSync
                 title="Performance"
                 subtitle="Time-weighted return, risk, and attribution"
-                crumbs={["Workspace", "Performance"]}
+                crumbs={["Performance", "Returns"]}
+                actions={<PerformanceExportButton />}
             />
             <PerformancePageClient />
         </>

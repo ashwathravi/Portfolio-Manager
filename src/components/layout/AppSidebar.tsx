@@ -12,6 +12,13 @@ import {
     Sparkles,
     X,
 } from 'lucide-react';
+import {
+    PRIMARY_NAV,
+    SYSTEM_NAV,
+    activeDestination,
+    type NavDestinationId,
+} from '@/lib/navigation';
+import { BrandMark } from './BrandMark';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect } from 'react';
@@ -31,15 +38,17 @@ import { SidebarUserFooter } from './SidebarUserFooter';
  *   │          Personal Investment OS           │
  *   ├─ Nav ──────────────────────────────────────┤
  *   │  WORKSPACE                                 │
- *   │   · Dashboard                              │
+ *   │   · Today                                  │
+ *   │   · Portfolio                              │
  *   │   · Performance                            │
- *   │   · Holdings                               │
  *   │   · Research                               │
  *   │   · Strategies                             │
- *   │   · Execution [badge]                      │
+ *   │   · Trade                                  │
+ *   │   · Ask [Beta]                             │
  *   │                                            │
  *   │  SYSTEM                                    │
  *   │   · Settings                               │
+ *   │   · Help                                   │
  *   ├─ Market card ──────────────────────────────┤
  *   │  ● Market open     9:42 AM ET              │
  *   │  S&P  +0.42%                               │
@@ -57,15 +66,13 @@ import { SidebarUserFooter } from './SidebarUserFooter';
  */
 
 interface NavItem {
+    id: NavDestinationId;
     title: string;
     icon: React.ComponentType<{ className?: string }>;
     href: string;
-    /** Badge count, or undefined to hide. Currently only Execution uses
-     *  this; wire-up for a global working-orders store lands with the
-     *  Execution rework (Phase 7). */
+    /** Badge count, or undefined to hide. */
     badge?: number;
-    /** Optional short tag shown next to the title — used for "Beta"
-     *  on new surfaces like Ask Ledger (AR-115). */
+    /** Optional short tag shown next to the title (e.g. "Beta"). */
     pill?: string;
 }
 
@@ -74,43 +81,34 @@ interface NavSection {
     items: readonly NavItem[];
 }
 
+const ICONS: Record<NavDestinationId, React.ComponentType<{ className?: string }>> = {
+    today: LayoutDashboard,
+    portfolio: Briefcase,
+    performance: TrendingUp,
+    research: FileText,
+    strategies: Cpu,
+    trade: PlayCircle,
+    ask: Sparkles,
+    settings: Settings,
+    help: CircleHelp,
+};
+
+// Destinations come from `lib/navigation` — the same config drives the
+// section tabs, the ⌘K palette, and the legacy-route redirects.
 const NAV_SECTIONS: readonly NavSection[] = [
     {
         label: 'Workspace',
-        items: [
-            { title: 'Dashboard', icon: LayoutDashboard, href: '/' },
-            { title: 'Performance', icon: TrendingUp, href: '/performance' },
-            { title: 'Holdings', icon: Briefcase, href: '/portfolios/holdings' },
-            { title: 'Research', icon: FileText, href: '/research' },
-            { title: 'Strategies', icon: Cpu, href: '/strategies' },
-            { title: 'Execution', icon: PlayCircle, href: '/execution' },
-            { title: 'Ask Ledger', icon: Sparkles, href: '/ask', pill: 'Beta' },
-        ],
+        items: PRIMARY_NAV.map((d) => ({ id: d.id, title: d.title, href: d.href, pill: d.pill, icon: ICONS[d.id] })),
     },
     {
         label: 'System',
-        items: [
-            { title: 'Settings', icon: Settings, href: '/settings' },
-            { title: 'Help', icon: CircleHelp, href: '/help' },
-        ],
+        items: SYSTEM_NAV.map((d) => ({ id: d.id, title: d.title, href: d.href, pill: d.pill, icon: ICONS[d.id] })),
     },
 ];
 
-/** Route-match helper.
- *
- *   `/`                matches ONLY exact `/` (dashboard home, no prefix)
- *   `/portfolios/holdings` matches `/portfolios/holdings` + deeper
- *   `/research`        matches `/research` + `/research/...`
- *
- * This keeps Holdings active on `/portfolios/holdings/AAPL` while Dashboard
- * is only active on `/` itself. */
-function isActive(href: string, pathname: string): boolean {
-    if (href === '/') return pathname === '/';
-    return pathname === href || pathname.startsWith(`${href}/`);
-}
-
 export function AppSidebar() {
-    const pathname = usePathname();
+    const pathname = usePathname() ?? '/';
+    const activeId = activeDestination(pathname)?.id ?? null;
     const sidebarOpen = useUiStore((s) => s.sidebarOpen);
     const closeSidebar = useUiStore((s) => s.closeSidebar);
 
@@ -177,7 +175,7 @@ export function AppSidebar() {
                             </p>
                             <ul className="pm-nav-list">
                                 {section.items.map((item) => {
-                                    const active = isActive(item.href, pathname);
+                                    const active = item.id === activeId;
                                     const Icon = item.icon;
                                     return (
                                         <li key={item.href}>
@@ -231,33 +229,5 @@ export function AppSidebar() {
                 <SidebarUserFooter />
             </aside>
         </>
-    );
-}
-
-/**
- * Tiny SVG brand mark — a line chart with a ping dot at the end. Keeping
- * it inline (rather than an `/public/brand.svg`) avoids an extra network
- * request on first paint and lets the colors follow `--pm-accent` via
- * `currentColor`.
- */
-function BrandMark() {
-    return (
-        <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            xmlns="http://www.w3.org/2000/svg"
-            width="22"
-            height="22"
-            className="pm-brand-svg"
-        >
-            <path
-                d="M3 17 L8 12 L12 14 L16 8 L21 10"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-            />
-            <circle cx="21" cy="10" r="2.5" fill="currentColor" />
-        </svg>
     );
 }

@@ -3,6 +3,7 @@ import { marketDataEngine } from '@/lib/api/market-data';
 import { requirePageUserId } from '@/lib/auth/request-user';
 import { buildUserHoldingPositionsQuery } from '@/lib/portfolio-repository';
 import { HoldingDetailView, type HoldingDetail, type AccountPosition } from '@/components/holdings/HoldingDetailView';
+import { PageHeaderSync } from '@/components/layout/TopBar';
 
 export const dynamic = 'force-dynamic';
 
@@ -27,18 +28,6 @@ async function HoldingDetailContent({ symbol }: { symbol: string }) {
         console.warn('Holding detail DB fetch failed:', error);
     }
 
-    if (rows.length === 0) {
-        return (
-            <div className="flex flex-col items-center justify-center py-24 gap-4 text-center">
-                <div className="text-4xl">🔍</div>
-                <h3 className="text-xl font-semibold">No holdings for {upper}</h3>
-                <p className="text-muted-foreground max-w-sm">
-                    This symbol isn&apos;t currently in any of your portfolios.
-                </p>
-            </div>
-        );
-    }
-
     // Try live quote; fall back to the last-known snapshot from the DB.
     let livePrice: number | undefined;
     let liveChange = 0;
@@ -52,6 +41,24 @@ async function HoldingDetailContent({ symbol }: { symbol: string }) {
         }
     } catch (e) {
         console.warn(`Failed to fetch live quote for ${upper}:`, e);
+    }
+
+    const quote = livePrice === undefined ? null : { price: livePrice, change: liveChange, changePercent: liveChangePercent };
+    const header = (
+        <PageHeaderSync
+            title={upper}
+            subtitle={rows[0]?.name ?? "Position detail"}
+            crumbs={["Portfolio", "Holdings", upper]}
+        />
+    );
+
+    if (rows.length === 0) {
+        return (
+            <>
+                {header}
+                <HoldingDetailView symbol={upper} holding={null} quote={quote} />
+            </>
+        );
     }
 
     const firstRow = rows[0];
@@ -96,16 +103,20 @@ async function HoldingDetailContent({ symbol }: { symbol: string }) {
         totalReturn,
         returnPercent,
         accounts: accountPositions,
-        priceHistory: [],
     };
 
-    return <HoldingDetailView holding={detail} />;
+    return (
+        <>
+            {header}
+            <HoldingDetailView symbol={upper} holding={detail} quote={quote} />
+        </>
+    );
 }
 
 export default async function PortfolioDetailPage({ params }: { params: Promise<{ symbol: string }> }) {
     const { symbol } = await params;
     return (
-        <Suspense fallback={<div className="p-6">Loading…</div>}>
+        <Suspense fallback={<div className="pm-page"><p className="pm-empty-line">Loading position…</p></div>}>
             <HoldingDetailContent symbol={symbol} />
         </Suspense>
     );
