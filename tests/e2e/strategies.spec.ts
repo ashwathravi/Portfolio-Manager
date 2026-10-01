@@ -306,3 +306,13 @@ test.describe('Strategies page — legacy strategy URLs', () => {
         await expect(page.getByText('Page not found')).toBeVisible();
     });
 });
+
+test.describe('Strategies page — backtest chart legibility', () => {
+    test('regression: backtest axis labels render at a readable size (were ~6px)', async ({ page }) => {
+        await page.goto('/strategies');
+        const label = page.locator('.pm-bt-chart svg text').first();
+        await expect(label).toBeVisible();
+        const px = await label.evaluate((el) => el.getBoundingClientRect().height);
+        expect(px).toBeGreaterThanOrEqual(9);
+    });
+});
