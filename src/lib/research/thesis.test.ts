@@ -234,3 +234,42 @@ describe('addEvidence', () => {
         assert.strictEqual(msft.dateUpdated, '2026-04-17');
     });
 });
+
+describe('seed theses', () => {
+    test('regression: the newest seed thesis is two weeks old, not years', async () => {
+        const { rebaseSeedTheses } = await import('./thesis');
+        const now = Date.parse('2026-09-30T05:56:00Z');
+        const rebased = rebaseSeedTheses(DEFAULT_THESES, now);
+        const newest = rebased.map((t) => t.dateUpdated).sort().at(-1);
+        assert.strictEqual(newest, '2026-09-16');
+    });
+
+    test('rebasing preserves the gaps between dates and leaves non-ISO dates alone', async () => {
+        const { rebaseSeedTheses } = await import('./thesis');
+        const now = Date.parse('2026-09-30T12:00:00Z');
+        const base = DEFAULT_THESES.find((t) => t.id === 'seed-nvda')!;
+        const out = rebaseSeedTheses(DEFAULT_THESES, now).find((t) => t.id === 'seed-nvda')!;
+        const gap = (a: string, b: string) => (Date.parse(b) - Date.parse(a)) / 86_400_000;
+        assert.strictEqual(gap(out.dateCreated, out.dateUpdated), gap(base.dateCreated, base.dateUpdated));
+        const tsla = rebaseSeedTheses(DEFAULT_THESES, now).find((t) => t.id === 'seed-tsla')!;
+        assert.ok(tsla.catalysts.some((c) => c.date === 'Monthly'));
+    });
+
+    test('rebasing is stable within a UTC day', async () => {
+        const { rebaseSeedTheses } = await import('./thesis');
+        const morning = rebaseSeedTheses(DEFAULT_THESES, Date.parse('2026-09-30T00:01:00Z'));
+        const night = rebaseSeedTheses(DEFAULT_THESES, Date.parse('2026-09-30T23:59:00Z'));
+        assert.deepStrictEqual(morning, night);
+    });
+
+    test('seed theses are identifiable as sample data; user theses are not', async () => {
+        const { isSeedThesis } = await import('./thesis');
+        assert.ok(DEFAULT_THESES.every((t) => isSeedThesis(t)));
+        assert.strictEqual(isSeedThesis({ id: 'thesis-user-1' }), false);
+    });
+
+    test('seed copy no longer pins stale calendar years', () => {
+        const text = JSON.stringify(DEFAULT_THESES.map(({ description, hypothesis, bullCase, bearCase, catalysts }) => ({ description, hypothesis, bullCase, bearCase, catalysts: catalysts.map((c) => c.title) })));
+        assert.doesNotMatch(text, /\b(2023|2024|2025)\b|FY2[345]/);
+    });
+});

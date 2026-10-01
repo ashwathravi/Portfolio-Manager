@@ -1,5 +1,7 @@
 "use client";
 
+import { SampleTag } from "@/components/data-display/SampleTag";
+import { isSeedThesis } from "@/lib/research/thesis";
 import type { Thesis, ThesisConviction } from "@/lib/research/thesis";
 
 /**
@@ -65,6 +67,7 @@ export function ThesisListCard({
             <header className="pm-thesis-list-head">
                 <div className="pm-thesis-list-ticker">
                     <span className="pm-thesis-list-sym">{thesis.ticker}</span>
+                    {isSeedThesis(thesis) && <SampleTag />}
                     <span
                         className={`pm-thesis-list-dir ${
                             thesis.type === "bull"

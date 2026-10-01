@@ -1,8 +1,17 @@
 "use client";
 
+import { SampleTag } from "@/components/data-display/SampleTag";
+import { isSeedThesis } from "@/lib/research/thesis";
 import Link from "next/link";
 import { useMemo } from "react";
-import { Archive, ArchiveRestore, ExternalLink, Trash2 } from "lucide-react";
+import { Archive, ArchiveRestore, ExternalLink, MoreHorizontal, Trash2 } from "lucide-react";
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuSeparator,
+    DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { AreaChart } from "@/components/charts";
 import { useHistoricalQuery } from "@/lib/api/market-data/queries";
 import type { HistoricalBar } from "@/lib/api/market-data";
@@ -20,7 +29,8 @@ import type {
  * selected. Layout (top → bottom):
  *
  *   1. Header — ticker · title + bull/bear chip + conviction chip and
- *      the action row (Open full view / Edit / Archive|Restore / Delete).
+ *      the action row (Open full view / Edit / ⋯ menu with Archive|Restore
+ *      and Delete).
  *   2. Lede — one-line description.
  *   3. Price since open — mini AreaChart with 4-readout strip
  *      (Open / Now / Target / % to target). Pulls live 1D bars via
@@ -85,6 +95,7 @@ export function ThesisDetailPane({
                 <div className="pm-thesis-detail-head-main">
                     <div className="pm-thesis-detail-titlerow">
                         <span className="pm-thesis-detail-sym">{thesis.ticker}</span>
+                        {isSeedThesis(thesis) && <SampleTag />}
                         <span
                             className={`pm-thesis-list-dir ${
                                 thesis.type === "bull"
@@ -117,28 +128,34 @@ export function ThesisDetailPane({
                         <ExternalLink size={14} aria-hidden="true" />
                         <span>Open full view</span>
                     </Link>
-                    {isArchived ? (
-                        <button type="button" className="pm-btn pm-btn-ghost" onClick={onRestore}>
-                            <ArchiveRestore size={14} aria-hidden="true" />
-                            <span>Restore</span>
-                        </button>
-                    ) : (
-                        <button type="button" className="pm-btn pm-btn-ghost" onClick={onArchive}>
-                            <Archive size={14} aria-hidden="true" />
-                            <span>Archive</span>
-                        </button>
-                    )}
                     <button type="button" className="pm-btn pm-btn-ghost" onClick={onEdit}>
                         Edit
                     </button>
-                    <button
-                        type="button"
-                        className="pm-btn pm-btn-ghost pm-btn-danger"
-                        onClick={onDelete}
-                        aria-label="Delete thesis"
-                    >
-                        <Trash2 size={14} aria-hidden="true" />
-                    </button>
+                    {/* Archive and the destructive Delete live in an overflow
+                        menu so they never compete with Edit. */}
+                    <DropdownMenu>
+                        <DropdownMenuTrigger className="pm-icon-btn" aria-label="More thesis actions">
+                            <MoreHorizontal size={16} aria-hidden="true" />
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                            {isArchived ? (
+                                <DropdownMenuItem onSelect={onRestore}>
+                                    <ArchiveRestore size={14} aria-hidden="true" />
+                                    Restore
+                                </DropdownMenuItem>
+                            ) : (
+                                <DropdownMenuItem onSelect={onArchive}>
+                                    <Archive size={14} aria-hidden="true" />
+                                    Archive
+                                </DropdownMenuItem>
+                            )}
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem onSelect={onDelete} className="pm-menu-danger">
+                                <Trash2 size={14} aria-hidden="true" />
+                                Delete thesis
+                            </DropdownMenuItem>
+                        </DropdownMenuContent>
+                    </DropdownMenu>
                 </div>
             </header>
 

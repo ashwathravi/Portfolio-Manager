@@ -6,11 +6,37 @@ test.describe('Research page', () => {
         await gotoAppPage(page, '/research');
     });
 
-    test('should render page heading and description', async ({ page }) => {
-        await expect(page.getByRole('heading', { name: 'Research', exact: true })).toBeVisible();
-        await expect(
-            page.locator('#pm-main-content').getByText('Theses, Alpha Radar, watchlist, and decision journal'),
-        ).toBeVisible();
+    test('should render a single page heading with its subtitle in the top bar', async ({ page }) => {
+        await expect(page.locator('h1')).toHaveCount(1);
+        await expect(page.locator('h1.pm-topbar-title')).toHaveText('Research');
+        await expect(page.locator('.pm-topbar-sub')).toHaveText('Theses, watchlist, Alpha Radar, and decision journal');
+        // Regression: the in-page "Research workspace" header duplicated the top bar.
+        await expect(page.getByText('Research workspace')).toHaveCount(0);
+    });
+
+    test('regression: research tabs sit on one row (Alpha Radar no longer wraps)', async ({ page }) => {
+        const tabs = page.getByRole('tablist', { name: 'Research section' }).getByRole('tab');
+        const count = await tabs.count();
+        const tops = new Set<number>();
+        for (let i = 0; i < count; i++) {
+            const box = await tabs.nth(i).boundingBox();
+            expect(box?.height ?? 0).toBeLessThan(40);
+            tops.add(Math.round(box?.y ?? 0));
+        }
+        expect(tops.size).toBe(1);
+    });
+
+    test('regression: delete lives in an overflow menu, not beside Edit', async ({ page }) => {
+        await expect(page.getByRole('button', { name: 'Delete thesis' })).toHaveCount(0);
+        await page.getByRole('button', { name: 'More thesis actions' }).click();
+        await expect(page.getByRole('menuitem', { name: 'Delete thesis' })).toBeVisible();
+        await expect(page.getByRole('menuitem', { name: 'Archive' })).toBeVisible();
+    });
+
+    test('example theses are tagged Sample and recently dated', async ({ page }) => {
+        const pane = page.locator('.pm-research-col').first();
+        await expect(pane.getByTestId('sample-tag').first()).toBeVisible();
+        await expect(page.getByText(/updated .*202[34]/)).toHaveCount(0);
     });
 
     test('should display tab navigation (Theses, Watchlist, Alpha Radar, Journal, Archive)', async ({ page }) => {
