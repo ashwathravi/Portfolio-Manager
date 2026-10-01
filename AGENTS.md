@@ -70,19 +70,23 @@ Every page in the application must have a corresponding E2E spec. The current ma
 
 | Route | E2E Spec File | Key assertions |
 |-------|--------------|----------------|
-| `/` (Dashboard) | `dashboard.spec.ts` | Greeting renders, stat cards visible, market status indicator, connected accounts section, Alpha Radar card |
-| `/portfolios` | `portfolios.spec.ts` | Table renders with data rows, view-by toggles switch data, search filters rows, row click navigates |
-| `/portfolios/holdings` | `holdings.spec.ts` | Holdings table or empty state renders |
-| `/portfolios/trade-log` | `trade-log.spec.ts` | Trade table with BUY/SELL badges, summary stats, filter panel toggles |
-| `/execution` | `execution.spec.ts` | Order form renders, Buy/Sell tabs, price field hides for market orders, ticker uppercases, order blotter tabs |
-| `/research` | `research.spec.ts` | All 5 tabs render content (theses, watchlist, Alpha Radar, journal, archive), conviction levels, target prices, Alpha Radar refresh/report state, semantic memory search, clone tracking filters, Alpha Radar conviction ranking, external overlay filters, scheduled orchestration, exploratory backtests, thesis draft review workflow |
-| `/strategies` | `strategies.spec.ts` | Strategy cards with status badges, action buttons match status, overview stats |
-| `/analytics` | `analytics.spec.ts` | Trading activity heatmap, trade calendar, behavioral insights table, chart sections |
-| `/performance` | `performance.spec.ts` | Performance metrics cards, charts sections, performance-by-period table, risk metrics, attribution |
-| `/settings` | `settings.spec.ts` | Card grid renders, advanced deep links render legacy surfaces, notifications and alerts include Alpha Radar controls |
-| `/help` | `help.spec.ts` | Alpha Radar v1/v2 release notes and guides render, product links work, mobile layout keeps content visible |
-| `/login` | `login.spec.ts` | Google sign-in page renders without the app navigation chrome |
-| Sidebar navigation | `navigation.spec.ts` | All top-level links navigate correctly, sub-menus expand, user info visible |
+| `/` (Today) | `dashboard.spec.ts` | Single "Today" header with greeting/market state, money-first hero (or connect-account empty state), ranked "Needs your attention", policy strip + disclosure, example section labelled and hideable, no fabricated deltas |
+| `/portfolios/holdings` | `holdings.spec.ts` | Portfolio title + Holdings tab, one heading, table or single empty state, LEAPS ledger only with holdings and tagged Sample, page gutter |
+| `/portfolios/accounts` | `accounts.spec.ts` | Accounts tab, real accounts or empty state (never seeded balances) |
+| `/portfolios/activity` | `activity.spec.ts` | Activity tab, real transactions or empty state, side filters |
+| `/portfolios/detail/[symbol]` | `position-detail.spec.ts` | Symbol title, draft-order prefill link, thesis link, not-held state is not a dead end |
+| `/execution` (Trade) | `execution.spec.ts` | Single ticket (no variant switcher), Buy/Sell, sticky summary, blotter newest-first, `?symbol=` prefill, phone fit, rationale/cooldown/adherence flows |
+| `/research` | `research.spec.ts` | One header, one-row tabs, delete in overflow menu, Sample-tagged recent seed theses, Alpha Radar workflows |
+| `/research/thesis/[ticker]` | `thesis.spec.ts` | Memo layout, explained thesis check (no opaque health score), links to position and draft order, not-found state |
+| `/strategies` | `strategies.spec.ts` | "Strategies" title, compact switcher, Duplicate works, stale-backtest flag, legacy `/strategies/[id]` redirects |
+| `/performance`, `/performance/behaviour` | `performance.spec.ts` | Returns: four cards, one heading, Sample notice, CSV export. Behaviour: one continuous trading calendar, mood, P&L density, reviews archive |
+| `/ask` + ⌘K | `ask.spec.ts` | Command palette (top-bar search + ⌘K), page/ticker/question routing, Ask overlay and page history |
+| `/settings` | `settings.spec.ts` | One column + section rail, legacy `?tab=` links scroll to sections, honest sign-in card, no seeded accounts, example-data toggle |
+| `/help` | `help.spec.ts` | Getting started (5 steps), glossary, Alpha Radar notes, single h1 |
+| `/login` | `login.spec.ts` | Google sign-in without app chrome, shared brand mark, no raw setup text |
+| 404 | `not-found.spec.ts` | Search button opens the palette, link back to Today |
+| Sidebar + IA | `navigation.spec.ts` | Eight destinations, section tabs, legacy redirects, identity footer |
+| Cross-cutting | `smoke.spec.ts` | Fonts loaded, hydration clean in another timezone, no horizontal overflow at 390px |
 
 ### Adding E2E tests for a new page
 
