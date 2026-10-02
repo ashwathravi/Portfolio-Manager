@@ -1,7 +1,7 @@
 import { describe, test } from "node:test";
 import assert from "node:assert";
 
-import { isMarketOpen, formatEtClock, getEasternParts } from "./market-hours";
+import { isMarketOpen, formatEtClock, getEasternParts, marketStateLabel } from "./market-hours";
 
 /**
  * Market-hours helper behavior. We construct UTC Dates at known instants
@@ -112,5 +112,21 @@ describe("market-hours", () => {
                 "3:45 PM ET"
             );
         });
+    });
+});
+
+describe("marketStateLabel", () => {
+    test("Monday 10:00 AM EDT reads 'Markets open'", () => {
+        assert.strictEqual(marketStateLabel(new Date("2026-06-15T14:00:00Z")), "Markets open");
+    });
+
+    test("regression: Wednesday 1:56 AM ET reads 'Markets closed', matching the sidebar", () => {
+        const now = new Date("2026-09-30T05:56:00Z");
+        assert.strictEqual(isMarketOpen(now), false);
+        assert.strictEqual(marketStateLabel(now), "Markets closed");
+    });
+
+    test("Saturday midday reads 'Markets closed'", () => {
+        assert.strictEqual(marketStateLabel(new Date("2026-06-13T16:00:00Z")), "Markets closed");
     });
 });

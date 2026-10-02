@@ -182,3 +182,51 @@ export function summarizeRules(strategy: Pick<Strategy, 'rules'>): string {
     if (n === 0) return 'No rules';
     return `${n} rule${n === 1 ? '' : 's'}`;
 }
+
+/**
+ * Copies a strategy so the user can experiment without touching the
+ * original. The copy keeps the original's rules — and therefore its
+ * backtest — but starts paused, with a fresh id and the next short id.
+ */
+export function duplicateStrategy(source: Strategy, existing: readonly Pick<Strategy, 'id' | 'shortId' | 'name'>[]): Strategy {
+    const ids = new Set(existing.map((s) => s.id));
+    let n = 1;
+    while (ids.has(`${source.id}-copy-${n}`)) n += 1;
+    const maxShort = existing.reduce((max, s) => {
+        const m = /^S-(\d+)$/.exec(s.shortId);
+        return m ? Math.max(max, Number(m[1])) : max;
+    }, 0);
+    const names = new Set(existing.map((s) => s.name));
+    let name = `${source.name} (copy)`;
+    let k = 2;
+    while (names.has(name)) name = `${source.name} (copy ${k++})`;
+    return {
+        ...source,
+        id: `${source.id}-copy-${n}`,
+        shortId: `S-${String(maxShort + 1).padStart(3, '0')}`,
+        name,
+        status: source.status === 'backtesting' ? 'backtesting' : 'paused',
+        rules: source.rules.map((r) => ({ ...r, id: `${r.id}-c${n}` })),
+        conjunctions: [...source.conjunctions],
+        universe: source.universe.map((u) => ({ ...u })),
+        guardrails: { ...source.guardrails },
+    };
+}
+
+/**
+ * True when the rules, universe, or guardrails differ from the version the
+ * backtest was run against — the backtest panel then flags its results as
+ * out of date instead of silently showing numbers for different rules.
+ */
+export function hasUnbacktestedChanges(
+    current: Pick<Strategy, 'rules' | 'conjunctions' | 'universe' | 'guardrails'>,
+    backtested: Pick<Strategy, 'rules' | 'conjunctions' | 'universe' | 'guardrails'>,
+): boolean {
+    const strip = (s: typeof current) => ({
+        rules: s.rules.map(({ field, op, value }) => ({ field, op, value })),
+        conjunctions: s.conjunctions,
+        universe: s.universe.map(({ id, enabled }) => ({ id, enabled })),
+        guardrails: s.guardrails,
+    });
+    return JSON.stringify(strip(current)) !== JSON.stringify(strip(backtested));
+}

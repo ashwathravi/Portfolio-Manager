@@ -12,7 +12,8 @@ import type { Strategy } from "@/lib/strategies/strategy";
  *   - shortId (S-001) in mono
  *   - strategy name + one-line description
  *   - optional rolling 30-day adherence score (AR-111)
- *   - 4 readouts: Total return / Sharpe / Max DD / Win rate
+ *   - total return + rolling adherence (Sharpe, drawdown, and win rate
+ *     live in the backtest panel; the card is a compact switcher)
  *
  * The selected card gets an accent border + ambient shadow so the user
  * always knows which strategy the rule builder + backtest surface below
@@ -53,15 +54,7 @@ function formatSignedPct(pct: number): string {
     return `${sign}${Math.abs(pct).toFixed(2)}%`;
 }
 
-function formatPct(pct: number): string {
-    if (pct === 0) return "—";
-    return `${pct.toFixed(1)}%`;
-}
 
-function formatRatio(r: number): string {
-    if (r === 0) return "—";
-    return r.toFixed(2);
-}
 
 export function StrategyCard({
     strategy,
@@ -79,7 +72,6 @@ export function StrategyCard({
             : hasRun && stats.totalReturnPct < 0
                 ? "pm-num-neg"
                 : "";
-    const ddTone = hasRun && stats.maxDrawdownPct < 0 ? "pm-num-neg" : "";
 
     return (
         <button
@@ -87,58 +79,36 @@ export function StrategyCard({
             className={`pm-strategy-card${selected ? " is-selected" : ""}`}
             aria-pressed={selected}
             onClick={onSelect}
+            title={strategy.description}
         >
-            <header className="pm-strategy-card-head">
+            <span className="pm-strategy-card-top">
                 <span className={`pm-strategy-status ${STATUS_CLASS[status]}`}>
                     {status === "active" && <span className="pm-live-dot" aria-hidden="true" />}
                     {STATUS_LABEL[status]}
                 </span>
                 <span className="pm-strategy-shortid">{strategy.shortId}</span>
-            </header>
-
-            <div className="pm-strategy-name">{strategy.name}</div>
-            <p className="pm-strategy-desc">{strategy.description}</p>
-
-            {adherenceScore != null && (
-                <div
-                    className="pm-strategy-adherence"
-                    data-tier={adherenceTier ?? 'none'}
-                    data-testid="strategy-card-adherence"
-                    aria-label={`30-day adherence ${adherenceScore} of 100`}
-                    title="Rolling 30-day rule adherence"
-                >
-                    <span className="pm-strategy-adherence-label">
-                        30d adherence
+            </span>
+            <span className="pm-strategy-name">{strategy.name}</span>
+            <span className="pm-strategy-card-meta">
+                <span className={`pm-strategy-return num ${returnTone}`} aria-label="Total return">
+                    {formatSignedPct(stats.totalReturnPct)}
+                </span>
+                {adherenceScore != null && (
+                    <span
+                        className="pm-strategy-adherence"
+                        data-tier={adherenceTier ?? 'none'}
+                        data-testid="strategy-card-adherence"
+                        aria-label={`30-day adherence ${adherenceScore} of 100`}
+                        title="Rolling 30-day rule adherence"
+                    >
+                        <span className="pm-strategy-adherence-label">30d adherence</span>
+                        <span className="pm-strategy-adherence-value num">
+                            {adherenceScore}
+                            <span className="pm-strategy-adherence-max">/ 100</span>
+                        </span>
                     </span>
-                    <span className="pm-strategy-adherence-value num">
-                        {adherenceScore}
-                        <span className="pm-strategy-adherence-max">/ 100</span>
-                    </span>
-                </div>
-            )}
-
-            <div className="pm-strategy-stats">
-                <div className="pm-readout">
-                    <span className="pm-readout-label">Total return</span>
-                    <span className={`pm-readout-value num ${returnTone}`}>
-                        {formatSignedPct(stats.totalReturnPct)}
-                    </span>
-                </div>
-                <div className="pm-readout">
-                    <span className="pm-readout-label">Sharpe</span>
-                    <span className="pm-readout-value num">{formatRatio(stats.sharpe)}</span>
-                </div>
-                <div className="pm-readout">
-                    <span className="pm-readout-label">Max DD</span>
-                    <span className={`pm-readout-value num ${ddTone}`}>
-                        {hasRun ? `${stats.maxDrawdownPct.toFixed(1)}%` : "—"}
-                    </span>
-                </div>
-                <div className="pm-readout">
-                    <span className="pm-readout-label">Win rate</span>
-                    <span className="pm-readout-value num">{formatPct(stats.winRatePct)}</span>
-                </div>
-            </div>
+                )}
+            </span>
         </button>
     );
 }

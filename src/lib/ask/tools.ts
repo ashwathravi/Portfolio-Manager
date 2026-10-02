@@ -172,7 +172,7 @@ export function pnl_attribution(
         href:
             groupBy === 'sector'
                 ? `/portfolios/holdings?sector=${encodeURIComponent(r.k)}`
-                : `/trade-log`,
+                : `/portfolios/activity`,
     }));
 }
 
@@ -246,7 +246,7 @@ export function trades_matching(
                 day: 'numeric',
             }),
             tone: e.realizedPnlUsd >= 0 ? 'pos' : 'neg',
-            href: `/trade-log`,
+            href: `/portfolios/activity`,
         }));
 }
 
@@ -503,7 +503,7 @@ export function churn_risks(ctx: AskContext, _args: Record<string, unknown> = {}
         value: `${row.churnScore}/100`,
         sub: `${row.tradeCount} trades · ${usd(row.turnoverUsd)} turnover · ${row.recommendation}`,
         tone: row.status === 'breached' || row.status === 'watch' ? 'warn' : 'neutral',
-        href: '/portfolios/trade-log',
+        href: '/portfolios/activity',
     }));
 }
 

@@ -1,5 +1,4 @@
 import { Suspense } from "react";
-import { PageHeaderSync } from "@/components/layout/TopBar";
 import { ResearchPageClient } from "@/components/research/ResearchPageClient";
 
 /**
@@ -16,11 +15,6 @@ export const dynamic = "force-dynamic";
 export default function ResearchPage() {
     return (
         <>
-            <PageHeaderSync
-                title="Research"
-                subtitle="Theses, Alpha Radar, watchlist, and decision journal"
-                crumbs={["Workspace", "Research"]}
-            />
             <Suspense fallback={null}>
                 <ResearchPageClient />
             </Suspense>

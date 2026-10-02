@@ -37,11 +37,12 @@ describe('settingsStore', () => {
 
     describe('updateProfile', () => {
         test('should merge partial updates without clobbering other fields', () => {
+            useSettingsStore.getState().updateProfile({ email: 'jane@example.com', phone: '+1 (555) 000-1111' });
             useSettingsStore.getState().updateProfile({ fullName: 'Jane Smith' });
             const profile = useSettingsStore.getState().profile;
             assert.strictEqual(profile.fullName, 'Jane Smith');
-            assert.strictEqual(profile.email, 'john@example.com');  // unchanged
-            assert.strictEqual(profile.phone, '+1 (555) 123-4567'); // unchanged
+            assert.strictEqual(profile.email, 'jane@example.com');  // unchanged
+            assert.strictEqual(profile.phone, '+1 (555) 000-1111'); // unchanged
         });
 
         test('should update multiple fields at once', () => {
@@ -453,8 +454,47 @@ describe('settingsStore', () => {
     // Accounts
     // -----------------------------------------------------------------------
 
+    // Accounts start empty (v15 removed the seeded example accounts), so
+    // account-action tests seed their own manual rows.
+    function seedManualAccounts() {
+        useSettingsStore.setState({
+            accounts: [
+                { id: 'fidelity', provider: 'manual', name: 'Fidelity', type: 'Individual Brokerage', accountMask: '****4321', holdings: 12, accountValue: 1000, lastSynced: 'Feb 6, 10:30 AM', status: 'reconciled' },
+                { id: 'vanguard', provider: 'manual', name: 'Vanguard', type: 'Roth IRA', accountMask: '****8765', holdings: 8, accountValue: 500, lastSynced: 'Feb 6, 9:15 AM', status: 'reconciled' },
+                { id: 'ibkr', provider: 'manual', name: 'Interactive Brokers', type: 'Trading Account', accountMask: '****2109', holdings: 0, accountValue: 0, lastSynced: 'Feb 5, 3:45 PM', status: 'needs-review', errorMessage: 'Connection error. Please re-authenticate this account.' },
+            ],
+        });
+    }
+
+    describe('setShowSampleData', () => {
+        test('defaults to showing example data', () => {
+            assert.strictEqual(useSettingsStore.getState().demo.showSampleData, true);
+        });
+
+        test('hides and re-shows example data', () => {
+            useSettingsStore.getState().setShowSampleData(false);
+            assert.strictEqual(useSettingsStore.getState().demo.showSampleData, false);
+            useSettingsStore.getState().setShowSampleData(true);
+            assert.strictEqual(useSettingsStore.getState().demo.showSampleData, true);
+        });
+
+        test('resetSettings restores example data to shown', () => {
+            useSettingsStore.getState().setShowSampleData(false);
+            useSettingsStore.getState().resetSettings();
+            assert.strictEqual(useSettingsStore.getState().demo.showSampleData, true);
+        });
+    });
+
+    test('regression: a fresh store has no example accounts or placeholder profile', () => {
+        const state = useSettingsStore.getState();
+        assert.deepStrictEqual(state.accounts, []);
+        assert.strictEqual(state.profile.fullName, '');
+        assert.strictEqual(state.profile.email, '');
+    });
+
     describe('syncAccount', () => {
         test('should update lastSynced for the given account id', () => {
+            seedManualAccounts();
             const before = useSettingsStore.getState().accounts.find((a: ConnectedAccount) => a.id === 'fidelity')!.lastSynced;
             useSettingsStore.getState().syncAccount('fidelity');
             const after = useSettingsStore.getState().accounts.find((a: ConnectedAccount) => a.id === 'fidelity')!.lastSynced;
@@ -462,6 +502,7 @@ describe('settingsStore', () => {
         });
 
         test('should not modify other accounts', () => {
+            seedManualAccounts();
             const vanguardBefore = useSettingsStore.getState().accounts.find((a: ConnectedAccount) => a.id === 'vanguard')!.lastSynced;
             useSettingsStore.getState().syncAccount('fidelity');
             const vanguardAfter = useSettingsStore.getState().accounts.find((a: ConnectedAccount) => a.id === 'vanguard')!.lastSynced;
@@ -505,6 +546,7 @@ describe('settingsStore', () => {
     describe('reconnectAccount', () => {
         test('should set non-Plaid accounts to reconciled and clear errorMessage', () => {
             // ibkr starts with status 'needs-review' and an errorMessage
+            seedManualAccounts();
             const before = useSettingsStore.getState().accounts.find((a: ConnectedAccount) => a.id === 'ibkr')!;
             assert.strictEqual(before.status, 'needs-review');
             assert.ok(before.errorMessage);
@@ -553,6 +595,7 @@ describe('settingsStore', () => {
 
     describe('removeAccount', () => {
         test('should remove an account by id', () => {
+            seedManualAccounts();
             const before = useSettingsStore.getState().accounts.length;
             useSettingsStore.getState().removeAccount('ibkr');
             const after = useSettingsStore.getState().accounts;
@@ -763,7 +806,7 @@ describe('settingsStore', () => {
             useSettingsStore.getState().resetSettings();
 
             const state = useSettingsStore.getState();
-            assert.strictEqual(state.profile.fullName, 'John Doe');
+            assert.strictEqual(state.profile.fullName, '');
             assert.strictEqual(state.notifications.portfolioUpdates, true);
             assert.strictEqual(state.notifications.alphaRadarSignals, true);
             assert.strictEqual(state.alphaRadarDelivery.channels.inApp, true);
@@ -776,7 +819,7 @@ describe('settingsStore', () => {
             assert.strictEqual(state.apiKeys.polygon, '');
             assert.strictEqual(state.preferences.baseCurrency, 'USD');
             assert.strictEqual(state.tags.length, 3);
-            assert.strictEqual(state.accounts.length, 3);
+            assert.strictEqual(state.accounts.length, 0);
         });
     });
 });

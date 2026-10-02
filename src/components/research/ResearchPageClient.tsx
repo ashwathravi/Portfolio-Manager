@@ -1,8 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import Link from "next/link";
+import { useCallback, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import { usePageHeader } from "@/components/layout/PageHeaderContext";
 import { Plus, Search, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useQuotesQuery } from "@/lib/api/market-data/queries";
@@ -181,10 +181,10 @@ export function ResearchPageClient() {
             : null;
 
     // ---- Handlers -----------------------------------------------------------
-    const openCreate = () => {
+    const openCreate = useCallback(() => {
         setEditingThesis(null);
         setThesisModalOpen(true);
-    };
+    }, []);
     const openEdit = (t: Thesis) => {
         setEditingThesis(t);
         setThesisModalOpen(true);
@@ -214,10 +214,10 @@ export function ResearchPageClient() {
         if (editingThesis) update(editingThesis.id, draft);
         else create(draft);
     };
-    const openCreateJournal = () => {
+    const openCreateJournal = useCallback(() => {
         setEditingJournal(null);
         setJournalModalOpen(true);
-    };
+    }, []);
     const handleDeleteJournal = (entry: JournalEntry) => {
         if (
             typeof window !== "undefined" &&
@@ -230,7 +230,9 @@ export function ResearchPageClient() {
     };
 
     // Action button varies by tab to match the surface the user is in.
-    const topbarAction =
+    // Memoized: it feeds the shared page header, and a fresh node on every
+    // render would re-set the header (and re-render this consumer) forever.
+    const topbarAction = useMemo(() =>
         tab === "journal" ? (
             <button
                 type="button"
@@ -249,24 +251,17 @@ export function ResearchPageClient() {
                 <Plus size={14} aria-hidden="true" />
                 <span>New thesis</span>
             </button>
-        );
+        ), [tab, openCreate, openCreateJournal]);
+
+    usePageHeader({
+        title: "Research",
+        subtitle: "Theses, watchlist, Alpha Radar, and decision journal",
+        crumbs: ["Research", TAB_LABEL[tab]],
+        actions: topbarAction ?? undefined,
+    });
 
     return (
         <div className="pm-research-stack">
-            <header className="pm-research-topbar">
-                <div>
-                    <nav className="pm-crumbs" aria-label="Breadcrumb">
-                        <Link href="/">Workspace</Link>
-                        <span className="pm-crumbs-sep">/</span>
-                        <span aria-current="page">Research</span>
-                    </nav>
-                    <h1 className="pm-page-title">Research workspace</h1>
-                    <p className="pm-page-sub">
-                        Theses, Alpha Radar, watchlist, and decision journal
-                    </p>
-                </div>
-                <div className="pm-topbar-actions">{topbarAction}</div>
-            </header>
 
             <div className="pm-research-split">
                 {/* ---------------------------- LEFT COLUMN ---------------------------- */}
@@ -549,9 +544,10 @@ function JournalColumn({
                                 )}
                             </div>
                             <span className="pm-journal-date">
-                                {new Date(entry.date).toLocaleDateString(undefined, {
+                                {new Date(entry.date).toLocaleDateString("en-US", {
                                     month: "short",
                                     day: "numeric",
+                                    timeZone: "UTC",
                                 })}
                             </span>
                         </header>

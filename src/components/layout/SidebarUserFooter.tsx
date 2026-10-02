@@ -11,7 +11,7 @@ import {
     DropdownMenuSeparator,
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { useSettingsStore } from "@/lib/stores/settingsStore";
+import { useDisplayName } from "@/components/providers/IdentityProvider";
 import { usePortfolioCount } from "@/lib/hooks/usePortfolioCount";
 import { useUiStore } from "@/lib/stores/uiStore";
 import { cn } from "@/lib/utils";
@@ -32,28 +32,18 @@ import { cn } from "@/lib/utils";
  * identity in the sidebar footer.
  */
 
-function initialsOf(fullName: string): string {
-    const parts = fullName.split(" ").filter(Boolean);
-    if (parts.length === 0) return "?";
-    const first = parts[0]?.[0] ?? "";
-    const last = parts.length > 1 ? (parts[parts.length - 1]?.[0] ?? "") : "";
-    return `${first}${last}`.toUpperCase() || "?";
-}
-
 export function SidebarUserFooter() {
-    const fullName = useSettingsStore((s) => s.profile.fullName);
+    const { name: fullName, initials, email } = useDisplayName();
     const openTweaks = useUiStore((s) => s.openTweaks);
     const { count, isLoading, isError } = usePortfolioCount();
 
-    // Renderable plan line. While loading we show just "Pro" so the footer
-    // doesn't jump when the count arrives. On error we still show "Pro" —
-    // count is nice-to-have, not critical to the user's identity.
+    // Second line: how many accounts are connected once the count arrives;
+    // the email (or nothing) until then. There is no paid plan, so the old
+    // "Pro" label is gone.
     const planLine =
         isLoading || isError || count === null
-            ? "Pro"
-            : `Pro · ${count} ${count === 1 ? "account" : "accounts"}`;
-
-    const initials = initialsOf(fullName);
+            ? email ?? ""
+            : `${count} ${count === 1 ? "account" : "accounts"}`;
 
     return (
         <div className="pm-user-footer">

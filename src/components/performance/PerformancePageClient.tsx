@@ -1,7 +1,5 @@
 "use client";
 
-import Link from "next/link";
-import { ArrowUpRight, Download } from "lucide-react";
 import {
     benchmarkMonthlySeries,
     portfolioMonthlySeries,
@@ -11,26 +9,25 @@ import {
     defaultSectorBreakdown,
 } from "@/lib/performance/attribution";
 import type { MonthlyValuation } from "@/lib/performance/periodSummary";
-import { SEED_JOURNAL } from "@/lib/journal/seed";
 import { EquityCurveCard, type Benchmark } from "./EquityCurveCard";
 import { AttributionBarsCard } from "./AttributionBarsCard";
 import { MetricsByPeriodTable } from "./MetricsByPeriodTable";
 import { MonthlyHeatmapCard } from "./MonthlyHeatmapCard";
-import { MoodBreakdownCard } from "./MoodBreakdownCard";
-import { PnlDensityCard } from "./PnlDensityCard";
-import { ReviewsArchiveCard } from "./ReviewsArchiveCard";
+import { SampleDataNotice } from "@/components/data-display/SampleDataNotice";
+import { SampleEmptyState } from "@/components/data-display/SampleEmptyState";
+import { SampleGate } from "@/components/data-display/SampleGate";
 
 /**
  * Performance page wrapper.
  *
- * Composes all deep-dive cards:
+ * Performance › Returns. Composes:
  *   - EquityCurveCard        (AR-75, hero)
  *   - AttributionBarsCard    (AR-76, BHB decomposition)
  *   - MetricsByPeriodTable   (AR-76, period × metrics matrix)
  *   - MonthlyHeatmapCard     (AR-77, year × month intensity grid)
- *   - MoodBreakdownCard      (AR-110, mood × realized P&L)
- *   - PnlDensityCard         (AR-113, weekday × hour P&L heatmap)
- *   - ReviewsArchiveCard     (AR-114, last 8 weekly reviews + reflections)
+ *
+ * Behavioural cards (mood, P&L density, trading calendar, weekly reviews)
+ * live on Performance › Behaviour — see BehaviourPageClient.
  *
  * All state is local to each card. The client wrapper exists purely to
  * keep the page file thin and to keep the topbar / breadcrumbs / actions
@@ -82,56 +79,36 @@ const BENCHMARKS: Benchmark[] = [
 export function PerformancePageClient() {
     return (
         <div className="pm-perf-stack">
-            <header className="pm-perf-topbar">
-                <div>
-                    <nav className="pm-crumbs" aria-label="Breadcrumb">
-                        <Link href="/">Workspace</Link>
-                        <span className="pm-crumbs-sep">/</span>
-                        <span aria-current="page">Performance</span>
-                    </nav>
-                    <h1 className="pm-page-title">Performance analytics</h1>
-                    <p className="pm-page-sub">
-                        Time-weighted return, risk metrics, and attribution
-                    </p>
-                </div>
-                <div className="pm-topbar-actions">
-                    <Link
-                        href="/portfolios/holdings"
-                        className="pm-btn pm-btn-ghost"
-                    >
-                        <ArrowUpRight size={14} aria-hidden="true" />
-                        <span>Holdings</span>
-                    </Link>
-                    <button type="button" className="pm-btn pm-btn-ghost" disabled>
-                        <Download size={14} aria-hidden="true" />
-                        <span>Export</span>
-                    </button>
-                </div>
-            </header>
+            <SampleGate
+                fallback={
+                    <SampleEmptyState
+                        title="No return history yet"
+                        body="Time-weighted returns, benchmark comparison, and attribution need your account history. Connect an account to start tracking."
+                    />
+                }
+            >
+                <SampleDataNotice>
+                    Returns, benchmarks, and attribution are example data until account history is connected.
+                </SampleDataNotice>
 
-            <EquityCurveCard
-                portfolio={portfolioMonthlySeries}
-                benchmarks={BENCHMARKS}
-            />
-
-            <div className="pm-perf-split">
-                <AttributionBarsCard
-                    sectors={defaultSectorBreakdown}
-                    assetClasses={defaultAssetClassBreakdown}
-                />
-                <MetricsByPeriodTable
+                <EquityCurveCard
                     portfolio={portfolioMonthlySeries}
-                    benchmark={benchmarkMonthlySeries}
+                    benchmarks={BENCHMARKS}
                 />
-            </div>
 
-            <MonthlyHeatmapCard portfolio={portfolioMonthlySeries} />
+                <div className="pm-perf-split">
+                    <AttributionBarsCard
+                        sectors={defaultSectorBreakdown}
+                        assetClasses={defaultAssetClassBreakdown}
+                    />
+                    <MetricsByPeriodTable
+                        portfolio={portfolioMonthlySeries}
+                        benchmark={benchmarkMonthlySeries}
+                    />
+                </div>
 
-            <MoodBreakdownCard trades={SEED_JOURNAL} />
-
-            <PnlDensityCard trades={SEED_JOURNAL} />
-
-            <ReviewsArchiveCard entries={SEED_JOURNAL} />
+                <MonthlyHeatmapCard portfolio={portfolioMonthlySeries} />
+            </SampleGate>
         </div>
     );
 }

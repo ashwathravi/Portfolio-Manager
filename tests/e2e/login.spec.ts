@@ -10,3 +10,12 @@ test.describe('Login', () => {
     await expect(page.getByRole('navigation', { name: 'Main navigation' })).toHaveCount(0);
   });
 });
+
+test.describe('Login — design review fixes', () => {
+  test('uses the app brand mark and shows no raw backtick setup text', async ({ context, page }) => {
+    await context.clearCookies();
+    await page.goto('/login');
+    await expect(page.locator('.pm-login-mark svg')).toBeVisible();
+    await expect(page.getByText(/`AUTH_SECRET`/)).toHaveCount(0);
+  });
+});

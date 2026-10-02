@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { ArrowUpRight, Plus, Upload } from "lucide-react";
+import { SampleGate } from "@/components/data-display/SampleGate";
 import { useAutoRefreshQuotes } from "@/lib/hooks/useAutoRefreshQuotes";
 import { sectorFor, type Sector } from "@/lib/holdings/sector";
 import {
@@ -59,11 +59,14 @@ export interface HoldingsSeed {
 export interface HoldingsPageClientProps {
     holdings: HoldingsSeed[];
     optionPositions?: readonly OptionRiskPosition[];
+    /** True while option positions come from example data (no options feed yet). */
+    optionPositionsAreSample?: boolean;
 }
 
 export function HoldingsPageClient({
     holdings,
     optionPositions = [],
+    optionPositionsAreSample = false,
 }: HoldingsPageClientProps) {
     const [sectorFilter, setSectorFilter] = useState<Sector | "All">("All");
     const [bucketFilter, setBucketFilter] = useState<PolicyBucketId | "All">("All");
@@ -196,33 +199,26 @@ export function HoldingsPageClient({
         }));
     }, [rows, sectorFilter, bucketFilter, themeFilter, sortKey, policySummary]);
 
+    if (rows.length === 0) {
+        return (
+            <div className="pm-holdings-stack">
+                <section className="pm-card pm-empty-card" data-testid="holdings-empty">
+                    <h2>No holdings yet</h2>
+                    <p>
+                        Positions appear here once an account is connected. Market value, unrealized gain,
+                        policy buckets, and theme exposure are all calculated from your own positions.
+                    </p>
+                    <div className="pm-empty-actions">
+                        <Link href="/settings#accounts" className="pm-btn pm-btn-primary">Connect an account</Link>
+                        <Link href="/portfolios/accounts" className="pm-btn pm-btn-ghost">View accounts</Link>
+                    </div>
+                </section>
+            </div>
+        );
+    }
+
     return (
         <div className="pm-holdings-stack">
-            <header className="pm-holdings-topbar">
-                <div>
-                    <nav className="pm-crumbs" aria-label="Breadcrumb">
-                        <Link href="/portfolios">Portfolio</Link>
-                        <span className="pm-crumbs-sep">/</span>
-                        <span aria-current="page">Holdings</span>
-                    </nav>
-                    <h1 className="pm-page-title">Current holdings</h1>
-                    <p className="pm-page-sub">
-                        {summary.positions} {summary.positions === 1 ? "position" : "positions"}
-                        {" · "}${summary.marketValue.toLocaleString("en-US", { maximumFractionDigits: 0 })} equity
-                    </p>
-                </div>
-                <div className="pm-topbar-actions">
-                    <Link href="/portfolios/trade-log" className="pm-btn pm-btn-ghost">
-                        <Upload size={14} aria-hidden="true" />
-                        <span>Import CSV</span>
-                    </Link>
-                    <Link href="/portfolios" className="pm-btn pm-btn-primary">
-                        <Plus size={14} aria-hidden="true" />
-                        <span>Add position</span>
-                    </Link>
-                </div>
-            </header>
-
             <HoldingsSummaryStrip
                 marketValue={summary.marketValue}
                 unrealizedGain={summary.unrealized}
@@ -238,11 +234,16 @@ export function HoldingsPageClient({
                 themeSummary={themeSummary}
             />
 
-            <OptionsRiskLedgerCard
-                positions={optionPositions}
-                totalPortfolioValue={totalPolicyValue}
-                liquidNetWorth={totalPolicyValue}
-            />
+            {optionPositions.length > 0 && (
+                <SampleGate>
+                    <OptionsRiskLedgerCard
+                        positions={optionPositions}
+                        totalPortfolioValue={totalPolicyValue}
+                        liquidNetWorth={totalPolicyValue}
+                        isSample={optionPositionsAreSample}
+                    />
+                </SampleGate>
+            )}
 
             <HoldingsFilterRow
                 sectorFilter={sectorFilter}
@@ -256,18 +257,6 @@ export function HoldingsPageClient({
             />
 
             <HoldingsFullTable rows={tableRows} />
-
-            {rows.length === 0 && (
-                <div className="pm-card pm-card-stack" style={{ textAlign: "center" }}>
-                    <h3 className="pm-card-title">No holdings yet</h3>
-                    <p className="pm-card-subtitle">
-                        Positions will appear here once you add them to a portfolio.{" "}
-                        <Link href="/portfolios" className="pm-card-link">
-                            Go to portfolios <ArrowUpRight size={12} aria-hidden="true" />
-                        </Link>
-                    </p>
-                </div>
-            )}
         </div>
     );
 }

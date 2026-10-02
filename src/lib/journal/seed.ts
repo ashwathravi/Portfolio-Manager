@@ -29,12 +29,18 @@ import {
     SEED_THESIS_TO_STRATEGY,
 } from '@/lib/adherence/seed';
 
-// Anchor the journal window to a stable "now" captured at module load.
-// Every date is relative so the heatmap, range filter, and "last 30
-// days" queries behave the same whether the page loads Tuesday at 9am
-// or Sunday at 2pm.
-const now = Date.now();
 const DAY_MS = 86_400_000;
+
+/**
+ * Anchor for every example journal date: the start of the current UTC day.
+ * Dates stay relative (the heatmap, range filters, and "last 30 days"
+ * queries behave the same any day), but unlike a module-load
+ * `Date.now()` the anchor is identical in a long-running server process
+ * and in the browser, so server renders and hydration agree. Pass it as
+ * `now` to window calculations over SEED_JOURNAL.
+ */
+export const SEED_JOURNAL_ANCHOR_MS = Math.floor(Date.now() / DAY_MS) * DAY_MS;
+const now = SEED_JOURNAL_ANCHOR_MS;
 const daysAgo = (d: number) => new Date(now - d * DAY_MS).toISOString();
 
 /**

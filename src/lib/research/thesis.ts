@@ -208,15 +208,19 @@ export function addEvidence(
     });
 }
 
-/** Default data used to seed the research workspace on first load. */
-export const DEFAULT_THESES: Thesis[] = [
+/**
+ * Example theses, authored against a fixed calendar. `rebaseSeedTheses`
+ * shifts every date so the newest update lands two weeks before "today";
+ * otherwise a fresh install shows theses that look years stale.
+ */
+const SEED_THESES_AUTHORED: Thesis[] = [
     {
         id: 'seed-nvda',
         ticker: 'NVDA',
         companyName: 'NVIDIA Corporation',
         title: 'AI Infrastructure Dominance',
         description:
-            'NVIDIA is uniquely positioned to capture majority of Data Center AI spend due to CUDA moat and H100 rollout. Supply constraints will support high ASPs through 2024.',
+            'NVIDIA is uniquely positioned to capture majority of Data Center AI spend due to CUDA moat and H100 rollout. Supply constraints will support high ASPs through the current product cycle.',
         type: 'bull',
         status: 'active',
         conviction: 'HIGH',
@@ -227,10 +231,10 @@ export const DEFAULT_THESES: Thesis[] = [
         dateUpdated: '2024-02-01',
         tags: ['AI', 'Semiconductors', 'Data Center'],
         hypothesis:
-            'NVIDIA will maintain 80%+ market share in Data Center AI accelerators through 2025, driven by CUDA ecosystem lock-in, superior performance/watt, and H100/H200 supply advantages. Expect 40%+ revenue CAGR with expanding operating margins as software/services mix increases.',
+            'NVIDIA will maintain 80%+ market share in Data Center AI accelerators over the next two years, driven by CUDA ecosystem lock-in, superior performance/watt, and H100/H200 supply advantages. Expect 40%+ revenue CAGR with expanding operating margins as software/services mix increases.',
         bullCase: [
             'CUDA moat creates 18-24 month switching cost for enterprises already invested in NVIDIA infrastructure',
-            'H100 supply constraints keeping ASPs elevated; H200 launch will extend premium pricing through H2 2024',
+            'H100 supply constraints keeping ASPs elevated; H200 launch will extend premium pricing through the next two quarters',
             'Azure, AWS, GCP continuing to expand AI infrastructure spend at 50%+ growth rates',
             'Software attach (AI Enterprise, Omniverse) reaching $1B+ ARR with 70%+ gross margins',
             'Automotive and edge AI creating additional TAM expansion beyond data center',
@@ -243,13 +247,13 @@ export const DEFAULT_THESES: Thesis[] = [
             'Valuation at 35x forward earnings leaves limited margin of safety',
         ],
         catalysts: [
-            { id: 'cat-nvda-1', title: 'Q4 FY24 Earnings', date: '2024-02-21', impact: 'high' },
+            { id: 'cat-nvda-1', title: 'Quarterly earnings', date: '2024-02-21', impact: 'high' },
             { id: 'cat-nvda-2', title: 'GTC Conference', date: '2024-03-18', impact: 'high' },
-            { id: 'cat-nvda-3', title: 'H200 Production Ramp', date: 'Q2 2024', impact: 'medium' },
-            { id: 'cat-nvda-4', title: 'Automotive Design Wins', date: 'Q3 2024', impact: 'medium' },
+            { id: 'cat-nvda-3', title: 'H200 Production Ramp', date: '2024-05-15', impact: 'medium' },
+            { id: 'cat-nvda-4', title: 'Automotive Design Wins', date: '2024-08-15', impact: 'medium' },
         ],
         linkedEvidence: [
-            { id: 'ev-nvda-1', title: 'Q3 FY24 Earnings Transcript Analysis', type: 'earnings', date: '2023-11-21' },
+            { id: 'ev-nvda-1', title: 'Earnings Transcript Analysis', type: 'earnings', date: '2023-11-21' },
             { id: 'ev-nvda-2', title: 'Azure AI Infrastructure Deep Dive', type: 'report', date: '2024-01-10' },
             { id: 'ev-nvda-3', title: 'CUDA Ecosystem Competitive Analysis', type: 'note', date: '2023-12-05' },
             { id: 'ev-nvda-4', title: 'AMD MI300 Benchmark Comparison', type: 'article', date: '2024-01-28' },
@@ -282,17 +286,17 @@ export const DEFAULT_THESES: Thesis[] = [
         bearCase: [
             'BYD and Chinese EV makers offering comparable vehicles at 30-40% lower prices',
             'Legacy automakers (Ford, GM) achieving price parity with EV offerings',
-            'Price cuts in Q1 2024 signal weakening demand elasticity',
+            'Recent price cuts signal weakening demand elasticity',
             'FSD revenue recognition pushed back again, limited near-term contribution',
             'Regulatory credit revenue declining as other OEMs meet requirements',
         ],
         catalysts: [
-            { id: 'cat-tsla-1', title: 'Q4 2023 Earnings', date: '2024-01-24', impact: 'high' },
+            { id: 'cat-tsla-1', title: 'Quarterly earnings', date: '2024-02-24', impact: 'high' },
             { id: 'cat-tsla-2', title: 'Cybertruck Production Update', date: '2024-03-01', impact: 'medium' },
             { id: 'cat-tsla-3', title: 'China Sales Data', date: 'Monthly', impact: 'high' },
         ],
         linkedEvidence: [
-            { id: 'ev-tsla-1', title: 'Q4 2023 Earnings Analysis', type: 'earnings', date: '2024-01-24' },
+            { id: 'ev-tsla-1', title: 'Earnings Analysis', type: 'earnings', date: '2024-01-24' },
             { id: 'ev-tsla-2', title: 'BYD Competitive Positioning', type: 'report', date: '2024-01-15' },
             { id: 'ev-tsla-3', title: 'EV Pricing Trends Analysis', type: 'article', date: '2024-02-01' },
         ],
@@ -315,9 +319,9 @@ export const DEFAULT_THESES: Thesis[] = [
         dateUpdated: '2024-01-28',
         tags: ['Cloud', 'AI', 'Enterprise'],
         hypothesis:
-            'Microsoft will monetize AI capabilities across Azure, Office 365, and GitHub to generate incremental $15B+ revenue by FY2025. OpenAI partnership provides competitive moat in enterprise AI, driving Azure consumption growth reacceleration to 30%+.',
+            'Microsoft will monetize AI capabilities across Azure, Office 365, and GitHub to generate incremental $15B+ revenue within two fiscal years. OpenAI partnership provides competitive moat in enterprise AI, driving Azure consumption growth reacceleration to 30%+.',
         bullCase: [
-            'Copilot for Microsoft 365 reaching 10M+ paid seats by end of FY24',
+            'Copilot for Microsoft 365 reaching 10M+ paid seats within the fiscal year',
             'Azure AI services growing 100%+ YoY with strong retention',
             'OpenAI exclusive partnership creating differentiated enterprise offering',
             'GitHub Copilot expanding beyond developers to broader knowledge workers',
@@ -329,12 +333,12 @@ export const DEFAULT_THESES: Thesis[] = [
             'Enterprise AI adoption slower than expected due to governance concerns',
         ],
         catalysts: [
-            { id: 'cat-msft-1', title: 'Q2 FY24 Earnings', date: '2024-01-30', impact: 'high' },
+            { id: 'cat-msft-1', title: 'Quarterly earnings', date: '2024-02-28', impact: 'high' },
             { id: 'cat-msft-2', title: 'Copilot Enterprise Launch', date: '2024-02-15', impact: 'high' },
             { id: 'cat-msft-3', title: 'Build Conference', date: '2024-05-21', impact: 'medium' },
         ],
         linkedEvidence: [
-            { id: 'ev-msft-1', title: 'Q1 FY24 Earnings Deep Dive', type: 'earnings', date: '2023-10-24' },
+            { id: 'ev-msft-1', title: 'Earnings Deep Dive', type: 'earnings', date: '2023-10-24' },
             { id: 'ev-msft-2', title: 'Copilot Adoption Survey Results', type: 'report', date: '2024-01-10' },
             { id: 'ev-msft-3', title: 'Azure AI Competitive Landscape', type: 'note', date: '2024-01-22' },
         ],
@@ -367,7 +371,7 @@ export const DEFAULT_THESES: Thesis[] = [
             'Apple privacy changes continue to pressure targeting efficiency',
         ],
         catalysts: [
-            { id: 'cat-meta-1', title: 'Q4 2023 Earnings', date: '2024-02-01', impact: 'high' },
+            { id: 'cat-meta-1', title: 'Quarterly earnings', date: '2024-02-01', impact: 'high' },
         ],
         linkedEvidence: [
             { id: 'ev-meta-1', title: 'Reality Labs Segment Deep Dive', type: 'report', date: '2023-11-15' },
@@ -375,3 +379,42 @@ export const DEFAULT_THESES: Thesis[] = [
         healthScore: 45,
     },
 ];
+
+/** Ids of the example theses (rendered with a "Sample" tag). */
+export const SEED_THESIS_IDS: ReadonlySet<string> = new Set(SEED_THESES_AUTHORED.map((t) => t.id));
+
+export function isSeedThesis(thesis: Pick<Thesis, 'id'>): boolean {
+    return SEED_THESIS_IDS.has(thesis.id);
+}
+
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+const DAY_MS = 86_400_000;
+
+function shiftIsoDate(iso: string, offsetDays: number): string {
+    if (!ISO_DATE.test(iso)) return iso;
+    return new Date(Date.parse(`${iso}T00:00:00Z`) + offsetDays * DAY_MS).toISOString().slice(0, 10);
+}
+
+/**
+ * Shifts every ISO date in the given theses (created/updated, catalysts,
+ * evidence) by the same number of whole days so the most recent
+ * `dateUpdated` falls `leadDays` before `now` (UTC day). Non-ISO dates
+ * such as "Monthly" are left alone. Deterministic within a UTC day, so the
+ * server render and hydration agree.
+ */
+export function rebaseSeedTheses(theses: readonly Thesis[], now: number, leadDays = 14): Thesis[] {
+    const latest = theses.reduce((max, t) => (ISO_DATE.test(t.dateUpdated) ? Math.max(max, Date.parse(`${t.dateUpdated}T00:00:00Z`)) : max), 0);
+    if (latest === 0) return theses.map((t) => ({ ...t }));
+    const todayUtc = Math.floor(now / DAY_MS) * DAY_MS;
+    const offset = Math.round((todayUtc - leadDays * DAY_MS - latest) / DAY_MS);
+    return theses.map((t) => ({
+        ...t,
+        dateCreated: shiftIsoDate(t.dateCreated, offset),
+        dateUpdated: shiftIsoDate(t.dateUpdated, offset),
+        catalysts: t.catalysts.map((c) => ({ ...c, date: shiftIsoDate(c.date, offset) })),
+        linkedEvidence: t.linkedEvidence.map((e) => ({ ...e, date: shiftIsoDate(e.date, offset) })),
+    }));
+}
+
+/** Default data used to seed the research workspace on first load. */
+export const DEFAULT_THESES: Thesis[] = rebaseSeedTheses(SEED_THESES_AUTHORED, Date.now());

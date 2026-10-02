@@ -383,6 +383,18 @@ describe('preferencesSchema', () => {
         assert.strictEqual(result.success, true);
     });
 
+    test('accepts every landing page in the consolidated IA', () => {
+        for (const page of ['/', '/portfolios/holdings', '/performance', '/performance/behaviour', '/research', '/strategies', '/execution']) {
+            assert.strictEqual(preferencesSchema.safeParse({ ...validPrefs, defaultLandingPage: page }).success, true, page);
+        }
+    });
+
+    test('rejects retired landing pages', () => {
+        for (const page of ['/analytics', '/portfolios']) {
+            assert.strictEqual(preferencesSchema.safeParse({ ...validPrefs, defaultLandingPage: page }).success, false, page);
+        }
+    });
+
     test('rejects unknown currency codes', () => {
         const result = preferencesSchema.safeParse({ ...validPrefs, baseCurrency: 'ZZZ' });
         assert.strictEqual(result.success, false);

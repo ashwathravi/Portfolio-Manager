@@ -44,12 +44,13 @@ const numberFormatOptions: { value: PreferencesFormValues["numberFormat"]; label
 ];
 
 const landingPageOptions: { value: PreferencesFormValues["defaultLandingPage"]; label: string }[] = [
-    { value: "/", label: "Dashboard" },
-    { value: "/performance", label: "Performance" },
-    { value: "/analytics", label: "Trade Analytics" },
-    { value: "/portfolios", label: "Portfolio" },
+    { value: "/", label: "Today" },
+    { value: "/portfolios/holdings", label: "Portfolio" },
+    { value: "/performance", label: "Performance › Returns" },
+    { value: "/performance/behaviour", label: "Performance › Behaviour" },
     { value: "/research", label: "Research" },
     { value: "/strategies", label: "Strategies" },
+    { value: "/execution", label: "Trade" },
 ];
 
 export function PreferencesSettings() {

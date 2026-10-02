@@ -7,9 +7,7 @@ import { Sparkline } from "@/components/charts";
  * Phase 3 (AR-70) StatCard primitive — the Ledger variant.
  *
  * Used by the Dashboard 4-card stat row (Net Worth, Today's P&L, Alpha vs S&P,
- * Cash Runway) and the Holdings 6-metric strip. Legacy
- * `@/components/data-display/StatCard` still exists for screens that haven't
- * been migrated yet; once every caller is on this version we'll retire it.
+ * Cash Runway) and the Holdings 6-metric strip.
  *
  * Layout:
  *

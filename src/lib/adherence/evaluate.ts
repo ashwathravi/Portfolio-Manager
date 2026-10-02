@@ -15,6 +15,7 @@
  * passes, every rule has a working predicate.
  */
 
+import { getEasternParts } from '@/lib/markets/market-hours';
 import {
     ADHERENCE_RULE_META,
     type AdherenceRule,
@@ -77,11 +78,17 @@ function fmtPct(n: number): string {
     return `${n.toFixed(1)}%`;
 }
 
+/**
+ * Hour of execution in market time (America/New_York). Trading-hour rules
+ * describe the market session, and the viewer's own timezone would make
+ * the same trade pass on one machine and fail on another (which also broke
+ * hydration when a UTC server rendered for a browser elsewhere).
+ */
 function hourOf(iso: string | number | undefined): number | null {
     if (iso == null) return null;
     const ms = typeof iso === 'number' ? iso : Date.parse(iso);
     if (!Number.isFinite(ms)) return null;
-    return new Date(ms).getHours();
+    return getEasternParts(new Date(ms)).hour;
 }
 
 // --------------------------------------------------------------------- //

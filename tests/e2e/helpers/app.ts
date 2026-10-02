@@ -25,8 +25,10 @@ export async function reloadAppPage(page: Page) {
 export async function selectAppTab(page: Page, name: string | RegExp) {
     const tab = page.getByRole('tab', { name });
     await expect(tab).toBeVisible();
-    await tab.click();
-    await expect(tab).toHaveAttribute('aria-selected', 'true');
+    await expect(async () => {
+        await tab.click();
+        await expect(tab).toHaveAttribute('aria-selected', 'true', { timeout: 1000 });
+    }).toPass({ timeout: 10_000 });
 }
 
 export async function clickUntil(
@@ -38,4 +40,32 @@ export async function clickUntil(
         await locator.click();
         await assertion();
     }).toPass({ timeout });
+}
+
+/**
+ * Starts collecting browser console errors and uncaught page errors.
+ * Call before navigation; read the returned array after the page settles.
+ */
+export function collectConsoleErrors(page: Page): string[] {
+    const errors: string[] = [];
+    page.on('console', (msg) => {
+        if (msg.type() === 'error') errors.push(msg.text());
+    });
+    page.on('pageerror', (err) => errors.push(String(err)));
+    return errors;
+}
+
+/**
+ * On Today, the full risk-policy checks sit behind the policy strip and
+ * only render when the user has holdings. Opens the strip and returns
+ * true, or returns false when the book is empty (callers then skip).
+ */
+export async function openPolicyChecks(page: Page): Promise<boolean> {
+    const hero = page.getByTestId('today-hero');
+    await expect(hero).toBeVisible();
+    if ((await hero.getAttribute('data-empty')) === 'true') return false;
+    const strip = page.getByTestId('policy-strip');
+    if ((await strip.getAttribute('open')) === null) await strip.locator('summary').click();
+    await expect(page.getByTestId('risk-policy-dashboard')).toBeVisible();
+    return true;
 }

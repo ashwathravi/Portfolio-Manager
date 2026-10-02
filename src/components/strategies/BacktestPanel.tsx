@@ -36,6 +36,8 @@ import type {
 
 export interface BacktestPanelProps {
     strategy: Strategy;
+    /** True when rules changed after the backtest ran (no live engine yet). */
+    stale?: boolean;
 }
 
 const VERDICT_CLASS: Record<StrategyBacktest["verdict"], string> = {
@@ -71,17 +73,26 @@ function formatUsd(n: number): string {
     return `$${n.toFixed(0)}`;
 }
 
-export function BacktestPanel({ strategy }: BacktestPanelProps) {
+export function BacktestPanel({ strategy, stale = false }: BacktestPanelProps) {
     const { backtest } = strategy;
 
     return (
         <div className="pm-bt-panel pm-card">
             <BacktestHead windowLabel={backtest.windowLabel} verdict={backtest.verdict} />
+            {stale && (
+                <p className="pm-bt-stale" role="status" data-testid="backtest-stale">
+                    Rules changed since this backtest. The results below are for the saved rules.
+                </p>
+            )}
             <div className="pm-bt-chart">
                 <AreaChart
                     data={backtest.equityCurve}
                     range="ALL"
-                    height={200}
+                    // The panel is ~360px wide; a matching viewBox keeps the
+                    // 11-unit axis labels at a readable ~11px (they rendered
+                    // at ~6px when scaled down from the default 600-wide box).
+                    width={360}
+                    height={170}
                     showEndDot
                     ariaLabel={`Equity curve for ${strategy.name} over ${backtest.windowLabel}`}
                 />

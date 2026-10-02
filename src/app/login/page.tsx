@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
-import { ArrowRight, ShieldCheck } from "lucide-react";
+import { ArrowRight } from "lucide-react";
+import { BrandMark } from "@/components/layout/BrandMark";
 import { auth, signIn } from "@/auth";
 import { isAuthConfigured } from "@/lib/auth/access";
 
@@ -26,13 +27,12 @@ export default async function LoginPage({
             <section className="pm-login-panel" aria-labelledby="pm-login-title">
                 <div className="pm-login-brand">
                     <span className="pm-login-mark" aria-hidden="true">
-                        AW
+                        <BrandMark size={20} className="pm-brand-svg" />
                     </span>
                     <span>Atlas Wealth</span>
                 </div>
 
                 <div className="pm-login-copy">
-                    <ShieldCheck className="pm-login-icon" aria-hidden="true" />
                     <h1 id="pm-login-title">Sign in</h1>
                     <p>Use your Google account to open your Atlas Wealth workspace.</p>
                 </div>
@@ -62,8 +62,17 @@ export default async function LoginPage({
                 </form>
 
                 {!isAuthConfigured() && (
-                    <p className="pm-login-hint">
-                        Configure `AUTH_SECRET`, `AUTH_GOOGLE_ID`, and `AUTH_GOOGLE_SECRET` to enable Google sign-in.
+                    // Setup instructions are for whoever runs the app, so they
+                    // only show in development; users get a plain message.
+                    <p className="pm-login-hint" data-testid="login-unavailable">
+                        {process.env.NODE_ENV === "production" ? (
+                            "Sign-in isn’t available right now. Contact the workspace owner."
+                        ) : (
+                            <>
+                                Development setup: set <code>AUTH_SECRET</code>, <code>AUTH_GOOGLE_ID</code>, and{" "}
+                                <code>AUTH_GOOGLE_SECRET</code> to enable Google sign-in.
+                            </>
+                        )}
                     </p>
                 )}
             </section>

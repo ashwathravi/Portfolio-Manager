@@ -1,5 +1,6 @@
 "use client";
 
+import { monthAxisLabels } from "@/lib/charts";
 import { useMemo, useState } from "react";
 import { AreaChart, type AreaChartRange } from "@/components/charts";
 import {
@@ -99,9 +100,13 @@ export function EquityCurveCard({ portfolio, benchmarks }: EquityCurveCardProps)
             <header className="pm-perf-equity-head">
                 <div>
                     <h2 className="pm-card-title">Equity curve</h2>
-                    <p className="pm-card-subtitle">
-                        Time-weighted return vs {activeBench?.label ?? "benchmark"},
-                        rebased to 100 at period start
+                    <p className="pm-perf-hero" data-testid="performance-hero">
+                        <span className={`pm-perf-hero-twr ${signTone(readouts.twr) === "pos" ? "pm-pos" : signTone(readouts.twr) === "neg" ? "pm-neg" : ""}`}>
+                            {fmtPct(readouts.twr)}
+                        </span>
+                        <span className="pm-perf-hero-sub">
+                            time-weighted, {range} · {activeBench?.label ?? "benchmark"} {fmtPct(readouts.bench)} · alpha {fmtPct(readouts.alpha)}
+                        </span>
                     </p>
                 </div>
                 <div className="pm-perf-equity-controls">
@@ -144,22 +149,14 @@ export function EquityCurveCard({ portfolio, benchmarks }: EquityCurveCardProps)
                 data={portfolioNormalized}
                 benchmark={benchNormalized}
                 range={range}
+                xLabels={monthAxisLabels(slicePortfolio)}
                 height={260}
                 ariaLabel={`Equity curve vs ${activeBench?.label ?? "benchmark"} over ${range}`}
             />
 
+            {/* TWR, benchmark, and alpha lead the card above; the strip keeps
+                the risk figures. */}
             <div className="pm-perf-readouts">
-                <Readout
-                    label="TWR"
-                    value={fmtPct(readouts.twr)}
-                    tone={signTone(readouts.twr)}
-                />
-                <Readout label="Bench" value={fmtPct(readouts.bench)} />
-                <Readout
-                    label="Alpha"
-                    value={fmtPct(readouts.alpha)}
-                    tone={signTone(readouts.alpha)}
-                />
                 <Readout label="Sharpe" value={fmtRatio(readouts.sharpe)} />
                 <Readout label="Sortino" value={fmtRatio(readouts.sortino)} />
                 <Readout label="Max DD" value={fmtPct(readouts.maxDd)} tone="neg" />

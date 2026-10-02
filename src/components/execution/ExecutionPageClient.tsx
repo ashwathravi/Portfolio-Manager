@@ -1,80 +1,50 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
 import { usePageHeader } from "@/components/layout/PageHeaderContext";
-import {
-    DEFAULT_EXECUTION_VARIANT,
-    readExecutionVariant,
-    variantCrumb,
-    writeExecutionVariant,
-    type ExecutionVariant,
-} from "@/lib/execution/variant";
-import { VariantSwitcher } from "./VariantSwitcher";
+import { SampleDataNotice } from "@/components/data-display/SampleDataNotice";
+import { SampleEmptyState } from "@/components/data-display/SampleEmptyState";
+import { useShowSampleData } from "@/lib/hooks/useShowSampleData";
 import { FocusVariant } from "./FocusVariant";
-import { CheckoutVariant } from "./CheckoutVariant";
-import { TerminalVariant } from "./TerminalVariant";
 
 /**
- * Phase 7 (AR-83) Execution page client wrapper.
+ * Trade (/execution).
  *
- * Owns the variant state, persists it to localStorage, and drives the
- * topbar breadcrumb + subtitle so the header stays in sync with which
- * layout the user is looking at.
+ * One ticket design: the order form beside the blotter and approval queue.
+ * The design review retired the Checkout and Terminal variants — users
+ * shouldn't have to pick a layout to place an order.
  *
- * SSR note: we always render the default variant on the server, then
- * hydrate to the persisted variant on mount. That's intentional — the
- * alternative (reading localStorage during render) breaks SSR. The first
- * client paint will flicker to the stored variant if it differs, but
- * only once per page load and only when it actually changes.
- *
- * The variant bodies themselves are stubbed here and will be replaced
- * by the real Focus/Checkout/Terminal layouts in AR-84/85/86.
+ * Orders never route to a broker from here: tickets draft into the
+ * blotter for review, and the blotter, buying power, and prices are
+ * example data until a brokerage is connected.
  */
 
+const HEADER = {
+    title: "Trade",
+    subtitle: "Draft orders, check them against your rules, then route them yourself",
+    crumbs: ["Trade"],
+};
+
 export function ExecutionPageClient() {
-    const [variant, setVariant] = useState<ExecutionVariant>(DEFAULT_EXECUTION_VARIANT);
-    const [hydrated, setHydrated] = useState(false);
+    usePageHeader(HEADER);
+    const showSample = useShowSampleData();
 
-    // On mount, pull the persisted variant. Default stays put if nothing
-    // is stored or storage is unavailable.
-    useEffect(() => {
-        const stored = readExecutionVariant();
-        // eslint-disable-next-line react-hooks/set-state-in-effect -- This hydrates client-only localStorage state after the SSR default render.
-        setVariant(stored);
-        setHydrated(true);
-    }, []);
-
-    const onChange = useCallback((next: ExecutionVariant) => {
-        setVariant(next);
-        writeExecutionVariant(next);
-    }, []);
-
-    // Breadcrumb trail updates live with the variant so the topbar always
-    // tells the user which surface they're in.
-    const crumbs = useMemo(
-        () => ["Workspace", "Execution", variantCrumb(variant)],
-        [variant],
-    );
-
-    // Actions slot hosts the switcher pill group so it sits in the
-    // topbar's right-aligned action area — same pattern as Strategies.
-    const actions = useMemo(
-        () => <VariantSwitcher value={variant} onChange={onChange} />,
-        [variant, onChange],
-    );
-
-    usePageHeader({
-        title: "Execution",
-        subtitle: "Place, manage, and audit your orders.",
-        crumbs,
-        actions,
-    });
+    if (!showSample) {
+        return (
+            <div className="pm-exec-page">
+                <SampleEmptyState
+                    title="No brokerage connected"
+                    body="The order ticket needs live prices and buying power from a connected brokerage. Example orders and prices are hidden."
+                />
+            </div>
+        );
+    }
 
     return (
-        <div className="pm-exec-page" data-variant={variant} aria-busy={!hydrated}>
-            {variant === "focus" && <FocusVariant />}
-            {variant === "checkout" && <CheckoutVariant />}
-            {variant === "terminal" && <TerminalVariant />}
+        <div className="pm-exec-page" data-variant="focus">
+            <SampleDataNotice>
+                Prices, buying power, and the order blotter are examples. Drafted orders stay in this tab.
+            </SampleDataNotice>
+            <FocusVariant />
         </div>
     );
 }

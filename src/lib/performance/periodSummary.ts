@@ -5,7 +5,6 @@ import {
     maxDrawdown,
     sharpeRatio,
     simpleReturn,
-    standardDeviation,
     volatility,
 } from './calculations';
 
@@ -182,10 +181,14 @@ export function computeRiskSnapshot(
         beta = varB === 0 ? 0 : cov / varB;
     }
 
-    // Sortino: annualized mean excess return / downside stddev (zero target).
-    const downside = pReturns.filter((r) => r < 0);
-    const downsideStd = downside.length >= 2 ? standardDeviation(downside) : 0;
-    const downsideAnnual = downsideStd * Math.sqrt(MONTHS_PER_YEAR);
+    // Sortino: annualized mean excess return / downside deviation (zero
+    // target). Downside deviation is the root-mean-square of below-target
+    // returns over *all* periods (target semideviation). Taking the
+    // standard deviation of only the losing months understated risk —
+    // two similar losses gave a near-zero spread and a Sortino of 35+.
+    const downsideSq = pReturns.reduce((sum, r) => sum + (r < 0 ? r * r : 0), 0);
+    const downsideDev = pReturns.length > 0 ? Math.sqrt(downsideSq / pReturns.length) : 0;
+    const downsideAnnual = downsideDev * Math.sqrt(MONTHS_PER_YEAR);
     const meanMonthly = pReturns.reduce((a, b) => a + b, 0) / pReturns.length;
     const annualMean = meanMonthly * MONTHS_PER_YEAR;
     const sortino = downsideAnnual === 0 ? 0 : (annualMean - riskFreeRate) / downsideAnnual;

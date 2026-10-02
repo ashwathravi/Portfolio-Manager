@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { LANDING_PAGES } from '@/lib/stores/settingsMigrations';
 import { safeText } from './common';
 
 export const profileSchema = z.object({
@@ -38,7 +39,7 @@ export const preferencesSchema = z.object({
     baseCurrency: z.enum(['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'JPY', 'CHF', 'INR']),
     dateFormat: z.enum(['MM/DD/YYYY', 'DD/MM/YYYY', 'YYYY-MM-DD']),
     numberFormat: z.enum(['en-US', 'en-GB', 'de-DE', 'fr-FR']),
-    defaultLandingPage: z.enum(['/', '/performance', '/analytics', '/portfolios', '/research', '/strategies']),
+    defaultLandingPage: z.enum(LANDING_PAGES),
     marketDataRefreshSeconds: z.number().int().min(15, "Minimum 15 seconds").max(3600, "Maximum 60 minutes"),
 });
 

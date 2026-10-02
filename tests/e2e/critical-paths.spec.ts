@@ -27,12 +27,13 @@ test.describe('Critical user paths', () => {
 
         // Fill the form. Metric defaults to "price" which requires a symbol.
         const uniqueName = `E2E price alert ${Date.now()}`;
-        await page.getByLabel('Name').fill(uniqueName);
-        await page.getByLabel('Symbol', { exact: false }).fill('tsla');
-        await page.getByLabel('Threshold', { exact: false }).fill('250');
+        const dialog = page.getByRole('dialog');
+        await dialog.getByLabel('Name').fill(uniqueName);
+        await dialog.getByLabel('Symbol', { exact: false }).fill('tsla');
+        await dialog.getByLabel('Threshold', { exact: false }).fill('250');
 
         // Submit.
-        await page.getByRole('button', { name: 'Create', exact: true }).click();
+        await dialog.getByRole('button', { name: 'Create', exact: true }).click();
 
         // Dialog closes and the new rule is rendered in the list. The name also
         // appears in the toast and in sr-only labels on edit/delete buttons, so
@@ -82,11 +83,15 @@ test.describe('Critical user paths', () => {
     test('switching theme to dark applies html.dark class and persists', async ({ page }) => {
         await gotoAppPage(page, '/settings?tab=appearance');
 
-        // Select the Dark theme tile.
-        await page.getByLabel('Dark', { exact: true }).click();
-
-        // ThemeProvider runs a useEffect that toggles `html.dark`. Wait for it.
-        await expect(page.locator('html')).toHaveClass(/(^|\s)dark(\s|$)/);
+        // Select the Dark theme option.
+        // Settings hydrates inside a Suspense boundary; retry until the click lands.
+        // ThemeProvider runs a useEffect that toggles `html.dark`.
+        await clickUntil(
+            page.getByRole('radiogroup', { name: 'Color theme' }).getByRole('radio', { name: 'Dark', exact: true }),
+            async () => {
+                await expect(page.locator('html')).toHaveClass(/(^|\s)dark(\s|$)/, { timeout: 1000 });
+            },
+        );
 
         // Navigate away — the class should remain since the settings store persists.
         await gotoAppPage(page, '/');
@@ -97,13 +102,13 @@ test.describe('Critical user paths', () => {
         await expect(page.locator('html')).toHaveClass(/(^|\s)dark(\s|$)/);
     });
 
-    test('user navigates dashboard → holdings → portfolios without errors', async ({ page }) => {
+    test('user navigates dashboard → holdings → accounts without errors', async ({ page }) => {
         const consoleErrors: string[] = [];
         page.on('pageerror', (err) => consoleErrors.push(err.message));
 
         await gotoAppPage(page, '/');
         // Post-redesign: the dashboard title lives in the Topbar, not the body.
-        await expect(page.locator('h1.pm-topbar-title')).toHaveText('Dashboard');
+        await expect(page.locator('h1.pm-topbar-title')).toHaveText('Today');
 
         // Jump to holdings via direct URL (sidebar is covered by navigation.spec.ts).
         await gotoAppPage(page, '/portfolios/holdings');
@@ -113,9 +118,9 @@ test.describe('Critical user paths', () => {
         );
         await expect(tableOrEmpty).toBeVisible();
 
-        // Then portfolios overview.
-        await gotoAppPage(page, '/portfolios');
-        await expect(page.locator('h1', { hasText: 'Portfolios' })).toBeVisible();
+        // Then the accounts view (replaced the old /portfolios overview).
+        await gotoAppPage(page, '/portfolios/accounts');
+        await expect(page.getByTestId('accounts-view')).toBeVisible();
 
         // No uncaught runtime errors surfaced during the journey.
         expect(consoleErrors).toEqual([]);

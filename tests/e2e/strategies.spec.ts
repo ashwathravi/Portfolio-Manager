@@ -20,19 +20,43 @@ test.describe('Strategies page — Phase 6 builder shell', () => {
         await page.goto('/strategies');
     });
 
-    test('renders the topbar title and builder subtitle', async ({ page }) => {
-        await expect(page.locator('h1.pm-topbar-title')).toHaveText('Strategy builder');
-        await expect(
-            page.getByText(/Rules → backtest → robustness → paper → live/),
-        ).toBeVisible();
+    test('renders the Strategies title without automation copy', async ({ page }) => {
+        await expect(page.locator('h1.pm-topbar-title')).toHaveText('Strategies');
+        await expect(page.getByText(/Earn automation/)).toHaveCount(0);
+        await expect(page.getByText(/Deploy live/i)).toHaveCount(0);
+    });
+
+    test('labels the strategies as example data', async ({ page }) => {
+        await expect(page.getByTestId('sample-data-notice')).toBeVisible();
+    });
+
+    test('regression: Duplicate creates and selects a copy (was a dead button)', async ({ page }) => {
+        const cards = page.locator('.pm-strategy-card');
+        await expect(cards).toHaveCount(3);
+        await page.getByRole('button', { name: 'Duplicate' }).click();
+        await expect(cards).toHaveCount(4);
+        await expect(cards.nth(3)).toHaveAttribute('aria-pressed', 'true');
+        await expect(cards.nth(3)).toContainText('Momentum + Value (copy)');
+    });
+
+    test('regression: there is no inert "Run backtest" button', async ({ page }) => {
+        await expect(page.getByRole('button', { name: 'Run backtest' })).toHaveCount(0);
+    });
+
+    test('editing a rule flags the backtest as out of date', async ({ page }) => {
+        await expect(page.getByTestId('backtest-stale')).toHaveCount(0);
+        await page.getByLabel('Value').first().fill('0.95');
+        await expect(page.getByTestId('backtest-stale')).toBeVisible();
     });
 
     test('renders three seed strategy cards in the top row', async ({ page }) => {
         const cards = page.locator('.pm-strategy-card');
         await expect(cards).toHaveCount(3);
-        await expect(page.getByText('Momentum + Value')).toBeVisible();
-        await expect(page.getByText('Mean Reversion')).toBeVisible();
-        await expect(page.getByText('Sector Rotation')).toBeVisible();
+        // Scoped to the switcher: the selected name is also in the breadcrumb.
+        const row = page.locator('.pm-strategy-row');
+        await expect(row.getByText('Momentum + Value')).toBeVisible();
+        await expect(row.getByText('Mean Reversion')).toBeVisible();
+        await expect(row.getByText('Sector Rotation')).toBeVisible();
     });
 
     test('selects the first strategy by default and updates on click', async ({ page }) => {
@@ -253,5 +277,44 @@ test.describe('Strategies page — Adherence impact card (AR-111)', () => {
                 card.getByTestId('adherence-impact-broken'),
             ).toBeVisible();
         }
+    });
+});
+
+/**
+ * Regression: /strategies/[id] and /strategies/[id]/backtest used to render
+ * "Strategy not found" for every seeded strategy. They now open the
+ * workspace with that strategy selected.
+ */
+test.describe('Strategies page — legacy strategy URLs', () => {
+    test('/strategies/<seeded id> selects that strategy in the workspace', async ({ page }) => {
+        await page.goto('/strategies/strategy-mean-reversion');
+        await expect(page).toHaveURL(/\/strategies\?strategy=strategy-mean-reversion$/);
+        await expect(page.getByText('Strategy not found')).toHaveCount(0);
+        const cards = page.locator('.pm-strategy-card');
+        await expect(cards.nth(1)).toHaveAttribute('aria-pressed', 'true');
+    });
+
+    test('/strategies/<seeded id>/backtest lands on the same workspace', async ({ page }) => {
+        await page.goto('/strategies/strategy-sector-rotation/backtest');
+        await expect(page).toHaveURL(/\/strategies\?strategy=strategy-sector-rotation$/);
+        await expect(page.locator('.pm-strategy-card').nth(2)).toHaveAttribute('aria-pressed', 'true');
+        await expect(page.locator('.pm-bt-panel').first()).toBeVisible();
+    });
+
+    test('an unknown strategy id shows the 404 page', async ({ page }) => {
+        // The /strategies segment streams a loading shell first, so the HTTP
+        // status is not reliable in dev; assert on the rendered 404 instead.
+        await page.goto('/strategies/does-not-exist');
+        await expect(page.getByText('Page not found')).toBeVisible();
+    });
+});
+
+test.describe('Strategies page — backtest chart legibility', () => {
+    test('regression: backtest axis labels render at a readable size (were ~6px)', async ({ page }) => {
+        await page.goto('/strategies');
+        const label = page.locator('.pm-bt-chart svg text').first();
+        await expect(label).toBeVisible();
+        const px = await label.evaluate((el) => el.getBoundingClientRect().height);
+        expect(px).toBeGreaterThanOrEqual(9);
     });
 });

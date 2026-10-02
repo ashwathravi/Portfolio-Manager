@@ -96,3 +96,12 @@ export function formatEtClock(now: Date = new Date()): string {
     const { hour12Text } = getEasternParts(now);
     return `${hour12Text} ET`;
 }
+
+/**
+ * Human label for the market state shown in page subtitles. Uses the same
+ * regular-session window as {@link isMarketOpen} so the dashboard and the
+ * sidebar card can never disagree.
+ */
+export function marketStateLabel(now: Date = new Date()): "Markets open" | "Markets closed" {
+    return isMarketOpen(now) ? "Markets open" : "Markets closed";
+}

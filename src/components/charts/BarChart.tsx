@@ -74,9 +74,8 @@ export function BarChart({
             <svg
                 viewBox={`0 0 ${width} ${height}`}
                 width="100%"
-                height="auto"
                 className={className}
-                style={style}
+                style={{ height: "auto", ...style }}
                 aria-label={ariaLabel}
                 role={ariaLabel ? "img" : undefined}
                 preserveAspectRatio="none"
@@ -88,9 +87,9 @@ export function BarChart({
         <svg
             viewBox={`0 0 ${width} ${height}`}
             width="100%"
-            height="auto"
             className={className}
-            style={style}
+            // CSS height (not the invalid `height="auto"` attribute) keeps the viewBox ratio.
+            style={{ height: "auto", ...style }}
             aria-label={ariaLabel}
             role={ariaLabel ? "img" : undefined}
             preserveAspectRatio="none"

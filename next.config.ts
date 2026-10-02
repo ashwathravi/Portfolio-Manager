@@ -1,9 +1,19 @@
 import type { NextConfig } from "next";
 import { buildContentSecurityPolicy } from "./src/lib/security/content-security-policy";
+import { LEGACY_REDIRECTS } from "./src/lib/navigation";
 
 const nextConfig: NextConfig = {
   output: "standalone",
   poweredByHeader: false,
+  // Routes retired by the IA consolidation (see src/lib/navigation.ts).
+  // Temporary (307) so browsers don't cache them while the IA settles.
+  async redirects() {
+    return LEGACY_REDIRECTS.map(({ source, destination }) => ({
+      source,
+      destination,
+      permanent: false,
+    }));
+  },
   async headers() {
     return [
       {

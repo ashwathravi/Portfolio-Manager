@@ -7,13 +7,15 @@ import {
     useSettingsStore,
     type CurrencyCode,
 } from "@/lib/stores/settingsStore";
+import { useViewerIdentity } from "@/components/providers/IdentityProvider";
 
 /**
  * AR-87 Profile card.
  *
- * Three fields:
- *   - Full name (text, persisted as `profile.fullName`)
- *   - Email (email, persisted as `profile.email`)
+ * Fields:
+ *   - Display name (optional override of the Google account name,
+ *     persisted as `profile.fullName`; clear it to use the account name)
+ *   - Email (read-only: the signed-in Google account)
  *   - Base currency (select, persisted as `preferences.baseCurrency`)
  *
  * Name / email are locally buffered and committed on blur to avoid
@@ -38,49 +40,27 @@ export function ProfileCard() {
     const baseCurrency = useSettingsStore((s) => s.preferences.baseCurrency);
     const updatePreferences = useSettingsStore((s) => s.updatePreferences);
 
+    const identity = useViewerIdentity();
+
     // Local draft state — committed to the store only on blur or on
     // pressing Enter. This keeps the zustand subscription count low.
     const [fullName, setFullName] = useState(profile.fullName);
-    const [email, setEmail] = useState(profile.email);
 
-    // Hydrate local state if the store changes out from under us (e.g.
-    // a reset). Stale inputs after a reset would silently re-apply the
-    // old values on blur, which is worse than the re-render.
+    // Hydrate local state if the store changes out from under us (e.g. a reset).
     useEffect(() => {
-        // Keep local text drafts aligned with external profile resets.
         // eslint-disable-next-line react-hooks/set-state-in-effect
         setFullName(profile.fullName);
-        setEmail(profile.email);
-    }, [profile.fullName, profile.email]);
+    }, [profile.fullName]);
 
+    // An empty display name is allowed: it means "use my account name".
     const commitName = () => {
-        if (fullName.trim() && fullName !== profile.fullName) {
-            updateProfile({ fullName: fullName.trim() });
-            toast.success("Name updated");
-        } else if (!fullName.trim()) {
-            // Empty name is nonsensical — snap back to the stored value.
-            setFullName(profile.fullName);
-        }
+        const next = fullName.trim();
+        if (next === profile.fullName) return;
+        updateProfile({ fullName: next });
+        toast.success(next ? "Display name updated" : "Using your account name");
     };
 
-    const commitEmail = () => {
-        const next = email.trim();
-        if (!next) {
-            setEmail(profile.email);
-            return;
-        }
-        // Minimal sanity — full RFC-compliant validation is the
-        // server's job. We just refuse obviously-malformed inputs.
-        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(next)) {
-            toast.error("That doesn't look like a valid email");
-            setEmail(profile.email);
-            return;
-        }
-        if (next !== profile.email) {
-            updateProfile({ email: next });
-            toast.success("Email updated");
-        }
-    };
+    const accountEmail = identity?.email ?? null;
 
     return (
         <section
@@ -104,7 +84,7 @@ export function ProfileCard() {
 
             <div className="pm-settings-card-body">
                 <label className="pm-settings-field">
-                    <span className="pm-settings-field-label">Full name</span>
+                    <span className="pm-settings-field-label">Display name</span>
                     <input
                         type="text"
                         className="pm-settings-input"
@@ -117,30 +97,21 @@ export function ProfileCard() {
                                 (e.target as HTMLInputElement).blur();
                             }
                         }}
-                        placeholder="Your name"
+                        placeholder={identity?.name ?? "Your name"}
                         autoComplete="name"
                     />
                 </label>
 
-                <label className="pm-settings-field">
+                <div className="pm-settings-field">
                     <span className="pm-settings-field-label">Email</span>
-                    <input
-                        type="email"
-                        className="pm-settings-input"
-                        value={email}
-                        onChange={(e) => setEmail(e.target.value)}
-                        onBlur={commitEmail}
-                        onKeyDown={(e) => {
-                            if (e.key === "Enter") {
-                                e.preventDefault();
-                                (e.target as HTMLInputElement).blur();
-                            }
-                        }}
-                        placeholder="you@example.com"
-                        autoComplete="email"
-                        spellCheck={false}
-                    />
-                </label>
+                    <p className="pm-settings-readonly" data-testid="profile-email">
+                        {accountEmail
+                            ? `${accountEmail} · signed in with Google`
+                            : identity?.mode === "local-dev"
+                                ? "Local development session (no Google account)"
+                                : "Not signed in"}
+                    </p>
+                </div>
 
                 <label className="pm-settings-field">
                     <span className="pm-settings-field-label">Base currency</span>

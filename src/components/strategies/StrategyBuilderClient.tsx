@@ -1,9 +1,17 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
+import { Copy } from "lucide-react";
+import { usePageHeader } from "@/components/layout/PageHeaderContext";
+import { SampleDataNotice } from "@/components/data-display/SampleDataNotice";
+import { SampleEmptyState } from "@/components/data-display/SampleEmptyState";
+import { useShowSampleData } from "@/lib/hooks/useShowSampleData";
 import { SEED_STRATEGIES } from "@/lib/strategies/seed";
+import { resolveSelectedStrategyId } from "@/lib/strategies/routes";
 import {
     addRule,
+    duplicateStrategy,
+    hasUnbacktestedChanges,
     removeRule,
     setConjunction,
     setGuardrail,
@@ -22,7 +30,7 @@ import {
     rollingAdherenceScore,
     adherenceTier,
 } from "@/lib/adherence/impact";
-import { SEED_JOURNAL } from "@/lib/journal/seed";
+import { SEED_JOURNAL, SEED_JOURNAL_ANCHOR_MS } from "@/lib/journal/seed";
 import { StrategyCard } from "./StrategyCard";
 import { RuleBuilderPanel } from "./RuleBuilderPanel";
 import { BacktestPanel } from "./BacktestPanel";
@@ -61,9 +69,11 @@ import { AdherenceImpactCard } from "./AdherenceImpactCard";
  * follows for free.
  */
 
-export function StrategyBuilderClient() {
+export function StrategyBuilderClient({ initialStrategyId }: { initialStrategyId?: string } = {}) {
     const [strategies, setStrategies] = useState<Strategy[]>(SEED_STRATEGIES);
-    const [selectedId, setSelectedId] = useState<string>(strategies[0]?.id ?? "");
+    const [selectedId, setSelectedId] = useState<string>(
+        () => resolveSelectedStrategyId(initialStrategyId, SEED_STRATEGIES),
+    );
 
     // AR-111. Per-strategy adherence rules. Seeded from the hardcoded
     // palette so every strategy shows meaningful rows on first render;
@@ -83,6 +93,42 @@ export function StrategyBuilderClient() {
         [strategies, selectedId],
     );
 
+    // The rules each backtest was run against. Editing rules has no
+    // backtest engine behind it yet, so the panel flags stale results
+    // instead of presenting them as current.
+    const [backtestedById, setBacktestedById] = useState<Record<string, Strategy>>(() =>
+        Object.fromEntries(SEED_STRATEGIES.map((s) => [s.id, s])),
+    );
+    const backtestStale = selected
+        ? hasUnbacktestedChanges(selected, backtestedById[selected.id] ?? selected)
+        : false;
+
+    const onDuplicate = useCallback(() => {
+        if (!selected) return;
+        const copy = duplicateStrategy(selected, strategies);
+        setStrategies((prev) => [...prev, copy]);
+        setBacktestedById((prev) => ({ ...prev, [copy.id]: backtestedById[selected.id] ?? selected }));
+        setAdherenceByStrategy((prev) => ({ ...prev, [copy.id]: prev[selected.id] ?? [] }));
+        setSelectedId(copy.id);
+    }, [selected, strategies, backtestedById]);
+
+    const headerActions = useMemo(
+        () => (
+            <button type="button" className="pm-btn pm-btn-ghost pm-strategy-dup-btn" onClick={onDuplicate}>
+                <Copy size={14} aria-hidden="true" />
+                <span>Duplicate</span>
+            </button>
+        ),
+        [onDuplicate],
+    );
+    usePageHeader({
+        title: "Strategies",
+        subtitle: "Write entry rules, backtest them, and hold your orders to them",
+        crumbs: ["Strategies", selected?.name ?? "Builder"],
+        actions: headerActions,
+    });
+    const showSample = useShowSampleData();
+
     const selectedAdherenceRules = selected
         ? adherenceByStrategy[selected.id] ?? []
         : [];
@@ -96,6 +142,9 @@ export function StrategyBuilderClient() {
             SEED_JOURNAL,
             selected.id,
             SEED_THESIS_TO_STRATEGY,
+            30,
+            // Same anchor as the example journal, so server and client agree.
+            SEED_JOURNAL_ANCHOR_MS,
         );
     }, [selected]);
     const rollingTier = useMemo(
@@ -113,6 +162,8 @@ export function StrategyBuilderClient() {
                 SEED_JOURNAL,
                 s.id,
                 SEED_THESIS_TO_STRATEGY,
+                30,
+                SEED_JOURNAL_ANCHOR_MS,
             );
         }
         return map;
@@ -203,6 +254,17 @@ export function StrategyBuilderClient() {
         [selectedId],
     );
 
+    if (!showSample) {
+        return (
+            <div className="pm-strategy-page">
+                <SampleEmptyState
+                    title="No strategies yet"
+                    body="Strategies are rule sets you backtest before trusting them with real orders. The examples are hidden; show them to explore the builder."
+                />
+            </div>
+        );
+    }
+
     if (!selected) {
         return (
             <div className="pm-strategy-page">
@@ -215,6 +277,9 @@ export function StrategyBuilderClient() {
 
     return (
         <div className="pm-strategy-page">
+            <SampleDataNotice>
+                These strategies and their backtests are examples. Edits stay in this tab until strategies are saved to your account.
+            </SampleDataNotice>
             <section className="pm-strategy-row" aria-label="Strategies">
                 {strategies.map((s) => (
                     <StrategyCard
@@ -246,7 +311,7 @@ export function StrategyBuilderClient() {
                         adherenceTier={rollingTier}
                     />
                 </div>
-                <BacktestPanel strategy={selected} />
+                <BacktestPanel strategy={selected} stale={backtestStale} />
             </section>
 
             <AdherenceImpactCard entries={SEED_JOURNAL} />

@@ -8,6 +8,8 @@ import {
     type CSSProperties,
 } from "react";
 import { Check, AlertTriangle, X } from "lucide-react";
+import { useSearchParams } from "next/navigation";
+import { parseOrderPrefill, sortOrdersNewestFirst } from "@/lib/execution/blotter";
 import {
     BUYING_POWER_USD,
     COMMISSION_PER_TRADE_USD,
@@ -72,7 +74,8 @@ import { SEED_STRATEGIES } from "@/lib/strategies/seed";
  *   - TIF segmented pill row (DAY / GTC / IOC / FOK)
  *   - Preview rows: Notional, Est. commission, Buying power after, Position after
  *   - Guardrail list with green/warn dots (concentration, sector, buying power, volatility)
- *   - Foot: Save draft + Review & submit (primary on buy, danger on sell)
+ *   - Foot (sticky): one-line order summary + Review & submit (primary on
+ *     buy, danger on sell). "Save draft" was removed — it never saved.
  *
  * Right card "Today's orders":
  *   - Filter chips: All / Working / Filled / Rejected
@@ -157,11 +160,14 @@ function formatUsd(n: number, digits = 2): string {
     });
 }
 
+/** Blotter times in market time (ET), like the app clock — also keeps the
+ *  server render and hydration identical across viewer timezones. */
 function formatTime(d: Date): string {
     return d.toLocaleTimeString("en-US", {
         hour: "2-digit",
         minute: "2-digit",
         hour12: false,
+        timeZone: "America/New_York",
     });
 }
 
@@ -239,12 +245,17 @@ interface OrderFormProps {
 }
 
 function OrderForm({ onSubmit }: OrderFormProps) {
+    // `?symbol=NVDA&side=sell` (from position detail, Ask, etc.) pre-fills the ticket.
+    const searchParams = useSearchParams();
+    const [prefill] = useState(() => parseOrderPrefill(searchParams ?? new URLSearchParams()));
     const [instrumentType, setInstrumentType] = useState<OrderInstrumentType>("equity");
-    const [side, setSide] = useState<OrderSide>("buy");
-    const [ticker, setTicker] = useState<string>("AAPL");
-    const [quantity, setQuantity] = useState<number>(50);
+    const [side, setSide] = useState<OrderSide>(prefill.side ?? "buy");
+    const [ticker, setTicker] = useState<string>(prefill.ticker ?? "AAPL");
+    const [quantity, setQuantity] = useState<number>(prefill.ticker ? 10 : 50);
     const [type, setType] = useState<OrderType>("limit");
-    const [limitPrice, setLimitPrice] = useState<number>(225.0);
+    const [limitPrice, setLimitPrice] = useState<number>(() =>
+        prefill.ticker ? Math.round((LIVE_PRICES[prefill.ticker] ?? 0) * 100) / 100 : 225.0,
+    );
     const [stopPrice, setStopPrice] = useState<number>(220.0);
     const [tif, setTif] = useState<TimeInForce>("day");
     const [optionContractType, setOptionContractType] = useState<OptionContractType>("call");
@@ -1082,9 +1093,9 @@ function OrderForm({ onSubmit }: OrderFormProps) {
 
             {/* Foot */}
             <footer className="pm-exec-form-foot">
-                <button type="button" className="pm-btn pm-btn-ghost">
-                    Save draft
-                </button>
+                <span className="pm-exec-foot-summary num" aria-live="polite">
+                    {side === "buy" ? "Buy" : "Sell"} {quantity.toLocaleString("en-US")} {tickerUpper || "—"}
+                </span>
                 <button
                     type="button"
                     className={submitClass}
@@ -1504,8 +1515,8 @@ function OrdersPanel({
     }, [orders]);
 
     const filtered = useMemo(() => {
-        if (filter === "all") return orders;
-        return orders.filter((o) => o.status === filter);
+        const rows = filter === "all" ? orders : orders.filter((o) => o.status === filter);
+        return sortOrdersNewestFirst(rows);
     }, [orders, filter]);
 
     const approvalQueue = useMemo(
