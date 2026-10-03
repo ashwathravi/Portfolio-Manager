@@ -15,6 +15,12 @@ describe('splitCsvLine', () => {
         assert.deepStrictEqual(splitCsvLine('X,"He said ""hi""",1'), ['X', 'He said "hi"', '1']);
         assert.deepStrictEqual(splitCsvLine('a,,b'), ['a', '', 'b']);
     });
+    test('rejects malformed records and preserves trailing empty fields', () => {
+        assert.deepStrictEqual(splitCsvLine('AAPL,"Apple\nInc",10,'), ['AAPL', 'Apple\nInc', '10', '']);
+        for (const record of ['AAPL,"Apple', 'AAPL,App"le,10', 'AAPL,"Apple"oops,10', 'AAPL,10\nMSFT,20']) {
+            assert.throws(() => splitCsvLine(record));
+        }
+    });
 });
 
 describe('parseNumber', () => {
@@ -38,6 +44,50 @@ describe('parseHoldingsCsv', () => {
             { symbol: 'NVDA', name: 'NVIDIA Corp', quantity: 10, avgCost: 450.25 },
             { symbol: 'MSFT', name: 'Microsoft', quantity: 2.5, avgCost: 300 },
         ]);
+    });
+
+    test('keeps quoted multiline descriptions as one holding, never a phantom row', () => {
+        for (const newline of ['\n', '\r\n', '\r']) {
+            const r = parseHoldingsCsv(`Symbol,Description,Quantity,Average Cost${newline}AAPL,"Apple${newline}INC,Whatever,10,100${newline}""quoted""",10,100${newline}MSFT,Microsoft,2,300`);
+            assert.deepStrictEqual(r.issues, []);
+            assert.deepStrictEqual(r.rows, [
+                { symbol: 'AAPL', name: `Apple${newline}INC,Whatever,10,100${newline}"quoted"`, quantity: 10, avgCost: 100 },
+                { symbol: 'MSFT', name: 'Microsoft', quantity: 2, avgCost: 300 },
+            ]);
+        }
+        const simple = parseHoldingsCsv('Symbol,Description,Quantity,Average Cost\nAAPL,"Apple\nInc",10,100');
+        assert.deepStrictEqual(simple.issues, []);
+        assert.strictEqual(simple.rows[0]?.symbol, 'AAPL');
+    });
+
+    test('reports malformed quoting and column counts at the record starting line', () => {
+        const r = parseHoldingsCsv('Symbol,Description,Quantity,Average Cost\nAAPL,"Apple\nInc",10,100\nBAD,"Name"oops,1,1\nMSFT,Micro"soft,1,1\nGOOG,Google,1,1,extra\nMETA,Meta,1\nNVDA,Nvidia,1,1');
+        assert.deepStrictEqual(r.rows.map((r) => r.symbol), ['AAPL', 'NVDA']);
+        assert.deepStrictEqual(r.issues.map((i) => i.line), [4, 5, 6, 7]);
+        const unclosed = parseHoldingsCsv('Symbol,Description,Quantity,Average Cost\nAAPL,"Apple\nINC,Whatever,10,100');
+        assert.deepStrictEqual(unclosed.rows, []);
+        assert.deepStrictEqual(unclosed.issues.map((i) => i.line), [2]);
+        assert.match(unclosed.issues[0].message, /unterminated/i);
+    });
+
+    test('preserves CASH and prefix-like securities; cash needs export context', () => {
+        const r = parseHoldingsCsv('Symbol,Description,Quantity,Average Cost,Asset Type\nCASH,Pathward,10,100,Stock\nCASHX,Fund,20,1,Mutual Fund\nTOTALX,Security,1,1,Stock\nPENDINGX,Security,1,1,Stock\nCASH,Cash balance,100,1,Cash\nUSD,US dollars,100,1,Currency\nSPAXX**,Broker core position,100,1,\nAccount Total,,,,');
+        assert.deepStrictEqual(r.rows.map((r) => r.symbol), ['CASH', 'CASHX', 'TOTALX', 'PENDINGX']);
+        assert.deepStrictEqual(r.issues, []);
+        assert.strictEqual(r.skipped, 4);
+        const ambiguous = parseHoldingsCsv('Symbol,Quantity,Average Cost\nCASH,10,100\nCASHX,20,1\nSPAXX,30,1');
+        assert.deepStrictEqual(ambiguous.rows.map((r) => r.symbol), ['CASH', 'CASHX', 'SPAXX']);
+        assert.deepStrictEqual(ambiguous.issues, []);
+        assert.strictEqual(ambiguous.skipped, 0);
+        const balance = parseHoldingsCsv('Symbol,Description,Quantity,Average Cost\nCASH,Cash balance,,');
+        assert.strictEqual(balance.skipped, 1);
+        assert.deepStrictEqual(balance.issues, []);
+        const corrupt = parseHoldingsCsv('Symbol,Description,Quantity,Average Cost\nCASH,Cash balance,oops,1');
+        assert.strictEqual(corrupt.skipped, 0);
+        assert.match(corrupt.issues[0].message, /quantity/);
+        const security = parseHoldingsCsv('Symbol,Description,Quantity,Average Cost,Asset Type\nCASH,Cash balance,,1,Stock');
+        assert.strictEqual(security.skipped, 0);
+        assert.match(security.issues[0].message, /quantity/);
     });
 
     test('derives average cost from a total cost-basis column', () => {

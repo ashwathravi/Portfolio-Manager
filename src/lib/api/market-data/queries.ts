@@ -1,5 +1,6 @@
 import { useQuery, type UseQueryOptions } from '@tanstack/react-query';
-import type { MarketQuote, HistoricalBar } from './index';
+import type { HistoricalBar } from './index';
+import type { Quote } from '@/types/market-data';
 
 export type Timeframe = '1D' | '1H' | '1M';
 
@@ -12,14 +13,27 @@ export function historicalQueryKey(symbol: string, timeframe: Timeframe) {
     return ['market-data', 'historical', symbol.toUpperCase(), timeframe] as const;
 }
 
-export async function fetchQuotes(symbols: readonly string[]): Promise<Record<string, MarketQuote>> {
+export async function fetchQuotes(symbols: readonly string[]): Promise<Record<string, Quote>> {
     const symbolsParam = symbols.map((s) => s.trim().toUpperCase()).filter(Boolean).join(',');
     const res = await fetch(`/api/market-data/quotes?symbols=${encodeURIComponent(symbolsParam)}`);
     if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error(body?.error ?? `Failed to fetch quotes (${res.status})`);
     }
-    return (await res.json()) as Record<string, MarketQuote>;
+    const body = await res.json();
+    if (!Array.isArray(body?.data)) throw new Error('Invalid quotes response.');
+    const quotes: Record<string, Quote> = {};
+    for (const quote of body.data) {
+        if (!quote || typeof quote.symbol !== 'string' || !quote.symbol.trim()
+            || !Number.isFinite(quote.price) || !Number.isFinite(quote.change)
+            || !Number.isFinite(quote.changePercent) || typeof quote.timestamp !== 'string'
+            || typeof quote.isRealtime !== 'boolean') {
+            throw new Error('Invalid quotes response.');
+        }
+        const symbol = quote.symbol.trim().toUpperCase();
+        quotes[symbol] = { ...quote, symbol };
+    }
+    return quotes;
 }
 
 export async function fetchHistorical(
@@ -41,9 +55,9 @@ export async function fetchHistorical(
 
 export function useQuotesQuery(
     symbols: readonly string[],
-    options?: Omit<UseQueryOptions<Record<string, MarketQuote>, Error>, 'queryKey' | 'queryFn'>,
+    options?: Omit<UseQueryOptions<Record<string, Quote>, Error>, 'queryKey' | 'queryFn'>,
 ) {
-    return useQuery<Record<string, MarketQuote>, Error>({
+    return useQuery<Record<string, Quote>, Error>({
         queryKey: quotesQueryKey(symbols),
         queryFn: () => fetchQuotes(symbols),
         enabled: symbols.length > 0,

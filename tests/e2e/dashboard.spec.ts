@@ -381,6 +381,20 @@ test.describe('Today watchlist', () => {
         await expect(card.getByTestId('sample-tag')).toBeVisible();
     });
 
+    test('successful route-shaped quotes render price and change; missing symbols keep dashes', async ({ page }) => {
+        await page.route('**/api/market-data/quotes**', (route) => route.fulfill({ status: 200, json: { data: [
+            { symbol: 'COIN', price: 123.45, change: -2.5, changePercent: -1.98, timestamp: '2026-10-03T18:11:00.000Z', isRealtime: false },
+        ] } }));
+        await gotoAppPage(page, '/');
+        const card = page.getByTestId('today-watchlist');
+        const coin = card.locator('li').filter({ has: page.getByRole('link', { name: /COIN/ }) });
+        await expect(coin.locator('.pm-watchlist-price')).toHaveText('$123.45');
+        await expect(coin.locator('.pm-watchlist-pct')).toHaveText('−1.98%');
+        const pltr = card.locator('li').filter({ has: page.getByRole('link', { name: /PLTR/ }) });
+        await expect(pltr.locator('.pm-watchlist-price')).toHaveText('—');
+        await expect(pltr.locator('.pm-watchlist-pct')).toHaveText('—');
+    });
+
     test('regression: no stale fallback prices — a missing quote is a dash', async ({ page }) => {
         await page.route('**/api/market-data/quotes**', (route) => route.fulfill({ status: 500, json: { error: 'down' } }));
         await gotoAppPage(page, '/');

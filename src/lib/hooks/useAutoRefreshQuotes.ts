@@ -2,13 +2,13 @@
 
 import { useMemo } from 'react';
 import { useQuotesQuery } from '@/lib/api/market-data/queries';
-import type { MarketQuote } from '@/lib/api/market-data';
+import type { Quote } from '@/types/market-data';
 import { useSettingsStore } from '@/lib/stores/settingsStore';
 
 const MIN_REFRESH_SECONDS = 15;
 
 export interface UseAutoRefreshQuotesResult {
-    quotes: Record<string, MarketQuote>;
+    quotes: Record<string, Quote>;
     isFetching: boolean;
     isError: boolean;
     refreshMs: number;
