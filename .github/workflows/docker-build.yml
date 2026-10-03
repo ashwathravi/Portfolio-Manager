@@ -3,13 +3,11 @@ name: Docker Build & Push
 on:
   push:
     branches:
-      - new_feature
       - master
       - main
       - develop
   pull_request:
     branches:
-      - new_feature
       - master
       - main
       - develop
