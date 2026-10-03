@@ -101,13 +101,13 @@ const SAMPLE_CSV = [
     'Account Total,,,',
 ].join('\n');
 
-async function openImport(page: Page) {
+async function openImport(page: Page, csv = SAMPLE_CSV) {
     const trigger = page.getByRole('button', { name: 'Import CSV' }).first();
     await expect(async () => {
         await trigger.click();
         await expect(page.getByTestId('import-dialog')).toBeVisible({ timeout: 1_000 });
     }).toPass({ timeout: 10_000 });
-    await page.getByLabel('CSV file').setInputFiles({ name: 'positions.csv', mimeType: 'text/csv', buffer: Buffer.from(SAMPLE_CSV) });
+    await page.getByLabel('CSV file').setInputFiles({ name: 'positions.csv', mimeType: 'text/csv', buffer: Buffer.from(csv) });
 }
 
 test.describe('Holdings › Import CSV', () => {
@@ -118,7 +118,46 @@ test.describe('Holdings › Import CSV', () => {
         await expect(preview).toContainText('2 positions ready, 1 row needs attention, 1 cash or total row skipped');
         await expect(preview.locator('tbody tr')).toHaveCount(2);
         await expect(preview.getByRole('list', { name: 'Rows not imported' })).toContainText('Line 5');
-        await expect(page.getByRole('button', { name: 'Import 2 positions' })).toBeEnabled();
+        await expect(page.getByRole('button', { name: 'Import 2 positions' })).toBeDisabled();
+        await expect(preview.getByRole('alert')).toContainText('Fix the listed issues');
+    });
+
+    test('multiline descriptions and CASH securities preview and submit exactly, with no phantom holding', async ({ page }) => {
+        let sent: unknown;
+        await page.route('**/api/portfolio/import', async (route) => {
+            sent = route.request().postDataJSON().rows;
+            await route.fulfill({ status: 200, json: { data: { insert: 3, update: 0, unchanged: 0 } } });
+        });
+        await gotoAppPage(page, '/portfolios/holdings');
+        await openImport(page, 'Symbol,Description,Quantity,Average Cost,Asset Type\r\nAAPL,"Apple\r\nINC,Whatever,10,100\r\n""quoted""",10,100,Stock\r\nCASH,Pathward,2,30,Stock\r\nCASHX,Fund,3,1,Mutual Fund\r\nCASH,Cash balance,100,1,Cash');
+        const preview = page.getByTestId('import-preview');
+        await expect(preview.locator('tbody tr')).toHaveCount(3);
+        await expect(preview.locator('tbody tr').first().locator('td').first()).toHaveText('AAPL');
+        await expect(preview.getByRole('list', { name: 'Rows not imported' })).toHaveCount(0);
+        await page.getByRole('button', { name: 'Import 3 positions' }).click();
+        await expect(page.getByText('Imported 3 positions: 3 new, 0 updated.')).toBeVisible();
+        expect(sent).toEqual([
+            { symbol: 'AAPL', name: 'Apple\r\nINC,Whatever,10,100\r\n"quoted"', quantity: 10, avgCost: 100 },
+            { symbol: 'CASH', name: 'Pathward', quantity: 2, avgCost: 30 },
+            { symbol: 'CASHX', name: 'Fund', quantity: 3, avgCost: 1 },
+        ]);
+    });
+
+    test('malformed multiline CSV blocks submission until a corrected file is uploaded', async ({ page }) => {
+        let requests = 0;
+        await page.route('**/api/portfolio/import', (route) => {
+            requests++;
+            return route.fulfill({ status: 500, json: { error: 'unexpected request' } });
+        });
+        await gotoAppPage(page, '/portfolios/holdings');
+        await openImport(page, 'Symbol,Description,Quantity,Average Cost\nMSFT,Microsoft,2,300\nAAPL,"Apple\nINC,Whatever,10,100');
+        await expect(page.getByTestId('import-preview')).toContainText('Line 3: Unterminated quoted field');
+        await expect(page.getByRole('button', { name: 'Import 1 position', exact: true })).toBeDisabled();
+        expect(requests).toBe(0);
+        await page.getByLabel('CSV file').setInputFiles({ name: 'fixed.csv', mimeType: 'text/csv', buffer: Buffer.from('Symbol,Description,Quantity,Average Cost\nAAPL,"Apple\nInc",10,100') });
+        await expect(page.getByTestId('import-preview').getByRole('alert')).toHaveCount(0);
+        await expect(page.getByRole('button', { name: 'Import 1 position', exact: true })).toBeEnabled();
+        expect(requests).toBe(0);
     });
 
     test('sends exactly the previewed rows, then confirms', async ({ page }) => {
@@ -128,7 +167,7 @@ test.describe('Holdings › Import CSV', () => {
             await route.fulfill({ status: 200, json: { data: { portfolioId: 'p', createdPortfolio: false, insert: 1, update: 1, unchanged: 0 } } });
         });
         await gotoAppPage(page, '/portfolios/holdings');
-        await openImport(page);
+        await openImport(page, SAMPLE_CSV.replace('BAD TICKER,Nope,1,1\n', ''));
         await page.getByRole('button', { name: 'Import 2 positions' }).click();
         await expect(page.getByText('Imported 2 positions: 1 new, 1 updated.')).toBeVisible();
         expect(sent.rows).toEqual([
@@ -143,7 +182,7 @@ test.describe('Holdings › Import CSV', () => {
             route.fulfill({ status: 404, json: { error: 'Portfolio not found' } }),
         );
         await gotoAppPage(page, '/portfolios/holdings');
-        await openImport(page);
+        await openImport(page, SAMPLE_CSV.replace('BAD TICKER,Nope,1,1\n', ''));
         await page.getByRole('button', { name: 'Import 2 positions' }).click();
         await expect(page.getByTestId('import-dialog').getByRole('alert')).toHaveText('Portfolio not found');
         await expect(page.getByText(/Imported \d+ position/)).toHaveCount(0);

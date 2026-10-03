@@ -55,7 +55,8 @@ test.describe('Critical user paths', () => {
             await route.fulfill({
                 status: 200,
                 contentType: 'application/json',
-                body: JSON.stringify({ data: {} }),
+                // Match the real quotes route: an empty successful batch is an array.
+                body: JSON.stringify({ data: [] }),
             });
         });
 
