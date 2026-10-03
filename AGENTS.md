@@ -73,7 +73,7 @@ Every page in the application must have a corresponding E2E spec. The current ma
 | Route | E2E Spec File | Key assertions |
 |-------|--------------|----------------|
 | `/` (Today) | `dashboard.spec.ts` | Single "Today" header with greeting/market state, money-first hero (or connect-account empty state), ranked "Needs your attention", policy strip + disclosure, example section labelled and hideable, no fabricated deltas |
-| `/portfolios/holdings` | `holdings.spec.ts` | Portfolio title + Holdings tab, one heading, table or single empty state, LEAPS ledger only with holdings and tagged Sample, page gutter |
+| `/portfolios/holdings` | `holdings.spec.ts` | Portfolio title + Holdings tab, one heading, table or single empty state, LEAPS ledger only with holdings and tagged Sample, sparklines never invented, Import CSV (preview, issues, exact payload, errors; API 400/cross-tenant 404/unchanged in DB mode), page gutter |
 | `/portfolios/accounts` | `accounts.spec.ts` | Accounts tab, real accounts or empty state (never seeded balances) |
 | `/portfolios/activity` | `activity.spec.ts` | Activity tab, real transactions or empty state, side filters |
 | `/portfolios/detail/[symbol]` | `position-detail.spec.ts` | Symbol title, draft-order prefill link, thesis link, Add to watchlist toggle, not-held state is not a dead end |

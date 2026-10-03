@@ -203,6 +203,7 @@ describe("API proxy security", () => {
             ["/api/plaid/exchange-public-token", "POST"],
             ["/api/portfolios/count", "GET"],
             ["/api/portfolio/00000000-0000-4000-8000-000000000001/value", "GET"],
+            ["/api/portfolio/import", "POST"],
             ["/api/alpha-radar/refresh", "POST"],
             ["/api/alpha-radar/filers", "POST"],
             ["/api/alpha-radar/filers/00000000-0000-4000-8000-000000000001", "PATCH"],
@@ -232,6 +233,15 @@ describe("API proxy security", () => {
             "POST",
         ));
         assert.equal(wrongMethod.status, 401);
+
+        const importWrongMethod = handleVerifiedRequest(apiRequest(
+            {},
+            "/api/portfolio/import",
+            null,
+            [],
+            "GET",
+        ));
+        assert.equal(importWrongMethod.status, 401);
     });
 
     test("rate limits non-session API routes by client IP", async () => {

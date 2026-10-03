@@ -1,5 +1,6 @@
 "use client";
 
+import { ImportHoldingsDialog, type ImportAccountOption } from "./ImportHoldingsDialog";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { SampleGate } from "@/components/data-display/SampleGate";
@@ -61,12 +62,15 @@ export interface HoldingsPageClientProps {
     optionPositions?: readonly OptionRiskPosition[];
     /** True while option positions come from example data (no options feed yet). */
     optionPositionsAreSample?: boolean;
+    /** Accounts offered as the CSV import target. */
+    importAccounts?: readonly ImportAccountOption[];
 }
 
 export function HoldingsPageClient({
     holdings,
     optionPositions = [],
     optionPositionsAreSample = false,
+    importAccounts = [],
 }: HoldingsPageClientProps) {
     const [sectorFilter, setSectorFilter] = useState<Sector | "All">("All");
     const [bucketFilter, setBucketFilter] = useState<PolicyBucketId | "All">("All");
@@ -205,11 +209,13 @@ export function HoldingsPageClient({
                 <section className="pm-card pm-empty-card" data-testid="holdings-empty">
                     <h2>No holdings yet</h2>
                     <p>
-                        Positions appear here once an account is connected. Market value, unrealized gain,
-                        policy buckets, and theme exposure are all calculated from your own positions.
+                        Connect an account, or import a positions export from your broker. Market value,
+                        unrealized gain, policy buckets, and theme exposure are all calculated from your own
+                        positions.
                     </p>
                     <div className="pm-empty-actions">
                         <Link href="/settings#accounts" className="pm-btn pm-btn-primary">Connect an account</Link>
+                        <ImportHoldingsDialog accounts={importAccounts} />
                         <Link href="/portfolios/accounts" className="pm-btn pm-btn-ghost">View accounts</Link>
                     </div>
                 </section>

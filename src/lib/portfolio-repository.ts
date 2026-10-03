@@ -75,3 +75,12 @@ export function buildOwnedPortfolioHoldingsQuery(userId: string, portfolioId: st
             eq(portfolios.userId, userId),
         ));
 }
+
+/** The user's accounts as options for pickers (e.g. the CSV import target). */
+export function buildUserPortfolioOptionsQuery(userId: string) {
+    return db
+        .select({ id: portfolios.id, name: portfolios.name })
+        .from(portfolios)
+        .where(eq(portfolios.userId, userId))
+        .orderBy(portfolios.name);
+}

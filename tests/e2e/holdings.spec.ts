@@ -91,3 +91,94 @@ test.describe('Holdings layout', () => {
         expect(paddingLeft).toBeGreaterThanOrEqual(16);
     });
 });
+
+const SAMPLE_CSV = [
+    'Account,Brokerage',
+    'Symbol,Description,Quantity,Average Cost',
+    'NVDA,NVIDIA Corp,10,"$450.25"',
+    'MSFT,Microsoft,2,300',
+    'BAD TICKER,Nope,1,1',
+    'Account Total,,,',
+].join('\n');
+
+async function openImport(page: Page) {
+    const trigger = page.getByRole('button', { name: 'Import CSV' }).first();
+    await expect(async () => {
+        await trigger.click();
+        await expect(page.getByTestId('import-dialog')).toBeVisible({ timeout: 1_000 });
+    }).toPass({ timeout: 10_000 });
+    await page.getByLabel('CSV file').setInputFiles({ name: 'positions.csv', mimeType: 'text/csv', buffer: Buffer.from(SAMPLE_CSV) });
+}
+
+test.describe('Holdings › Import CSV', () => {
+    test('previews what was read, flags rows it could not read, and skips totals', async ({ page }) => {
+        await gotoAppPage(page, '/portfolios/holdings');
+        await openImport(page);
+        const preview = page.getByTestId('import-preview');
+        await expect(preview).toContainText('2 positions ready, 1 row needs attention, 1 cash or total row skipped');
+        await expect(preview.locator('tbody tr')).toHaveCount(2);
+        await expect(preview.getByRole('list', { name: 'Rows not imported' })).toContainText('Line 5');
+        await expect(page.getByRole('button', { name: 'Import 2 positions' })).toBeEnabled();
+    });
+
+    test('sends exactly the previewed rows, then confirms', async ({ page }) => {
+        let sent: { rows?: Array<{ symbol: string; quantity: number; avgCost: number }>; portfolioId?: string; newPortfolioName?: string } = {};
+        await page.route('**/api/portfolio/import', async (route) => {
+            sent = route.request().postDataJSON();
+            await route.fulfill({ status: 200, json: { data: { portfolioId: 'p', createdPortfolio: false, insert: 1, update: 1, unchanged: 0 } } });
+        });
+        await gotoAppPage(page, '/portfolios/holdings');
+        await openImport(page);
+        await page.getByRole('button', { name: 'Import 2 positions' }).click();
+        await expect(page.getByText('Imported 2 positions: 1 new, 1 updated.')).toBeVisible();
+        expect(sent.rows).toEqual([
+            { symbol: 'NVDA', name: 'NVIDIA Corp', quantity: 10, avgCost: 450.25 },
+            { symbol: 'MSFT', name: 'Microsoft', quantity: 2, avgCost: 300 },
+        ]);
+        expect(Boolean(sent.portfolioId) !== Boolean(sent.newPortfolioName)).toBe(true);
+    });
+
+    test('a server error is shown and nothing is claimed', async ({ page }) => {
+        await page.route('**/api/portfolio/import', (route) =>
+            route.fulfill({ status: 404, json: { error: 'Portfolio not found' } }),
+        );
+        await gotoAppPage(page, '/portfolios/holdings');
+        await openImport(page);
+        await page.getByRole('button', { name: 'Import 2 positions' }).click();
+        await expect(page.getByTestId('import-dialog').getByRole('alert')).toHaveText('Portfolio not found');
+        await expect(page.getByText(/Imported \d+ position/)).toHaveCount(0);
+    });
+});
+
+test.describe('POST /api/portfolio/import', () => {
+    const dbMode = Boolean(process.env.CI || process.env.E2E_DATABASE_AUTH === '1');
+
+    test('rejects a malformed import before touching the database', async ({ page }) => {
+        await gotoAppPage(page, '/portfolios/holdings');
+        const res = await page.request.post('/api/portfolio/import', { data: { rows: [] } });
+        expect(res.status()).toBe(400);
+    });
+
+    test('database: another user\'s account is a 404 and nothing is written', async ({ page }) => {
+        test.skip(!dbMode, 'needs the seeded E2E database');
+        await gotoAppPage(page, '/portfolios/holdings');
+        const res = await page.request.post('/api/portfolio/import', {
+            data: { portfolioId: '00000000-0000-4000-8000-000000000009', rows: [{ symbol: 'XUSR', quantity: 5, avgCost: 1 }] },
+        });
+        expect(res.status()).toBe(404);
+    });
+
+    test('database: re-importing an identical position reports it unchanged', async ({ page }) => {
+        test.skip(!dbMode, 'needs the seeded E2E database');
+        await gotoAppPage(page, '/portfolios/holdings');
+        const res = await page.request.post('/api/portfolio/import', {
+            data: {
+                portfolioId: '00000000-0000-4000-8000-000000000001',
+                rows: [{ symbol: 'AAPL', name: 'Apple Inc.', quantity: 500, avgCost: 165.3 }],
+            },
+        });
+        expect(res.status()).toBe(200);
+        const body = await res.json();
+        expect(body.data).toMatchObject({ insert: 0, update: 0, unchanged: 1, createdPortfolio: false });
+    });
+});

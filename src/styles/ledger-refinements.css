@@ -849,3 +849,14 @@ a.pm-watchlist-sym:hover .pm-watchlist-ticker { text-decoration: underline; }
 .pm-attr-verdict { margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -0.01em; color: var(--pm-fg); text-wrap: balance; }
 .pm-attr-table tbody th, .pm-attr-table tfoot th { text-align: left; font-weight: 500; }
 .pm-attr-table tfoot th, .pm-attr-table tfoot td { font-weight: 600; border-top: 1px solid var(--pm-border-strong); }
+
+/* Holdings › Import CSV dialog */
+.pm-import-body { display: grid; gap: 14px; min-width: 0; }
+.pm-import-body input[type="file"] { font: inherit; font-size: 13px; }
+.pm-import-preview { display: grid; gap: 10px; min-width: 0; }
+.pm-import-summary { margin: 0; font-size: 13px; color: var(--pm-fg); }
+.pm-import-table { max-height: 260px; overflow: auto; border: 1px solid var(--pm-border); border-radius: 8px; }
+.pm-import-more { margin: 6px 10px; font-size: 12px; color: var(--pm-fg-muted); }
+.pm-import-issues { margin: 0; padding-left: 18px; font-size: 12px; color: var(--pm-warn); display: grid; gap: 2px; }
+.pm-import-target { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+.pm-import-error { margin: 0; font-size: 13px; color: var(--pm-danger); }
