@@ -784,3 +784,28 @@
 
 /* A 30-day sparkline with no price history shows a dash, never an invented line. */
 .pm-spark-empty { display: inline-block; min-width: 72px; color: var(--pm-fg-subtle); text-align: center; }
+
+/* Trade ticket keyboard mode: a quiet toggle in the ticket header, an
+   inline cheat sheet, and a ⌘↵ hint on the submit button. */
+.pm-exec-form-head { position: relative; padding-right: 96px; }
+.pm-exec-kbd-toggle {
+  position: absolute; top: 0; right: 0;
+  display: inline-flex; align-items: center; gap: 6px;
+  font: inherit; font-size: 12px; color: var(--pm-fg-muted);
+  background: transparent; border: 1px solid var(--pm-border); border-radius: 6px;
+  padding: 3px 8px; cursor: pointer;
+}
+.pm-exec-kbd-toggle:hover, .pm-exec-kbd-toggle[aria-expanded="true"] { color: var(--pm-fg); border-color: var(--pm-border-strong); }
+.pm-exec-form kbd {
+  font-family: var(--font-mono, ui-monospace, monospace); font-size: 11px; line-height: 1;
+  min-width: 18px; padding: 2px 5px; border-radius: 4px; text-align: center;
+  border: 1px solid var(--pm-border-strong); background: var(--pm-card); color: var(--pm-fg-muted);
+}
+.pm-exec-kbd-sheet { border: 1px solid var(--pm-border); border-radius: 8px; padding: 12px 14px; background: var(--pm-bg); display: grid; gap: 10px; }
+.pm-exec-kbd-sheet ul { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px 16px; font-size: 13px; color: var(--pm-fg); }
+.pm-exec-kbd-sheet li { display: flex; align-items: center; gap: 8px; }
+.pm-exec-kbd-keys { display: inline-flex; gap: 3px; min-width: 52px; }
+.pm-exec-kbd-sheet p { margin: 0; font-size: 12px; color: var(--pm-fg-muted); }
+.pm-exec-submit { gap: 8px; }
+.pm-exec-submit .pm-exec-submit-kbd { background: transparent; border-color: currentColor; color: inherit; opacity: .7; }
+@media (pointer: coarse) { .pm-exec-kbd-toggle, .pm-exec-submit-kbd { display: none; } .pm-exec-form-head { padding-right: 0; } }
