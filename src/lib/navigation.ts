@@ -2,10 +2,11 @@
  * Information architecture — the single source of truth for where things
  * live in Atlas Wealth.
  *
- * The app collapses its former 21 routes into eight destinations. The
- * sidebar, the in-page section tabs, the ⌘K command palette, and the
- * legacy-route redirects in `next.config.ts` all read from this module, so
- * renaming or moving a page is a one-line change here.
+ * The app collapses its former 21 routes into eight destinations: seven in
+ * the workspace plus Settings, which also holds Help. The sidebar, the
+ * in-page section tabs, the ⌘K command palette, and the legacy-route
+ * redirects in `next.config.ts` all read from this module, so renaming or
+ * moving a page is a one-line change here.
  *
  * Keep this file free of React / icon imports: `next.config.ts` imports
  * `LEGACY_REDIRECTS` at build time.
@@ -69,6 +70,7 @@ export const PRIMARY_NAV: readonly NavDestination[] = [
         description: 'Returns, attribution, and trading behaviour',
         tabs: [
             { label: 'Returns', href: '/performance' },
+            { label: 'Attribution', href: '/performance/attribution' },
             { label: 'Behaviour', href: '/performance/behaviour' },
         ],
     },
@@ -105,16 +107,27 @@ export const SYSTEM_NAV: readonly NavDestination[] = [
         title: 'Settings',
         href: '/settings',
         description: 'Profile, accounts, guardrails, and appearance',
-    },
-    {
-        id: 'help',
-        title: 'Help',
-        href: '/help',
-        description: 'Getting started, glossary, and what’s new',
+        matchPrefixes: ['/help'],
+        tabs: [
+            { label: 'General', href: '/settings' },
+            { label: 'Help', href: '/help' },
+        ],
     },
 ];
 
-export const ALL_DESTINATIONS: readonly NavDestination[] = [...PRIMARY_NAV, ...SYSTEM_NAV];
+/**
+ * Help lives under Settings (it is a tab there, not a sidebar item) but stays
+ * a palette destination so "help" in ⌘K still jumps straight to it.
+ */
+export const HELP_PAGE: NavDestination = {
+    id: 'help',
+    title: 'Help',
+    href: '/help',
+    description: 'Getting started, glossary, and what’s new',
+};
+
+/** Everything the command palette can jump to. Settings precedes Help so /help resolves to Settings. */
+export const ALL_DESTINATIONS: readonly NavDestination[] = [...PRIMARY_NAV, ...SYSTEM_NAV, HELP_PAGE];
 
 /**
  * Routes retired by the IA consolidation. Each permanently redirects to the

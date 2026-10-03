@@ -211,3 +211,65 @@ export const defaultAssetClassBreakdown: AttributionSegment[] = [
         benchmarkReturn: 0.0510,
     },
 ];
+
+// ---------------------------------------------------------------------------
+// Plain-language read-out for Performance › Attribution
+// ---------------------------------------------------------------------------
+
+export type AttributionEffectKey = 'allocationEffect' | 'selectionEffect' | 'interactionEffect';
+
+const EFFECT_NAMES: Record<AttributionEffectKey, string> = {
+    allocationEffect: 'allocation',
+    selectionEffect: 'selection',
+    interactionEffect: 'interaction',
+};
+
+export interface AttributionHeadline {
+    /** "You beat the benchmark by 2.1 pp" / "trailed … by" / "matched". */
+    verdict: string;
+    /** The effect that explains most of the gap, by absolute size. */
+    mainDriver: { effect: AttributionEffectKey; name: string; value: number };
+    /** The single segment × effect that moved the result most. */
+    biggestMove: { label: string; effect: AttributionEffectKey; name: string; value: number } | null;
+}
+
+/** Percentage points with a sign, one decimal: 0.0213 → "+2.1 pp". */
+export function formatPp(fraction: number): string {
+    const pp = Math.round(fraction * 1000) / 10;
+    if (pp === 0) return '0.0 pp';
+    return `${pp > 0 ? '+' : '−'}${Math.abs(pp).toFixed(1)} pp`;
+}
+
+/**
+ * Turns the BHB numbers into the two sentences a reader needs: did I beat
+ * the benchmark, and was it what I owned (allocation) or how my picks did
+ * (selection)?
+ */
+export function attributionHeadline(summary: AttributionSummary): AttributionHeadline {
+    const { total, segments } = summary;
+    const gap = Math.round(total.alpha * 1000) / 10;
+    const verdict =
+        gap > 0
+            ? `You beat the benchmark by ${Math.abs(gap).toFixed(1)} pp`
+            : gap < 0
+                ? `You trailed the benchmark by ${Math.abs(gap).toFixed(1)} pp`
+                : 'You matched the benchmark';
+
+    const effects: AttributionEffectKey[] = ['allocationEffect', 'selectionEffect', 'interactionEffect'];
+    const main = effects.reduce((best, e) => (Math.abs(total[e]) > Math.abs(total[best]) ? e : best), effects[0]);
+
+    let biggestMove: AttributionHeadline['biggestMove'] = null;
+    for (const s of segments) {
+        for (const e of effects) {
+            if (s[e] !== 0 && (!biggestMove || Math.abs(s[e]) > Math.abs(biggestMove.value))) {
+                biggestMove = { label: s.label, effect: e, name: EFFECT_NAMES[e], value: s[e] };
+            }
+        }
+    }
+
+    return {
+        verdict,
+        mainDriver: { effect: main, name: EFFECT_NAMES[main], value: total[main] },
+        biggestMove,
+    };
+}

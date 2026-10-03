@@ -95,7 +95,7 @@ export default function HelpPage() {
             <PageHeaderSync
                 title="Help"
                 subtitle="Getting started, glossary, and what’s new"
-                crumbs={["Help"]}
+                crumbs={["Settings", "Help"]}
             />
             <div className="pm-help" data-testid="help-page">
                 <nav className="pm-help-version-nav" aria-label="Help sections">

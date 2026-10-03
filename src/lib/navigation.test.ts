@@ -2,6 +2,7 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert';
 import {
     ALL_DESTINATIONS,
+    HELP_PAGE,
     LEGACY_REDIRECTS,
     PRIMARY_NAV,
     SYSTEM_NAV,
@@ -12,12 +13,21 @@ import {
 } from './navigation';
 
 describe('navigation', () => {
-    test('primary nav is the eight-destination IA minus settings', () => {
+    test('the sidebar is the eight-destination IA: seven workspace items plus Settings', () => {
         assert.deepStrictEqual(
             PRIMARY_NAV.map((d) => d.title),
             ['Today', 'Portfolio', 'Performance', 'Research', 'Strategies', 'Trade', 'Ask'],
         );
-        assert.deepStrictEqual(SYSTEM_NAV.map((d) => d.title), ['Settings', 'Help']);
+        assert.deepStrictEqual(SYSTEM_NAV.map((d) => d.title), ['Settings']);
+        assert.strictEqual(PRIMARY_NAV.length + SYSTEM_NAV.length, 8);
+    });
+
+    test('Help lives under Settings but stays reachable from the palette', () => {
+        assert.strictEqual(activeDestination('/help')?.id, 'settings');
+        assert.deepStrictEqual(sectionTabsFor('/help').map((t) => t.label), ['General', 'Help']);
+        assert.strictEqual(activeSectionTab('/help')?.label, 'Help');
+        assert.strictEqual(activeSectionTab('/settings')?.label, 'General');
+        assert.ok(ALL_DESTINATIONS.includes(HELP_PAGE));
     });
 
     test('every destination has a unique id and href', () => {
@@ -52,13 +62,14 @@ describe('navigation', () => {
 
     test('sectionTabsFor returns Portfolio and Performance tabs, none elsewhere', () => {
         assert.deepStrictEqual(sectionTabsFor('/portfolios/activity').map((t) => t.label), ['Holdings', 'Accounts', 'Activity']);
-        assert.deepStrictEqual(sectionTabsFor('/performance').map((t) => t.label), ['Returns', 'Behaviour']);
+        assert.deepStrictEqual(sectionTabsFor('/performance').map((t) => t.label), ['Returns', 'Attribution', 'Behaviour']);
         assert.deepStrictEqual(sectionTabsFor('/research'), []);
     });
 
     test('activeSectionTab picks the most specific tab', () => {
         assert.strictEqual(activeSectionTab('/performance')?.label, 'Returns');
         assert.strictEqual(activeSectionTab('/performance/behaviour')?.label, 'Behaviour');
+        assert.strictEqual(activeSectionTab('/performance/attribution')?.label, 'Attribution');
         assert.strictEqual(activeSectionTab('/portfolios/accounts')?.label, 'Accounts');
     });
 
