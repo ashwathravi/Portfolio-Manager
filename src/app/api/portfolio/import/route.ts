@@ -10,6 +10,7 @@
 
 import { NextResponse } from 'next/server';
 
+import { readJsonBody } from '@/lib/api/body';
 import { apiError, internalServerError, logApiEvent } from '@/lib/api/security';
 import { requireSessionApiUserScope } from '@/lib/api/session-security';
 import { ImportAccessError, importHoldings } from '@/lib/portfolio/importHoldings';
@@ -24,13 +25,13 @@ export async function POST(request: Request) {
     const auth = await requireSessionApiUserScope(request);
     if (!auth.ok) return auth.response;
 
-    const length = Number(request.headers.get('content-length') ?? 0);
-    if (length > MAX_BODY_BYTES) {
-        return apiError('Import is too large.', 'IMPORT_TOO_LARGE', 413);
+    const body = await readJsonBody(request, MAX_BODY_BYTES);
+    if (!body.ok) {
+        return body.reason === 'too-large'
+            ? apiError('Import is too large.', 'IMPORT_TOO_LARGE', 413)
+            : apiError('Invalid import', 'INVALID_IMPORT', 400);
     }
-
-    const json = await request.json().catch(() => null);
-    const parsed = portfolioImportSchema.safeParse(json);
+    const parsed = portfolioImportSchema.safeParse(body.value);
     if (!parsed.success) {
         return apiError(parsed.error.issues[0]?.message ?? 'Invalid import', 'INVALID_IMPORT', 400);
     }

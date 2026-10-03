@@ -2,9 +2,9 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert';
 import { displayNameFor, firstNameFor, initialsFor, type ViewerIdentity } from './identity';
 
-const google: ViewerIdentity = { name: 'Ashwath Ravi', email: 'ash@example.com', image: null, mode: 'signed-in' };
-const emailOnly: ViewerIdentity = { name: null, email: 'ash.r@example.com', image: null, mode: 'signed-in' };
-const local: ViewerIdentity = { name: null, email: null, image: null, mode: 'local-dev' };
+const google: ViewerIdentity = { id: 'u1', name: 'Ashwath Ravi', email: 'ash@example.com', image: null, mode: 'signed-in' };
+const emailOnly: ViewerIdentity = { id: 'u2', name: null, email: 'ash.r@example.com', image: null, mode: 'signed-in' };
+const local: ViewerIdentity = { id: 'dev', name: null, email: null, image: null, mode: 'local-dev' };
 
 describe('identity', () => {
     test('a name typed in Settings wins over the account name', () => {

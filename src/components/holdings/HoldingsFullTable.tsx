@@ -100,7 +100,7 @@ export function HoldingsFullTable({ rows, className }: HoldingsFullTableProps) {
                     : null),
             }}
         >
-            <table className="pm-table-full" aria-rowcount={rows.length}>
+            <table className="pm-table-full" aria-rowcount={rows.length} data-testid="holdings-table">
                 <thead>
                     <tr>
                         <th>Ticker</th>

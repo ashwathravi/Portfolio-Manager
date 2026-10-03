@@ -23,6 +23,8 @@ export interface ShortcutKeyEvent {
     metaKey?: boolean;
     ctrlKey?: boolean;
     altKey?: boolean;
+    /** Keyboard auto-repeat from a held key. */
+    repeat?: boolean;
     /** True when focus is in an input, textarea, select, or contenteditable. */
     inEditable: boolean;
     /** True when a modal (⌘K palette, Ask) owns the keyboard. */
@@ -41,7 +43,8 @@ const LETTERS: Record<string, TicketShortcut> = {
 
 export function resolveTicketShortcut(e: ShortcutKeyEvent): TicketShortcut | null {
     if (e.overlayOpen) return null;
-    if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key === "Enter") return { kind: "submit" };
+    // A held ⌘↵ auto-repeats; only the first press may review the order.
+    if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key === "Enter") return e.repeat ? null : { kind: "submit" };
     if (e.key === "Escape") return { kind: "escape" };
     if (e.inEditable || e.metaKey || e.ctrlKey || e.altKey) return null;
     return LETTERS[e.key.length === 1 ? e.key.toLowerCase() : e.key] ?? null;

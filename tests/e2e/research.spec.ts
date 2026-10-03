@@ -314,11 +314,15 @@ test.describe('Research watchlist', () => {
 
     test('duplicates and malformed tickers are refused with a message', async ({ page }) => {
         const add = page.getByLabel('Add ticker to watchlist');
+        const addButton = page.getByRole('button', { name: 'Add', exact: true });
         await expect(async () => {
-            await add.fill('coin');
-            await expect(add).toHaveValue('COIN', { timeout: 1_000 });
+            await add.fill('intc');
+            await expect(add).toHaveValue('INTC', { timeout: 1_000 });
         }).toPass({ timeout: 10_000 });
-        await page.getByRole('button', { name: 'Add', exact: true }).click();
+        await addButton.click();
+        await expect(page.locator('.pm-research-pane .pm-thesis-detail-sym')).toHaveText('INTC');
+        await add.fill('intc');
+        await addButton.click();
         await expect(page.locator('#watch-add-error')).toContainText('already on your watchlist');
         await add.fill('a..b');
         await page.getByRole('button', { name: 'Add', exact: true }).click();
@@ -335,6 +339,19 @@ test.describe('Research watchlist', () => {
         await page.locator('.pm-research-list').getByRole('button', { name: /SHOP/ }).click();
         await expect(pane.getByRole('textbox', { name: 'Notes' })).toHaveValue('Check margins first');
         await expect(pane.getByLabel('Target entry ($)')).toHaveValue('70');
+    });
+
+    test('adding a ticker that is only an example makes it yours (no Sample tag)', async ({ page }) => {
+        const add = page.getByLabel('Add ticker to watchlist');
+        await expect(async () => {
+            await add.fill('coin');
+            await expect(add).toHaveValue('COIN', { timeout: 1_000 });
+        }).toPass({ timeout: 10_000 });
+        await page.getByRole('button', { name: 'Add', exact: true }).click();
+        await expect(page.locator('#watch-add-error')).toHaveCount(0);
+        const card = page.locator('.pm-research-list').getByRole('button', { name: /COIN/ });
+        await expect(card).toHaveCount(1);
+        await expect(card.getByTestId('sample-tag')).toHaveCount(0);
     });
 
     test('remove takes a ticker off the list', async ({ page }) => {

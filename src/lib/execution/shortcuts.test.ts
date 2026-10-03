@@ -31,6 +31,11 @@ describe('resolveTicketShortcut', () => {
         assert.strictEqual(key('Enter', { metaKey: true, altKey: true }), null);
     });
 
+    test('regression: a held ⌘↵ (auto-repeat) reviews only once', () => {
+        assert.deepStrictEqual(key('Enter', { metaKey: true }), { kind: 'submit' });
+        assert.strictEqual(key('Enter', { metaKey: true, repeat: true }), null);
+    });
+
     test('Escape is always available; modified letters are left to the browser', () => {
         assert.deepStrictEqual(key('Escape', { inEditable: true }), { kind: 'escape' });
         assert.strictEqual(key('b', { metaKey: true }), null);

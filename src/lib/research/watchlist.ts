@@ -50,7 +50,15 @@ export function addToWatchlist(
 ): { list: WatchItem[]; item?: WatchItem; error?: AddWatchError } {
     const ticker = normalizeTicker(input);
     if (!ticker) return { list: [...list], error: 'invalid' };
-    if (findWatchItem(list, ticker)) return { list: [...list], error: 'duplicate' };
+    const existing = findWatchItem(list, ticker);
+    if (existing?.sample) {
+        // Adding a ticker that is only on the list as an example (possibly
+        // hidden by the example-data toggle) makes it the user's own.
+        const adopted: WatchItem = { ...existing };
+        delete adopted.sample;
+        return { list: list.map((w) => (w.id === existing.id ? adopted : w)), item: adopted };
+    }
+    if (existing) return { list: [...list], error: 'duplicate' };
     const item: WatchItem = {
         id: `w-${ticker.toLowerCase()}-${opts.now.toString(36)}`,
         ticker,
@@ -140,6 +148,19 @@ export function seedWatchlist(now: number): WatchItem[] {
 
 export const WATCHLIST_STORAGE_KEY = 'atlas:research:watchlist';
 
+/**
+ * Storage key per signed-in user, so on a shared browser one account never
+ * loads another's tickers and notes.
+ */
+export function watchlistStorageKey(userId: string | null | undefined): string {
+    return `${WATCHLIST_STORAGE_KEY}:${userId?.trim() || 'anonymous'}`;
+}
+
+/** Example rows are hidden when the user turns example data off. */
+export function visibleWatchItems(list: readonly WatchItem[], showSample: boolean): WatchItem[] {
+    return showSample ? [...list] : list.filter((w) => !w.sample);
+}
+
 interface Envelope {
     version: 1;
     items: WatchItem[];
@@ -165,10 +186,13 @@ function coerceItem(v: unknown): WatchItem | null {
 }
 
 /** Null when nothing valid is stored (first visit, or corrupt data). */
-export function loadWatchlist(storage: Pick<Storage, 'getItem'> | null): WatchItem[] | null {
+export function loadWatchlist(
+    storage: Pick<Storage, 'getItem'> | null,
+    key: string = WATCHLIST_STORAGE_KEY,
+): WatchItem[] | null {
     if (!storage) return null;
     try {
-        const raw = storage.getItem(WATCHLIST_STORAGE_KEY);
+        const raw = storage.getItem(key);
         if (!raw) return null;
         const parsed = JSON.parse(raw) as Partial<Envelope>;
         if (parsed?.version !== 1 || !Array.isArray(parsed.items)) return null;
@@ -187,12 +211,18 @@ export function loadWatchlist(storage: Pick<Storage, 'getItem'> | null): WatchIt
     }
 }
 
-export function saveWatchlist(storage: Pick<Storage, 'setItem'> | null, items: readonly WatchItem[]): void {
-    if (!storage) return;
+/** Returns false when the write failed (quota, privacy mode); the list still works for this session. */
+export function saveWatchlist(
+    storage: Pick<Storage, 'setItem'> | null,
+    items: readonly WatchItem[],
+    key: string = WATCHLIST_STORAGE_KEY,
+): boolean {
+    if (!storage) return false;
     try {
         const envelope: Envelope = { version: 1, items: [...items] };
-        storage.setItem(WATCHLIST_STORAGE_KEY, JSON.stringify(envelope));
+        storage.setItem(key, JSON.stringify(envelope));
+        return true;
     } catch {
-        // Quota or privacy mode — the list still works for this session.
+        return false;
     }
 }

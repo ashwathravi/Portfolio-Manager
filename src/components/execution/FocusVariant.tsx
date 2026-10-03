@@ -794,6 +794,7 @@ function OrderForm({ onSubmit }: OrderFormProps) {
                 metaKey: e.metaKey,
                 ctrlKey: e.ctrlKey,
                 altKey: e.altKey,
+                repeat: e.repeat,
                 inEditable: isEditableElement(document.activeElement),
                 overlayOpen: useUiStore.getState().commandOpen,
             });

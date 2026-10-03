@@ -10,7 +10,9 @@ import {
     saveWatchlist,
     seedWatchlist,
     updateWatchItem,
+    visibleWatchItems,
     WATCHLIST_STORAGE_KEY,
+    watchlistStorageKey,
     type WatchItem,
 } from './watchlist';
 
@@ -53,10 +55,10 @@ describe('addToWatchlist', () => {
     });
 
     test('refuses duplicates case-insensitively and invalid tickers', () => {
-        const seeded = seedWatchlist(NOW);
-        assert.strictEqual(addToWatchlist(seeded, 'coin', { now: NOW }).error, 'duplicate');
-        assert.strictEqual(addToWatchlist(seeded, 'not a ticker', { now: NOW }).error, 'invalid');
-        assert.strictEqual(addToWatchlist(seeded, 'coin', { now: NOW }).list.length, 3);
+        const mine = addToWatchlist([], 'COIN', { now: NOW }).list;
+        assert.strictEqual(addToWatchlist(mine, 'coin', { now: NOW }).error, 'duplicate');
+        assert.strictEqual(addToWatchlist(mine, 'not a ticker', { now: NOW }).error, 'invalid');
+        assert.strictEqual(addToWatchlist(mine, 'coin', { now: NOW }).list.length, 1);
     });
 });
 
@@ -152,5 +154,38 @@ describe('watchlist storage', () => {
         assert.strictEqual(loaded?.length, 1);
         assert.strictEqual(loaded?.[0].ticker, 'AAPL');
         assert.strictEqual(loaded?.[0].targetEntry, null);
+    });
+});
+
+describe('per-user scoping and the example toggle', () => {
+    test('each signed-in user gets their own storage key', () => {
+        const storage = memoryStorage();
+        const { list } = addToWatchlist([], 'amd', { now: NOW });
+        saveWatchlist(storage, list, watchlistStorageKey('user-a'));
+        assert.deepStrictEqual(loadWatchlist(storage, watchlistStorageKey('user-a')), list);
+        assert.strictEqual(loadWatchlist(storage, watchlistStorageKey('user-b')), null);
+        assert.strictEqual(watchlistStorageKey(null), `${WATCHLIST_STORAGE_KEY}:anonymous`);
+    });
+
+    test('saveWatchlist reports a failed write', () => {
+        const throwing = { setItem: () => { throw new Error('QuotaExceededError'); } };
+        assert.strictEqual(saveWatchlist(throwing, []), false);
+        assert.strictEqual(saveWatchlist(null, []), false);
+        assert.strictEqual(saveWatchlist(memoryStorage(), []), true);
+    });
+
+    test("example rows are hidden when example data is off; the user's rows stay", () => {
+        const { list } = addToWatchlist(seedWatchlist(NOW), 'amd', { now: NOW });
+        assert.deepStrictEqual(visibleWatchItems(list, false).map((w) => w.ticker), ['AMD']);
+        assert.strictEqual(visibleWatchItems(list, true).length, 4);
+    });
+
+    test('adding a ticker that is only an example adopts it instead of refusing', () => {
+        const { list, item, error } = addToWatchlist(seedWatchlist(NOW), 'coin', { now: NOW });
+        assert.strictEqual(error, undefined);
+        assert.strictEqual(item?.ticker, 'COIN');
+        assert.strictEqual(item?.sample, undefined);
+        assert.strictEqual(list.length, 3);
+        assert.strictEqual(addToWatchlist(list, 'COIN', { now: NOW }).error, 'duplicate');
     });
 });

@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { clickUntil, collectConsoleErrors, gotoAppPage, reloadAppPage } from './helpers/app';
+import { clickUntil, collectConsoleErrors, gotoAppPage, openPolicyChecks, reloadAppPage } from './helpers/app';
 
 /**
  * Today (/) — formerly the Dashboard.
@@ -77,8 +77,7 @@ test.describe('Today page', () => {
         const strip = page.getByTestId('policy-strip');
         await expect(strip).toBeVisible();
         await expect(page.getByTestId('risk-policy-dashboard')).toBeHidden();
-        await strip.locator('summary').click();
-        await expect(page.getByTestId('risk-policy-dashboard')).toBeVisible();
+        await openPolicyChecks(page);
         await expect(page.getByTestId('risk-policy-dimension')).toHaveCount(12);
     });
 
@@ -109,9 +108,13 @@ test.describe('Today page', () => {
         await expect(page.getByTestId('alpha-radar-dashboard-card')).toBeVisible();
         await expect(page.locator('.pm-card-title', { hasText: /^Active Theses$/ })).toBeVisible();
 
-        await examples.getByRole('button', { name: 'hide examples' }).click();
-        await expect(page.getByTestId('today-examples')).toHaveCount(0);
+        await clickUntil(examples.getByRole('button', { name: 'hide examples' }), async () => {
+            await expect(page.getByTestId('today-examples')).toHaveCount(0, { timeout: 1_500 });
+        });
         await expect(page.getByTestId('today-hero')).toBeVisible();
+        // The seeded watchlist rows are examples too; only saved tickers remain.
+        await expect(page.getByTestId('today-watchlist').getByTestId('sample-tag')).toHaveCount(0);
+        await expect(page.getByTestId('today-watchlist').getByRole('link', { name: /COIN/ })).toHaveCount(0);
     });
 
     test('active theses on Today match the Research store', async ({ page }) => {

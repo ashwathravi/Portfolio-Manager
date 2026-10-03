@@ -76,7 +76,7 @@ test.describe('Holdings sparklines', () => {
         );
         await gotoAppPage(page, '/portfolios/holdings');
         test.skip(!(await hasHoldings(page)), 'no holdings in this database');
-        const firstRow = page.locator('table tbody tr').first();
+        const firstRow = page.getByTestId('holdings-table').locator('tbody tr').first();
         await expect(firstRow.getByTestId('spark-empty')).toBeVisible();
         await expect(firstRow.getByRole('img', { name: /30-day trend/ })).toHaveCount(0);
     });
@@ -157,6 +157,15 @@ test.describe('POST /api/portfolio/import', () => {
         await gotoAppPage(page, '/portfolios/holdings');
         const res = await page.request.post('/api/portfolio/import', { data: { rows: [] } });
         expect(res.status()).toBe(400);
+    });
+
+    test('regression: an oversized body is refused with 413', async ({ page }) => {
+        await gotoAppPage(page, '/portfolios/holdings');
+        const res = await page.request.post('/api/portfolio/import', {
+            headers: { 'content-type': 'application/json' },
+            data: JSON.stringify({ newPortfolioName: 'x', rows: [], pad: 'x'.repeat(300 * 1024) }),
+        });
+        expect(res.status()).toBe(413);
     });
 
     test('database: another user\'s account is a 404 and nothing is written', async ({ page }) => {

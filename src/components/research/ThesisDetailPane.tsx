@@ -172,7 +172,9 @@ export function ThesisDetailPane({
                     <span className="pm-thesis-detail-section-hint">
                         {price.source === "illustrative"
                             ? "Live prices unavailable · shape is illustrative, ends at last saved price"
-                            : "Daily closes · target as dashed line"}
+                            : price.source === "none"
+                              ? "No price history available"
+                              : "Daily closes · target as dashed line"}
                     </span>
                     {price.source === "illustrative" && (
                         <SampleTag

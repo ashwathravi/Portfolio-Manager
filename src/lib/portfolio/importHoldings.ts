@@ -33,11 +33,15 @@ export async function importHoldings(userId: string, body: PortfolioImportBody):
         let createdPortfolio = false;
 
         if (body.portfolioId) {
+            // FOR UPDATE serializes concurrent imports into the same account:
+            // the second waits, then sees the first one's rows, so a symbol is
+            // never inserted twice (there is no unique (portfolio, symbol) key).
             const [owned] = await tx
                 .select({ id: portfolios.id })
                 .from(portfolios)
                 .where(and(eq(portfolios.id, body.portfolioId), eq(portfolios.userId, userId)))
-                .limit(1);
+                .limit(1)
+                .for('update');
             if (!owned) throw new ImportAccessError();
             portfolioId = owned.id;
         } else {
@@ -79,6 +83,10 @@ export async function importHoldings(userId: string, body: PortfolioImportBody):
                 .set({
                     quantity: String(p.row.quantity),
                     avgCost: String(p.row.avgCost),
+                    // Snapshot fields were computed for the old quantity; clear
+                    // them so readers fall back to quantity × price.
+                    marketValue: null,
+                    allocation: null,
                     ...(p.row.name ? { name: p.row.name } : {}),
                     updatedAt: now,
                 })
