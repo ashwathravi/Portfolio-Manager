@@ -53,7 +53,7 @@ export function WatchlistDetailPane({
             <section className="pm-thesis-detail-section" aria-label="Price and entry">
                 <div className="pm-thesis-detail-readouts">
                     <Readout label="Price" value={livePrice != null ? `$${livePrice.toFixed(2)}` : "—"} />
-                    <Readout label="Target entry" value={item.targetEntry != null ? `$${item.targetEntry.toFixed(2)}` : "—"} />
+                    <Readout label="Entry" value={item.targetEntry != null ? `$${item.targetEntry.toFixed(2)}` : "—"} />
                     <Readout
                         label="To entry"
                         value={distance != null ? `${distance > 0 ? "+" : distance < 0 ? "−" : ""}${Math.abs(distance).toFixed(1)}%` : "—"}
