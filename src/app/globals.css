@@ -365,19 +365,6 @@
   padding: var(--pm-pad-card);
 }
 
-.pm-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 2px 8px;
-  border-radius: 999px;
-  font-size: 11px;
-  font-weight: 600;
-  background: var(--pm-neutral-100);
-  color: var(--pm-fg-muted);
-  border: 1px solid var(--pm-border);
-}
-
 .pm-pill {
   display: inline-flex;
   align-items: center;
@@ -387,8 +374,6 @@
   font-weight: 600;
 }
 .pm-pill-muted { background: var(--pm-neutral-100); color: var(--pm-fg-muted); }
-.pm-pill-success { background: var(--pm-success-50); color: var(--pm-success); }
-.pm-pill-danger { background: var(--pm-danger-50); color: var(--pm-danger); }
 
 /* Buttons */
 .pm-btn {
@@ -435,11 +420,6 @@
   border-color: var(--pm-danger);
 }
 .pm-btn-danger:hover { filter: brightness(0.95); }
-.pm-btn-dark {
-  background: var(--pm-fg);
-  color: var(--pm-card);
-  border-color: var(--pm-fg);
-}
 
 /* Segmented control */
 .pm-seg {
@@ -511,7 +491,6 @@
   background-repeat: no-repeat;
   padding-right: 26px;
 }
-.pm-select-full { width: 100%; }
 .pm-select:focus-visible {
   outline: 2px solid var(--pm-accent);
   outline-offset: 2px;
@@ -1334,26 +1313,14 @@
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 16px;
 }
-.pm-grid-2 {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px;
-}
 .pm-grid-2-63 {
   display: grid;
   grid-template-columns: 63% calc(37% - 16px);
   gap: 16px;
 }
-.pm-grid-3 {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 16px;
-}
 @media (max-width: 1100px) {
   .pm-grid-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .pm-grid-2,
-  .pm-grid-2-63,
-  .pm-grid-3 { grid-template-columns: 1fr; }
+  .pm-grid-2-63 { grid-template-columns: 1fr; }
 }
 
 /* ---- Card stacking modifier (composes with the existing .pm-card) ---- */
@@ -1709,93 +1676,6 @@
 .pm-thesis-meta { font-size: 11px; color: var(--pm-fg-subtle); }
 
 /* Daily Brief — dark insight variant card */
-.pm-card-insight {
-  background: var(--pm-fg);
-  color: var(--pm-card);
-  border: 1px solid var(--pm-fg);
-  border-radius: 12px;
-  padding: 18px;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-.pm-insight-chip {
-  align-self: flex-start;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  padding: 3px 8px;
-  border-radius: 999px;
-  background: color-mix(in oklab, var(--pm-accent) 40%, transparent);
-  color: var(--pm-card);
-}
-.pm-insight-headline {
-  font-family: var(--pm-font-display, inherit);
-  font-size: 18px;
-  font-weight: 700;
-  line-height: 1.25;
-  margin: 0;
-}
-.pm-insight-list {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  counter-reset: pm-insight-counter;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-.pm-insight-item {
-  display: grid;
-  grid-template-columns: 22px 1fr;
-  align-items: start;
-  gap: 10px;
-  counter-increment: pm-insight-counter;
-}
-.pm-insight-item::before {
-  content: counter(pm-insight-counter);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  border-radius: 999px;
-  font-size: 11px;
-  font-weight: 700;
-  background: color-mix(in oklab, var(--pm-card) 18%, transparent);
-  color: var(--pm-card);
-}
-.pm-insight-heading {
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--pm-card);
-}
-.pm-insight-desc {
-  font-size: 12px;
-  color: color-mix(in oklab, var(--pm-card) 75%, transparent);
-  margin-top: 2px;
-}
-.pm-insight-cta {
-  align-self: flex-start;
-  background: var(--pm-accent);
-  color: var(--pm-fg);
-  border: 0;
-  border-radius: 999px;
-  padding: 8px 14px;
-  font-size: 13px;
-  font-weight: 600;
-  text-decoration: none;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  cursor: pointer;
-}
-.pm-insight-cta:hover { background: var(--pm-accent-dark); }
-.pm-insight-cta:focus-visible {
-  outline: 2px solid var(--pm-accent);
-  outline-offset: 2px;
-}
 
 /* ---- Dashboard topbar (AR-71) ---- */
 
@@ -1805,29 +1685,6 @@
   justify-content: space-between;
   gap: 16px;
   flex-wrap: wrap;
-}
-.pm-crumbs {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  color: var(--pm-fg-subtle);
-  margin-bottom: 4px;
-}
-.pm-crumbs a { color: inherit; text-decoration: none; }
-.pm-crumbs a:hover { color: var(--pm-fg); }
-.pm-crumbs-sep { opacity: 0.6; }
-.pm-greeting {
-  font-family: var(--pm-font-display, inherit);
-  font-size: 28px;
-  font-weight: 700;
-  margin: 0;
-  line-height: 1.15;
-}
-.pm-greeting-sub {
-  font-size: 13px;
-  color: var(--pm-fg-subtle);
-  margin: 4px 0 0;
 }
 .pm-topbar-actions {
   display: flex;
@@ -1861,26 +1718,12 @@
   padding: 24px;
 }
 
-.pm-holdings-topbar {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 16px;
-  flex-wrap: wrap;
-}
-
 .pm-page-title {
   font-family: var(--pm-font-display, inherit);
   font-size: 22px;
   font-weight: 700;
   margin: 0;
   line-height: 1.2;
-}
-
-.pm-page-sub {
-  font-size: 13px;
-  color: var(--pm-fg-subtle);
-  margin: 4px 0 0;
 }
 
 /* --- Summary strip ------------------------------------------------------ */
@@ -2747,14 +2590,6 @@
   padding: 24px;
 }
 
-.pm-perf-topbar {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-end;
-  flex-wrap: wrap;
-  gap: 16px;
-}
-
 .pm-perf-equity-card {
   gap: 16px;
 }
@@ -2830,18 +2665,6 @@
   font-weight: 700;
   font-family: var(--pm-font-mono, monospace);
   color: var(--pm-fg);
-}
-
-.pm-perf-split {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 20px;
-}
-
-@media (max-width: 1100px) {
-  .pm-perf-split {
-    grid-template-columns: 1fr;
-  }
 }
 
 .pm-perf-attr-head {
@@ -2950,14 +2773,6 @@
   gap: 20px;
   padding: 24px;
   min-height: 100%;
-}
-
-.pm-research-topbar {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-end;
-  gap: 16px;
-  flex-wrap: wrap;
 }
 
 .pm-research-split {
@@ -3416,27 +3231,6 @@
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
-}
-
-.pm-research-pane-body {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.pm-research-pane-lede {
-  margin: 0;
-  font-size: 14px;
-  line-height: 1.55;
-  color: var(--pm-fg-muted);
-}
-
-.pm-research-pane-hint {
-  padding: 14px 16px;
-  border: 1px dashed var(--pm-border);
-  border-radius: 10px;
-  font-size: 12px;
-  color: var(--pm-fg-subtle);
 }
 
 .pm-research-empty {
@@ -4393,12 +4187,6 @@
   padding: 24px;
 }
 
-.pm-strategy-topbar-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
 /* Strategy selection row ---------------------------------------------- */
 
 .pm-strategy-row {
@@ -4446,13 +4234,6 @@
   background: color-mix(in oklab, var(--pm-accent) 4%, var(--pm-card));
 }
 
-.pm-strategy-card-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
 .pm-strategy-status {
   display: inline-flex;
   align-items: center;
@@ -4498,31 +4279,6 @@
   line-height: 1.3;
 }
 
-.pm-strategy-desc {
-  margin: 0;
-  font-size: 13px;
-  line-height: 1.45;
-  color: var(--pm-fg-muted);
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-.pm-strategy-stats {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 8px;
-  padding-top: 8px;
-  border-top: 1px solid var(--pm-border);
-}
-
-@media (max-width: 520px) {
-  .pm-strategy-stats {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
 /* Builder / backtest split placeholder (AR-81 + AR-82 fill these)     */
 
 .pm-strategy-split {
@@ -4535,47 +4291,6 @@
   .pm-strategy-split {
     grid-template-columns: 1fr;
   }
-}
-
-.pm-strategy-builder-placeholder,
-.pm-strategy-backtest-placeholder {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  min-height: 320px;
-  padding: 20px;
-}
-
-.pm-strategy-placeholder-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.pm-strategy-placeholder-eyebrow {
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--pm-fg-subtle);
-}
-
-.pm-strategy-placeholder-hint {
-  font-family: var(--pm-font-mono, monospace);
-  font-size: 11px;
-  color: var(--pm-fg-subtle);
-  padding: 2px 8px;
-  border: 1px dashed var(--pm-border);
-  border-radius: 999px;
-}
-
-.pm-strategy-placeholder-body {
-  margin: 0;
-  font-size: 13px;
-  line-height: 1.5;
-  color: var(--pm-fg-muted);
-  max-width: 64ch;
 }
 
 /* -------------------------------------------------------------------- */
@@ -6152,29 +5867,6 @@
 /* the old tabbed layout, so the data model is unchanged.                */
 /* --------------------------------------------------------------------- */
 
-.pm-settings-v2 {
-  display: flex;
-  flex-direction: column;
-  gap: 24px;
-  padding: 24px;
-  padding-bottom: 64px;
-  max-width: 1200px;
-  margin-inline: auto;
-  width: 100%;
-}
-
-.pm-settings-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
-}
-
-@media (max-width: 960px) {
-  .pm-settings-grid {
-    grid-template-columns: 1fr;
-  }
-}
-
 /* --- card shell ----------------------------------------------------- */
 
 .pm-settings-card {
@@ -6250,21 +5942,6 @@
   flex-direction: column;
   gap: 14px;
   padding: 16px 18px 18px;
-}
-
-.pm-settings-card-stub .pm-settings-card-body {
-  padding: 24px 18px;
-  align-items: center;
-  justify-content: center;
-  flex: 1;
-}
-
-.pm-settings-card-placeholder {
-  margin: 0;
-  color: var(--pm-fg-muted);
-  font-size: 12.5px;
-  text-align: center;
-  max-width: 320px;
 }
 
 /* --- form fields ---------------------------------------------------- */
@@ -7149,35 +6826,6 @@
 
 /* --- Advanced links footer ----------------------------------------- */
 
-.pm-settings-advanced {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding: 20px 2px 4px;
-}
-
-.pm-settings-advanced-head {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  padding: 0 4px;
-}
-
-.pm-settings-advanced-title {
-  margin: 0;
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--pm-fg-muted);
-}
-
-.pm-settings-advanced-sub {
-  margin: 0;
-  font-size: 11.5px;
-  color: var(--pm-fg-subtle);
-}
-
 .pm-settings-advanced-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -7194,65 +6842,6 @@
   .pm-settings-advanced-grid {
     grid-template-columns: 1fr;
   }
-}
-
-.pm-settings-advanced-link {
-  display: grid;
-  grid-template-columns: auto 1fr auto;
-  gap: 12px;
-  align-items: center;
-  padding: 12px 14px;
-  background: var(--pm-card);
-  border: 1px solid var(--pm-border);
-  border-radius: 10px;
-  color: var(--pm-fg);
-  text-decoration: none;
-  transition: border-color 120ms ease, transform 100ms ease, background 120ms ease;
-}
-
-.pm-settings-advanced-link:hover {
-  border-color: color-mix(in oklab, var(--pm-accent) 45%, var(--pm-border));
-  background: color-mix(in oklab, var(--pm-accent) 4%, var(--pm-card));
-  transform: translateY(-1px);
-}
-
-.pm-settings-advanced-icon {
-  width: 16px;
-  height: 16px;
-  color: var(--pm-fg-muted);
-  flex-shrink: 0;
-}
-
-.pm-settings-advanced-text {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  min-width: 0;
-}
-
-.pm-settings-advanced-label {
-  font-size: 12.5px;
-  font-weight: 600;
-  color: var(--pm-fg);
-}
-
-.pm-settings-advanced-desc {
-  font-size: 11px;
-  color: var(--pm-fg-subtle);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.pm-settings-advanced-chev {
-  width: 14px;
-  height: 14px;
-  color: var(--pm-fg-subtle);
-  flex-shrink: 0;
-}
-
-.pm-settings-advanced-link:hover .pm-settings-advanced-chev {
-  color: var(--pm-accent);
 }
 
 /* --- AR-88 Appearance card ----------------------------------------- */
@@ -7423,18 +7012,9 @@
      (b) The prompt is `aria-hidden`, so the blink never produces SR
          noise — it's a pure visual cue.
      (c) Keyframing `opacity` is GPU-compositor-cheap. */
-.pm-term-cli-prompt {
-  animation: pm-caret 1s steps(2, jump-none) infinite;
-  will-change: opacity;
-}
 
 /* `.is-valid` / `.is-error` pause the blink — once the user has a parse
    verdict, the steady prompt is the calmer signal. */
-.pm-term-cli.is-valid .pm-term-cli-prompt,
-.pm-term-cli.is-error .pm-term-cli-prompt {
-  animation: none;
-  opacity: 1;
-}
 
 @keyframes pm-caret {
   0%, 49%   { opacity: 1; }
@@ -7448,8 +7028,7 @@
    feel cohesive with the rest of the UI. We transition just the
    properties that can change in :hover / :focus — keeping the list
    narrow means browsers can fast-path the paint. */
-.pm-card,
-.pm-chip {
+.pm-card {
   transition: background-color 140ms ease-out, border-color 140ms ease-out,
               box-shadow 140ms ease-out, color 140ms ease-out;
 }
@@ -7467,9 +7046,7 @@
 @media (prefers-reduced-motion: reduce) {
   .pm-live-dot::after,
   .pm-tweaks-panel,
-  .pm-chart-halo,
-  .pm-co-lock-dot,
-  .pm-term-cli-prompt {
+  .pm-chart-halo {
     animation: none !important;
   }
 
@@ -7513,12 +7090,9 @@
 .pm-exec-chip:focus-visible,
 .pm-exec-input:focus-visible,
 .pm-exec-textarea:focus-visible,
-.pm-term-btn:focus-visible,
-.pm-term-cli-input:focus-visible,
 .pm-settings-input:focus-visible,
 .pm-settings-select:focus-visible,
-.pm-integration-action:focus-visible,
-.pm-settings-advanced-link:focus-visible {
+.pm-integration-action:focus-visible {
   outline: 2px solid var(--pm-accent);
   outline-offset: 2px;
 }
@@ -7526,11 +7100,6 @@
 /* Terminal inputs sit on a dark panel. Offsetting into the dark
    surface makes the ring hard to see — use an inset ring (box-shadow)
    instead so it stays visible against #0a0f0c. */
-.pm-term-cli-input:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 2px var(--term-accent);
-  border-radius: 3px;
-}
 
 /* Universal safety net: any button / link / input / textarea / select
    that we missed still gets a visible ring. Low-specificity so any
@@ -7577,17 +7146,6 @@ a:focus-visible,
 
 /* Screen-reader-only utility — useful anywhere we want to announce
    state without showing it visually (e.g. "{count} new orders"). */
-.pm-sr-only {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
-}
 
 /* ==========================================================================
    Phase 9 · AR-92 — Responsive breakpoints
@@ -7616,34 +7174,6 @@ a:focus-visible,
    "error". The notice sits inside `.pm-term` so the dark-theme scoped
    tokens (`--term-*`) apply automatically — it doesn't need a light-
    theme variant. */
-.pm-term-narrow-notice {
-  display: none;
-  align-items: center;
-  gap: 8px;
-  margin: 8px 12px 0;
-  padding: 8px 12px;
-  background: color-mix(in srgb, var(--term-accent) 12%, transparent);
-  border: 1px solid color-mix(in srgb, var(--term-accent) 38%, transparent);
-  border-radius: 6px;
-  color: var(--term-fg);
-  font-size: 12px;
-  font-weight: 500;
-  letter-spacing: 0.01em;
-}
-
-.pm-term-narrow-notice-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 999px;
-  background: var(--term-accent);
-  flex-shrink: 0;
-}
-
-@media (max-width: 899px) {
-  .pm-term-narrow-notice {
-    display: flex;
-  }
-}
 
 /* --- Holdings + Execution tables: horizontal scroll on mobile ---- */
 
@@ -8057,11 +7587,6 @@ a:focus-visible,
    bottom-left. Keeping the 2-col grid but making the Execution card
    span both columns when it lands on a solo row looks cleanest at
    full width. Relies on DOM order — the card must be the 5th child. */
-@media (min-width: 961px) {
-  .pm-settings-grid > :nth-child(5):nth-last-child(1) {
-    grid-column: 1 / -1;
-  }
-}
 
 /* ==========================================================================
    AR-110 — Mood breakdown card (Performance page)
@@ -8337,14 +7862,6 @@ a:focus-visible,
 .pm-exec-submit[data-cooldown="true"] > * {
   position: relative;
   z-index: 1;
-}
-
-.pm-exec-cooldown-hint {
-  display: block;
-  margin-top: 6px;
-  font-size: 11px;
-  color: var(--pm-warn);
-  text-align: right;
 }
 
 /* --- Cooldown chip row (Settings → Execution card, AR-110) ---------- */
@@ -9147,12 +8664,6 @@ a:focus-visible,
 
 /* Dashboard bottom-row side stack: watchlist + theses stacked vertically
    next to the wide pattern feed column (pm-grid-2-63 layout). */
-.pm-dashboard-side-stack {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  min-width: 0;
-}
 
 .pm-pattern-feed {
   display: flex;
@@ -10896,12 +10407,6 @@ a:focus-visible,
 .pm-login-copy {
   display: grid;
   gap: 10px;
-}
-
-.pm-login-icon {
-  width: 28px;
-  height: 28px;
-  color: #0f766e;
 }
 
 .pm-login-copy h1 {

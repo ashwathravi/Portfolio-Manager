@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { AreaChart } from "@/components/charts";
 import { useHistoricalQuery } from "@/lib/api/market-data/queries";
-import type { HistoricalBar } from "@/lib/api/market-data";
+import { buildThesisPriceSeries } from "@/lib/research/priceSeries";
 import type {
     Thesis,
     ThesisCatalyst,
@@ -32,10 +32,11 @@ import type {
  *      the action row (Open full view / Edit / ⋯ menu with Archive|Restore
  *      and Delete).
  *   2. Lede — one-line description.
- *   3. Price since open — mini AreaChart with 4-readout strip
- *      (Open / Now / Target / % to target). Pulls live 1D bars via
+ *   3. Price · 30 days — mini AreaChart with 4-readout strip
+ *      (30 days ago / Now / Target / % to target). Pulls daily bars via
  *      `useHistoricalQuery` and falls back to a synthesized walk anchored
- *      on `thesis.currentPrice` when the provider returns empty.
+ *      on `thesis.currentPrice` (tagged "Illustrative", no day change) when
+ *      the provider fails or returns nothing.
  *   4. HYPOTHESIS + FALSIFY IF — 2-column grid. Left is the full
  *      `thesis.hypothesis` paragraph; right frames the opposing case
  *      ("This thesis is wrong if…") as a bulleted list.
@@ -73,10 +74,10 @@ export function ThesisDetailPane({
     onRestore,
     onDelete,
 }: ThesisDetailPaneProps) {
-    // --- Price series (live → synthesized fallback) --------------------------
-    const { data: bars } = useHistoricalQuery(thesis.ticker, "1D");
+    // --- Price series (live daily bars → labelled illustrative fallback) -----
+    const { data: bars } = useHistoricalQuery(thesis.ticker, "1M", { retry: false, staleTime: 15 * 60_000 });
     const price = useMemo(
-        () => buildPriceSeries(bars, thesis),
+        () => buildThesisPriceSeries(bars, thesis),
         [bars, thesis],
     );
 
@@ -164,20 +165,32 @@ export function ThesisDetailPane({
             {/* ------------- Price since open (mini chart) ------------------- */}
             <section
                 className="pm-thesis-detail-section pm-thesis-detail-chart-section"
-                aria-label="Price since open"
+                aria-label="Price over the last 30 days"
             >
                 <div className="pm-thesis-detail-section-head">
-                    <span className="pm-thesis-detail-eyebrow">PRICE SINCE OPEN</span>
-                    <span className="pm-thesis-detail-section-hint">1D · target as dashed line</span>
+                    <span className="pm-thesis-detail-eyebrow">PRICE · 30 DAYS</span>
+                    <span className="pm-thesis-detail-section-hint">
+                        {price.source === "illustrative"
+                            ? "Live prices unavailable · shape is illustrative, ends at last saved price"
+                            : price.source === "none"
+                              ? "No price history available"
+                              : "Daily closes · target as dashed line"}
+                    </span>
+                    {price.source === "illustrative" && (
+                        <SampleTag
+                            label="Illustrative"
+                            title="Live price history could not be loaded. The line is an invented shape that ends at this thesis's last saved price."
+                        />
+                    )}
                 </div>
 
                 <div className="pm-thesis-detail-readouts">
                     <Readout
-                        label="Open"
+                        label="30 days ago"
                         value={price.open != null ? `$${fmtMoney(price.open)}` : "—"}
                     />
                     <Readout
-                        label="Now"
+                        label={price.source === "live" ? "Now" : "Last saved"}
                         value={price.now != null ? `$${fmtMoney(price.now)}` : "—"}
                         tone={
                             price.changePct == null
@@ -211,8 +224,8 @@ export function ThesisDetailPane({
                 <AreaChart
                     data={price.data}
                     benchmark={price.benchmark}
-                    range="1D"
-                    ariaLabel={`${thesis.ticker} price since open with $${fmtMoney(thesis.targetPrice)} target`}
+                    range="1M"
+                    ariaLabel={`${thesis.ticker} price over 30 days with $${fmtMoney(thesis.targetPrice)} target`}
                     height={180}
                 />
             </section>
@@ -431,121 +444,6 @@ function SourceRow({ evidence }: { evidence: ThesisEvidence }) {
             )}
         </li>
     );
-}
-
-// ---------------------------------------------------------------------------
-// Price series
-// ---------------------------------------------------------------------------
-
-interface PriceSeries {
-    /** Portfolio series passed to AreaChart (closes over the session). */
-    data: number[];
-    /** Flat benchmark at `thesis.targetPrice` so the chart shows how far we are. */
-    benchmark: number[];
-    open: number | null;
-    now: number | null;
-    /** % change from open to now. */
-    changePct: number | null;
-    /** % distance from "now" to target, signed (thesis-POV handled by caller). */
-    toTargetPct: number | null;
-}
-
-/**
- * Assemble the chart series. Preference order:
- *   1. Live 1D bars from `useHistoricalQuery`, using bar.close.
- *   2. Synthesized walk anchored on `thesis.currentPrice` when bars are empty
- *      (e.g. weekends, offline dev).
- *
- * The benchmark line is a constant array at `thesis.targetPrice` so the user
- * can eyeball the gap between price and target.
- */
-function buildPriceSeries(
-    bars: HistoricalBar[] | undefined,
-    thesis: Thesis,
-): PriceSeries {
-    const target = thesis.targetPrice;
-    const fallbackNow =
-        typeof thesis.currentPrice === "number" && Number.isFinite(thesis.currentPrice)
-            ? thesis.currentPrice
-            : null;
-
-    let data: number[];
-    let open: number | null;
-    let now: number | null;
-
-    if (bars && bars.length > 0) {
-        data = bars.map((b) => b.close);
-        open = bars[0].open ?? bars[0].close;
-        now = data[data.length - 1];
-    } else if (fallbackNow != null) {
-        data = synthesize1DWalk(fallbackNow, thesis.ticker);
-        open = data[0];
-        now = data[data.length - 1];
-    } else {
-        data = [];
-        open = null;
-        now = null;
-    }
-
-    const benchmark = data.length > 0 ? new Array<number>(data.length).fill(target) : [];
-
-    const changePct =
-        open != null && now != null && open > 0 ? ((now - open) / open) * 100 : null;
-
-    // Signed distance from the thesis's perspective:
-    //   bull: (target - now) / now  → positive = upside remaining.
-    //   bear: (now - target) / now  → positive = downside remaining.
-    const toTargetPct =
-        now != null && now > 0 && target > 0
-            ? thesis.type === "bull"
-                ? ((target - now) / now) * 100
-                : ((now - target) / now) * 100
-            : null;
-
-    return { data, benchmark, open, now, changePct, toTargetPct };
-}
-
-/**
- * Deterministic 1D random walk anchored on `current`. 78 points = 5-minute
- * bars through a 6.5h session (same shape the dashboard equity curve uses
- * for its 1D range).
- */
-function synthesize1DWalk(current: number, seedSource: string): number[] {
-    const points = 78;
-    const drift = 0.004; // ~0.4% over the session
-    const vol = 0.004;
-    const end = Math.max(current, 0.01);
-    const start = end / (1 + drift);
-
-    const rand = mulberry32(hashString(seedSource));
-    const out = new Array<number>(points);
-    for (let i = 0; i < points; i++) {
-        const t = i / (points - 1 || 1);
-        const trend = start + (end - start) * t;
-        const noise = (rand() - 0.5) * 2 * vol * end;
-        out[i] = trend + noise;
-    }
-    out[points - 1] = end;
-    return out;
-}
-
-function hashString(s: string): number {
-    let h = 0;
-    for (let i = 0; i < s.length; i++) {
-        h = (h * 31 + s.charCodeAt(i)) | 0;
-    }
-    return h || 1;
-}
-
-function mulberry32(a: number): () => number {
-    return function () {
-        a |= 0;
-        a = (a + 0x6d2b79f5) | 0;
-        let t = a;
-        t = Math.imul(t ^ (t >>> 15), t | 1);
-        t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-    };
 }
 
 // ---------------------------------------------------------------------------

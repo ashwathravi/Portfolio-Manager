@@ -4,13 +4,8 @@ import {
     benchmarkMonthlySeries,
     portfolioMonthlySeries,
 } from "@/lib/performance/series";
-import {
-    defaultAssetClassBreakdown,
-    defaultSectorBreakdown,
-} from "@/lib/performance/attribution";
 import type { MonthlyValuation } from "@/lib/performance/periodSummary";
 import { EquityCurveCard, type Benchmark } from "./EquityCurveCard";
-import { AttributionBarsCard } from "./AttributionBarsCard";
 import { MetricsByPeriodTable } from "./MetricsByPeriodTable";
 import { MonthlyHeatmapCard } from "./MonthlyHeatmapCard";
 import { SampleDataNotice } from "@/components/data-display/SampleDataNotice";
@@ -22,12 +17,12 @@ import { SampleGate } from "@/components/data-display/SampleGate";
  *
  * Performance › Returns. Composes:
  *   - EquityCurveCard        (AR-75, hero)
- *   - AttributionBarsCard    (AR-76, BHB decomposition)
  *   - MetricsByPeriodTable   (AR-76, period × metrics matrix)
  *   - MonthlyHeatmapCard     (AR-77, year × month intensity grid)
  *
- * Behavioural cards (mood, P&L density, trading calendar, weekly reviews)
- * live on Performance › Behaviour — see BehaviourPageClient.
+ * Attribution has its own tab (AttributionPageClient). Behavioural cards
+ * (mood, P&L density, trading calendar, weekly reviews) live on
+ * Performance › Behaviour — see BehaviourPageClient.
  *
  * All state is local to each card. The client wrapper exists purely to
  * keep the page file thin and to keep the topbar / breadcrumbs / actions
@@ -83,12 +78,12 @@ export function PerformancePageClient() {
                 fallback={
                     <SampleEmptyState
                         title="No return history yet"
-                        body="Time-weighted returns, benchmark comparison, and attribution need your account history. Connect an account to start tracking."
+                        body="Time-weighted returns and benchmark comparison need your account history. Connect an account to start tracking."
                     />
                 }
             >
                 <SampleDataNotice>
-                    Returns, benchmarks, and attribution are example data until account history is connected.
+                    Returns and benchmarks are example data until account history is connected.
                 </SampleDataNotice>
 
                 <EquityCurveCard
@@ -96,16 +91,10 @@ export function PerformancePageClient() {
                     benchmarks={BENCHMARKS}
                 />
 
-                <div className="pm-perf-split">
-                    <AttributionBarsCard
-                        sectors={defaultSectorBreakdown}
-                        assetClasses={defaultAssetClassBreakdown}
-                    />
-                    <MetricsByPeriodTable
-                        portfolio={portfolioMonthlySeries}
-                        benchmark={benchmarkMonthlySeries}
-                    />
-                </div>
+                <MetricsByPeriodTable
+                    portfolio={portfolioMonthlySeries}
+                    benchmark={benchmarkMonthlySeries}
+                />
 
                 <MonthlyHeatmapCard portfolio={portfolioMonthlySeries} />
             </SampleGate>

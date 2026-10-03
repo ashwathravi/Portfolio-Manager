@@ -9,6 +9,7 @@
 
 export { AreaChart, type AreaChartProps, type AreaChartRange } from "./AreaChart";
 export { Sparkline, type SparklineProps } from "./Sparkline";
+export { PriceSparkline } from "./PriceSparkline";
 export { Donut, type DonutProps, type DonutSegment } from "./Donut";
 export { BarChart, type BarChartProps, type BarDatum } from "./BarChart";
 

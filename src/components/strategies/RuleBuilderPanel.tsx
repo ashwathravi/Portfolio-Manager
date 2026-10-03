@@ -9,6 +9,7 @@ import type {
     StrategyRule,
     StrategyUniverseFilter,
 } from "@/lib/strategies/strategy";
+import { opLabel } from "@/lib/strategies/strategy";
 
 /**
  * Phase 6 (AR-81) Rule builder · Universe · Guardrails.
@@ -172,7 +173,7 @@ function RulePill({
                 aria-label="Operator"
             >
                 {OP_OPTIONS.map((op) => (
-                    <option key={op} value={op}>{op}</option>
+                    <option key={op} value={op}>{opLabel(op)}</option>
                 ))}
             </select>
 

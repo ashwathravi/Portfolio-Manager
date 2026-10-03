@@ -1,7 +1,9 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert';
 import {
+    attributionHeadline,
     computeAttribution,
+    formatPp,
     defaultSectorBreakdown,
     defaultAssetClassBreakdown,
     type AttributionSegment,
@@ -125,5 +127,49 @@ describe('defaultAssetClassBreakdown', () => {
     test('benchmark weights sum to 1', () => {
         const totalWeight = defaultAssetClassBreakdown.reduce((acc, s) => acc + s.benchmarkWeight, 0);
         assert.ok(approx(totalWeight, 1, 1e-9), `weights sum to ${totalWeight}`);
+    });
+});
+
+describe('attributionHeadline', () => {
+    const seg = (key: string, wP: number, wB: number, rP: number, rB: number) => ({
+        key, label: key, portfolioWeight: wP, benchmarkWeight: wB, portfolioReturn: rP, benchmarkReturn: rB,
+    });
+
+    test('names the verdict, the main driver, and the single biggest move', () => {
+        const summary = computeAttribution([
+            seg('Tech', 0.5, 0.5, 0.2, 0.1),
+            seg('Energy', 0.5, 0.5, 0.05, 0.05),
+        ]);
+        const h = attributionHeadline(summary);
+        assert.strictEqual(h.verdict, 'You beat the benchmark by 5.0 pp');
+        assert.strictEqual(h.mainDriver.name, 'selection');
+        assert.deepStrictEqual(h.biggestMove && [h.biggestMove.label, h.biggestMove.name], ['Tech', 'selection']);
+    });
+
+    test('trailing and matching read correctly', () => {
+        assert.strictEqual(
+            attributionHeadline(computeAttribution([seg('A', 1, 1, 0.01, 0.03)])).verdict,
+            'You trailed the benchmark by 2.0 pp',
+        );
+        const flat = attributionHeadline(computeAttribution([seg('A', 1, 1, 0.03, 0.03)]));
+        assert.strictEqual(flat.verdict, 'You matched the benchmark');
+        assert.strictEqual(flat.biggestMove, null);
+    });
+
+    test('an overweight in a winning segment is an allocation story', () => {
+        const h = attributionHeadline(computeAttribution([
+            seg('Tech', 0.8, 0.4, 0.2, 0.2),
+            seg('Bonds', 0.2, 0.6, 0.02, 0.02),
+        ]));
+        assert.strictEqual(h.mainDriver.name, 'allocation');
+        assert.ok(h.mainDriver.value > 0);
+    });
+});
+
+describe('formatPp', () => {
+    test('signs and rounds to one decimal of a percentage point', () => {
+        assert.strictEqual(formatPp(0.0213), '+2.1 pp');
+        assert.strictEqual(formatPp(-0.0049), '−0.5 pp');
+        assert.strictEqual(formatPp(0.00001), '0.0 pp');
     });
 });

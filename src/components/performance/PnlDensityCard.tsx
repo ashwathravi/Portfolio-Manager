@@ -6,6 +6,7 @@ import type { JournalEntry } from "@/types/trade";
 import {
     buildHeatmap,
     colorFor,
+    HEAT_COLORS,
     computeCallouts,
     computeScale,
     dayLabel,
@@ -42,11 +43,11 @@ const RANGES: ReadonlyArray<{ key: RangeKey; label: string; days: number | null 
 
 // Legend swatches, top→bottom, aligned with `colorFor` thresholds.
 const LEGEND_SWATCHES: ReadonlyArray<{ color: string; label: string }> = [
-    { color: "#17cf54", label: "Big gain" },
-    { color: "#bbf7d0", label: "Gain" },
-    { color: "#f0f2f4", label: "Neutral" },
-    { color: "#fee2e2", label: "Loss" },
-    { color: "#fecaca", label: "Big loss" },
+    { color: HEAT_COLORS.pos2, label: "Big gain" },
+    { color: HEAT_COLORS.pos1, label: "Gain" },
+    { color: HEAT_COLORS.zero, label: "Neutral" },
+    { color: HEAT_COLORS.neg1, label: "Loss" },
+    { color: HEAT_COLORS.neg2, label: "Big loss" },
 ];
 
 export interface PnlDensityCardProps {

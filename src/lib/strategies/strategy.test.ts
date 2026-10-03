@@ -5,6 +5,7 @@ import {
     addRule,
     duplicateStrategy,
     hasUnbacktestedChanges,
+    opLabel,
     removeRule,
     setConjunction,
     setGuardrail,
@@ -85,5 +86,19 @@ describe('hasUnbacktestedChanges', () => {
         assert.strictEqual(hasUnbacktestedChanges({ ...base, rules: base.rules.map((r, i) => (i === 0 ? { ...r, value: '0.9' } : r)) }, base), true);
         assert.strictEqual(hasUnbacktestedChanges({ ...base, universe: toggleUniverseFilter(base.universe, base.universe[0].id) }, base), true);
         assert.strictEqual(hasUnbacktestedChanges({ ...base, guardrails: setGuardrail(base.guardrails, 'maxPositionPct', 9) }, base), true);
+    });
+});
+
+describe('opLabel', () => {
+    test('renders comparison operators as typographic symbols', () => {
+        assert.strictEqual(opLabel('>='), '≥');
+        assert.strictEqual(opLabel('<='), '≤');
+        assert.strictEqual(opLabel('!='), '≠');
+    });
+
+    test('leaves single-character and word operators alone', () => {
+        assert.strictEqual(opLabel('>'), '>');
+        assert.strictEqual(opLabel('='), '=');
+        assert.strictEqual(opLabel('crosses above'), 'crosses above');
     });
 });

@@ -10,7 +10,7 @@ describe('resolveViewerIdentity', () => {
     test('maps the Auth.js session user', async () => {
         const getSession = async () => ({ user: { id: 'u', name: ' Ash ', email: 'a@x.com', image: '' }, expires: '' }) as Session;
         assert.deepStrictEqual(await resolveViewerIdentity({ env: configured, getSession }), {
-            name: 'Ash', email: 'a@x.com', image: null, mode: 'signed-in',
+            id: 'u', name: 'Ash', email: 'a@x.com', image: null, mode: 'signed-in',
         });
     });
 
@@ -25,6 +25,7 @@ describe('resolveViewerIdentity', () => {
     test('local bypass is labelled as local development', async () => {
         const identity = await resolveViewerIdentity({ env: bypass, getSession: async () => { throw new Error('should not call'); } });
         assert.strictEqual(identity?.mode, 'local-dev');
+        assert.strictEqual(identity?.id, bypass.AUTH_LOCAL_DEV_USER_ID);
     });
 
     test('invalid auth configuration yields null', async () => {

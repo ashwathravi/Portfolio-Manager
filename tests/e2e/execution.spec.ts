@@ -662,6 +662,59 @@ test.describe('Execution page — live adherence panel (AR-111)', () => {
     });
 });
 
+test.describe('Trade — keyboard mode', () => {
+    test.beforeEach(async ({ page }) => {
+        await gotoAppPage(page, '/execution');
+        await page.locator('.pm-exec-form-title').click();
+        // Wait for hydration: the listener only exists once the ticket mounts.
+        const sell = page.locator('.pm-exec-side').getByRole('tab', { name: 'Sell' });
+        await expect(async () => {
+            await page.keyboard.press('s');
+            await expect(sell).toHaveAttribute('aria-selected', 'true', { timeout: 1_000 });
+        }).toPass({ timeout: 10_000 });
+    });
+
+    test('B and S switch the side; M and L switch the order type', async ({ page }) => {
+        const side = page.locator('.pm-exec-side');
+        await page.keyboard.press('b');
+        await expect(side.getByRole('tab', { name: 'Buy' })).toHaveAttribute('aria-selected', 'true');
+        await page.keyboard.press('m');
+        await expect(page.getByLabel('Order type')).toHaveValue('market');
+        await expect(page.getByLabel('Limit price')).toHaveCount(0);
+        await page.keyboard.press('l');
+        await expect(page.getByLabel('Order type')).toHaveValue('limit');
+    });
+
+    test('regression: typing a ticker never flips the side', async ({ page }) => {
+        await page.keyboard.press('t');
+        await expect(page.getByLabel('Ticker')).toBeFocused();
+        await page.keyboard.type('bb');
+        await expect(page.getByLabel('Ticker')).toHaveValue('BB');
+        await expect(page.locator('.pm-exec-side').getByRole('tab', { name: 'Sell' })).toHaveAttribute('aria-selected', 'true');
+        await page.keyboard.press('Escape');
+        await expect(page.getByLabel('Ticker')).not.toBeFocused();
+    });
+
+    test('? opens the shortcut sheet and Escape closes it', async ({ page }) => {
+        await page.keyboard.press('?');
+        const sheet = page.getByRole('region', { name: 'Keyboard shortcuts' });
+        await expect(sheet).toContainText('Review order');
+        await page.keyboard.press('Escape');
+        await expect(sheet).toHaveCount(0);
+        await page.getByRole('button', { name: /Shortcuts/ }).click();
+        await expect(sheet).toBeVisible();
+    });
+
+    test('⌘/Ctrl+Enter still respects the rationale gate', async ({ page }) => {
+        const submit = page.getByRole('button', { name: /Review & sell/ });
+        await expect(submit).toBeDisabled();
+        const before = await page.locator('.pm-exec-table tbody tr').count();
+        await page.keyboard.press('q');
+        await page.keyboard.press('ControlOrMeta+Enter');
+        await expect(page.locator('.pm-exec-table tbody tr')).toHaveCount(before);
+    });
+});
+
 test.describe('Trade — prefilled ticket', () => {
     test('?symbol=&side= pre-fills the order ticket', async ({ page }) => {
         await gotoAppPage(page, '/execution?symbol=nvda&side=sell');

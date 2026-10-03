@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useMemo } from "react";
-import { Sparkline } from "@/components/charts";
+import { PriceSparkline } from "@/components/charts";
 import { useAutoRefreshQuotes } from "@/lib/hooks/useAutoRefreshQuotes";
 import { ArrowUpRight } from "lucide-react";
 
@@ -16,7 +16,7 @@ import { ArrowUpRight } from "lucide-react";
  *   4. Today %  (green/red)
  *   5. Total return %  (green/red)
  *   6. Allocation bar + %
- *   7. 30-day sparkline — red when today's change is negative
+ *   7. 30-day sparkline of real daily closes (a dash when unavailable)
  *
  * Live quotes from `useAutoRefreshQuotes` drive price / today %. When a
  * quote is missing for a symbol we fall back to the static seed values
@@ -31,8 +31,6 @@ export interface TopHoldingsRow {
     avgCost: number;
     currentPrice: number;
     marketValue: number;
-    /** Optional 30-day trailing series. When absent, we synthesize one. */
-    spark30d?: number[];
 }
 
 export interface TopHoldingsCardProps {
@@ -123,7 +121,6 @@ export function TopHoldingsCard({
                             enriched.map((r) => {
                                 const allocPct =
                                     totalMV > 0 ? (r.marketValue / totalMV) * 100 : 0;
-                                const spark = r.spark30d ?? synthesizeSpark(r.price, r.symbol);
                                 const todayNeg = r.todayChangePercent < 0;
                                 return (
                                     <tr key={r.id}>
@@ -163,14 +160,7 @@ export function TopHoldingsCard({
                                             </div>
                                         </td>
                                         <td>
-                                            <Sparkline
-                                                data={spark}
-                                                width={72}
-                                                height={22}
-                                                color={todayNeg ? "var(--pm-danger)" : "var(--pm-success)"}
-                                                strokeWidth={1.25}
-                                                ariaLabel={`${r.symbol} 30-day trend`}
-                                            />
+                                            <PriceSparkline symbol={r.symbol} />
                                         </td>
                                     </tr>
                                 );
@@ -205,34 +195,3 @@ function fmtSignedPct(n: number): string {
     return `${sign}${Math.abs(n).toFixed(2)}%`;
 }
 
-/**
- * Deterministic 30-point walk keyed to ticker so each row gets a distinct
- * sparkline even when all prices are the same (e.g. right after seed).
- */
-function synthesizeSpark(price: number, seedKey: string): number[] {
-    let seed = 0;
-    for (let i = 0; i < seedKey.length; i++) {
-        seed = (seed * 31 + seedKey.charCodeAt(i)) | 0;
-    }
-    const rand = mulberry32(seed || 1);
-    const base = Math.abs(price) || 1;
-    const out: number[] = new Array(30);
-    let x = base;
-    for (let i = 0; i < 30; i++) {
-        x += (rand() - 0.5) * 0.04 * base;
-        out[i] = x;
-    }
-    out[29] = price;
-    return out;
-}
-
-function mulberry32(a: number): () => number {
-    return function () {
-        a |= 0;
-        a = (a + 0x6d2b79f5) | 0;
-        let t = a;
-        t = Math.imul(t ^ (t >>> 15), t | 1);
-        t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-    };
-}

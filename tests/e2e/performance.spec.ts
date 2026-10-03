@@ -3,9 +3,11 @@ import { test, expect } from '@playwright/test';
 /**
  * Performance tests.
  *
- * Performance has two views (section tabs):
- *   /performance            Returns — equity curve, attribution, metrics
- *                           by period, monthly heatmap
+ * Performance has three views (section tabs):
+ *   /performance            Returns — equity curve, metrics by period,
+ *                           monthly heatmap
+ *   /performance/attribution Attribution — plain-language read-out, BHB
+ *                           bars, and the full attribution table
  *   /performance/behaviour  Behaviour — trading calendar (absorbed the
  *                           retired /analytics page), mood breakdown,
  *                           P&L density, weekly reviews archive
@@ -23,10 +25,11 @@ test.describe('Performance › Returns', () => {
         await expect(page.locator('h1.pm-topbar-title')).toHaveText('Performance');
     });
 
-    test('renders the four returns cards', async ({ page }) => {
-        for (const title of [/^Equity curve$/i, /^Attribution$/i, /^Metrics by period$/i, /^Monthly return heatmap$/i]) {
+    test('renders the three returns cards; attribution moved to its own tab', async ({ page }) => {
+        for (const title of [/^Equity curve$/i, /^Metrics by period$/i, /^Monthly return heatmap$/i]) {
             await expect(page.locator('h2.pm-card-title', { hasText: title })).toBeVisible();
         }
+        await expect(page.locator('h2.pm-card-title', { hasText: /^Attribution$/i })).toHaveCount(0);
     });
 
     test('behavioural cards moved to the Behaviour view', async ({ page }) => {
@@ -48,6 +51,38 @@ test.describe('Performance › Returns', () => {
         await expect(button).toBeEnabled();
         const [download] = await Promise.all([page.waitForEvent('download'), button.click()]);
         expect(download.suggestedFilename()).toBe('atlas-monthly-returns.csv');
+    });
+});
+
+test.describe('Performance › Attribution', () => {
+    test.beforeEach(async ({ page }) => {
+        await page.goto('/performance/attribution');
+    });
+
+    test('is a Performance tab with one heading and labelled example data', async ({ page }) => {
+        await expect(page.locator('h1')).toHaveCount(1);
+        await expect(page.locator('h1.pm-topbar-title')).toHaveText('Performance');
+        await expect(page.getByRole('link', { name: 'Attribution' })).toHaveAttribute('aria-current', 'page');
+        await expect(page.getByTestId('sample-data-notice')).toBeVisible();
+    });
+
+    test('leads with a plain-language answer, then the bars and the full table', async ({ page }) => {
+        await expect(page.getByTestId('attribution-lede')).toContainText(/You (beat|trailed|matched) the benchmark/);
+        await expect(page.getByTestId('attribution-lede')).toContainText(/Mostly (allocation|selection|interaction)/);
+        await expect(page.locator('h2.pm-card-title', { hasText: /^Attribution$/i })).toBeVisible();
+        const table = page.getByTestId('attribution-table');
+        await expect(table.locator('tbody tr')).toHaveCount(8);
+        await expect(table.locator('tfoot')).toContainText('Total');
+    });
+
+    test('the table switches between sector and asset class', async ({ page }) => {
+        const table = page.getByTestId('attribution-table');
+        const assetClass = table.getByRole('radio', { name: 'Asset class' });
+        await expect(async () => {
+            await assetClass.click();
+            await expect(assetClass).toHaveAttribute('aria-checked', 'true', { timeout: 1_000 });
+        }).toPass({ timeout: 10_000 });
+        await expect(table.locator('thead')).toContainText('Asset class');
     });
 });
 

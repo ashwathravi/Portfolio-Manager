@@ -20,6 +20,13 @@ export type StrategyOp =
     | 'crosses above'
     | 'crosses below';
 
+const OP_LABELS: Partial<Record<StrategyOp, string>> = { '>=': '≥', '<=': '≤', '!=': '≠' };
+
+/** How an operator reads on screen — typographic symbols, not ASCII `>=`. */
+export function opLabel(op: StrategyOp): string {
+    return OP_LABELS[op] ?? op;
+}
+
 export interface StrategyRule {
     id: string;
     field: string; // e.g. "RSI(14)", "P/E", "MomScore"

@@ -1,9 +1,10 @@
 import { Suspense } from "react";
 import { marketDataEngine } from "@/lib/api/market-data";
 import { requirePageUserId } from "@/lib/auth/request-user";
-import { buildUserHoldingsQuery } from "@/lib/portfolio-repository";
+import { buildUserHoldingsQuery, buildUserPortfolioOptionsQuery } from "@/lib/portfolio-repository";
 import { HoldingsPageClient, type HoldingsSeed } from "@/components/holdings/HoldingsPageClient";
 import { PageHeaderSync } from "@/components/layout/TopBar";
+import { ImportHoldingsDialog, type ImportAccountOption } from "@/components/holdings/ImportHoldingsDialog";
 import HoldingsLoading from "./loading";
 import { DEFAULT_OPTION_RISK_POSITIONS } from "@/lib/risk-policy";
 
@@ -30,8 +31,12 @@ async function HoldingsContent() {
         createdAt: Date;
         portfolioName: string;
     }> = [];
+    let accounts: ImportAccountOption[] = [];
     try {
-        dbHoldings = await buildUserHoldingsQuery(userId);
+        [dbHoldings, accounts] = await Promise.all([
+            buildUserHoldingsQuery(userId),
+            buildUserPortfolioOptionsQuery(userId),
+        ]);
     } catch (e) {
         console.warn("Holdings fetch failed — showing empty table.", e);
     }
@@ -82,11 +87,17 @@ async function HoldingsContent() {
 
     return (
         <>
-            <PageHeaderSync title="Portfolio" subtitle={subtitle} crumbs={["Portfolio", "Holdings"]} />
+            <PageHeaderSync
+                title="Portfolio"
+                subtitle={subtitle}
+                crumbs={["Portfolio", "Holdings"]}
+                actions={seed.length > 0 ? <ImportHoldingsDialog accounts={accounts} /> : undefined}
+            />
             {/* No options feed exists yet, so the LEAPS ledger runs on example
                 positions and is tagged as such. */}
             <HoldingsPageClient
                 holdings={seed}
+                importAccounts={accounts}
                 optionPositions={DEFAULT_OPTION_RISK_POSITIONS}
                 optionPositionsAreSample
             />

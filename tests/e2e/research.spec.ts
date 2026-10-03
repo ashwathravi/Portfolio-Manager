@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { gotoAppPage, selectAppTab } from './helpers/app';
+import { gotoAppPage, reloadAppPage, selectAppTab } from './helpers/app';
 
 test.describe('Research page', () => {
     test.beforeEach(async ({ page }) => {
@@ -77,7 +77,7 @@ test.describe('Research page', () => {
         await selectAppTab(page, 'Watchlist');
 
         await expect(page.getByText('COIN').first()).toBeVisible();
-        await expect(page.getByText('Coinbase Global')).toBeVisible();
+        await expect(page.getByText('Coinbase Global').first()).toBeVisible();
         await expect(page.getByText('PLTR').first()).toBeVisible();
         await expect(page.getByText('SHOP').first()).toBeVisible();
     });
@@ -88,14 +88,15 @@ test.describe('Research page', () => {
         const list = page.locator('.pm-research-list');
         await expect(list.getByText('Price').first()).toBeVisible();
         await expect(list.getByText('Target entry').first()).toBeVisible();
-        await expect(list.getByText('Distance').first()).toBeVisible();
+        await expect(list.getByText('To entry').first()).toBeVisible();
     });
 
     test('should switch to Decision Journal tab and show entries', async ({ page }) => {
         await selectAppTab(page, 'Journal');
 
-        await expect(page.getByText('Increased position by 50 shares')).toBeVisible();
-        await expect(page.getByText('Reduced position by 25 shares')).toBeVisible();
+        const list = page.locator('.pm-research-list');
+        await expect(list.getByText('Increased position by 50 shares')).toBeVisible();
+        await expect(list.getByText('Reduced position by 25 shares')).toBeVisible();
     });
 
     test('should show entry/exit/hold badges in journal', async ({ page }) => {
@@ -245,5 +246,130 @@ test.describe('Research page', () => {
 
         await expect(page.getByRole('tab', { name: 'Alpha Radar' })).toHaveAttribute('aria-selected', 'true');
         await expect(page.getByTestId('alpha-radar-detail')).toBeVisible();
+    });
+});
+
+test.describe('Research thesis price strip', () => {
+    const strip = (page: import('@playwright/test').Page) =>
+        page.getByRole('region', { name: 'Price over the last 30 days' });
+
+    test('regression: without live prices the line is labelled Illustrative and claims no change', async ({ page }) => {
+        await page.route('**/api/market-data/historical**', (route) =>
+            route.fulfill({ status: 500, json: { error: 'provider unavailable' } }),
+        );
+        await gotoAppPage(page, '/research');
+        await expect(strip(page).getByTestId('sample-tag')).toHaveText('Illustrative');
+        await expect(strip(page)).toContainText('Live prices unavailable');
+        await expect(strip(page)).toContainText('Last saved');
+    });
+
+    test('regression: live daily bars in the { data } envelope replace the illustrative line', async ({ page }) => {
+        const bars = Array.from({ length: 21 }, (_, i) => ({
+            time: `2026-09-${String(i + 1).padStart(2, '0')}`,
+            open: 100 + i,
+            high: 101 + i,
+            low: 99 + i,
+            close: 100 + i,
+            volume: 1000,
+        }));
+        await page.route('**/api/market-data/historical**', (route) =>
+            route.fulfill({ status: 200, json: { data: bars } }),
+        );
+        await gotoAppPage(page, '/research');
+        await expect(strip(page)).toContainText('Daily closes');
+        await expect(strip(page).getByTestId('sample-tag')).toHaveCount(0);
+        await expect(strip(page)).toContainText('$100.00');
+        await expect(strip(page)).toContainText('$120.00');
+    });
+});
+
+test.describe('Research watchlist', () => {
+    test.beforeEach(async ({ page }) => {
+        await gotoAppPage(page, '/research?tab=watchlist');
+    });
+
+    test('regression: example rows are tagged Sample and the pane is real, not a placeholder', async ({ page }) => {
+        const list = page.locator('.pm-research-list');
+        await expect(list.getByTestId('sample-tag').first()).toBeVisible();
+        await expect(page.getByText(/coming in Phase/)).toHaveCount(0);
+        await list.getByRole('button', { name: /PLTR/ }).click();
+        const pane = page.locator('.pm-research-pane');
+        await expect(pane.locator('.pm-thesis-detail-sym')).toHaveText('PLTR');
+        await expect(pane.getByRole('link', { name: 'Draft order' })).toHaveAttribute('href', '/execution?symbol=PLTR');
+        await expect(pane.getByLabel('Why it is on the list')).toHaveValue(/AI platform/);
+    });
+
+    test('add a ticker, and it is still there after a reload', async ({ page }) => {
+        const add = page.getByLabel('Add ticker to watchlist');
+        await expect(async () => {
+            await add.fill('amd');
+            await expect(add).toHaveValue('AMD', { timeout: 1_000 });
+        }).toPass({ timeout: 10_000 });
+        await page.getByRole('button', { name: 'Add', exact: true }).click();
+        const pane = page.locator('.pm-research-pane');
+        await expect(pane.locator('.pm-thesis-detail-sym')).toHaveText('AMD');
+        await reloadAppPage(page);
+        await expect(page.locator('.pm-research-list').getByRole('button', { name: /AMD/ })).toBeVisible();
+    });
+
+    test('duplicates and malformed tickers are refused with a message', async ({ page }) => {
+        const add = page.getByLabel('Add ticker to watchlist');
+        const addButton = page.getByRole('button', { name: 'Add', exact: true });
+        await expect(async () => {
+            await add.fill('intc');
+            await expect(add).toHaveValue('INTC', { timeout: 1_000 });
+        }).toPass({ timeout: 10_000 });
+        await addButton.click();
+        await expect(page.locator('.pm-research-pane .pm-thesis-detail-sym')).toHaveText('INTC');
+        await add.fill('intc');
+        await addButton.click();
+        await expect(page.locator('#watch-add-error')).toContainText('already on your watchlist');
+        await add.fill('a..b');
+        await page.getByRole('button', { name: 'Add', exact: true }).click();
+        await expect(page.locator('#watch-add-error')).toContainText('Enter a ticker like');
+    });
+
+    test('notes and target entry save and survive a reload', async ({ page }) => {
+        await page.locator('.pm-research-list').getByRole('button', { name: /SHOP/ }).click();
+        const pane = page.locator('.pm-research-pane');
+        await pane.getByLabel('Target entry ($)').fill('70');
+        await pane.getByRole('textbox', { name: 'Notes' }).fill('Check margins first');
+        await pane.getByRole('textbox', { name: 'Notes' }).blur();
+        await reloadAppPage(page);
+        await page.locator('.pm-research-list').getByRole('button', { name: /SHOP/ }).click();
+        await expect(pane.getByRole('textbox', { name: 'Notes' })).toHaveValue('Check margins first');
+        await expect(pane.getByLabel('Target entry ($)')).toHaveValue('70');
+    });
+
+    test('adding a ticker that is only an example makes it yours (no Sample tag)', async ({ page }) => {
+        const add = page.getByLabel('Add ticker to watchlist');
+        await expect(async () => {
+            await add.fill('coin');
+            await expect(add).toHaveValue('COIN', { timeout: 1_000 });
+        }).toPass({ timeout: 10_000 });
+        await page.getByRole('button', { name: 'Add', exact: true }).click();
+        await expect(page.locator('#watch-add-error')).toHaveCount(0);
+        const card = page.locator('.pm-research-list').getByRole('button', { name: /COIN/ });
+        await expect(card).toHaveCount(1);
+        await expect(card.getByTestId('sample-tag')).toHaveCount(0);
+    });
+
+    test('remove takes a ticker off the list', async ({ page }) => {
+        await page.locator('.pm-research-list').getByRole('button', { name: /COIN/ }).click();
+        await page.locator('.pm-research-pane').getByRole('button', { name: 'Remove' }).click();
+        await expect(page.locator('.pm-research-list').getByRole('button', { name: /COIN/ })).toHaveCount(0);
+    });
+});
+
+test.describe('Research journal', () => {
+    test('selecting an entry shows its rationale beside the linked thesis', async ({ page }) => {
+        await gotoAppPage(page, '/research?tab=journal');
+        await expect(page.getByText(/coming in Phase/)).toHaveCount(0);
+        const list = page.locator('.pm-research-list');
+        await list.getByRole('button', { name: /Reduced position by 25 shares/ }).click();
+        const pane = page.locator('.pm-research-pane');
+        await expect(pane.getByRole('heading', { level: 2 })).toHaveText('Reduced position by 25 shares');
+        await expect(pane.getByRole('region', { name: 'Rationale at the time' })).toBeVisible();
+        await expect(pane.getByRole('region', { name: 'Linked thesis' })).toBeVisible();
     });
 });

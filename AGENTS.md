@@ -38,6 +38,8 @@ npm run test:e2e:ui
 
 The Playwright config (`playwright.config.ts`) includes a `webServer` block that automatically starts `npm run dev` before running tests. If the dev server is already running on port 3000, it reuses the existing server.
 
+**Never run E2E against a dev server connected to a real database.** A server Playwright starts gets `DATABASE_URL=""` unless the shell exports one, so `.env.local` is ignored. A server you started yourself with `.env.local` pointing at Supabase is *reused as-is*, and tests would act on real data. Stop it before `npm run test:e2e`.
+
 ---
 
 ## Test Coverage Requirements
@@ -71,21 +73,21 @@ Every page in the application must have a corresponding E2E spec. The current ma
 | Route | E2E Spec File | Key assertions |
 |-------|--------------|----------------|
 | `/` (Today) | `dashboard.spec.ts` | Single "Today" header with greeting/market state, money-first hero (or connect-account empty state), ranked "Needs your attention", policy strip + disclosure, example section labelled and hideable, no fabricated deltas |
-| `/portfolios/holdings` | `holdings.spec.ts` | Portfolio title + Holdings tab, one heading, table or single empty state, LEAPS ledger only with holdings and tagged Sample, page gutter |
+| `/portfolios/holdings` | `holdings.spec.ts` | Portfolio title + Holdings tab, one heading, table or single empty state, LEAPS ledger only with holdings and tagged Sample, sparklines never invented, Import CSV (preview, issues, exact payload, errors; API 400/cross-tenant 404/unchanged in DB mode), page gutter |
 | `/portfolios/accounts` | `accounts.spec.ts` | Accounts tab, real accounts or empty state (never seeded balances) |
 | `/portfolios/activity` | `activity.spec.ts` | Activity tab, real transactions or empty state, side filters |
-| `/portfolios/detail/[symbol]` | `position-detail.spec.ts` | Symbol title, draft-order prefill link, thesis link, not-held state is not a dead end |
-| `/execution` (Trade) | `execution.spec.ts` | Single ticket (no variant switcher), Buy/Sell, sticky summary, blotter newest-first, `?symbol=` prefill, phone fit, rationale/cooldown/adherence flows |
-| `/research` | `research.spec.ts` | One header, one-row tabs, delete in overflow menu, Sample-tagged recent seed theses, Alpha Radar workflows |
+| `/portfolios/detail/[symbol]` | `position-detail.spec.ts` | Symbol title, draft-order prefill link, thesis link, Add to watchlist toggle, not-held state is not a dead end |
+| `/execution` (Trade) | `execution.spec.ts` | Single ticket (no variant switcher), Buy/Sell, sticky summary, blotter newest-first, `?symbol=` prefill, keyboard mode (B/S/M/L/T/Q, ⌘↵ respects gates), phone fit, rationale/cooldown/adherence flows |
+| `/research` | `research.spec.ts` | One header, one-row tabs, delete in overflow menu, Sample-tagged recent seed theses, saved watchlist (add/refuse duplicates/edit/remove, survives reload), watchlist and journal detail panes, labelled illustrative price strip, Alpha Radar workflows |
 | `/research/thesis/[ticker]` | `thesis.spec.ts` | Memo layout, explained thesis check (no opaque health score), links to position and draft order, not-found state |
 | `/strategies` | `strategies.spec.ts` | "Strategies" title, compact switcher, Duplicate works, stale-backtest flag, legacy `/strategies/[id]` redirects |
-| `/performance`, `/performance/behaviour` | `performance.spec.ts` | Returns: four cards, one heading, Sample notice, CSV export. Behaviour: one continuous trading calendar, mood, P&L density, reviews archive |
+| `/performance`, `/performance/attribution`, `/performance/behaviour` | `performance.spec.ts` | Returns: three cards, one heading, Sample notice, CSV export. Attribution: plain-language verdict, BHB bars, full table with sector/asset-class switch. Behaviour: one continuous trading calendar, mood, P&L density, reviews archive |
 | `/ask` + ⌘K | `ask.spec.ts` | Command palette (top-bar search + ⌘K), page/ticker/question routing, Ask overlay and page history |
 | `/settings` | `settings.spec.ts` | One column + section rail, legacy `?tab=` links scroll to sections, honest sign-in card, no seeded accounts, example-data toggle |
-| `/help` | `help.spec.ts` | Getting started (5 steps), glossary, Alpha Radar notes, single h1 |
+| `/help` (Settings › Help) | `help.spec.ts` | Getting started (5 steps), glossary, Alpha Radar notes, single h1 |
 | `/login` | `login.spec.ts` | Google sign-in without app chrome, shared brand mark, no raw setup text |
 | 404 | `not-found.spec.ts` | Search button opens the palette, link back to Today |
-| Sidebar + IA | `navigation.spec.ts` | Eight destinations, section tabs, legacy redirects, identity footer |
+| Sidebar + IA | `navigation.spec.ts` | Exactly eight sidebar destinations (Help is a Settings tab), section tabs, legacy redirects, identity footer |
 | Cross-cutting | `smoke.spec.ts` | Fonts loaded, hydration clean in another timezone, no horizontal overflow at 390px |
 
 ### Adding E2E tests for a new page
@@ -206,3 +208,13 @@ npm run test:e2e
 - E2E tests: `tests/e2e/<feature>.spec.ts` (e.g. `portfolios.spec.ts`).
 - Do not put unit tests in the `tests/` directory — that is reserved for E2E specs.
 - Do not put E2E specs in the `src/` directory.
+
+<!-- BEGIN:nextjs-agent-rules -->
+
+# This is NOT the Next.js you know
+
+This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
+
+This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
+
+<!-- END:nextjs-agent-rules -->

@@ -11,6 +11,12 @@ import { Check, AlertTriangle, X } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import { parseOrderPrefill, sortOrdersNewestFirst } from "@/lib/execution/blotter";
 import {
+    TICKET_SHORTCUTS,
+    isEditableElement,
+    resolveTicketShortcut,
+} from "@/lib/execution/shortcuts";
+import { useUiStore } from "@/lib/stores/uiStore";
+import {
     BUYING_POWER_USD,
     COMMISSION_PER_TRADE_USD,
     CURRENT_POSITIONS,
@@ -258,6 +264,9 @@ function OrderForm({ onSubmit }: OrderFormProps) {
     );
     const [stopPrice, setStopPrice] = useState<number>(220.0);
     const [tif, setTif] = useState<TimeInForce>("day");
+    const [showShortcuts, setShowShortcuts] = useState(false);
+    const tickerInputRef = useRef<HTMLInputElement>(null);
+    const quantityInputRef = useRef<HTMLInputElement>(null);
     const [optionContractType, setOptionContractType] = useState<OptionContractType>("call");
     const [optionStrike, setOptionStrike] = useState<number>(250);
     const [optionExpiry, setOptionExpiry] = useState<string>("2027-01-15");
@@ -771,6 +780,59 @@ function OrderForm({ onSubmit }: OrderFormProps) {
         }
     };
 
+    // --- Keyboard mode -------------------------------------------------------
+    // Latest-value ref so the window listener subscribes once but always
+    // sees the current handler, options, and help state.
+    const keyboardRef = useRef({ handleSubmit, orderTypeOptions, showShortcuts: false });
+    useEffect(() => {
+        keyboardRef.current = { handleSubmit, orderTypeOptions, showShortcuts };
+    });
+    useEffect(() => {
+        const onKey = (e: KeyboardEvent) => {
+            const action = resolveTicketShortcut({
+                key: e.key,
+                metaKey: e.metaKey,
+                ctrlKey: e.ctrlKey,
+                altKey: e.altKey,
+                repeat: e.repeat,
+                inEditable: isEditableElement(document.activeElement),
+                overlayOpen: useUiStore.getState().commandOpen,
+            });
+            if (!action) return;
+            const current = keyboardRef.current;
+            switch (action.kind) {
+                case "side":
+                    setSide(action.side);
+                    break;
+                case "orderType":
+                    if (!current.orderTypeOptions.includes(action.orderType)) return;
+                    setType(action.orderType);
+                    break;
+                case "focus":
+                    (action.field === "ticker" ? tickerInputRef : quantityInputRef).current?.select();
+                    break;
+                case "submit":
+                    current.handleSubmit();
+                    break;
+                case "help":
+                    setShowShortcuts((v) => !v);
+                    break;
+                case "escape":
+                    if (current.showShortcuts) {
+                        setShowShortcuts(false);
+                    } else if (isEditableElement(document.activeElement)) {
+                        (document.activeElement as HTMLElement).blur();
+                    } else {
+                        return;
+                    }
+                    break;
+            }
+            e.preventDefault();
+        };
+        window.addEventListener("keydown", onKey);
+        return () => window.removeEventListener("keydown", onKey);
+    }, []);
+
     const baseSubmitLabel = side === "buy" ? "Review & buy" : "Review & sell";
     const submitLabel = cooldownActive
         ? `Hold on\u2026 ${cooldownRemainingSec}s`
@@ -799,7 +861,33 @@ function OrderForm({ onSubmit }: OrderFormProps) {
                 <span className="pm-exec-form-sub">
                     Draft routes to review. Never fills on click.
                 </span>
+                <button
+                    type="button"
+                    className="pm-exec-kbd-toggle"
+                    aria-expanded={showShortcuts}
+                    aria-controls="exec-shortcuts"
+                    onClick={() => setShowShortcuts((v) => !v)}
+                    title="Keyboard shortcuts (?)"
+                >
+                    <kbd>?</kbd> Shortcuts
+                </button>
             </header>
+
+            {showShortcuts && (
+                <div id="exec-shortcuts" className="pm-exec-kbd-sheet" role="region" aria-label="Keyboard shortcuts">
+                    <ul>
+                        {TICKET_SHORTCUTS.map((s) => (
+                            <li key={s.label}>
+                                <span className="pm-exec-kbd-keys">
+                                    {s.keys.map((k) => <kbd key={k}>{k}</kbd>)}
+                                </span>
+                                {s.label}
+                            </li>
+                        ))}
+                    </ul>
+                    <p>Letters work when you are not typing in a field. Reviewing still checks your rules.</p>
+                </div>
+            )}
 
             {/* Instrument toggle */}
             <div className="pm-exec-instrument" role="tablist" aria-label="Instrument type">
@@ -844,8 +932,10 @@ function OrderForm({ onSubmit }: OrderFormProps) {
                 <span className="pm-exec-field-label">Ticker</span>
                 <div className="pm-exec-field-wrap">
                     <input
+                        ref={tickerInputRef}
                         type="text"
                         className="pm-exec-input"
+                        aria-label="Ticker"
                         value={ticker}
                         onChange={(e) => setTicker(e.target.value.toUpperCase())}
                         placeholder="AAPL"
@@ -862,6 +952,7 @@ function OrderForm({ onSubmit }: OrderFormProps) {
                 <label className="pm-exec-field">
                     <span className="pm-exec-field-label">Quantity</span>
                     <input
+                        ref={quantityInputRef}
                         type="number"
                         className="pm-exec-input num"
                         value={quantity}
@@ -1113,6 +1204,7 @@ function OrderForm({ onSubmit }: OrderFormProps) {
                     }
                 >
                     <span>{submitLabel}</span>
+                    <kbd className="pm-exec-submit-kbd" aria-hidden="true">⌘↵</kbd>
                 </button>
             </footer>
         </section>

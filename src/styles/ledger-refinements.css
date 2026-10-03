@@ -771,3 +771,92 @@
 .pm-pattern-row[data-severity="info"] { border-color: var(--pm-border); }
 .pm-pattern-row[data-severity="info"] .pm-pattern-glyph { color: var(--pm-fg-muted); background: var(--pm-neutral-100); }
 .pm-pattern-feed-pill { background: var(--pm-neutral-100); color: var(--pm-fg-muted); }
+
+/* P&L density heatmap stops. Mixed from the semantic colours so the grid
+   reads on both the light and dark ground (it used fixed light pastels). */
+:root {
+  --pm-heat-pos-2: var(--pm-success);
+  --pm-heat-pos-1: color-mix(in srgb, var(--pm-success) 32%, var(--pm-card));
+  --pm-heat-zero: color-mix(in srgb, var(--pm-fg) 6%, var(--pm-card));
+  --pm-heat-neg-1: color-mix(in srgb, var(--pm-danger) 28%, var(--pm-card));
+  --pm-heat-neg-2: color-mix(in srgb, var(--pm-danger) 70%, var(--pm-card));
+}
+
+/* A 30-day sparkline with no price history shows a dash, never an invented line. */
+.pm-spark-empty { display: inline-block; min-width: 72px; color: var(--pm-fg-subtle); text-align: center; }
+
+/* Trade ticket keyboard mode: a quiet toggle in the ticket header, an
+   inline cheat sheet, and a ⌘↵ hint on the submit button. */
+.pm-exec-form-head { position: relative; padding-right: 96px; }
+.pm-exec-kbd-toggle {
+  position: absolute; top: 0; right: 0;
+  display: inline-flex; align-items: center; gap: 6px;
+  font: inherit; font-size: 12px; color: var(--pm-fg-muted);
+  background: transparent; border: 1px solid var(--pm-border); border-radius: 6px;
+  padding: 3px 8px; cursor: pointer;
+}
+.pm-exec-kbd-toggle:hover, .pm-exec-kbd-toggle[aria-expanded="true"] { color: var(--pm-fg); border-color: var(--pm-border-strong); }
+.pm-exec-form kbd {
+  font-family: var(--font-mono, ui-monospace, monospace); font-size: 11px; line-height: 1;
+  min-width: 18px; padding: 2px 5px; border-radius: 4px; text-align: center;
+  border: 1px solid var(--pm-border-strong); background: var(--pm-card); color: var(--pm-fg-muted);
+}
+.pm-exec-kbd-sheet { border: 1px solid var(--pm-border); border-radius: 8px; padding: 12px 14px; background: var(--pm-bg); display: grid; gap: 10px; }
+.pm-exec-kbd-sheet ul { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px 16px; font-size: 13px; color: var(--pm-fg); }
+.pm-exec-kbd-sheet li { display: flex; align-items: center; gap: 8px; }
+.pm-exec-kbd-keys { display: inline-flex; gap: 3px; min-width: 52px; }
+.pm-exec-kbd-sheet p { margin: 0; font-size: 12px; color: var(--pm-fg-muted); }
+.pm-exec-submit { gap: 8px; }
+.pm-exec-submit .pm-exec-submit-kbd { background: transparent; border-color: currentColor; color: inherit; opacity: .7; }
+@media (pointer: coarse) { .pm-exec-kbd-toggle, .pm-exec-submit-kbd { display: none; } .pm-exec-form-head { padding-right: 0; } }
+
+/* Research: watchlist and journal cards are selectable like thesis cards. */
+.pm-list-select {
+  font: inherit; color: inherit; text-align: left; cursor: pointer;
+  width: 100%; background: none; border: 0; padding: 0;
+  display: flex; flex-direction: column; gap: 6px;
+}
+button.pm-watch-list-card { width: 100%; padding: 12px 14px; background: var(--pm-bg-2); border: 1px solid transparent; }
+.pm-list-select .pm-journal-decision,
+.pm-list-select .pm-journal-rationale,
+.pm-list-select .pm-watch-list-reason { display: block; }
+.pm-list-select .pm-journal-rationale { display: -webkit-box; }
+.pm-watch-list-card.is-selected,
+.pm-journal-list-card.is-selected { border-color: var(--pm-fg); box-shadow: 0 0 0 1px var(--pm-fg); background: var(--pm-card); }
+.pm-watch-list-card:hover,
+.pm-journal-list-card:hover { border-color: var(--pm-border-strong); }
+.pm-list-select:focus-visible,
+button.pm-watch-list-card:focus-visible { outline: 2px solid var(--pm-fg); outline-offset: 2px; border-radius: 8px; }
+
+.pm-watch-add { display: flex; gap: 8px; }
+.pm-watch-add .pm-exec-input { flex: 1; min-width: 0; text-transform: uppercase; }
+.pm-watch-add-error { margin: 0; font-size: 12px; color: var(--pm-danger); }
+.pm-watch-detail-note { margin: 8px 0 0; font-size: 12px; color: var(--pm-fg-muted); }
+.pm-watch-detail-form { display: grid; gap: 12px; }
+.pm-watch-detail-form textarea.pm-exec-input { resize: vertical; min-height: 72px; font: inherit; }
+.pm-watch-detail-thesis { margin: 0; font-size: 13px; color: var(--pm-fg-muted); }
+.pm-watch-detail-thesis + .pm-watch-detail-thesis { margin-top: 6px; }
+.pm-journal-detail-thesis { display: grid; gap: 4px; margin-top: 6px; }
+
+/* Today › Watchlist reads the saved list; each ticker opens its position page. */
+.pm-watchlist-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+a.pm-watchlist-sym { color: inherit; text-decoration: none; min-width: 0; }
+a.pm-watchlist-sym:hover .pm-watchlist-ticker { text-decoration: underline; }
+.pm-card-title .pm-sample-tag { margin-left: 6px; vertical-align: middle; }
+
+/* Performance › Attribution */
+.pm-attr-lede { padding: 18px 20px; display: grid; gap: 4px; }
+.pm-attr-verdict { margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -0.01em; color: var(--pm-fg); text-wrap: balance; }
+.pm-attr-table tbody th, .pm-attr-table tfoot th { text-align: left; font-weight: 500; }
+.pm-attr-table tfoot th, .pm-attr-table tfoot td { font-weight: 600; border-top: 1px solid var(--pm-border-strong); }
+
+/* Holdings › Import CSV dialog */
+.pm-import-body { display: grid; gap: 14px; min-width: 0; }
+.pm-import-body input[type="file"] { font: inherit; font-size: 13px; }
+.pm-import-preview { display: grid; gap: 10px; min-width: 0; }
+.pm-import-summary { margin: 0; font-size: 13px; color: var(--pm-fg); }
+.pm-import-table { max-height: 260px; overflow: auto; border: 1px solid var(--pm-border); border-radius: 8px; }
+.pm-import-more { margin: 6px 10px; font-size: 12px; color: var(--pm-fg-muted); }
+.pm-import-issues { margin: 0; padding-left: 18px; font-size: 12px; color: var(--pm-warn); display: grid; gap: 2px; }
+.pm-import-target { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+.pm-import-error { margin: 0; font-size: 13px; color: var(--pm-danger); }

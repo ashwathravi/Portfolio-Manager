@@ -65,7 +65,12 @@ export async function openPolicyChecks(page: Page): Promise<boolean> {
     await expect(hero).toBeVisible();
     if ((await hero.getAttribute('data-empty')) === 'true') return false;
     const strip = page.getByTestId('policy-strip');
-    if ((await strip.getAttribute('open')) === null) await strip.locator('summary').click();
-    await expect(page.getByTestId('risk-policy-dashboard')).toBeVisible();
+    const dashboard = page.getByTestId('risk-policy-dashboard');
+    // A click that lands before hydration can be reset by React, so retry
+    // (only while still closed — a second click would close it again).
+    await expect(async () => {
+        if ((await strip.getAttribute('open')) === null) await strip.locator('summary').click();
+        await expect(dashboard).toBeVisible({ timeout: 1_500 });
+    }).toPass({ timeout: 15_000 });
     return true;
 }

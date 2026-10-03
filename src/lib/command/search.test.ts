@@ -18,7 +18,8 @@ describe('command search', () => {
 
     test('matches destinations by title and description, label matches first', () => {
         const items = searchCommands('behav').filter((i) => i.group === 'Go to');
-        assert.deepStrictEqual(items.map((i) => i.href), ['/performance/behaviour', '/performance']);
+        assert.deepStrictEqual(items.map((i) => i.href), ['/performance/behaviour', '/performance', '/performance/attribution']);
+        assert.ok(searchCommands('help').some((i) => i.href === '/help'));
         assert.strictEqual(searchCommands('activity')[0].href, '/portfolios/activity');
         assert.ok(searchCommands('guardrails').some((i) => i.href === '/settings'));
     });

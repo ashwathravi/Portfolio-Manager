@@ -5,6 +5,8 @@
  */
 
 export interface ViewerIdentity {
+    /** Auth user id; scopes per-user browser storage (e.g. the watchlist). */
+    id: string | null;
     name: string | null;
     email: string | null;
     image: string | null;

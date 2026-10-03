@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { clickUntil, collectConsoleErrors, gotoAppPage, reloadAppPage } from './helpers/app';
+import { clickUntil, collectConsoleErrors, gotoAppPage, openPolicyChecks, reloadAppPage } from './helpers/app';
 
 /**
  * Today (/) — formerly the Dashboard.
@@ -14,7 +14,7 @@ import { clickUntil, collectConsoleErrors, gotoAppPage, reloadAppPage } from './
  *   Holdings + allocation . real data, only when there are holdings
  *   Recent activity ....... real transactions
  *   Review & research ..... example-data cards (weekly review, equity curve,
- *                           theses, patterns, Alpha Radar, watchlist)
+ *                           theses, patterns, Alpha Radar)
  */
 
 async function hasHoldings(page: import('@playwright/test').Page): Promise<boolean> {
@@ -77,8 +77,7 @@ test.describe('Today page', () => {
         const strip = page.getByTestId('policy-strip');
         await expect(strip).toBeVisible();
         await expect(page.getByTestId('risk-policy-dashboard')).toBeHidden();
-        await strip.locator('summary').click();
-        await expect(page.getByTestId('risk-policy-dashboard')).toBeVisible();
+        await openPolicyChecks(page);
         await expect(page.getByTestId('risk-policy-dimension')).toHaveCount(12);
     });
 
@@ -107,12 +106,15 @@ test.describe('Today page', () => {
         await expect(examples.getByTestId('sample-data-notice')).toBeVisible();
         await expect(page.getByTestId('pattern-feed')).toBeVisible();
         await expect(page.getByTestId('alpha-radar-dashboard-card')).toBeVisible();
-        await expect(page.locator('.pm-card-title', { hasText: /^Watchlist$/ })).toBeVisible();
         await expect(page.locator('.pm-card-title', { hasText: /^Active Theses$/ })).toBeVisible();
 
-        await examples.getByRole('button', { name: 'hide examples' }).click();
-        await expect(page.getByTestId('today-examples')).toHaveCount(0);
+        await clickUntil(examples.getByRole('button', { name: 'hide examples' }), async () => {
+            await expect(page.getByTestId('today-examples')).toHaveCount(0, { timeout: 1_500 });
+        });
         await expect(page.getByTestId('today-hero')).toBeVisible();
+        // The seeded watchlist rows are examples too; only saved tickers remain.
+        await expect(page.getByTestId('today-watchlist').getByTestId('sample-tag')).toHaveCount(0);
+        await expect(page.getByTestId('today-watchlist').getByRole('link', { name: /COIN/ })).toHaveCount(0);
     });
 
     test('active theses on Today match the Research store', async ({ page }) => {
@@ -365,5 +367,24 @@ test.describe('Dashboard console hygiene', () => {
         await expect(page.getByTestId('today-examples').locator('svg').first()).toBeVisible();
         await page.waitForTimeout(500);
         expect(errors.filter((e) => e.includes('<svg> attribute height'))).toEqual([]);
+    });
+});
+
+test.describe('Today watchlist', () => {
+    test('regression: shows the saved watchlist outside the example section and links to Research, not a 404', async ({ page }) => {
+        await gotoAppPage(page, '/');
+        const card = page.getByTestId('today-watchlist');
+        await expect(card).toBeVisible();
+        await expect(page.getByTestId('today-examples').getByTestId('today-watchlist')).toHaveCount(0);
+        await expect(card.getByRole('link', { name: 'Manage' })).toHaveAttribute('href', '/research?tab=watchlist');
+        await expect(card.getByRole('link', { name: /COIN/ })).toHaveAttribute('href', '/portfolios/detail/COIN');
+        await expect(card.getByTestId('sample-tag')).toBeVisible();
+    });
+
+    test('regression: no stale fallback prices — a missing quote is a dash', async ({ page }) => {
+        await page.route('**/api/market-data/quotes**', (route) => route.fulfill({ status: 500, json: { error: 'down' } }));
+        await gotoAppPage(page, '/');
+        const card = page.getByTestId('today-watchlist');
+        await expect(card.locator('.pm-watchlist-price').first()).toHaveText('—');
     });
 });

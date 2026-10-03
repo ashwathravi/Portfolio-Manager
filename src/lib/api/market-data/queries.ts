@@ -33,8 +33,10 @@ export async function fetchHistorical(
         const body = await res.json().catch(() => ({}));
         throw new Error(body?.error ?? `Failed to fetch historical data (${res.status})`);
     }
+    // The route answers `{ data: bars }`; older callers sent a bare array.
     const json = await res.json();
-    return Array.isArray(json) ? (json as HistoricalBar[]) : [];
+    const bars = Array.isArray(json) ? json : Array.isArray(json?.data) ? json.data : [];
+    return bars as HistoricalBar[];
 }
 
 export function useQuotesQuery(
