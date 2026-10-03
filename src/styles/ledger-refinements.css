@@ -809,3 +809,37 @@
 .pm-exec-submit { gap: 8px; }
 .pm-exec-submit .pm-exec-submit-kbd { background: transparent; border-color: currentColor; color: inherit; opacity: .7; }
 @media (pointer: coarse) { .pm-exec-kbd-toggle, .pm-exec-submit-kbd { display: none; } .pm-exec-form-head { padding-right: 0; } }
+
+/* Research: watchlist and journal cards are selectable like thesis cards. */
+.pm-list-select {
+  font: inherit; color: inherit; text-align: left; cursor: pointer;
+  width: 100%; background: none; border: 0; padding: 0;
+  display: flex; flex-direction: column; gap: 6px;
+}
+button.pm-watch-list-card { width: 100%; padding: 12px 14px; background: var(--pm-bg-2); border: 1px solid transparent; }
+.pm-list-select .pm-journal-decision,
+.pm-list-select .pm-journal-rationale,
+.pm-list-select .pm-watch-list-reason { display: block; }
+.pm-list-select .pm-journal-rationale { display: -webkit-box; }
+.pm-watch-list-card.is-selected,
+.pm-journal-list-card.is-selected { border-color: var(--pm-fg); box-shadow: 0 0 0 1px var(--pm-fg); background: var(--pm-card); }
+.pm-watch-list-card:hover,
+.pm-journal-list-card:hover { border-color: var(--pm-border-strong); }
+.pm-list-select:focus-visible,
+button.pm-watch-list-card:focus-visible { outline: 2px solid var(--pm-fg); outline-offset: 2px; border-radius: 8px; }
+
+.pm-watch-add { display: flex; gap: 8px; }
+.pm-watch-add .pm-exec-input { flex: 1; min-width: 0; text-transform: uppercase; }
+.pm-watch-add-error { margin: 0; font-size: 12px; color: var(--pm-danger); }
+.pm-watch-detail-note { margin: 8px 0 0; font-size: 12px; color: var(--pm-fg-muted); }
+.pm-watch-detail-form { display: grid; gap: 12px; }
+.pm-watch-detail-form textarea.pm-exec-input { resize: vertical; min-height: 72px; font: inherit; }
+.pm-watch-detail-thesis { margin: 0; font-size: 13px; color: var(--pm-fg-muted); }
+.pm-watch-detail-thesis + .pm-watch-detail-thesis { margin-top: 6px; }
+.pm-journal-detail-thesis { display: grid; gap: 4px; margin-top: 6px; }
+
+/* Today › Watchlist reads the saved list; each ticker opens its position page. */
+.pm-watchlist-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+a.pm-watchlist-sym { color: inherit; text-decoration: none; min-width: 0; }
+a.pm-watchlist-sym:hover .pm-watchlist-ticker { text-decoration: underline; }
+.pm-card-title .pm-sample-tag { margin-left: 6px; vertical-align: middle; }

@@ -10,6 +10,11 @@ import { useThesisStore } from "@/lib/research/useThesisStore";
 import { useJournalStore } from "@/lib/research/useJournalStore";
 import type { Thesis, ThesisDraft } from "@/lib/research/thesis";
 import type { JournalEntry } from "@/lib/research/journal";
+import { useWatchlist } from "@/lib/research/useWatchlist";
+import { distanceToEntryPct, type WatchItem } from "@/lib/research/watchlist";
+import { SampleTag } from "@/components/data-display/SampleTag";
+import { WatchlistDetailPane } from "./WatchlistDetailPane";
+import { JournalDetailPane } from "./JournalDetailPane";
 import { NewThesisModal } from "./NewThesisModal";
 import { NewJournalEntryModal } from "./NewJournalEntryModal";
 import { ThesisListCard } from "./ThesisListCard";
@@ -46,55 +51,6 @@ const TAB_LABEL: Record<ResearchTabKey, string> = {
 };
 
 // ---------------------------------------------------------------------------
-// Seed watchlist — kept inline until a proper WatchlistStore lands. These
-// are the same three tickers the old page rendered, so nothing regresses.
-// ---------------------------------------------------------------------------
-
-interface WatchlistItem {
-    id: string;
-    ticker: string;
-    companyName: string;
-    reason: string;
-    dateAdded: string;
-    currentPrice: number;
-    targetEntry: number;
-    notes: string;
-}
-
-const SEED_WATCHLIST: WatchlistItem[] = [
-    {
-        id: "w-coin",
-        ticker: "COIN",
-        companyName: "Coinbase Global, Inc.",
-        reason: "Waiting for BTC ETF approval catalyst",
-        dateAdded: "2024-01-15",
-        currentPrice: 165.5,
-        targetEntry: 145.0,
-        notes: "Enter on pullback to $145 support level",
-    },
-    {
-        id: "w-pltr",
-        ticker: "PLTR",
-        companyName: "Palantir Technologies Inc.",
-        reason: "AI platform traction in commercial sector",
-        dateAdded: "2024-01-22",
-        currentPrice: 18.75,
-        targetEntry: 16.5,
-        notes: "Wait for next earnings to confirm commercial growth",
-    },
-    {
-        id: "w-shop",
-        ticker: "SHOP",
-        companyName: "Shopify Inc.",
-        reason: "E-commerce recovery + margin expansion",
-        dateAdded: "2024-02-03",
-        currentPrice: 72.3,
-        targetEntry: 65.0,
-        notes: "Target entry on market-wide pullback",
-    },
-];
-
-// ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
@@ -125,6 +81,9 @@ export function ResearchPageClient() {
     const [journalModalOpen, setJournalModalOpen] = useState(false);
     const [editingJournal, setEditingJournal] = useState<JournalEntry | null>(null);
     const alphaRadar = useAlphaRadarResearchData();
+    const watchlist = useWatchlist();
+    const [selectedWatch, setSelectedWatch] = useState<string | null>(null);
+    const [selectedJournalId, setSelectedJournalId] = useState<string | null>(null);
 
     const thesesById = useMemo(
         () => new Map(theses.map((t) => [t.id, t] as const)),
@@ -133,8 +92,8 @@ export function ResearchPageClient() {
 
     // Live watchlist quotes — same behavior the old WatchlistSection had.
     const watchSymbols = useMemo(
-        () => SEED_WATCHLIST.map((w) => w.ticker),
-        [],
+        () => watchlist.items.map((w) => w.ticker),
+        [watchlist.items],
     );
     const { data: watchQuotes } = useQuotesQuery(watchSymbols, {
         refetchInterval: 60_000,
@@ -152,8 +111,8 @@ export function ResearchPageClient() {
     );
     const watchlistFiltered = useMemo(
         () =>
-            SEED_WATCHLIST.filter((w) => matchQuery(query, w.ticker, w.companyName, w.reason)),
-        [query],
+            watchlist.items.filter((w) => matchQuery(query, w.ticker, w.companyName, w.reason, w.notes)),
+        [watchlist.items, query],
     );
     const journalFiltered = useMemo(
         () =>
@@ -165,7 +124,7 @@ export function ResearchPageClient() {
 
     const counts: Record<ResearchTabKey, number> = {
         theses: active.length,
-        watchlist: SEED_WATCHLIST.length,
+        watchlist: watchlist.items.length,
         alphaRadar: alphaRadar.filers.length,
         journal: journalEntries.length,
         archive: archived.length,
@@ -180,7 +139,30 @@ export function ResearchPageClient() {
             ? thesesById.get(effectiveSelectedId) ?? null
             : null;
 
+    const selectedWatchItem =
+        watchlistFiltered.find((w) => w.ticker === selectedWatch) ?? watchlistFiltered[0] ?? null;
+    const selectedJournal =
+        journalFiltered.find((e) => e.id === selectedJournalId) ?? journalFiltered[0] ?? null;
+    const thesisForTicker = (ticker: string) =>
+        active.find((t) => t.ticker === ticker) ?? archived.find((t) => t.ticker === ticker);
+
     // ---- Handlers -----------------------------------------------------------
+    const handleAddWatch = (input: string): string | null => {
+        const { item, error } = watchlist.add(input);
+        if (error === "invalid") return "Enter a ticker like NVDA, BRK.B, or BTC-USD.";
+        if (error === "duplicate") return `${input.trim().toUpperCase()} is already on your watchlist.`;
+        if (item) {
+            setSelectedWatch(item.ticker);
+            setQuery("");
+            toast.success(`${item.ticker} added to your watchlist.`);
+        }
+        return null;
+    };
+    const handleRemoveWatch = (item: WatchItem) => {
+        watchlist.remove(item.ticker);
+        if (selectedWatch === item.ticker) setSelectedWatch(null);
+        toast(`${item.ticker} removed from your watchlist.`);
+    };
     const openCreate = useCallback(() => {
         setEditingThesis(null);
         setThesisModalOpen(true);
@@ -322,6 +304,9 @@ export function ResearchPageClient() {
                             <WatchlistColumn
                                 list={watchlistFiltered}
                                 quotes={watchQuotes}
+                                selectedTicker={selectedWatchItem?.ticker ?? null}
+                                onSelect={setSelectedWatch}
+                                onAdd={handleAddWatch}
                             />
                         )}
                         {tab === "alphaRadar" && (
@@ -334,6 +319,8 @@ export function ResearchPageClient() {
                             <JournalColumn
                                 list={journalFiltered}
                                 thesesById={thesesById}
+                                selectedId={selectedJournal?.id ?? null}
+                                onSelect={setSelectedJournalId}
                                 onDelete={handleDeleteJournal}
                                 onEdit={(e) => {
                                     setEditingJournal(e);
@@ -363,16 +350,36 @@ export function ResearchPageClient() {
                             />
                         )
                     ) : tab === "watchlist" ? (
-                        <EmptyPane
-                            title="Watchlist detail"
-                            body="Select a watchlist ticker to see its entry rationale, notes, and suggested target. (Dedicated pane coming in Phase 6.)"
-                        />
+                        selectedWatchItem ? (
+                            <WatchlistDetailPane
+                                key={selectedWatchItem.id}
+                                item={selectedWatchItem}
+                                livePrice={liveWatchPrice(watchQuotes, selectedWatchItem.ticker)}
+                                thesis={thesisForTicker(selectedWatchItem.ticker)}
+                                onUpdate={(patch) => watchlist.update(selectedWatchItem.id, patch)}
+                                onRemove={() => handleRemoveWatch(selectedWatchItem)}
+                            />
+                        ) : (
+                            <EmptyPane
+                                title={watchlist.items.length === 0 ? "Your watchlist is empty" : "No watchlist matches"}
+                                body="Add a ticker on the left to track why you want it and the price you would enter at."
+                            />
+                        )
                     ) : tab === "alphaRadar" ? (
                         <AlphaRadarDetailPane data={alphaRadar} />
+                    ) : selectedJournal ? (
+                        <JournalDetailPane
+                            entry={selectedJournal}
+                            thesis={selectedJournal.thesisId ? thesesById.get(selectedJournal.thesisId) : undefined}
+                            onEdit={() => {
+                                setEditingJournal(selectedJournal);
+                                setJournalModalOpen(true);
+                            }}
+                        />
                     ) : (
                         <EmptyPane
                             title="Decision journal"
-                            body="Every trade's rationale lives on the left. Select an entry to surface the linked thesis and rationale side-by-side. (Dedicated pane coming in Phase 6.)"
+                            body="Record why you bought, sold, or held. Use New entry to write the first one."
                         />
                     )}
                 </section>
@@ -440,65 +447,113 @@ function ThesesColumn({
     );
 }
 
+type QuoteMap = Record<string, { price: number; change: number; changePercent: number }> | undefined;
+
+function liveWatchPrice(quotes: QuoteMap, ticker: string): number | null {
+    const live = quotes?.[ticker.toUpperCase()];
+    return live && Number.isFinite(live.price) && live.price > 0 ? live.price : null;
+}
+
 function WatchlistColumn({
     list,
     quotes,
+    selectedTicker,
+    onSelect,
+    onAdd,
 }: {
-    list: WatchlistItem[];
-    quotes: Record<string, { price: number; change: number; changePercent: number }> | undefined;
+    list: WatchItem[];
+    quotes: QuoteMap;
+    selectedTicker: string | null;
+    onSelect: (ticker: string) => void;
+    /** Returns an error message, or null when the ticker was added. */
+    onAdd: (input: string) => string | null;
 }) {
-    if (list.length === 0) {
-        return <div className="pm-research-empty-hint">No watchlist matches.</div>;
-    }
+    const [draft, setDraft] = useState("");
+    const [error, setError] = useState<string | null>(null);
     return (
         <>
-            {list.map((w) => {
-                const live = quotes?.[w.ticker.toUpperCase()];
-                const price = live && Number.isFinite(live.price) ? live.price : w.currentPrice;
-                const distancePct =
-                    price > 0 ? ((w.targetEntry - price) / price) * 100 : 0;
-                const toneClass =
-                    distancePct > 0 ? "pm-num-neg" : "pm-num-pos"; // target below current = wait, above = red
-                return (
-                    <article key={w.id} className="pm-watch-list-card">
-                        <header className="pm-watch-list-head">
-                            <div>
-                                <span className="pm-watch-list-sym">{w.ticker}</span>
-                                <span className="pm-watch-list-company">{w.companyName}</span>
-                            </div>
-                            {live && (
-                                <span
-                                    className="pm-live-dot"
-                                    aria-label="Live quote"
-                                    title="Live quote, refreshes every 60s"
-                                />
-                            )}
-                        </header>
-                        <p className="pm-watch-list-reason">{w.reason}</p>
-                        <div className="pm-watch-list-prices">
-                            <div>
-                                <span className="pm-watch-list-k">Price</span>
-                                <span className="pm-watch-list-v num">
-                                    ${price.toFixed(2)}
+            <form
+                className="pm-watch-add"
+                onSubmit={(e) => {
+                    e.preventDefault();
+                    const message = onAdd(draft);
+                    setError(message);
+                    if (!message) setDraft("");
+                }}
+            >
+                <input
+                    className="pm-exec-input"
+                    value={draft}
+                    onChange={(e) => {
+                        setDraft(e.target.value.toUpperCase());
+                        setError(null);
+                    }}
+                    placeholder="Add ticker"
+                    aria-label="Add ticker to watchlist"
+                    aria-invalid={error ? true : undefined}
+                    aria-describedby={error ? "watch-add-error" : undefined}
+                    maxLength={10}
+                />
+                <button type="submit" className="pm-btn pm-btn-ghost" disabled={!draft.trim()}>
+                    <Plus size={14} aria-hidden="true" />
+                    <span>Add</span>
+                </button>
+            </form>
+            {error && (
+                <p id="watch-add-error" className="pm-watch-add-error" role="alert">
+                    {error}
+                </p>
+            )}
+            {list.length === 0 ? (
+                <div className="pm-research-empty-hint">No watchlist matches.</div>
+            ) : (
+                list.map((w) => {
+                    const price = liveWatchPrice(quotes, w.ticker);
+                    const distance = distanceToEntryPct(price, w.targetEntry);
+                    return (
+                        <button
+                            key={w.id}
+                            type="button"
+                            className={`pm-watch-list-card pm-list-select${selectedTicker === w.ticker ? " is-selected" : ""}`}
+                            aria-pressed={selectedTicker === w.ticker}
+                            onClick={() => onSelect(w.ticker)}
+                        >
+                            <span className="pm-watch-list-head">
+                                <span>
+                                    <span className="pm-watch-list-sym">{w.ticker}</span>
+                                    {w.companyName && <span className="pm-watch-list-company">{w.companyName}</span>}
                                 </span>
-                            </div>
-                            <div>
-                                <span className="pm-watch-list-k">Target entry</span>
-                                <span className="pm-watch-list-v num">
-                                    ${w.targetEntry.toFixed(2)}
+                                {w.sample ? (
+                                    <SampleTag />
+                                ) : price != null ? (
+                                    <span className="pm-live-dot" aria-label="Live quote" title="Live quote, refreshes every 60s" />
+                                ) : null}
+                            </span>
+                            {w.reason && <span className="pm-watch-list-reason">{w.reason}</span>}
+                            <span className="pm-watch-list-prices">
+                                <span>
+                                    <span className="pm-watch-list-k">Price</span>
+                                    <span className="pm-watch-list-v num">{price != null ? `$${price.toFixed(2)}` : "—"}</span>
                                 </span>
-                            </div>
-                            <div>
-                                <span className="pm-watch-list-k">Distance</span>
-                                <span className={`pm-watch-list-v num ${toneClass}`}>
-                                    {distancePct > 0 ? "+" : distancePct < 0 ? "−" : ""}
-                                    {Math.abs(distancePct).toFixed(1)}%
+                                <span>
+                                    <span className="pm-watch-list-k">Target entry</span>
+                                    <span className="pm-watch-list-v num">
+                                        {w.targetEntry != null ? `$${w.targetEntry.toFixed(2)}` : "—"}
+                                    </span>
                                 </span>
-                            </div>
-                        </div>
-                    </article>
-                );
-            })}
+                                <span>
+                                    <span className="pm-watch-list-k">To entry</span>
+                                    <span className="pm-watch-list-v num">
+                                        {distance != null
+                                            ? `${distance > 0 ? "+" : distance < 0 ? "−" : ""}${Math.abs(distance).toFixed(1)}%`
+                                            : "—"}
+                                    </span>
+                                </span>
+                            </span>
+                        </button>
+                    );
+                })
+            )}
         </>
     );
 }
@@ -506,11 +561,15 @@ function WatchlistColumn({
 function JournalColumn({
     list,
     thesesById,
+    selectedId,
+    onSelect,
     onEdit,
     onDelete,
 }: {
     list: JournalEntry[];
     thesesById: Map<string, Thesis>;
+    selectedId: string | null;
+    onSelect: (id: string) => void;
     onEdit: (entry: JournalEntry) => void;
     onDelete: (entry: JournalEntry) => void;
 }) {
@@ -530,9 +589,18 @@ function JournalColumn({
                           ? "pm-journal-type-exit"
                           : "pm-journal-type-hold";
                 return (
-                    <article key={entry.id} className="pm-journal-list-card">
-                        <header className="pm-journal-list-head">
-                            <div>
+                    <article
+                        key={entry.id}
+                        className={`pm-journal-list-card${selectedId === entry.id ? " is-selected" : ""}`}
+                    >
+                        <button
+                            type="button"
+                            className="pm-list-select"
+                            aria-pressed={selectedId === entry.id}
+                            onClick={() => onSelect(entry.id)}
+                        >
+                        <span className="pm-journal-list-head">
+                            <span>
                                 <span className={`pm-journal-type ${typeClass}`}>{typeLabel}</span>
                                 <span className="pm-journal-sym">{entry.ticker}</span>
                                 {entry.outcome !== "pending" && (
@@ -542,7 +610,7 @@ function JournalColumn({
                                         {entry.outcome}
                                     </span>
                                 )}
-                            </div>
+                            </span>
                             <span className="pm-journal-date">
                                 {new Date(entry.date).toLocaleDateString("en-US", {
                                     month: "short",
@@ -550,14 +618,15 @@ function JournalColumn({
                                     timeZone: "UTC",
                                 })}
                             </span>
-                        </header>
-                        <p className="pm-journal-decision">{entry.decision}</p>
-                        <p className="pm-journal-rationale">{entry.rationale}</p>
+                        </span>
+                        <span className="pm-journal-decision">{entry.decision}</span>
+                        <span className="pm-journal-rationale">{entry.rationale}</span>
                         {linked && (
                             <span className="pm-journal-linked">
                                 Linked to {linked.ticker} · {linked.title}
                             </span>
                         )}
+                        </button>
                         <footer className="pm-journal-foot">
                             <button
                                 type="button"

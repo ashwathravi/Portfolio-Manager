@@ -32,4 +32,18 @@ test.describe('Position detail', () => {
         await expect(page.getByTestId('position-thesis').getByRole('link', { name: 'Write a thesis' })).toBeVisible();
         await expect(page.getByText('🔍')).toHaveCount(0);
     });
+
+    test('Add to watchlist puts the symbol on the Research watchlist, and can be undone', async ({ page }) => {
+        await gotoAppPage(page, '/portfolios/detail/AMD');
+        const toggle = page.getByRole('button', { name: 'Add to watchlist' });
+        await expect(async () => {
+            await toggle.click();
+            await expect(page.getByRole('button', { name: /On watchlist/ })).toBeVisible({ timeout: 1_000 });
+        }).toPass({ timeout: 10_000 });
+        await gotoAppPage(page, '/research?tab=watchlist');
+        await expect(page.locator('.pm-research-list').getByRole('button', { name: /AMD/ })).toBeVisible();
+        await gotoAppPage(page, '/portfolios/detail/AMD');
+        await page.getByRole('button', { name: /On watchlist/ }).click();
+        await expect(page.getByRole('button', { name: 'Add to watchlist' })).toHaveAttribute('aria-pressed', 'false');
+    });
 });

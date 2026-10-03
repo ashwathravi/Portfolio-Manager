@@ -14,7 +14,7 @@ import { clickUntil, collectConsoleErrors, gotoAppPage, reloadAppPage } from './
  *   Holdings + allocation . real data, only when there are holdings
  *   Recent activity ....... real transactions
  *   Review & research ..... example-data cards (weekly review, equity curve,
- *                           theses, patterns, Alpha Radar, watchlist)
+ *                           theses, patterns, Alpha Radar)
  */
 
 async function hasHoldings(page: import('@playwright/test').Page): Promise<boolean> {
@@ -107,7 +107,6 @@ test.describe('Today page', () => {
         await expect(examples.getByTestId('sample-data-notice')).toBeVisible();
         await expect(page.getByTestId('pattern-feed')).toBeVisible();
         await expect(page.getByTestId('alpha-radar-dashboard-card')).toBeVisible();
-        await expect(page.locator('.pm-card-title', { hasText: /^Watchlist$/ })).toBeVisible();
         await expect(page.locator('.pm-card-title', { hasText: /^Active Theses$/ })).toBeVisible();
 
         await examples.getByRole('button', { name: 'hide examples' }).click();
@@ -365,5 +364,24 @@ test.describe('Dashboard console hygiene', () => {
         await expect(page.getByTestId('today-examples').locator('svg').first()).toBeVisible();
         await page.waitForTimeout(500);
         expect(errors.filter((e) => e.includes('<svg> attribute height'))).toEqual([]);
+    });
+});
+
+test.describe('Today watchlist', () => {
+    test('regression: shows the saved watchlist outside the example section and links to Research, not a 404', async ({ page }) => {
+        await gotoAppPage(page, '/');
+        const card = page.getByTestId('today-watchlist');
+        await expect(card).toBeVisible();
+        await expect(page.getByTestId('today-examples').getByTestId('today-watchlist')).toHaveCount(0);
+        await expect(card.getByRole('link', { name: 'Manage' })).toHaveAttribute('href', '/research?tab=watchlist');
+        await expect(card.getByRole('link', { name: /COIN/ })).toHaveAttribute('href', '/portfolios/detail/COIN');
+        await expect(card.getByTestId('sample-tag')).toBeVisible();
+    });
+
+    test('regression: no stale fallback prices — a missing quote is a dash', async ({ page }) => {
+        await page.route('**/api/market-data/quotes**', (route) => route.fulfill({ status: 500, json: { error: 'down' } }));
+        await gotoAppPage(page, '/');
+        const card = page.getByTestId('today-watchlist');
+        await expect(card.locator('.pm-watchlist-price').first()).toHaveText('—');
     });
 });

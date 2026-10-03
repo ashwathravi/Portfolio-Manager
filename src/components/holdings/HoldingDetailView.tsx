@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useThesisStore } from '@/lib/research/useThesisStore';
+import { useWatchlist } from '@/lib/research/useWatchlist';
 import { findThesisByTicker } from '@/lib/research/thesis';
 import { formatPct, formatQty, formatUsd } from '@/lib/format';
 
@@ -53,6 +54,8 @@ export function HoldingDetailView({
     quote: SymbolQuote | null;
 }) {
     const { theses } = useThesisStore();
+    const watchlist = useWatchlist();
+    const watched = watchlist.isWatched(symbol);
     const thesis = findThesisByTicker(theses, symbol);
     const price = holding?.price ?? quote?.price ?? null;
     const change = holding?.changePercent ?? quote?.changePercent ?? null;
@@ -73,6 +76,14 @@ export function HoldingDetailView({
                         </p>
                     </div>
                     <div className="pm-empty-actions">
+                        <button
+                            type="button"
+                            className="pm-btn pm-btn-ghost"
+                            aria-pressed={watched}
+                            onClick={() => (watched ? watchlist.remove(symbol) : watchlist.add(symbol, holding?.name))}
+                        >
+                            {watched ? 'On watchlist ✓' : 'Add to watchlist'}
+                        </button>
                         <Link href={`/execution?symbol=${encodeURIComponent(symbol)}`} className="pm-btn pm-btn-primary">
                             Draft order
                         </Link>

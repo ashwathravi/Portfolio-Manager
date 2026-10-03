@@ -4,104 +4,75 @@ import { useMemo } from "react";
 import Link from "next/link";
 import { Pencil } from "lucide-react";
 import { useAutoRefreshQuotes } from "@/lib/hooks/useAutoRefreshQuotes";
+import { useWatchlist } from "@/lib/research/useWatchlist";
+import { SampleTag } from "@/components/data-display/SampleTag";
 
 /**
- * Phase 3 (AR-73) Watchlist card.
- *
- * Five rows of (ticker, name, price, Δ%). Live prices from the shared
- * auto-refresh hook; static fallback from seed when quote is missing.
- *
- * The "Edit" affordance is a Link — clicking it routes to a watchlist
- * management page (stub route fine). Keeping navigation in the URL makes
- * back/forward work and keeps SSR simple.
+ * Today › Watchlist. Reads the same saved watchlist as Research, with live
+ * quotes. There are no fallback prices: a stored price goes stale and reads
+ * as real, so a missing quote shows a dash. Example rows carry a Sample tag
+ * until the user edits or replaces them.
  */
 
-export interface WatchlistRow {
-    symbol: string;
-    name: string;
-    /** Price used if live quote is missing. */
-    fallbackPrice?: number;
-    /** Δ% used if live quote is missing. */
-    fallbackChangePct?: number;
-}
-
 export interface WatchlistCardProps {
-    rows: WatchlistRow[];
-    /** Max rows to render. Default 5 (handoff spec). */
+    /** Max rows to render. Default 5. */
     limit?: number;
-    /** Edit button href; default /watchlist. */
-    editHref?: string;
     className?: string;
 }
 
-export function WatchlistCard({
-    rows,
-    limit = 5,
-    editHref = "/watchlist",
-    className,
-}: WatchlistCardProps) {
-    const symbols = useMemo(
-        () => rows.map((r) => r.symbol).filter(Boolean),
-        [rows],
-    );
+export function WatchlistCard({ limit = 5, className }: WatchlistCardProps) {
+    const { items } = useWatchlist();
+    const shown = items.slice(0, limit);
+    const symbols = useMemo(() => shown.map((r) => r.ticker), [shown]);
     const { quotes } = useAutoRefreshQuotes(symbols);
-
-    const shown = rows.slice(0, limit);
+    const hasSample = shown.some((r) => r.sample);
 
     return (
         <section
             className={`pm-card pm-card-stack${className ? ` ${className}` : ""}`}
             aria-label="Watchlist"
+            data-testid="today-watchlist"
         >
             <header className="pm-card-header">
                 <div>
-                    <h3 className="pm-card-title">Watchlist</h3>
+                    <h3 className="pm-card-title">
+                        Watchlist {hasSample && <SampleTag />}
+                    </h3>
                     <p className="pm-card-subtitle">
-                        {shown.length} {shown.length === 1 ? "ticker" : "tickers"}
+                        {items.length} {items.length === 1 ? "ticker" : "tickers"}
                     </p>
                 </div>
-                <Link href={editHref} className="pm-card-link" aria-label="Edit watchlist">
+                <Link href="/research?tab=watchlist" className="pm-card-link">
                     <Pencil size={12} aria-hidden="true" style={{ verticalAlign: "-1px", marginRight: 4 }} />
-                    Edit
+                    Manage
                 </Link>
             </header>
 
             {shown.length === 0 ? (
-                <p className="pm-card-subtitle">No tickers in your watchlist yet.</p>
+                <p className="pm-card-subtitle">
+                    Nothing on your watchlist. Add tickers from Research or any position page.
+                </p>
             ) : (
-                <ul
-                    style={{
-                        listStyle: "none",
-                        margin: 0,
-                        padding: 0,
-                        display: "flex",
-                        flexDirection: "column",
-                    }}
-                >
+                <ul className="pm-watchlist-list">
                     {shown.map((r) => {
-                        const q = quotes[r.symbol.toUpperCase()];
-                        const price = Number.isFinite(q?.price) ? q!.price : r.fallbackPrice ?? null;
-                        const pct = q?.changePercent ?? r.fallbackChangePct ?? 0;
-                        const cls = pct < 0 ? "pm-num-neg" : "pm-num-pos";
+                        const q = quotes[r.ticker];
+                        const price = q && Number.isFinite(q.price) && q.price > 0 ? q.price : null;
+                        const pct = q && Number.isFinite(q.changePercent) ? q.changePercent : null;
                         return (
-                            <li key={r.symbol} className="pm-watchlist-row">
-                                <div className="pm-watchlist-sym">
-                                    <span className="pm-watchlist-ticker">{r.symbol}</span>
-                                    <span className="pm-watchlist-name" title={r.name}>
-                                        {r.name}
+                            <li key={r.id} className="pm-watchlist-row">
+                                <Link href={`/portfolios/detail/${r.ticker}`} className="pm-watchlist-sym">
+                                    <span className="pm-watchlist-ticker">{r.ticker}</span>
+                                    <span className="pm-watchlist-name" title={r.companyName}>
+                                        {r.companyName}
                                     </span>
-                                </div>
+                                </Link>
                                 <span className="pm-watchlist-price">
                                     {price != null
-                                        ? `$${price.toLocaleString("en-US", {
-                                              minimumFractionDigits: 2,
-                                              maximumFractionDigits: 2,
-                                          })}`
+                                        ? `$${price.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
                                         : "—"}
                                 </span>
-                                <span className={`pm-watchlist-pct ${cls}`}>
-                                    {pct >= 0 ? "+" : "−"}
-                                    {Math.abs(pct).toFixed(2)}%
+                                <span className={`pm-watchlist-pct ${pct == null ? "" : pct < 0 ? "pm-num-neg" : "pm-num-pos"}`}>
+                                    {pct == null ? "—" : `${pct >= 0 ? "+" : "−"}${Math.abs(pct).toFixed(2)}%`}
                                 </span>
                             </li>
                         );

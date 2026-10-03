@@ -76,9 +76,9 @@ Every page in the application must have a corresponding E2E spec. The current ma
 | `/portfolios/holdings` | `holdings.spec.ts` | Portfolio title + Holdings tab, one heading, table or single empty state, LEAPS ledger only with holdings and tagged Sample, page gutter |
 | `/portfolios/accounts` | `accounts.spec.ts` | Accounts tab, real accounts or empty state (never seeded balances) |
 | `/portfolios/activity` | `activity.spec.ts` | Activity tab, real transactions or empty state, side filters |
-| `/portfolios/detail/[symbol]` | `position-detail.spec.ts` | Symbol title, draft-order prefill link, thesis link, not-held state is not a dead end |
+| `/portfolios/detail/[symbol]` | `position-detail.spec.ts` | Symbol title, draft-order prefill link, thesis link, Add to watchlist toggle, not-held state is not a dead end |
 | `/execution` (Trade) | `execution.spec.ts` | Single ticket (no variant switcher), Buy/Sell, sticky summary, blotter newest-first, `?symbol=` prefill, keyboard mode (B/S/M/L/T/Q, ⌘↵ respects gates), phone fit, rationale/cooldown/adherence flows |
-| `/research` | `research.spec.ts` | One header, one-row tabs, delete in overflow menu, Sample-tagged recent seed theses, Alpha Radar workflows |
+| `/research` | `research.spec.ts` | One header, one-row tabs, delete in overflow menu, Sample-tagged recent seed theses, saved watchlist (add/refuse duplicates/edit/remove, survives reload), watchlist and journal detail panes, labelled illustrative price strip, Alpha Radar workflows |
 | `/research/thesis/[ticker]` | `thesis.spec.ts` | Memo layout, explained thesis check (no opaque health score), links to position and draft order, not-found state |
 | `/strategies` | `strategies.spec.ts` | "Strategies" title, compact switcher, Duplicate works, stale-backtest flag, legacy `/strategies/[id]` redirects |
 | `/performance`, `/performance/behaviour` | `performance.spec.ts` | Returns: four cards, one heading, Sample notice, CSV export. Behaviour: one continuous trading calendar, mood, P&L density, reviews archive |

@@ -136,14 +136,17 @@ export default async function Today() {
         </div>
       )}
 
-      <RecentActivityCard activities={toTodayActivity(activity)} limit={8} />
+      <div className="pm-grid-2-63">
+        <RecentActivityCard activities={toTodayActivity(activity)} limit={8} />
+        <WatchlistCard limit={6} />
+      </div>
 
       <SampleGate>
         <section className="pm-today-examples" aria-labelledby="pm-today-examples-head" data-testid="today-examples">
           <header className="pm-today-section-head">
             <h2 id="pm-today-examples-head" className="pm-today-section-title">Review &amp; research</h2>
             <SampleDataNotice>
-              The weekly review, equity curve, patterns, watchlist, theses, and Alpha Radar below use example data.
+              The weekly review, equity curve, patterns, theses, and Alpha Radar below use example data.
             </SampleDataNotice>
           </header>
           <div id="weekly-review">
@@ -155,10 +158,7 @@ export default async function Today() {
           </div>
           <div className="pm-grid-2-63">
             <PatternFeed />
-            <div className="pm-dashboard-side-stack">
-              <AlphaRadarDashboardCard />
-              <WatchlistCard rows={DEFAULT_WATCHLIST} limit={5} />
-            </div>
+            <AlphaRadarDashboardCard />
           </div>
         </section>
       </SampleGate>
@@ -198,10 +198,3 @@ function resolveName(symbol: string): string {
   return TICKER_NAMES[symbol.toUpperCase()] ?? symbol;
 }
 
-const DEFAULT_WATCHLIST = [
-  { symbol: 'SPY', name: 'SPDR S&P 500', fallbackPrice: 547.20, fallbackChangePct: 0.45 },
-  { symbol: 'QQQ', name: 'Invesco QQQ', fallbackPrice: 478.60, fallbackChangePct: 0.88 },
-  { symbol: 'NVDA', name: 'NVIDIA Corp.', fallbackPrice: 932.10, fallbackChangePct: 2.14 },
-  { symbol: 'META', name: 'Meta Platforms', fallbackPrice: 512.45, fallbackChangePct: -0.72 },
-  { symbol: 'COIN', name: 'Coinbase Global', fallbackPrice: 214.30, fallbackChangePct: 3.55 },
-];
