@@ -38,6 +38,8 @@ npm run test:e2e:ui
 
 The Playwright config (`playwright.config.ts`) includes a `webServer` block that automatically starts `npm run dev` before running tests. If the dev server is already running on port 3000, it reuses the existing server.
 
+**Never run E2E against a dev server connected to a real database.** A server Playwright starts gets `DATABASE_URL=""` unless the shell exports one, so `.env.local` is ignored. A server you started yourself with `.env.local` pointing at Supabase is *reused as-is*, and tests would act on real data. Stop it before `npm run test:e2e`.
+
 ---
 
 ## Test Coverage Requirements
@@ -206,3 +208,13 @@ npm run test:e2e
 - E2E tests: `tests/e2e/<feature>.spec.ts` (e.g. `portfolios.spec.ts`).
 - Do not put unit tests in the `tests/` directory — that is reserved for E2E specs.
 - Do not put E2E specs in the `src/` directory.
+
+<!-- BEGIN:nextjs-agent-rules -->
+
+# This is NOT the Next.js you know
+
+This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
+
+This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
+
+<!-- END:nextjs-agent-rules -->

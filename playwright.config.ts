@@ -65,6 +65,10 @@ export default defineConfig({
         env: {
             ...webServerEnv,
             ...authServerEnv,
+            // Only use a database the test run was explicitly given (CI exports
+            // one). An empty value stops Next from loading a developer's real
+            // DATABASE_URL out of .env.local into the test server.
+            DATABASE_URL: process.env.DATABASE_URL ?? '',
         },
         url: 'http://localhost:3000',
         reuseExistingServer: !process.env.CI,

@@ -122,20 +122,31 @@ export function computeScale(cells: HeatCell[]): number {
 /**
  * 5-stop diverging colour map keyed off the ratio `avg / scale`.
  * Thresholds match the AR-113 spec exactly:
- *   > 0.6     deep green  #17cf54
- *   > 0.2     light green #bbf7d0
- *   [-0.2,+0.2] neutral   #f0f2f4
- *   < -0.2    light red   #fee2e2
- *   < -0.6    deep red    #fecaca
+ *   > 0.6       big gain   var(--pm-heat-pos-2)
+ *   > 0.2       gain       var(--pm-heat-pos-1)
+ *   [-0.2,+0.2] neutral    var(--pm-heat-zero)
+ *   < -0.2      loss       var(--pm-heat-neg-1)
+ *   <= -0.6     big loss   var(--pm-heat-neg-2)
+ *
+ * Returns theme tokens (defined in ledger-refinements.css) so the grid reads
+ * in dark mode too; the old literal pastels glared on a dark ground.
  */
+export const HEAT_COLORS = {
+    pos2: 'var(--pm-heat-pos-2)',
+    pos1: 'var(--pm-heat-pos-1)',
+    zero: 'var(--pm-heat-zero)',
+    neg1: 'var(--pm-heat-neg-1)',
+    neg2: 'var(--pm-heat-neg-2)',
+} as const;
+
 export function colorFor(avgPnl: number, scale: number): string {
-    if (scale === 0 || avgPnl === 0) return '#f0f2f4';
+    if (scale === 0 || avgPnl === 0) return HEAT_COLORS.zero;
     const r = avgPnl / scale;
-    if (r > 0.6) return '#17cf54';
-    if (r > 0.2) return '#bbf7d0';
-    if (r > -0.2) return '#f0f2f4';
-    if (r > -0.6) return '#fee2e2';
-    return '#fecaca';
+    if (r > 0.6) return HEAT_COLORS.pos2;
+    if (r > 0.2) return HEAT_COLORS.pos1;
+    if (r > -0.2) return HEAT_COLORS.zero;
+    if (r > -0.6) return HEAT_COLORS.neg1;
+    return HEAT_COLORS.neg2;
 }
 
 /**

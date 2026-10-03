@@ -771,3 +771,16 @@
 .pm-pattern-row[data-severity="info"] { border-color: var(--pm-border); }
 .pm-pattern-row[data-severity="info"] .pm-pattern-glyph { color: var(--pm-fg-muted); background: var(--pm-neutral-100); }
 .pm-pattern-feed-pill { background: var(--pm-neutral-100); color: var(--pm-fg-muted); }
+
+/* P&L density heatmap stops. Mixed from the semantic colours so the grid
+   reads on both the light and dark ground (it used fixed light pastels). */
+:root {
+  --pm-heat-pos-2: var(--pm-success);
+  --pm-heat-pos-1: color-mix(in srgb, var(--pm-success) 32%, var(--pm-card));
+  --pm-heat-zero: color-mix(in srgb, var(--pm-fg) 6%, var(--pm-card));
+  --pm-heat-neg-1: color-mix(in srgb, var(--pm-danger) 28%, var(--pm-card));
+  --pm-heat-neg-2: color-mix(in srgb, var(--pm-danger) 70%, var(--pm-card));
+}
+
+/* A 30-day sparkline with no price history shows a dash, never an invented line. */
+.pm-spark-empty { display: inline-block; min-width: 72px; color: var(--pm-fg-subtle); text-align: center; }

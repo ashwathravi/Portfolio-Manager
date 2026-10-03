@@ -69,6 +69,19 @@ test.describe('Portfolio › Holdings', () => {
     });
 });
 
+test.describe('Holdings sparklines', () => {
+    test('with holdings: no price history shows a dash, never an invented trend line', async ({ page }) => {
+        await page.route('**/api/market-data/historical**', (route) =>
+            route.fulfill({ status: 500, json: { error: 'provider unavailable' } }),
+        );
+        await gotoAppPage(page, '/portfolios/holdings');
+        test.skip(!(await hasHoldings(page)), 'no holdings in this database');
+        const firstRow = page.locator('table tbody tr').first();
+        await expect(firstRow.getByTestId('spark-empty')).toBeVisible();
+        await expect(firstRow.getByRole('img', { name: /30-day trend/ })).toHaveCount(0);
+    });
+});
+
 test.describe('Holdings layout', () => {
     test('regression: holdings content keeps a page gutter instead of touching the sidebar', async ({ page }) => {
         await gotoAppPage(page, '/portfolios/holdings');

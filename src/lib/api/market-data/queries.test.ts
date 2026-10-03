@@ -138,6 +138,18 @@ describe('fetchHistorical', () => {
         assert.deepStrictEqual(result, []);
     });
 
+    test('unwraps the { data } envelope the route actually returns', async () => {
+        const bar = { time: '2026-10-01', open: 1, high: 2, low: 1, close: 2, volume: 5 };
+        mockFetch({ ok: true, json: { data: [bar] } });
+        assert.deepStrictEqual(await fetchHistorical('AAPL', '1M'), [bar]);
+    });
+
+    test('still accepts a bare array body', async () => {
+        const bar = { time: '2026-10-01', open: 1, high: 2, low: 1, close: 2, volume: 5 };
+        mockFetch({ ok: true, json: [bar] });
+        assert.deepStrictEqual(await fetchHistorical('AAPL', '1M'), [bar]);
+    });
+
     test('throws with server error message on failure', async () => {
         mockFetch({ ok: false, status: 429, json: { error: 'rate limited' } });
         await assert.rejects(fetchHistorical('AAPL', '1D'), /rate limited/);

@@ -247,3 +247,37 @@ test.describe('Research page', () => {
         await expect(page.getByTestId('alpha-radar-detail')).toBeVisible();
     });
 });
+
+test.describe('Research thesis price strip', () => {
+    const strip = (page: import('@playwright/test').Page) =>
+        page.getByRole('region', { name: 'Price over the last 30 days' });
+
+    test('regression: without live prices the line is labelled Illustrative and claims no change', async ({ page }) => {
+        await page.route('**/api/market-data/historical**', (route) =>
+            route.fulfill({ status: 500, json: { error: 'provider unavailable' } }),
+        );
+        await gotoAppPage(page, '/research');
+        await expect(strip(page).getByTestId('sample-tag')).toHaveText('Illustrative');
+        await expect(strip(page)).toContainText('Live prices unavailable');
+        await expect(strip(page)).toContainText('Last saved');
+    });
+
+    test('regression: live daily bars in the { data } envelope replace the illustrative line', async ({ page }) => {
+        const bars = Array.from({ length: 21 }, (_, i) => ({
+            time: `2026-09-${String(i + 1).padStart(2, '0')}`,
+            open: 100 + i,
+            high: 101 + i,
+            low: 99 + i,
+            close: 100 + i,
+            volume: 1000,
+        }));
+        await page.route('**/api/market-data/historical**', (route) =>
+            route.fulfill({ status: 200, json: { data: bars } }),
+        );
+        await gotoAppPage(page, '/research');
+        await expect(strip(page)).toContainText('Daily closes');
+        await expect(strip(page).getByTestId('sample-tag')).toHaveCount(0);
+        await expect(strip(page)).toContainText('$100.00');
+        await expect(strip(page)).toContainText('$120.00');
+    });
+});
