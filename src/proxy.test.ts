@@ -61,12 +61,12 @@ describe("API proxy security", () => {
         mock.timers.reset();
     });
 
-    test("keeps the health route public when production auth is unavailable", async () => {
+    test("keeps the health routes public when production auth is unavailable", async () => {
         setNodeEnv("production");
 
-        const response = await proxy(apiRequest({}, "/api/health"));
-
-        assert.equal(response.status, 200);
+        assert.equal((await proxy(apiRequest({}, "/api/health"))).status, 200);
+        assert.equal((await proxy(apiRequest({}, "/api/health/ready"))).status, 200);
+        assert.equal((await proxy(apiRequest({}, "/api/health/ready/extra"))).status, 503);
     });
 
     test("keeps only exact public asset paths open", async () => {

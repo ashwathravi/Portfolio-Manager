@@ -200,11 +200,15 @@ test('myFunction - describes the scenario', () => {
 
 ## CI Pipeline
 
-The GitHub Actions workflow (`.github/workflows/docker-build.yml`) runs three jobs:
+The GitHub Actions workflow (`.github/workflows/docker-build.yml`) runs these jobs:
 
-1. **`build`** — Docker image build and push (only pushes on `main`).
-2. **`lint-and-test`** — Linting (`npm run lint`), unit tests (`npm test`), and Next.js build (`npm run build`).
+1. **`build`** — Builds the Docker image (never pushes).
+2. **`lint-and-test`** — Audits production dependencies (`npm audit --omit=dev --audit-level=high`), lints (`npm run lint`), runs unit tests (`npm test`), and builds Next.js (`npm run build`).
 3. **`e2e-tests`** — Installs Playwright browsers, prepares a Postgres service with `scripts/e2e/prepare-database.ts`, starts the dev server connected as a member of `app_runtime`, and runs all E2E tests. Only runs after `lint-and-test` passes. Uploads the Playwright HTML report as a build artifact.
+4. **`publish-image`** — On `master` only, after the three checks pass: pushes the image to GHCR.
+5. **`deploy-production`** — On `master` only, after the three checks pass: applies migrations, deploys to Vercel, and checks `/api/health/ready`. See `docs/deployment.md`, including the rule that migrations must work with the code already running.
+
+`.github/workflows/codeql.yml` runs CodeQL on pull requests, on `master`, and weekly. `.github/dependabot.yml` opens weekly grouped updates for npm and GitHub Actions.
 
 ### Ensuring CI passes
 

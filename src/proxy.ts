@@ -92,6 +92,7 @@ function applyPageAuth(request: NextRequest, userId: string | null): NextRespons
 function isPublicRoute(pathname: string): boolean {
     return pathname === "/login"
         || pathname === "/api/health"
+        || pathname === "/api/health/ready"
         || PUBLIC_ASSET_PATHS.has(pathname)
         || isAuthJsRoute(pathname);
 }
