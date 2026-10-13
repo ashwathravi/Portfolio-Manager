@@ -8,11 +8,9 @@ repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repository_root"
 
 # Playwright reuses a server already on port 3000, and that server may be
-# connected to another database. Refuse rather than test against it.
-if lsof -nP -iTCP:3000 -sTCP:LISTEN >/dev/null 2>&1; then
-    echo "Port 3000 is in use. Stop your dev server first; Playwright would reuse it." >&2
-    exit 1
-fi
+# connected to another database. Refuse rather than test against it, and
+# refuse when the check itself can't tell.
+node scripts/e2e/check-port-free.mjs 3000
 
 docker compose up -d --wait db >/dev/null
 docker compose exec -T db psql -U atlas -d postgres --set=ON_ERROR_STOP=1 --quiet \
