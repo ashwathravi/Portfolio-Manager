@@ -19,14 +19,14 @@ Atlas Wealth is a comprehensive wealth management platform built for individuals
 - **UI Components**: [shadcn/ui](https://ui.shadcn.com/) + [Radix UI](https://www.radix-ui.com/)
 - **State Management**: [TanStack Query](https://tanstack.com/query/latest) (Server) + [Zustand](https://github.com/pmndrs/zustand) (Client)
 - **Charts**: [Recharts](https://recharts.org/) + [Lightweight Charts](https://tradingview.github.io/lightweight-charts/)
-- **Database/ORM**: PostgreSQL (via Docker)
+- **Database/ORM**: PostgreSQL with Drizzle (Supabase in production, Docker locally)
 - **Containerization**: Docker & Docker Compose
 
 ## Getting Started
 
 ### Prerequisites
 
-- Node.js 20.9+
+- Node.js 24 (see `.nvmrc`)
 - Docker & Docker Compose
 
 This repository uses **npm** as its canonical package manager. Commit changes to
@@ -47,32 +47,31 @@ This repository uses **npm** as its canonical package manager. Commit changes to
     npm install
     ```
 
-3. **Run the development server:**
+3. **Start the local database and load example data:**
+
+    ```bash
+    cp .env.example .env.local
+    npm run db:up
+    npm run db:setup
+    ```
+
+    This runs Postgres in Docker on `127.0.0.1:54329`. Local development never connects to the production Supabase project.
+
+4. **Run the development server:**
 
     ```bash
     npm run dev
     ```
 
-    Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+    Open [http://localhost:3000](http://localhost:3000) with your browser to see the result. You are signed in as the local dev user from `.env.local`.
 
-### Running with Docker
+### Running the production image
 
-1. **Build and start the services:**
+`docker compose up -d db` starts only the database. To run the production image as well, put real auth and database settings in `.env.docker` and run:
 
-    ```bash
-    docker-compose up -d --build
-    ```
-
-    This will start the Next.js application and any configured services (e.g., PostgreSQL).
-
-2. **Access the application:**
-    Open [http://localhost:3000](http://localhost:3000).
-
-3. **Stop services:**
-
-    ```bash
-    docker-compose down
-    ```
+```bash
+docker compose --profile app up -d --build
+```
 
 ## Documentation
 

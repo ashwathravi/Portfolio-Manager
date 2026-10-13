@@ -1,5 +1,5 @@
 
-import 'dotenv/config';
+import './load-env';
 import { db } from '../src/db';
 import { authUsers, portfolios, holdings, transactions } from '../src/db/schema';
 import { mockPortfolios, mockTransactions } from '../src/lib/mockData';

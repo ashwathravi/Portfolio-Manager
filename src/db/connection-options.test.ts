@@ -1,6 +1,6 @@
 import { describe, test } from "node:test";
 import assert from "node:assert";
-import { resolveDatabaseSslMode } from "./connection-options.ts";
+import { isLocalDatabaseUrl, resolveDatabaseSslMode } from "./connection-options.ts";
 
 describe("resolveDatabaseSslMode", () => {
     test("requires SSL when no database URL is configured", () => {
@@ -26,5 +26,32 @@ describe("resolveDatabaseSslMode", () => {
             resolveDatabaseSslMode("postgres://postgres:postgres@127.0.0.1:5432/app"),
             false,
         );
+    });
+});
+
+describe("isLocalDatabaseUrl", () => {
+    test("accepts loopback hosts", () => {
+        assert.strictEqual(isLocalDatabaseUrl("postgres://atlas:pw@127.0.0.1:54329/atlas_wealth"), true);
+        assert.strictEqual(isLocalDatabaseUrl("postgres://atlas:pw@localhost:54329/atlas_wealth"), true);
+        assert.strictEqual(isLocalDatabaseUrl("postgres://atlas:pw@[::1]:54329/atlas_wealth"), true);
+    });
+
+    test("rejects hosted databases, including the Supabase pooler", () => {
+        assert.strictEqual(
+            isLocalDatabaseUrl("postgres://postgres.ref:pw@aws-0-us-west-2.pooler.supabase.com:6543/postgres"),
+            false,
+        );
+        assert.strictEqual(isLocalDatabaseUrl("postgres://atlas:pw@db.example.com:5432/app"), false);
+    });
+
+    test("rejects hosts that only look local", () => {
+        assert.strictEqual(isLocalDatabaseUrl("postgres://atlas:pw@localhost.example.com:5432/app"), false);
+        assert.strictEqual(isLocalDatabaseUrl("postgres://atlas:pw@127.0.0.1.nip.io:5432/app"), false);
+    });
+
+    test("rejects missing or malformed URLs", () => {
+        assert.strictEqual(isLocalDatabaseUrl(undefined), false);
+        assert.strictEqual(isLocalDatabaseUrl(""), false);
+        assert.strictEqual(isLocalDatabaseUrl("not a url"), false);
     });
 });
