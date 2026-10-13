@@ -1,13 +1,41 @@
-version: '3'
-
 services:
+  # Local Postgres for development and E2E. Never point local dev at the
+  # Supabase project: that database is production.
+  db:
+    image: postgres:17-alpine
+    container_name: atlas-wealth-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: atlas
+      POSTGRES_PASSWORD: atlas-local-only
+      POSTGRES_DB: atlas_wealth
+    ports:
+      - "127.0.0.1:54329:5432"
+    volumes:
+      - atlas-wealth-db:/var/lib/postgresql/data
+      - ./scripts/db/init-local.sql:/docker-entrypoint-initdb.d/00-init-local.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U atlas -d atlas_wealth"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  # The production image. Needs real auth and database settings in
+  # .env.docker (see .env.example), so it only starts with
+  # `docker compose --profile app up --build`.
   web:
+    profiles: ["app"]
     build:
       context: .
       dockerfile: Dockerfile
     container_name: atlas-wealth-web
-    restart: always
+    restart: unless-stopped
     ports:
       - "3000:3000"
+    env_file:
+      - .env.docker
     environment:
       - NODE_ENV=production
+
+volumes:
+  atlas-wealth-db:

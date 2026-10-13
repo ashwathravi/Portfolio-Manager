@@ -71,6 +71,13 @@
       "when": 1786683150097,
       "tag": "0009_enforce_portfolio_ownership",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1791922806539,
+      "tag": "0010_app_runtime_role",
+      "breakpoints": true
     }
   ]
 }

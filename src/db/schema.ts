@@ -24,6 +24,17 @@ const serverOnlyNoClientAccessPolicy = () => pgPolicy("server_only_no_client_acc
     withCheck: sql`false`,
 });
 
+// The app connects as a login role that is a member of app_runtime (created
+// in migration 0010) instead of the table owner, so RLS applies to it. This
+// policy is what lets it read and write; tenant scoping stays in app code.
+const appRuntimeAccessPolicy = () => pgPolicy("app_runtime_access", {
+    as: "permissive",
+    for: "all",
+    to: "app_runtime",
+    using: sql`true`,
+    withCheck: sql`true`,
+});
+
 // ---------------------------------------------------------------------------
 // Auth.js — Google OAuth identity and database sessions
 // ---------------------------------------------------------------------------
@@ -35,6 +46,7 @@ export const authUsers = pgTable("auth_users", {
     image: text("image"),
 }, () => ({
     serverOnlyNoClientAccess: serverOnlyNoClientAccessPolicy(),
+    appRuntimeAccess: appRuntimeAccessPolicy(),
 })).enableRLS();
 
 export const authAccounts = pgTable("auth_accounts", {
@@ -58,6 +70,7 @@ export const authAccounts = pgTable("auth_accounts", {
         columns: [table.provider, table.providerAccountId],
     }),
     serverOnlyNoClientAccess: serverOnlyNoClientAccessPolicy(),
+    appRuntimeAccess: appRuntimeAccessPolicy(),
 })).enableRLS();
 
 export const authSessions = pgTable("auth_sessions", {
@@ -69,6 +82,7 @@ export const authSessions = pgTable("auth_sessions", {
 }, (table) => ({
     userIdIdx: index("auth_sessions_user_id_idx").on(table.userId),
     serverOnlyNoClientAccess: serverOnlyNoClientAccessPolicy(),
+    appRuntimeAccess: appRuntimeAccessPolicy(),
 })).enableRLS();
 
 export const authVerificationTokens = pgTable("auth_verification_tokens", {
@@ -81,6 +95,7 @@ export const authVerificationTokens = pgTable("auth_verification_tokens", {
         columns: [table.identifier, table.token],
     }),
     serverOnlyNoClientAccess: serverOnlyNoClientAccessPolicy(),
+    appRuntimeAccess: appRuntimeAccessPolicy(),
 })).enableRLS();
 
 export const authAuthenticators = pgTable("auth_authenticators", {
@@ -100,6 +115,7 @@ export const authAuthenticators = pgTable("auth_authenticators", {
         columns: [table.userId, table.credentialID],
     }),
     serverOnlyNoClientAccess: serverOnlyNoClientAccessPolicy(),
+    appRuntimeAccess: appRuntimeAccessPolicy(),
 })).enableRLS();
 
 // ---------------------------------------------------------------------------
@@ -126,6 +142,7 @@ export const plaidItems = pgTable("plaid_items", {
     userStatusIdx: index("plaid_items_user_status_idx").on(table.userId, table.status),
     userItemIdx: uniqueIndex("plaid_items_user_item_idx").on(table.userId, table.plaidItemId),
     serverOnlyNoClientAccess: serverOnlyNoClientAccessPolicy(),
+    appRuntimeAccess: appRuntimeAccessPolicy(),
 })).enableRLS();
 
 export const plaidAccounts = pgTable("plaid_accounts", {
@@ -157,6 +174,7 @@ export const plaidAccounts = pgTable("plaid_accounts", {
     itemIdx: index("plaid_accounts_item_idx").on(table.plaidItemRecordId),
     userAccountIdx: uniqueIndex("plaid_accounts_user_account_idx").on(table.userId, table.plaidAccountId),
     serverOnlyNoClientAccess: serverOnlyNoClientAccessPolicy(),
+    appRuntimeAccess: appRuntimeAccessPolicy(),
 })).enableRLS();
 
 // ---------------------------------------------------------------------------
@@ -177,6 +195,7 @@ export const portfolios = pgTable("portfolios", {
 }, (table) => ({
     userIdIdx: index("portfolios_user_id_idx").on(table.userId),
     serverOnlyNoClientAccess: serverOnlyNoClientAccessPolicy(),
+    appRuntimeAccess: appRuntimeAccessPolicy(),
 })).enableRLS();
 
 // ---------------------------------------------------------------------------
@@ -199,6 +218,7 @@ export const holdings = pgTable("holdings", {
     portfolioIdIdx: index("holdings_portfolio_id_idx").on(table.portfolioId),
     symbolIdx: index("holdings_symbol_idx").on(table.symbol),
     serverOnlyNoClientAccess: serverOnlyNoClientAccessPolicy(),
+    appRuntimeAccess: appRuntimeAccessPolicy(),
 })).enableRLS();
 
 // ---------------------------------------------------------------------------
@@ -220,6 +240,7 @@ export const transactions = pgTable("transactions", {
     portfolioIdIdx: index("transactions_portfolio_id_idx").on(table.portfolioId),
     symbolIdx: index("transactions_symbol_idx").on(table.symbol),
     serverOnlyNoClientAccess: serverOnlyNoClientAccessPolicy(),
+    appRuntimeAccess: appRuntimeAccessPolicy(),
 })).enableRLS();
 
 // ---------------------------------------------------------------------------
@@ -241,6 +262,7 @@ export const alphaRadarTrackedFilers = pgTable("alpha_radar_tracked_filers", {
     slugIdx: uniqueIndex("alpha_radar_tracked_filers_slug_idx").on(table.slug),
     cikIdx: uniqueIndex("alpha_radar_tracked_filers_cik_idx").on(table.cik),
     serverOnlyNoClientAccess: serverOnlyNoClientAccessPolicy(),
+    appRuntimeAccess: appRuntimeAccessPolicy(),
 })).enableRLS();
 
 export const alphaRadarSecFilings = pgTable("alpha_radar_sec_filings", {
@@ -271,6 +293,7 @@ export const alphaRadarSecFilings = pgTable("alpha_radar_sec_filings", {
         table.filingType,
     ),
     serverOnlyNoClientAccess: serverOnlyNoClientAccessPolicy(),
+    appRuntimeAccess: appRuntimeAccessPolicy(),
 })).enableRLS();
 
 export const alphaRadarFilingHoldings = pgTable("alpha_radar_filing_holdings", {
@@ -298,6 +321,7 @@ export const alphaRadarFilingHoldings = pgTable("alpha_radar_filing_holdings", {
     tickerIdx: index("alpha_radar_filing_holdings_ticker_idx").on(table.ticker),
     filingCusipIdx: uniqueIndex("alpha_radar_filing_holdings_filing_cusip_idx").on(table.filingId, table.cusip),
     serverOnlyNoClientAccess: serverOnlyNoClientAccessPolicy(),
+    appRuntimeAccess: appRuntimeAccessPolicy(),
 })).enableRLS();
 
 export const alphaRadarHoldingChanges = pgTable("alpha_radar_holding_changes", {
@@ -336,6 +360,7 @@ export const alphaRadarHoldingChanges = pgTable("alpha_radar_holding_changes", {
         table.cusip,
     ),
     serverOnlyNoClientAccess: serverOnlyNoClientAccessPolicy(),
+    appRuntimeAccess: appRuntimeAccessPolicy(),
 })).enableRLS();
 
 export const alphaRadarReports = pgTable("alpha_radar_reports", {
@@ -364,6 +389,7 @@ export const alphaRadarReports = pgTable("alpha_radar_reports", {
         table.generatorVersion,
     ),
     serverOnlyNoClientAccess: serverOnlyNoClientAccessPolicy(),
+    appRuntimeAccess: appRuntimeAccessPolicy(),
 })).enableRLS();
 
 export const alphaRadarSemanticChunks = pgTable("alpha_radar_semantic_chunks", {
@@ -404,6 +430,7 @@ export const alphaRadarSemanticChunks = pgTable("alpha_radar_semantic_chunks", {
     keywordsGinIdx: index("alpha_radar_semantic_chunks_keywords_gin_idx").using("gin", table.keywords),
     metadataGinIdx: index("alpha_radar_semantic_chunks_metadata_gin_idx").using("gin", table.metadata),
     serverOnlyNoClientAccess: serverOnlyNoClientAccessPolicy(),
+    appRuntimeAccess: appRuntimeAccessPolicy(),
 })).enableRLS();
 
 export const portfoliosRelations = relations(portfolios, ({ one, many }) => ({
