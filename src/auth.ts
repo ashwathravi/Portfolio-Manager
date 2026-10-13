@@ -11,6 +11,7 @@ import {
     authVerificationTokens,
 } from "@/db/schema";
 import { isGoogleProfileAllowed } from "@/lib/auth/access";
+import { SESSION_MAX_AGE_SECONDS, SESSION_UPDATE_AGE_SECONDS } from "@/lib/auth/session-policy";
 
 type AuthAdapterSchema = NonNullable<Parameters<typeof DrizzleAdapter<typeof db>>[1]>;
 
@@ -24,7 +25,11 @@ const authAdapterSchema = {
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
     adapter: DrizzleAdapter(db, authAdapterSchema),
-    session: { strategy: "database" },
+    session: {
+        strategy: "database",
+        maxAge: SESSION_MAX_AGE_SECONDS,
+        updateAge: SESSION_UPDATE_AGE_SECONDS,
+    },
     pages: {
         signIn: "/login",
         error: "/login",

@@ -43,6 +43,20 @@ describe("Plaid server token vault", () => {
         assert.equal(getPlaidAccessToken("item-memory"), "access-token-memory");
     });
 
+    test("never uses INTERNAL_API_SECRET as the token encryption key", () => {
+        process.env.INTERNAL_API_SECRET = "unrelated-service-secret";
+
+        const result = storePlaidAccessToken({
+            itemId: "item-no-key",
+            accessToken: "access-token-no-key",
+        });
+
+        assert.equal(result.durable, false);
+        assert.equal(result.mode, "memory");
+        assert.match(result.reason ?? "", /PLAID_TOKEN_ENCRYPTION_KEY/);
+        assert.doesNotMatch(result.reason ?? "", /INTERNAL_API_SECRET/);
+    });
+
     test("scopes in-memory access tokens by user id", () => {
         storePlaidAccessToken({
             itemId: "item-shared",

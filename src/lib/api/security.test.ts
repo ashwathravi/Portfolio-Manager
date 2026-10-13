@@ -5,9 +5,6 @@ import {
     applyApiSecurity,
     authenticateApiRequest,
     rateLimitApiRequest,
-    readUserId,
-    requireApiUserScope,
-    requirePortfolioUserScope,
     resetApiSecurityForTests,
 } from "./security";
 
@@ -45,36 +42,16 @@ describe("API security helpers", () => {
         assert.equal(authenticateApiRequest(request({ "x-api-key": "test-secret" })).ok, true);
     });
 
-    test("requires a user id for scoped portfolio routes when auth is enabled", () => {
+    test("never takes a user from the x-user-id header, even with the internal secret", () => {
         process.env.INTERNAL_API_SECRET = "test-secret";
 
-        const missing = requirePortfolioUserScope(request({ "x-api-key": "test-secret" }, "/api/portfolio/p/value"));
-        assert.equal(missing.ok, false);
-
-        const scoped = requirePortfolioUserScope(request({
+        const result = authenticateApiRequest(request({
             "x-api-key": "test-secret",
             "x-user-id": "11111111-1111-4111-8111-111111111111",
         }, "/api/portfolio/p/value"));
-        assert.equal(scoped.ok, true);
-        if (scoped.ok) assert.equal(scoped.context.userId, "11111111-1111-4111-8111-111111111111");
-    });
 
-    test("requires user scope for provider-backed API actions", () => {
-        assert.equal(requireApiUserScope(request()).ok, false);
-
-        const scoped = requireApiUserScope(request({
-            "x-user-id": "11111111-1111-4111-8111-111111111111",
-        }, "/api/plaid/link-token"));
-
-        assert.equal(scoped.ok, true);
-        if (scoped.ok) {
-            assert.equal(scoped.context.authRequired, false);
-            assert.equal(scoped.context.userId, "11111111-1111-4111-8111-111111111111");
-        }
-    });
-
-    test("ignores malformed user ids", () => {
-        assert.equal(readUserId(request({ "x-user-id": "not-a-uuid" })), null);
+        assert.equal(result.ok, true);
+        if (result.ok) assert.equal(result.context.userId, null);
     });
 
     test("returns 429 with retry-after when a route exceeds its fixed window", () => {

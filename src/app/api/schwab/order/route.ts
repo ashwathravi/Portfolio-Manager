@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { apiError, authenticateApiRequest, internalServerError } from '@/lib/api/security';
 import { schwabClient } from '@/lib/api/schwab/client';
+import { isSchwabIntegrationEnabled } from '@/lib/api/schwab/feature';
 import { orderSchema } from '@/lib/validators/execution';
 
 interface SchwabOrderPayload {
@@ -20,6 +21,8 @@ interface SchwabOrderPayload {
 }
 
 export async function POST(request: Request) {
+    if (!isSchwabIntegrationEnabled()) return apiError('Not found', 'NOT_FOUND', 404);
+
     if (!process.env.INTERNAL_API_SECRET?.trim()) {
         return apiError('API authentication is not configured.', 'API_AUTH_NOT_CONFIGURED', 503);
     }

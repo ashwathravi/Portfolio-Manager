@@ -12,11 +12,6 @@ interface AuthSuccess {
     context: ApiAuthContext;
 }
 
-interface ScopedAuthSuccess {
-    ok: true;
-    context: ApiAuthContext & { userId: string };
-}
-
 interface AuthFailure {
     ok: false;
     response: NextResponse;
@@ -38,7 +33,6 @@ type ApiRequestLike = {
     url?: string;
 };
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const rateBuckets = new Map<string, RateBucket>();
 let nextSweepAt = 0;
 
@@ -61,10 +55,9 @@ export function authenticateApiRequest(
 ): AuthSuccess | AuthFailure {
     const configuredSecret = env.INTERNAL_API_SECRET?.trim();
     const authRequired = Boolean(configuredSecret) || env.NODE_ENV === "production";
-    const userId = readUserId(request);
 
     if (!authRequired) {
-        return { ok: true, context: { userId, authRequired: false } };
+        return { ok: true, context: { userId: null, authRequired: false } };
     }
 
     if (!configuredSecret) {
@@ -82,38 +75,9 @@ export function authenticateApiRequest(
         };
     }
 
-    return { ok: true, context: { userId, authRequired: true } };
-}
-
-export function requirePortfolioUserScope(request: ApiRequestLike): AuthSuccess | AuthFailure {
-    const auth = authenticateApiRequest(request);
-    if (!auth.ok) return auth;
-
-    if (auth.context.authRequired && !auth.context.userId) {
-        return {
-            ok: false,
-            response: apiError("User scope is required.", "USER_SCOPE_REQUIRED", 401),
-        };
-    }
-
-    return auth;
-}
-
-export function requireApiUserScope(request: ApiRequestLike): ScopedAuthSuccess | AuthFailure {
-    const auth = authenticateApiRequest(request);
-    if (!auth.ok) return auth;
-
-    if (!auth.context.userId) {
-        return {
-            ok: false,
-            response: apiError("User scope is required.", "USER_SCOPE_REQUIRED", 401),
-        };
-    }
-
-    return {
-        ok: true,
-        context: { ...auth.context, userId: auth.context.userId },
-    };
+    // The internal secret identifies a service, never a user: user-scoped
+    // routes take their user from the Auth.js session only.
+    return { ok: true, context: { userId: null, authRequired: true } };
 }
 
 export function apiError(
@@ -156,7 +120,7 @@ export function providerRateLimitError(retryAfterSeconds: number): NextResponse 
 
 export function rateLimitApiRequest(
     request: ApiRequestLike,
-    authContext: ApiAuthContext = { userId: readUserId(request), authRequired: false },
+    authContext: ApiAuthContext = { userId: null, authRequired: false },
     options: { skipIp?: boolean } = {},
 ): NextResponse | undefined {
     if (process.env.API_RATE_LIMIT_DISABLED === "1") return undefined;
@@ -176,11 +140,6 @@ export function rateLimitApiRequest(
     }
 
     return undefined;
-}
-
-export function readUserId(request: ApiRequestLike): string | null {
-    const value = request.headers.get("x-user-id")?.trim();
-    return value && UUID_RE.test(value) ? value : null;
 }
 
 export function resetApiSecurityForTests(): void {

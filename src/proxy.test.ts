@@ -39,6 +39,7 @@ function configureAuth() {
     process.env.AUTH_SECRET = "auth-secret";
     process.env.AUTH_GOOGLE_ID = "google-client-id";
     process.env.AUTH_GOOGLE_SECRET = "google-client-secret";
+    process.env.AUTH_ALLOWED_EMAILS = "owner@example.com";
 }
 
 function setNodeEnv(value: string | undefined) {
@@ -54,6 +55,7 @@ describe("API proxy security", () => {
         delete process.env.AUTH_SECRET;
         delete process.env.AUTH_GOOGLE_ID;
         delete process.env.AUTH_GOOGLE_SECRET;
+        delete process.env.AUTH_ALLOWED_EMAILS;
         delete process.env.AUTH_LOCAL_DEV_BYPASS;
         delete process.env.AUTH_LOCAL_DEV_USER_ID;
         setNodeEnv(ORIGINAL_NODE_ENV);
@@ -114,7 +116,6 @@ describe("API proxy security", () => {
         const rejectedApiResponse = await proxy(apiRequest());
         const internalApiResponse = await proxy(apiRequest({
             "x-api-key": "test-secret",
-            "x-user-id": USER_ID,
         }));
 
         assert.equal(pageResponse.status, 503);
@@ -189,7 +190,6 @@ describe("API proxy security", () => {
 
         const response = handleVerifiedRequest(apiRequest({
             "x-api-key": "test-secret",
-            "x-user-id": USER_ID,
         }));
 
         assert.equal(response.status, 200);

@@ -23,6 +23,8 @@ describe("Plaid API routes", () => {
     afterEach(() => {
         globalThis.fetch = ORIGINAL_FETCH;
         delete process.env.INTERNAL_API_SECRET;
+        delete process.env.AUTH_LOCAL_DEV_BYPASS;
+        delete process.env.AUTH_LOCAL_DEV_USER_ID;
         delete process.env.PLAID_CLIENT_ID;
         delete process.env.PLAID_SECRET;
         delete process.env.PLAID_ENV;
@@ -36,38 +38,31 @@ describe("Plaid API routes", () => {
         resetApiSecurityForTests();
     });
 
-    test("rejects unauthenticated Plaid requests when API auth is enabled", async () => {
-        process.env.INTERNAL_API_SECRET = "test-secret";
-
+    test("fails closed when sign-in is not configured", async () => {
         const response = await createLinkToken(new Request("https://atlas.test/api/plaid/link-token", {
             method: "POST",
         }));
 
-        assert.equal(response.status, 401);
+        assert.equal(response.status, 503);
         assert.deepEqual(await response.json(), {
-            error: "Unauthorized",
-            code: "UNAUTHORIZED",
+            error: "Authentication is not configured.",
+            code: "AUTH_CONFIGURATION_ERROR",
         });
     });
 
-    test("rejects Plaid requests without a scoped user id", async () => {
+    test("does not accept the internal secret and a user id header as a session", async () => {
         process.env.INTERNAL_API_SECRET = "test-secret";
 
         const response = await createLinkToken(new Request("https://atlas.test/api/plaid/link-token", {
             method: "POST",
-            headers: { "x-api-key": "test-secret" },
+            headers: { "x-api-key": "test-secret", "x-user-id": USER_ID },
         }));
 
-        assert.equal(response.status, 401);
-        assert.deepEqual(await response.json(), {
-            error: "User scope is required.",
-            code: "USER_SCOPE_REQUIRED",
-        });
+        assert.equal(response.status, 503);
     });
 
     test("rate limits repeated Plaid link attempts before provider calls", async (t) => {
         t.mock.timers.enable({ apis: ["Date"], now: 0 });
-        process.env.INTERNAL_API_SECRET = "test-secret";
 
         const request = () => new Request("https://atlas.test/api/plaid/link-token", {
             method: "POST",
@@ -75,7 +70,7 @@ describe("Plaid API routes", () => {
         });
 
         for (let i = 0; i < 20; i++) {
-            assert.equal((await createLinkToken(request())).status, 401);
+            assert.equal((await createLinkToken(request())).status, 503);
         }
 
         const response = await createLinkToken(request());
@@ -221,8 +216,11 @@ describe("Plaid API routes", () => {
     });
 });
 
+// Signs in as the fixed local-bypass principal (non-production only) and
+// configures Plaid sandbox credentials.
 function configurePlaidEnv(): void {
-    process.env.INTERNAL_API_SECRET = "test-secret";
+    process.env.AUTH_LOCAL_DEV_BYPASS = "1";
+    process.env.AUTH_LOCAL_DEV_USER_ID = USER_ID;
     process.env.PLAID_CLIENT_ID = "client-id";
     process.env.PLAID_SECRET = "sandbox-secret";
     process.env.PLAID_ENV = "sandbox";
@@ -233,8 +231,6 @@ function authorizedRequest(pathname: string, body?: unknown): Request {
         method: "POST",
         headers: {
             "Content-Type": "application/json",
-            "x-api-key": "test-secret",
-            "x-user-id": USER_ID,
         },
         body: body === undefined ? undefined : JSON.stringify(body),
     });

@@ -8,12 +8,11 @@ import {
 } from "@/lib/auth/access";
 import {
     apiError,
-    authenticateApiRequest,
     rateLimitApiRequest,
     type ApiAuthContext,
 } from "@/lib/api/security";
 
-type ApiRequestLike = Parameters<typeof authenticateApiRequest>[0];
+type ApiRequestLike = Parameters<typeof rateLimitApiRequest>[0];
 
 interface ScopedAuthSuccess {
     ok: true;
@@ -30,6 +29,11 @@ interface SessionScopeOptions {
     getSession?: () => Promise<Session | null>;
 }
 
+/**
+ * The user for a session-backed API route: the Auth.js session user, or the
+ * fixed local-dev principal in explicit non-production bypass mode. Nothing
+ * else names a user: no header, and no shared secret.
+ */
 export async function requireSessionApiUserScope(
     request: ApiRequestLike,
     {
@@ -51,31 +55,20 @@ export async function requireSessionApiUserScope(
             return authorizeUser(request, session.user.id, true);
         }
 
-        if (!env.INTERNAL_API_SECRET?.trim()) {
-            return {
-                ok: false,
-                response: apiError("Unauthorized", "UNAUTHORIZED", 401),
-            };
-        }
-    } else if (!env.INTERNAL_API_SECRET?.trim()) {
         return {
             ok: false,
-            response: apiError(
-                "Authentication is not configured.",
-                "AUTH_CONFIGURATION_ERROR",
-                503,
-            ),
+            response: apiError("Unauthorized", "UNAUTHORIZED", 401),
         };
     }
 
-    const internalAuth = authenticateApiRequest(request, env);
-    if (!internalAuth.ok) return internalAuth;
-
-    return authorizeUser(
-        request,
-        internalAuth.context.userId,
-        internalAuth.context.authRequired,
-    );
+    return {
+        ok: false,
+        response: apiError(
+            "Authentication is not configured.",
+            "AUTH_CONFIGURATION_ERROR",
+            503,
+        ),
+    };
 }
 
 function authorizeUser(

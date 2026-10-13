@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
     authRuntimeMode,
     getLocalDevUserId,
+    hasAccessAllowlist,
     isGoogleProfileAllowed,
 } from "./access";
 
@@ -14,6 +15,24 @@ describe("Google auth access policy", () => {
                 email: "ashwath@example.com",
                 email_verified: true,
             }, {}),
+            true,
+        );
+    });
+
+    test("denies every profile when an invite list is required but none is set", () => {
+        const profile = { email: "ashwath@example.com", email_verified: true };
+
+        assert.equal(isGoogleProfileAllowed(profile, { requireAllowlist: true }), false);
+        assert.equal(isGoogleProfileAllowed(profile, { requireAllowlist: true, allowedEmails: " , " }), false);
+        assert.equal(
+            isGoogleProfileAllowed(profile, { requireAllowlist: true, allowedEmails: "ashwath@example.com" }),
+            true,
+        );
+        assert.equal(
+            isGoogleProfileAllowed(
+                { ...profile, hd: "example.com" },
+                { requireAllowlist: true, allowedDomains: "example.com" },
+            ),
             true,
         );
     });
@@ -80,6 +99,29 @@ describe("Auth runtime configuration", () => {
             AUTH_SECRET: "secret",
             AUTH_GOOGLE_ID: "client-id",
             AUTH_GOOGLE_SECRET: "client-secret",
+            AUTH_ALLOWED_EMAILS: "owner@example.com",
+        }), "configured");
+    });
+
+    test("fails closed in production when no invite list is set", () => {
+        const env = {
+            NODE_ENV: "production",
+            AUTH_SECRET: "secret",
+            AUTH_GOOGLE_ID: "client-id",
+            AUTH_GOOGLE_SECRET: "client-secret",
+        };
+
+        assert.equal(authRuntimeMode(env), "invalid");
+        assert.equal(authRuntimeMode({ ...env, AUTH_ALLOWED_EMAILS: "  " }), "invalid");
+        assert.equal(authRuntimeMode({ ...env, AUTH_ALLOWED_DOMAINS: "example.com" }), "configured");
+    });
+
+    test("keeps open sign-in available outside production", () => {
+        assert.equal(authRuntimeMode({
+            NODE_ENV: "development",
+            AUTH_SECRET: "secret",
+            AUTH_GOOGLE_ID: "client-id",
+            AUTH_GOOGLE_SECRET: "client-secret",
         }), "configured");
     });
 
@@ -115,5 +157,17 @@ describe("Auth runtime configuration", () => {
 
         assert.equal(authRuntimeMode(env), "invalid");
         assert.equal(getLocalDevUserId(env), null);
+    });
+});
+
+describe("hasAccessAllowlist", () => {
+    test("is true when either list has an entry", () => {
+        assert.equal(hasAccessAllowlist({ AUTH_ALLOWED_EMAILS: "a@example.com" }), true);
+        assert.equal(hasAccessAllowlist({ AUTH_ALLOWED_DOMAINS: "example.com" }), true);
+    });
+
+    test("ignores empty and whitespace-only lists", () => {
+        assert.equal(hasAccessAllowlist({}), false);
+        assert.equal(hasAccessAllowlist({ AUTH_ALLOWED_EMAILS: "", AUTH_ALLOWED_DOMAINS: " , " }), false);
     });
 });

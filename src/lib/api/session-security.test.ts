@@ -18,6 +18,7 @@ const configuredEnv = {
     AUTH_SECRET: "auth-secret",
     AUTH_GOOGLE_ID: "google-client-id",
     AUTH_GOOGLE_SECRET: "google-client-secret",
+    AUTH_ALLOWED_EMAILS: "owner@example.com",
 };
 
 describe("session-backed API user scope", () => {
@@ -82,25 +83,24 @@ describe("session-backed API user scope", () => {
         if (result.ok) assert.equal(result.context.userId, USER_A);
     });
 
-    test("allows a validated internal principal without enabling browser auth", async () => {
-        const result = await requireSessionApiUserScope(
-            request({
-                "x-api-key": "test-secret",
-                "x-user-id": USER_A,
-            }),
-            {
-                env: {
-                    NODE_ENV: "production",
-                    AUTH_SECRET: "partial-only",
-                    INTERNAL_API_SECRET: "test-secret",
-                },
-                getSession: async () => {
-                    throw new Error("partial auth must not trigger a session lookup");
-                },
-            },
-        );
+    test("never accepts the internal secret and a user id header in place of a session", async () => {
+        const headers = { "x-api-key": "test-secret", "x-user-id": USER_A };
+        const noSessionLookup = async () => {
+            throw new Error("incomplete auth must not trigger a session lookup");
+        };
 
-        assert.equal(result.ok, true);
-        if (result.ok) assert.equal(result.context.userId, USER_A);
+        const incomplete = await requireSessionApiUserScope(request(headers), {
+            env: { NODE_ENV: "production", AUTH_SECRET: "partial-only", INTERNAL_API_SECRET: "test-secret" },
+            getSession: noSessionLookup,
+        });
+        assert.equal(incomplete.ok, false);
+        if (!incomplete.ok) assert.equal(incomplete.response.status, 503);
+
+        const configured = await requireSessionApiUserScope(request(headers), {
+            env: { ...configuredEnv, INTERNAL_API_SECRET: "test-secret" },
+            getSession: async () => null,
+        });
+        assert.equal(configured.ok, false);
+        if (!configured.ok) assert.equal(configured.response.status, 401);
     });
 });
