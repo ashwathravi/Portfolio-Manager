@@ -17,6 +17,7 @@ import { PolicyStrip } from '@/components/today/PolicyStrip';
 import { TodayTheses } from '@/components/today/TodayTheses';
 import { computeRiskPolicyDashboard } from '@/lib/risk-policy';
 import { loadDashboardPortfolios } from '@/lib/dashboard-portfolios';
+import { DataUnavailableNotice } from '@/components/data-display/DataUnavailableNotice';
 import { requirePageUserId } from '@/lib/auth/request-user';
 import { buildDashboardPortfoliosQuery, buildUserTransactionsQuery } from '@/lib/portfolio-repository';
 import { toActivityRows, type TransactionRowInput } from '@/lib/portfolio/activity';
@@ -42,7 +43,15 @@ export const dynamic = 'force-dynamic';
 
 export default async function Today() {
   const userId = await requirePageUserId();
-  const allPortfolios = await loadDashboardPortfolios(userId, buildDashboardPortfoliosQuery);
+  const { portfolios: allPortfolios, unavailable } = await loadDashboardPortfolios(userId, buildDashboardPortfoliosQuery);
+  if (unavailable) {
+    return (
+      <div className="pm-dashboard-stack p-6">
+        <TodayHeader />
+        <DataUnavailableNotice />
+      </div>
+    );
+  }
 
   let transactionRows: TransactionRowInput[] = [];
   try {
