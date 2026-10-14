@@ -6,6 +6,7 @@ import {
     getLocalDevUserId,
     hasAccessAllowlist,
     isGoogleProfileAllowed,
+    isSessionEmailAllowed,
 } from "./access";
 
 describe("Google auth access policy", () => {
@@ -169,5 +170,37 @@ describe("hasAccessAllowlist", () => {
     test("ignores empty and whitespace-only lists", () => {
         assert.equal(hasAccessAllowlist({}), false);
         assert.equal(hasAccessAllowlist({ AUTH_ALLOWED_EMAILS: "", AUTH_ALLOWED_DOMAINS: " , " }), false);
+    });
+});
+
+describe("isSessionEmailAllowed", () => {
+    test("ends a session whose email has left the invite list", () => {
+        const policy = { allowedEmails: "owner@example.com", requireAllowlist: true };
+        assert.equal(isSessionEmailAllowed("owner@example.com", policy), true);
+        assert.equal(isSessionEmailAllowed(" Owner@Example.com ", policy), true);
+        assert.equal(isSessionEmailAllowed("former@example.com", policy), false);
+    });
+
+    test("checks the domain list against the email's domain", () => {
+        const policy = { allowedDomains: "example.com", requireAllowlist: true };
+        assert.equal(isSessionEmailAllowed("anyone@example.com", policy), true);
+        assert.equal(isSessionEmailAllowed("someone@example.com.evil.test", policy), false);
+        assert.equal(isSessionEmailAllowed("someone@evil.test", policy), false);
+    });
+
+    test("requires both lists to match when both are set", () => {
+        const policy = { allowedEmails: "a@example.com", allowedDomains: "example.com", requireAllowlist: true };
+        assert.equal(isSessionEmailAllowed("a@example.com", policy), true);
+        assert.equal(isSessionEmailAllowed("b@example.com", policy), false);
+    });
+
+    test("denies sessions without an email whenever a list is set", () => {
+        assert.equal(isSessionEmailAllowed(undefined, { allowedEmails: "a@example.com" }), false);
+        assert.equal(isSessionEmailAllowed("", { allowedDomains: "example.com" }), false);
+    });
+
+    test("follows the open or invite-only rule when no list is set", () => {
+        assert.equal(isSessionEmailAllowed("anyone@example.com", { requireAllowlist: false }), true);
+        assert.equal(isSessionEmailAllowed("anyone@example.com", { requireAllowlist: true }), false);
     });
 });
