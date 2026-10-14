@@ -71,13 +71,22 @@ Auth.js (required for any network-reachable environment):
 AUTH_SECRET="replace-with-a-managed-random-secret"
 AUTH_GOOGLE_ID="your_google_oauth_client_id"
 AUTH_GOOGLE_SECRET="your_google_oauth_client_secret"
+# Required in production: the invite list (comma-separated). Set either or
+# both; when both are set a person must match both.
+AUTH_ALLOWED_EMAILS="you@example.com"
+# AUTH_ALLOWED_DOMAINS="example.com"
 ```
 
-Missing or partial Auth.js configuration fails closed for browser access.
-Machine API callers may still use a validated `INTERNAL_API_SECRET` together
-with an explicit `x-user-id`; a browser session identity always takes
-precedence over that header. Fixture-only local and E2E use may opt into one
-fixed principal; this bypass is ignored in production:
+Missing or partial Auth.js configuration fails closed for browser access, and
+so does production without an invite list (503). The invite list is checked at
+sign-in and again on every session read, so removing someone ends their access
+immediately.
+
+User-scoped API routes take the user only from the Auth.js session. A
+validated `INTERNAL_API_SECRET` (bearer token or `x-api-key`) authorizes
+service calls to routes that need no user, such as market data; it never
+names a user, and an `x-user-id` header is ignored. Fixture-only local and E2E
+use may opt into one fixed principal; this bypass is ignored in production:
 
 ```bash
 AUTH_LOCAL_DEV_BYPASS="1"
@@ -104,9 +113,11 @@ PLAID_COUNTRY_CODES="US"
 
 `PLAID_TOKEN_ENCRYPTION_KEY` enables encrypted local persistence for Plaid access tokens in `.runtime/plaid-token-vault.json`. Without it, Plaid tokens are cached only in the running server process and accounts must be reconnected after a server restart before provider sync can resume.
 
-Schwab:
+Schwab (off unless `SCHWAB_INTEGRATION_ENABLED="1"`, and never in production;
+the routes are not ready for real accounts):
 
 ```bash
+SCHWAB_INTEGRATION_ENABLED="0"
 SCHWAB_CLIENT_ID=""
 SCHWAB_CLIENT_SECRET=""
 SCHWAB_REDIRECT_URI=""
@@ -121,9 +132,10 @@ Production secrets:
 
 - Do not deploy `.env` or `.env.local`; configure production values through the hosting platform or a secrets manager such as Vercel environment variables, AWS Secrets Manager, or 1Password CLI.
 - `DATABASE_URL` must be a production database credential with SSL enabled. Local-style hosts such as `localhost`, `127.0.0.1`, `postgres`, or `db` are treated as misconfiguration in production.
-- Configure all three Auth.js values (`AUTH_SECRET`, `AUTH_GOOGLE_ID`, and `AUTH_GOOGLE_SECRET`). Missing or partial production auth returns a closed configuration error; `AUTH_LOCAL_DEV_BYPASS` can never enable production access.
+- Configure all three Auth.js values (`AUTH_SECRET`, `AUTH_GOOGLE_ID`, and `AUTH_GOOGLE_SECRET`) and at least one non-empty invite list (`AUTH_ALLOWED_EMAILS` or `AUTH_ALLOWED_DOMAINS`). Missing or partial production auth, or no invite list, returns a closed configuration error (503); `AUTH_LOCAL_DEV_BYPASS` can never enable production access.
 - Keep Plaid and broker access tokens server-side only. The encrypted local Plaid vault is a development bridge; production sync needs user-scoped durable storage and managed key rotation.
-- Set `INTERNAL_API_SECRET` before network-visible deployment so API middleware can enforce authenticated requests and per-user rate limits.
+- `INTERNAL_API_SECRET` is optional: set it only if a service needs to call non-user API routes (bearer token or `x-api-key`). It never acts as a user.
+- Set `PLAID_TOKEN_ENCRYPTION_KEY` before linking accounts in production; no other secret is used in its place.
 
 Production Plaid token storage:
 

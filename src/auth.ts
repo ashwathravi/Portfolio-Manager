@@ -10,7 +10,7 @@ import {
     authUsers,
     authVerificationTokens,
 } from "@/db/schema";
-import { isGoogleProfileAllowed } from "@/lib/auth/access";
+import { isGoogleProfileAllowed, isSessionEmailAllowed } from "@/lib/auth/access";
 import { SESSION_MAX_AGE_SECONDS, SESSION_UPDATE_AGE_SECONDS } from "@/lib/auth/session-policy";
 
 type AuthAdapterSchema = NonNullable<Parameters<typeof DrizzleAdapter<typeof db>>[1]>;
@@ -49,6 +49,11 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             return isGoogleProfileAllowed(profile);
         },
         async session({ session, user }) {
+            // A session whose user has left the invite list carries no user,
+            // which every caller treats as signed out.
+            if (!isSessionEmailAllowed(user?.email)) {
+                return { expires: session.expires };
+            }
             if (session.user && user.id) {
                 session.user.id = user.id;
             }

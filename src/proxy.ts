@@ -9,6 +9,7 @@ import {
     getLocalDevUserId,
     isAuthConfigured,
 } from "@/lib/auth/access";
+import { isSchwabIntegrationEnabled } from "@/lib/api/schwab/feature";
 
 type VerifiedRequest = NextRequest & { auth?: Session | null };
 
@@ -28,6 +29,10 @@ const verifiedAuthProxy = auth((request: NextAuthRequest, event: NextFetchEvent)
 
 export async function proxy(request: NextRequest, event?: NextFetchEvent): Promise<Response> {
     const pathname = request.nextUrl.pathname;
+    // Disabled Schwab routes are not found for everyone, signed in or not.
+    if (isSchwabRoute(pathname) && !isSchwabIntegrationEnabled()) {
+        return apiError("Not found", "NOT_FOUND", 404);
+    }
     if (isPublicRoute(pathname)) return NextResponse.next();
 
     const mode = authRuntimeMode();
@@ -94,6 +99,10 @@ function isPublicRoute(pathname: string): boolean {
         || pathname === "/api/health"
         || PUBLIC_ASSET_PATHS.has(pathname)
         || isAuthJsRoute(pathname);
+}
+
+function isSchwabRoute(pathname: string): boolean {
+    return pathname === "/api/auth/schwab" || pathname.startsWith("/api/schwab/");
 }
 
 function isSessionBackedApiRoute(pathname: string, method: string): boolean {

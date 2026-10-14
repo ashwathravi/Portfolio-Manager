@@ -71,6 +71,16 @@ describe("API proxy security", () => {
         assert.equal(response.status, 200);
     });
 
+    test("answers disabled Schwab routes with 404 before authentication", async () => {
+        setNodeEnv("production");
+        configureAuth();
+
+        assert.equal((await proxy(apiRequest({}, "/api/schwab/order", null, [], "POST"))).status, 404);
+        assert.equal((await proxy(apiRequest({}, "/api/auth/schwab"))).status, 404);
+        // Other API routes still require a session.
+        assert.equal((await proxy(apiRequest({}, "/api/market-data/quote"))).status, 401);
+    });
+
     test("keeps only exact public asset paths open", async () => {
         setNodeEnv("production");
 

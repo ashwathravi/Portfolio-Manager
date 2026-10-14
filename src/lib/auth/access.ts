@@ -25,13 +25,17 @@ export interface AuthEnvironment {
 
 export type AuthRuntimeMode = "configured" | "local-bypass" | "invalid";
 
+export function currentAccessPolicy(env: AuthEnvironment = process.env): GoogleAccessPolicy {
+    return {
+        allowedEmails: env.AUTH_ALLOWED_EMAILS,
+        allowedDomains: env.AUTH_ALLOWED_DOMAINS,
+        requireAllowlist: env.NODE_ENV === "production",
+    };
+}
+
 export function isGoogleProfileAllowed(
     profile: GoogleAuthProfile | undefined,
-    policy: GoogleAccessPolicy = {
-        allowedEmails: process.env.AUTH_ALLOWED_EMAILS,
-        allowedDomains: process.env.AUTH_ALLOWED_DOMAINS,
-        requireAllowlist: process.env.NODE_ENV === "production",
-    },
+    policy: GoogleAccessPolicy = currentAccessPolicy(),
 ): boolean {
     const email = typeof profile?.email === "string" ? profile.email.trim().toLowerCase() : "";
     const emailVerified = profile?.email_verified === true;
@@ -48,6 +52,28 @@ export function isGoogleProfileAllowed(
 
     const hostedDomain = typeof profile?.hd === "string" ? profile.hd.trim().toLowerCase() : "";
     return allowedDomains.includes(hostedDomain);
+}
+
+/**
+ * Whether an existing session's user is still on the invite list. Checked on
+ * every session read, so removing someone from the list ends their access
+ * immediately rather than when their session expires. At sign-in the domain
+ * list is checked against Google's hosted-domain claim; here, where only the
+ * stored email is available, against the email's domain.
+ */
+export function isSessionEmailAllowed(
+    email: unknown,
+    policy: GoogleAccessPolicy = currentAccessPolicy(),
+): boolean {
+    const allowedEmails = parseCsv(policy.allowedEmails).map((entry) => entry.toLowerCase());
+    const allowedDomains = parseCsv(policy.allowedDomains).map((entry) => entry.toLowerCase());
+    if (allowedEmails.length === 0 && allowedDomains.length === 0) return !policy.requireAllowlist;
+
+    const normalized = typeof email === "string" ? email.trim().toLowerCase() : "";
+    if (!normalized) return false;
+    if (allowedEmails.length > 0 && !allowedEmails.includes(normalized)) return false;
+    if (allowedDomains.length === 0) return true;
+    return allowedDomains.includes(normalized.slice(normalized.lastIndexOf("@") + 1));
 }
 
 export function authRuntimeMode(env: AuthEnvironment = process.env): AuthRuntimeMode {
