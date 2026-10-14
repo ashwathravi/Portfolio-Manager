@@ -41,18 +41,18 @@ export async function requireSessionApiUserScope(
         getSession = auth,
     }: SessionScopeOptions = {},
 ): Promise<ScopedAuthSuccess | AuthFailure> {
-    const ipLimited = rateLimitApiRequest(request, { userId: null, authRequired: true });
+    const ipLimited = await rateLimitApiRequest(request, { userId: null, authRequired: true });
     if (ipLimited) return { ok: false, response: ipLimited };
 
     const mode = authRuntimeMode(env);
     if (mode === "local-bypass") {
-        return authorizeUser(request, getLocalDevUserId(env), true);
+        return authorizeUser(request, getLocalDevUserId(env));
     }
 
     if (mode === "configured") {
         const session = await getSession();
         if (session?.user?.id) {
-            return authorizeUser(request, session.user.id, true);
+            return authorizeUser(request, session.user.id);
         }
 
         return {
@@ -71,11 +71,10 @@ export async function requireSessionApiUserScope(
     };
 }
 
-function authorizeUser(
+async function authorizeUser(
     request: ApiRequestLike,
     userId: string | null,
-    authRequired: boolean,
-): ScopedAuthSuccess | AuthFailure {
+): Promise<ScopedAuthSuccess | AuthFailure> {
     if (!userId) {
         return {
             ok: false,
@@ -83,15 +82,15 @@ function authorizeUser(
         };
     }
 
-    const userLimited = rateLimitApiRequest(
+    const userLimited = await rateLimitApiRequest(
         request,
-        { userId, authRequired },
+        { userId, authRequired: true },
         { skipIp: true },
     );
     if (userLimited) return { ok: false, response: userLimited };
 
     return {
         ok: true,
-        context: { userId, authRequired },
+        context: { userId, authRequired: true },
     };
 }

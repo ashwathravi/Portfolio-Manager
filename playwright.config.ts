@@ -69,6 +69,12 @@ export default defineConfig({
             // one). An empty value stops Next from loading a developer's real
             // DATABASE_URL out of .env.local into the test server.
             DATABASE_URL: process.env.DATABASE_URL ?? '',
+            // Same for Upstash: E2E always uses the in-memory rate limiter,
+            // so test runs never spend (or trip over) a shared Redis budget.
+            KV_REST_API_URL: '',
+            KV_REST_API_TOKEN: '',
+            UPSTASH_REDIS_REST_URL: '',
+            UPSTASH_REDIS_REST_TOKEN: '',
         },
         url: 'http://localhost:3000',
         reuseExistingServer: !process.env.CI,

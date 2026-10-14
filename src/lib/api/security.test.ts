@@ -54,26 +54,44 @@ describe("API security helpers", () => {
         if (result.ok) assert.equal(result.context.userId, null);
     });
 
-    test("returns 429 with retry-after when a route exceeds its fixed window", () => {
+    test("returns 429 with retry-after when a route exceeds its fixed window", async () => {
         mock.timers.enable({ apis: ["Date"], now: 0 });
         const limitedRequest = request({ "x-forwarded-for": "203.0.113.9" }, "/api/market-data/search");
         for (let i = 0; i < 30; i++) {
-            assert.equal(rateLimitApiRequest(limitedRequest), undefined);
+            assert.equal(await rateLimitApiRequest(limitedRequest), undefined);
         }
 
-        const response = rateLimitApiRequest(limitedRequest);
+        const response = await rateLimitApiRequest(limitedRequest);
         assert.ok(response);
         assert.equal(response.status, 429);
         assert.equal(response.headers.get("Retry-After"), "60");
     });
 
-    test("applyApiSecurity composes auth and rate limiting", () => {
+    test("opens a new window once the old one ends", async () => {
+        mock.timers.enable({ apis: ["Date"], now: 0 });
+        const limitedRequest = request({ "x-forwarded-for": "203.0.113.10" }, "/api/plaid/link-token");
+        for (let i = 0; i < 20; i++) await rateLimitApiRequest(limitedRequest);
+        assert.ok(await rateLimitApiRequest(limitedRequest));
+
+        mock.timers.tick(60_000);
+        assert.equal(await rateLimitApiRequest(limitedRequest), undefined);
+    });
+
+    test("can be switched off for load tests", async () => {
+        process.env.API_RATE_LIMIT_DISABLED = "1";
+        const limitedRequest = request({ "x-forwarded-for": "203.0.113.11" }, "/api/plaid/link-token");
+        for (let i = 0; i < 25; i++) {
+            assert.equal(await rateLimitApiRequest(limitedRequest), undefined);
+        }
+    });
+
+    test("applyApiSecurity composes auth and rate limiting", async () => {
         process.env.INTERNAL_API_SECRET = "test-secret";
         process.env.API_RATE_LIMIT_DISABLED = "1";
 
-        const unauthorized = applyApiSecurity(request());
+        const unauthorized = await applyApiSecurity(request());
         assert.ok(unauthorized);
         assert.equal(unauthorized.status, 401);
-        assert.equal(applyApiSecurity(request({ "x-api-key": "test-secret" })), undefined);
+        assert.equal(await applyApiSecurity(request({ "x-api-key": "test-secret" })), undefined);
     });
 });

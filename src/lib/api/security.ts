@@ -1,6 +1,14 @@
 import { NextResponse } from "next/server";
 
 import type { AuthEnvironment } from "@/lib/auth/access";
+import {
+    clientIpAddress,
+    createMemoryRateLimitStore,
+    getRateLimitStore,
+    rateLimitRouteKey,
+    setRateLimitStoreForTests,
+    type RateLimitRule,
+} from "@/lib/api/rate-limit";
 
 export interface ApiAuthContext {
     userId: string | null;
@@ -17,36 +25,21 @@ interface AuthFailure {
     response: NextResponse;
 }
 
-interface RateLimitRule {
-    limit: number;
-    windowMs: number;
-}
-
-interface RateBucket {
-    count: number;
-    resetAt: number;
-}
-
 type ApiRequestLike = {
     headers: Headers;
     nextUrl?: { pathname?: string };
     url?: string;
 };
 
-const rateBuckets = new Map<string, RateBucket>();
-let nextSweepAt = 0;
 
-export function applyApiSecurity(
+export async function applyApiSecurity(
     request: ApiRequestLike,
     env: AuthEnvironment = process.env,
-): NextResponse | undefined {
+): Promise<NextResponse | undefined> {
     const auth = authenticateApiRequest(request, env);
     if (!auth.ok) return auth.response;
 
-    const rateLimited = rateLimitApiRequest(request, auth.context);
-    if (rateLimited) return rateLimited;
-
-    return undefined;
+    return rateLimitApiRequest(request, auth.context);
 }
 
 export function authenticateApiRequest(
@@ -118,33 +111,37 @@ export function providerRateLimitError(retryAfterSeconds: number): NextResponse 
     );
 }
 
-export function rateLimitApiRequest(
+/**
+ * Applies the route's limits through the shared store (Upstash in deployed
+ * environments). One check per key: callers that already know the user pass
+ * skipIp so a signed-in request costs a single Redis round trip.
+ */
+export async function rateLimitApiRequest(
     request: ApiRequestLike,
     authContext: ApiAuthContext = { userId: null, authRequired: false },
     options: { skipIp?: boolean } = {},
-): NextResponse | undefined {
+): Promise<NextResponse | undefined> {
     if (process.env.API_RATE_LIMIT_DISABLED === "1") return undefined;
 
-    const pathname = pathnameFor(request);
-    const { ip, user } = rulesFor(pathname);
+    const route = rateLimitRouteKey(pathnameFor(request));
+    const { ip, user } = rulesFor(route);
+    const store = getRateLimitStore();
+
     if (!options.skipIp) {
-        const ipKey = `ip:${pathname}:${clientIp(request)}`;
-        const ipResult = consumeRateBucket(ipKey, ip);
-        if (!ipResult.allowed) return rateLimitResponse(ipResult.retryAfterSeconds);
+        const decision = await store.consume(`ip:${route}:${clientIpAddress(request.headers)}`, ip);
+        if (!decision.allowed) return rateLimitResponse(decision.retryAfterSeconds);
     }
 
     if (authContext.userId) {
-        const userKey = `user:${pathname}:${authContext.userId}`;
-        const userResult = consumeRateBucket(userKey, user);
-        if (!userResult.allowed) return rateLimitResponse(userResult.retryAfterSeconds);
+        const decision = await store.consume(`user:${route}:${authContext.userId}`, user);
+        if (!decision.allowed) return rateLimitResponse(decision.retryAfterSeconds);
     }
 
     return undefined;
 }
 
 export function resetApiSecurityForTests(): void {
-    rateBuckets.clear();
-    nextSweepAt = 0;
+    setRateLimitStoreForTests(createMemoryRateLimitStore());
 }
 
 function rateLimitResponse(retryAfterSeconds: number): NextResponse {
@@ -156,61 +153,41 @@ function rateLimitResponse(retryAfterSeconds: number): NextResponse {
     );
 }
 
-function rulesFor(pathname: string): { ip: RateLimitRule; user: RateLimitRule } {
-    if (pathname.includes("/market-data/search") || pathname.includes("/alpha-radar/memory/search")) {
+function rulesFor(route: string): { ip: RateLimitRule; user: RateLimitRule } {
+    if (route.startsWith("/api/auth/")) {
+        // Sign-in, callback and session endpoints: enough for normal use,
+        // too few for credential stuffing or callback floods.
         return {
-            ip: { limit: 30, windowMs: 60_000 },
-            user: { limit: 60, windowMs: 60_000 },
+            ip: { limit: 30, windowSeconds: 60 },
+            user: { limit: 60, windowSeconds: 60 },
         };
     }
 
-    if (pathname.includes("/plaid/") || pathname.includes("/alpha-radar/refresh")) {
+    if (route.includes("/market-data/search") || route.includes("/alpha-radar/memory/search")) {
         return {
-            ip: { limit: 20, windowMs: 60_000 },
-            user: { limit: 30, windowMs: 60_000 },
+            ip: { limit: 30, windowSeconds: 60 },
+            user: { limit: 60, windowSeconds: 60 },
         };
     }
 
-    if (pathname.includes("/market-data/")) {
+    if (route.includes("/plaid/") || route.includes("/alpha-radar/refresh")) {
         return {
-            ip: { limit: 120, windowMs: 60_000 },
-            user: { limit: 240, windowMs: 60_000 },
+            ip: { limit: 20, windowSeconds: 60 },
+            user: { limit: 30, windowSeconds: 60 },
+        };
+    }
+
+    if (route.includes("/market-data/")) {
+        return {
+            ip: { limit: 120, windowSeconds: 60 },
+            user: { limit: 240, windowSeconds: 60 },
         };
     }
 
     return {
-        ip: { limit: 180, windowMs: 60_000 },
-        user: { limit: 300, windowMs: 60_000 },
+        ip: { limit: 180, windowSeconds: 60 },
+        user: { limit: 300, windowSeconds: 60 },
     };
-}
-
-function consumeRateBucket(key: string, rule: RateLimitRule): { allowed: true } | { allowed: false; retryAfterSeconds: number } {
-    const now = Date.now();
-    sweepExpiredBuckets(now);
-
-    const existing = rateBuckets.get(key);
-    if (!existing || existing.resetAt <= now) {
-        rateBuckets.set(key, { count: 1, resetAt: now + rule.windowMs });
-        return { allowed: true };
-    }
-
-    if (existing.count >= rule.limit) {
-        return {
-            allowed: false,
-            retryAfterSeconds: Math.ceil((existing.resetAt - now) / 1000),
-        };
-    }
-
-    existing.count += 1;
-    return { allowed: true };
-}
-
-function sweepExpiredBuckets(now: number): void {
-    if (now < nextSweepAt) return;
-    nextSweepAt = now + 60_000;
-    for (const [key, bucket] of rateBuckets) {
-        if (bucket.resetAt <= now) rateBuckets.delete(key);
-    }
 }
 
 function readAuthToken(request: ApiRequestLike): string | null {
@@ -245,7 +222,3 @@ function pathnameFor(request: ApiRequestLike): string {
     }
 }
 
-function clientIp(request: ApiRequestLike): string {
-    const forwarded = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
-    return forwarded || request.headers.get("x-real-ip")?.trim() || "unknown";
-}
