@@ -1,6 +1,6 @@
 import type { Session } from "next-auth";
 
-import { auth } from "@/auth";
+import { getRequestSession } from "@/lib/auth/session";
 import { authRuntimeMode, getLocalDevUserId, type AuthEnvironment } from "@/lib/auth/access";
 import type { ViewerIdentity } from "@/lib/identity";
 
@@ -11,7 +11,7 @@ import type { ViewerIdentity } from "@/lib/identity";
  */
 export async function resolveViewerIdentity({
     env = process.env,
-    getSession = auth,
+    getSession = getRequestSession,
 }: { env?: AuthEnvironment; getSession?: () => Promise<Session | null> } = {}): Promise<ViewerIdentity | null> {
     const mode = authRuntimeMode(env);
     if (mode === "invalid") return null;

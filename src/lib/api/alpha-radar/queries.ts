@@ -1,7 +1,6 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient, type UseQueryOptions } from '@tanstack/react-query';
-import { clientApiScopeHeaders } from '@/lib/api/client-scope';
 import type {
     AlphaRadarFilingRecord,
     AlphaRadarHoldingRecord,
@@ -104,7 +103,7 @@ export async function searchAlphaRadarMemory(input: {
 export async function refreshAlphaRadarAll(input: AlphaRadarRefreshRequest = {}): Promise<AlphaRadarRefreshRunResult> {
     return fetchJsonData('/api/alpha-radar/refresh', {
         method: 'POST',
-        headers: clientApiScopeHeaders({ 'Content-Type': 'application/json' }),
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(input),
     });
 }
@@ -115,7 +114,7 @@ export async function refreshAlphaRadarFiler(
 ): Promise<AlphaRadarRefreshRunResult> {
     return fetchJsonData(`/api/alpha-radar/filers/${encodeURIComponent(filerId)}/refresh`, {
         method: 'POST',
-        headers: clientApiScopeHeaders({ 'Content-Type': 'application/json' }),
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(input),
     });
 }

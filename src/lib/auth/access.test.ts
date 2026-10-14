@@ -4,7 +4,9 @@ import assert from "node:assert/strict";
 import {
     authRuntimeMode,
     getLocalDevUserId,
+    hasAccessAllowlist,
     isGoogleProfileAllowed,
+    isSessionEmailAllowed,
 } from "./access";
 
 describe("Google auth access policy", () => {
@@ -14,6 +16,24 @@ describe("Google auth access policy", () => {
                 email: "ashwath@example.com",
                 email_verified: true,
             }, {}),
+            true,
+        );
+    });
+
+    test("denies every profile when an invite list is required but none is set", () => {
+        const profile = { email: "ashwath@example.com", email_verified: true };
+
+        assert.equal(isGoogleProfileAllowed(profile, { requireAllowlist: true }), false);
+        assert.equal(isGoogleProfileAllowed(profile, { requireAllowlist: true, allowedEmails: " , " }), false);
+        assert.equal(
+            isGoogleProfileAllowed(profile, { requireAllowlist: true, allowedEmails: "ashwath@example.com" }),
+            true,
+        );
+        assert.equal(
+            isGoogleProfileAllowed(
+                { ...profile, hd: "example.com" },
+                { requireAllowlist: true, allowedDomains: "example.com" },
+            ),
             true,
         );
     });
@@ -80,6 +100,29 @@ describe("Auth runtime configuration", () => {
             AUTH_SECRET: "secret",
             AUTH_GOOGLE_ID: "client-id",
             AUTH_GOOGLE_SECRET: "client-secret",
+            AUTH_ALLOWED_EMAILS: "owner@example.com",
+        }), "configured");
+    });
+
+    test("fails closed in production when no invite list is set", () => {
+        const env = {
+            NODE_ENV: "production",
+            AUTH_SECRET: "secret",
+            AUTH_GOOGLE_ID: "client-id",
+            AUTH_GOOGLE_SECRET: "client-secret",
+        };
+
+        assert.equal(authRuntimeMode(env), "invalid");
+        assert.equal(authRuntimeMode({ ...env, AUTH_ALLOWED_EMAILS: "  " }), "invalid");
+        assert.equal(authRuntimeMode({ ...env, AUTH_ALLOWED_DOMAINS: "example.com" }), "configured");
+    });
+
+    test("keeps open sign-in available outside production", () => {
+        assert.equal(authRuntimeMode({
+            NODE_ENV: "development",
+            AUTH_SECRET: "secret",
+            AUTH_GOOGLE_ID: "client-id",
+            AUTH_GOOGLE_SECRET: "client-secret",
         }), "configured");
     });
 
@@ -115,5 +158,49 @@ describe("Auth runtime configuration", () => {
 
         assert.equal(authRuntimeMode(env), "invalid");
         assert.equal(getLocalDevUserId(env), null);
+    });
+});
+
+describe("hasAccessAllowlist", () => {
+    test("is true when either list has an entry", () => {
+        assert.equal(hasAccessAllowlist({ AUTH_ALLOWED_EMAILS: "a@example.com" }), true);
+        assert.equal(hasAccessAllowlist({ AUTH_ALLOWED_DOMAINS: "example.com" }), true);
+    });
+
+    test("ignores empty and whitespace-only lists", () => {
+        assert.equal(hasAccessAllowlist({}), false);
+        assert.equal(hasAccessAllowlist({ AUTH_ALLOWED_EMAILS: "", AUTH_ALLOWED_DOMAINS: " , " }), false);
+    });
+});
+
+describe("isSessionEmailAllowed", () => {
+    test("ends a session whose email has left the invite list", () => {
+        const policy = { allowedEmails: "owner@example.com", requireAllowlist: true };
+        assert.equal(isSessionEmailAllowed("owner@example.com", policy), true);
+        assert.equal(isSessionEmailAllowed(" Owner@Example.com ", policy), true);
+        assert.equal(isSessionEmailAllowed("former@example.com", policy), false);
+    });
+
+    test("checks the domain list against the email's domain", () => {
+        const policy = { allowedDomains: "example.com", requireAllowlist: true };
+        assert.equal(isSessionEmailAllowed("anyone@example.com", policy), true);
+        assert.equal(isSessionEmailAllowed("someone@example.com.evil.test", policy), false);
+        assert.equal(isSessionEmailAllowed("someone@evil.test", policy), false);
+    });
+
+    test("requires both lists to match when both are set", () => {
+        const policy = { allowedEmails: "a@example.com", allowedDomains: "example.com", requireAllowlist: true };
+        assert.equal(isSessionEmailAllowed("a@example.com", policy), true);
+        assert.equal(isSessionEmailAllowed("b@example.com", policy), false);
+    });
+
+    test("denies sessions without an email whenever a list is set", () => {
+        assert.equal(isSessionEmailAllowed(undefined, { allowedEmails: "a@example.com" }), false);
+        assert.equal(isSessionEmailAllowed("", { allowedDomains: "example.com" }), false);
+    });
+
+    test("follows the open or invite-only rule when no list is set", () => {
+        assert.equal(isSessionEmailAllowed("anyone@example.com", { requireAllowlist: false }), true);
+        assert.equal(isSessionEmailAllowed("anyone@example.com", { requireAllowlist: true }), false);
     });
 });

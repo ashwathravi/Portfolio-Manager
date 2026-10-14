@@ -3,6 +3,9 @@ import { buildContentSecurityPolicy } from "./src/lib/security/content-security-
 import { LEGACY_REDIRECTS } from "./src/lib/navigation";
 
 const nextConfig: NextConfig = {
+  // Only set by the E2E "database down" server, which runs next to the main
+  // dev server and so needs its own build directory (and dev lock).
+  ...(process.env.NEXT_DIST_DIR ? { distDir: process.env.NEXT_DIST_DIR } : {}),
   output: "standalone",
   poweredByHeader: false,
   // Routes retired by the IA consolidation (see src/lib/navigation.ts).

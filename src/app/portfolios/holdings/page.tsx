@@ -4,6 +4,7 @@ import { requirePageUserId } from "@/lib/auth/request-user";
 import { buildUserHoldingsQuery, buildUserPortfolioOptionsQuery } from "@/lib/portfolio-repository";
 import { HoldingsPageClient, type HoldingsSeed } from "@/components/holdings/HoldingsPageClient";
 import { PageHeaderSync } from "@/components/layout/TopBar";
+import { DataUnavailableNotice } from "@/components/data-display/DataUnavailableNotice";
 import { ImportHoldingsDialog, type ImportAccountOption } from "@/components/holdings/ImportHoldingsDialog";
 import HoldingsLoading from "./loading";
 import { DEFAULT_OPTION_RISK_POSITIONS } from "@/lib/risk-policy";
@@ -32,13 +33,33 @@ async function HoldingsContent() {
         portfolioName: string;
     }> = [];
     let accounts: ImportAccountOption[] = [];
+    let unavailable = false;
     try {
         [dbHoldings, accounts] = await Promise.all([
             buildUserHoldingsQuery(userId),
             buildUserPortfolioOptionsQuery(userId),
         ]);
     } catch (e) {
-        console.warn("Holdings fetch failed — showing empty table.", e);
+        // With a configured database a failure is an outage, not an empty
+        // portfolio; without one (local runs) the empty table is expected.
+        unavailable = Boolean(process.env.DATABASE_URL?.trim());
+        if (unavailable) console.error("Holdings fetch failed — showing the outage notice.", e);
+        else console.warn("Holdings fetch failed without a configured database — showing empty table.", e);
+    }
+
+    if (unavailable) {
+        return (
+            <>
+                <PageHeaderSync
+                    title="Portfolio"
+                    subtitle="Every position across every account"
+                    crumbs={["Portfolio", "Holdings"]}
+                />
+                <div className="pm-holdings-stack">
+                    <DataUnavailableNotice what="your holdings" />
+                </div>
+            </>
+        );
     }
 
     // Warm the quote cache so the initial paint has correct prices.

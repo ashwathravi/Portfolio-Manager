@@ -39,6 +39,7 @@ function configureAuth() {
     process.env.AUTH_SECRET = "auth-secret";
     process.env.AUTH_GOOGLE_ID = "google-client-id";
     process.env.AUTH_GOOGLE_SECRET = "google-client-secret";
+    process.env.AUTH_ALLOWED_EMAILS = "owner@example.com";
 }
 
 function setNodeEnv(value: string | undefined) {
@@ -54,6 +55,7 @@ describe("API proxy security", () => {
         delete process.env.AUTH_SECRET;
         delete process.env.AUTH_GOOGLE_ID;
         delete process.env.AUTH_GOOGLE_SECRET;
+        delete process.env.AUTH_ALLOWED_EMAILS;
         delete process.env.AUTH_LOCAL_DEV_BYPASS;
         delete process.env.AUTH_LOCAL_DEV_USER_ID;
         setNodeEnv(ORIGINAL_NODE_ENV);
@@ -61,12 +63,22 @@ describe("API proxy security", () => {
         mock.timers.reset();
     });
 
-    test("keeps the health route public when production auth is unavailable", async () => {
+    test("keeps the health routes public when production auth is unavailable", async () => {
         setNodeEnv("production");
 
-        const response = await proxy(apiRequest({}, "/api/health"));
+        assert.equal((await proxy(apiRequest({}, "/api/health"))).status, 200);
+        assert.equal((await proxy(apiRequest({}, "/api/health/ready"))).status, 200);
+        assert.equal((await proxy(apiRequest({}, "/api/health/ready/extra"))).status, 503);
+    });
 
-        assert.equal(response.status, 200);
+    test("answers disabled Schwab routes with 404 before authentication", async () => {
+        setNodeEnv("production");
+        configureAuth();
+
+        assert.equal((await proxy(apiRequest({}, "/api/schwab/order", null, [], "POST"))).status, 404);
+        assert.equal((await proxy(apiRequest({}, "/api/auth/schwab"))).status, 404);
+        // Other API routes still require a session.
+        assert.equal((await proxy(apiRequest({}, "/api/market-data/quote"))).status, 401);
     });
 
     test("keeps only exact public asset paths open", async () => {
@@ -114,7 +126,6 @@ describe("API proxy security", () => {
         const rejectedApiResponse = await proxy(apiRequest());
         const internalApiResponse = await proxy(apiRequest({
             "x-api-key": "test-secret",
-            "x-user-id": USER_ID,
         }));
 
         assert.equal(pageResponse.status, 503);
@@ -132,10 +143,10 @@ describe("API proxy security", () => {
         assert.equal(response.status, 200);
     });
 
-    test("rejects a forged Auth.js cookie when no verified session exists", () => {
+    test("rejects a forged Auth.js cookie when no verified session exists", async () => {
         configureAuth();
 
-        const response = handleVerifiedRequest(pageRequest("/settings", null, [
+        const response = await handleVerifiedRequest(pageRequest("/settings", null, [
             { name: "authjs.session-token", value: "opaque-session-token" },
         ]));
 
@@ -143,15 +154,15 @@ describe("API proxy security", () => {
         assert.equal(response.headers.get("location"), "https://atlas.test/login?callbackUrl=%2Fsettings");
     });
 
-    test("allows page requests only when Auth.js supplied a verified user", () => {
+    test("allows page requests only when Auth.js supplied a verified user", async () => {
         configureAuth();
 
-        const response = handleVerifiedRequest(pageRequest("/settings", USER_ID));
+        const response = await handleVerifiedRequest(pageRequest("/settings", USER_ID));
 
         assert.equal(response.status, 200);
     });
 
-    test("does not exclude dotted application paths from the proxy matcher", () => {
+    test("does not exclude dotted application paths from the proxy matcher", async () => {
         const pageMatcher = config.matcher[1];
 
         assert.ok(!pageMatcher.includes(".*\\..*"));
@@ -161,7 +172,7 @@ describe("API proxy security", () => {
     test("rejects a forged cookie on non-session API routes", async () => {
         configureAuth();
 
-        const response = handleVerifiedRequest(apiRequest(
+        const response = await handleVerifiedRequest(apiRequest(
             {},
             "/api/market-data/quote",
             null,
@@ -175,21 +186,20 @@ describe("API proxy security", () => {
         });
     });
 
-    test("allows non-session API routes for a verified session user", () => {
+    test("allows non-session API routes for a verified session user", async () => {
         configureAuth();
 
-        const response = handleVerifiedRequest(apiRequest({}, "/api/market-data/quote", USER_ID));
+        const response = await handleVerifiedRequest(apiRequest({}, "/api/market-data/quote", USER_ID));
 
         assert.equal(response.status, 200);
     });
 
-    test("preserves validated internal-service authentication", () => {
+    test("preserves validated internal-service authentication", async () => {
         configureAuth();
         process.env.INTERNAL_API_SECRET = "test-secret";
 
-        const response = handleVerifiedRequest(apiRequest({
+        const response = await handleVerifiedRequest(apiRequest({
             "x-api-key": "test-secret",
-            "x-user-id": USER_ID,
         }));
 
         assert.equal(response.status, 200);
@@ -216,7 +226,7 @@ describe("API proxy security", () => {
             assert.equal(response.status, 200, `${method} ${pathname} was not delegated`);
         }
 
-        const futurePlaidRoute = handleVerifiedRequest(apiRequest(
+        const futurePlaidRoute = await handleVerifiedRequest(apiRequest(
             {},
             "/api/plaid/future-route",
             null,
@@ -225,7 +235,7 @@ describe("API proxy security", () => {
         ));
         assert.equal(futurePlaidRoute.status, 401);
 
-        const wrongMethod = handleVerifiedRequest(apiRequest(
+        const wrongMethod = await handleVerifiedRequest(apiRequest(
             {},
             "/api/portfolios/count",
             null,
@@ -234,7 +244,7 @@ describe("API proxy security", () => {
         ));
         assert.equal(wrongMethod.status, 401);
 
-        const importWrongMethod = handleVerifiedRequest(apiRequest(
+        const importWrongMethod = await handleVerifiedRequest(apiRequest(
             {},
             "/api/portfolio/import",
             null,
@@ -244,21 +254,22 @@ describe("API proxy security", () => {
         assert.equal(importWrongMethod.status, 401);
     });
 
-    test("rate limits non-session API routes by client IP", async () => {
+    test("rate limits signed-in API calls per user, once per request", async () => {
         configureAuth();
         mock.timers.enable({ apis: ["Date"], now: 0 });
 
-        const headers = { "x-forwarded-for": "203.0.113.99" };
-        for (let i = 0; i < 30; i++) {
-            assert.equal(handleVerifiedRequest(apiRequest(
-                headers,
+        // Different IPs: a signed-in user's budget follows the user.
+        for (let i = 0; i < 60; i++) {
+            const response = await handleVerifiedRequest(apiRequest(
+                { "x-forwarded-for": `203.0.113.${i}` },
                 "/api/market-data/search",
                 USER_ID,
-            )).status, 200);
+            ));
+            assert.equal(response.status, 200);
         }
 
-        const response = handleVerifiedRequest(apiRequest(
-            headers,
+        const response = await handleVerifiedRequest(apiRequest(
+            { "x-forwarded-for": "203.0.113.200" },
             "/api/market-data/search",
             USER_ID,
         ));
@@ -269,5 +280,50 @@ describe("API proxy security", () => {
             error: "Too many requests. Please retry later.",
             code: "RATE_LIMITED",
         });
+    });
+
+    test("rate limits service calls without a user by client IP", async () => {
+        configureAuth();
+        process.env.INTERNAL_API_SECRET = "test-secret";
+        mock.timers.enable({ apis: ["Date"], now: 0 });
+
+        const headers = { "x-forwarded-for": "203.0.113.99", "x-api-key": "test-secret" };
+        for (let i = 0; i < 30; i++) {
+            assert.equal((await handleVerifiedRequest(apiRequest(headers, "/api/market-data/search"))).status, 200);
+        }
+
+        assert.equal((await handleVerifiedRequest(apiRequest(headers, "/api/market-data/search"))).status, 429);
+    });
+
+    test("rate limits Auth.js routes by client IP", async () => {
+        setNodeEnv("production");
+        mock.timers.enable({ apis: ["Date"], now: 0 });
+
+        const headers = { "x-forwarded-for": "198.51.100.7" };
+        for (let i = 0; i < 30; i++) {
+            assert.equal((await proxy(apiRequest(headers, "/api/auth/callback/google"))).status, 200);
+        }
+
+        assert.equal((await proxy(apiRequest(headers, "/api/auth/callback/google"))).status, 429);
+        assert.equal(
+            (await proxy(apiRequest({ "x-forwarded-for": "198.51.100.8" }, "/api/auth/callback/google"))).status,
+            200,
+        );
+    });
+
+    test("shares one limit across ids in a dynamic path", async () => {
+        configureAuth();
+        mock.timers.enable({ apis: ["Date"], now: 0 });
+
+        for (let i = 0; i < 300; i++) {
+            const portfolioId = `00000000-0000-4000-8000-${String(i).padStart(12, "0")}`;
+            const response = await handleVerifiedRequest(apiRequest({}, `/api/alpha-radar/filers/${portfolioId}/holdings`, USER_ID));
+            assert.equal(response.status, 200);
+        }
+
+        const response = await handleVerifiedRequest(
+            apiRequest({}, "/api/alpha-radar/filers/00000000-0000-4000-8000-999999999999/holdings", USER_ID),
+        );
+        assert.equal(response.status, 429);
     });
 });
