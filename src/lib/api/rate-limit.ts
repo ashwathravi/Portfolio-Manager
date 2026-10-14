@@ -18,7 +18,7 @@ export interface RateLimitStore {
 
 type RateLimitEnvironment = Partial<Record<
     "KV_REST_API_URL" | "KV_REST_API_TOKEN" | "UPSTASH_REDIS_REST_URL" | "UPSTASH_REDIS_REST_TOKEN"
-    | "VERCEL" | "VERCEL_ENV" | "NODE_ENV",
+    | "VERCEL" | "VERCEL_ENV" | "VERCEL_GIT_COMMIT_REF" | "NODE_ENV",
     string
 >>;
 
@@ -129,7 +129,14 @@ export function createUpstashRateLimitStore(
                 limiter = createLimiter(rule, `${keyPrefix}:${ruleId}`);
                 limiters.set(ruleId, limiter);
             }
-            const result = await limiter.limit(key);
+            let result: { success: boolean; reset: number };
+            try {
+                result = await limiter.limit(key);
+            } catch (error) {
+                // Same as a timeout: a Redis outage must not take the API down.
+                console.warn("Rate limit check failed; allowing the request.", error);
+                return { allowed: true, retryAfterSeconds: 0 };
+            }
             return {
                 allowed: result.success,
                 retryAfterSeconds: result.success ? 0 : Math.max(1, Math.ceil((result.reset - now()) / 1000)),
@@ -139,23 +146,50 @@ export function createUpstashRateLimitStore(
 }
 
 /**
- * Upstash when its REST credentials are present (Vercel's Marketplace sets
- * KV_REST_API_URL and KV_REST_API_TOKEN), otherwise per-process memory.
- * Keys are prefixed with the deployment environment, so local development
- * and previews never spend production's budget.
+ * The first complete URL + token pair: Vercel's Marketplace names
+ * (KV_REST_API_*), then Upstash's own (UPSTASH_REDIS_REST_*). Never a URL
+ * from one pair with the token from the other.
+ */
+export function resolveUpstashCredentials(env: RateLimitEnvironment): { url: string; token: string } | null {
+    const pairs: Array<[string | undefined, string | undefined]> = [
+        [env.KV_REST_API_URL, env.KV_REST_API_TOKEN],
+        [env.UPSTASH_REDIS_REST_URL, env.UPSTASH_REDIS_REST_TOKEN],
+    ];
+    for (const [url, token] of pairs) {
+        if (url?.trim() && token?.trim()) return { url: url.trim(), token: token.trim() };
+    }
+    return null;
+}
+
+/**
+ * The key namespace: production and local runs each get one; every preview
+ * branch gets its own, so a burst against one preview can't 429 another.
+ */
+export function rateLimitKeyPrefix(env: RateLimitEnvironment): string {
+    const environment = env.VERCEL_ENV?.trim() || "local";
+    if (environment !== "preview") return `atlas:rl:${environment}`;
+    const branch = (env.VERCEL_GIT_COMMIT_REF?.trim() || "unknown")
+        .toLowerCase()
+        .replace(/[^a-z0-9._-]+/g, "-")
+        .slice(0, 60);
+    return `atlas:rl:preview:${branch}`;
+}
+
+/**
+ * Upstash when a complete credential pair is present, otherwise per-process
+ * memory. Keys are namespaced per environment (and per preview branch), so
+ * local development and previews never spend production's budget.
  */
 export function resolveRateLimitStore(env: RateLimitEnvironment = process.env): RateLimitStore {
-    const url = env.KV_REST_API_URL?.trim() || env.UPSTASH_REDIS_REST_URL?.trim();
-    const token = env.KV_REST_API_TOKEN?.trim() || env.UPSTASH_REDIS_REST_TOKEN?.trim();
-    if (!url || !token) {
+    const credentials = resolveUpstashCredentials(env);
+    if (!credentials) {
         if (env.NODE_ENV === "production") {
             console.warn("Rate limiting is per-instance: set KV_REST_API_URL and KV_REST_API_TOKEN to share limits.");
         }
         return createMemoryRateLimitStore();
     }
 
-    const environment = env.VERCEL_ENV?.trim() || "local";
-    return createUpstashRateLimitStore(new Redis({ url, token }), { keyPrefix: `atlas:rl:${environment}` });
+    return createUpstashRateLimitStore(new Redis(credentials), { keyPrefix: rateLimitKeyPrefix(env) });
 }
 
 let activeStore: RateLimitStore | null = null;

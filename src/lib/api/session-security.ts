@@ -41,9 +41,9 @@ export async function requireSessionApiUserScope(
         getSession = auth,
     }: SessionScopeOptions = {},
 ): Promise<ScopedAuthSuccess | AuthFailure> {
-    const ipLimited = await rateLimitApiRequest(request, { userId: null, authRequired: true });
-    if (ipLimited) return { ok: false, response: ipLimited };
-
+    // Signed-in requests are limited per user only, so people behind one
+    // shared IP (an office, a household) don't share a budget. Requests that
+    // stay anonymous are limited per IP before they're refused.
     const mode = authRuntimeMode(env);
     if (mode === "local-bypass") {
         return authorizeUser(request, getLocalDevUserId(env));
@@ -55,20 +55,19 @@ export async function requireSessionApiUserScope(
             return authorizeUser(request, session.user.id);
         }
 
-        return {
-            ok: false,
-            response: apiError("Unauthorized", "UNAUTHORIZED", 401),
-        };
+        return refuseAnonymous(request, apiError("Unauthorized", "UNAUTHORIZED", 401));
     }
 
-    return {
-        ok: false,
-        response: apiError(
-            "Authentication is not configured.",
-            "AUTH_CONFIGURATION_ERROR",
-            503,
-        ),
-    };
+    return refuseAnonymous(request, apiError(
+        "Authentication is not configured.",
+        "AUTH_CONFIGURATION_ERROR",
+        503,
+    ));
+}
+
+async function refuseAnonymous(request: ApiRequestLike, response: Response): Promise<AuthFailure> {
+    const ipLimited = await rateLimitApiRequest(request, { userId: null, authRequired: true });
+    return { ok: false, response: ipLimited ?? response };
 }
 
 async function authorizeUser(

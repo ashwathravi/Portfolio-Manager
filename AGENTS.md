@@ -45,9 +45,9 @@ npm run test:e2e:ui
 
 Playwright starts two web servers: the main one on port 3000, and a "database down" one on port 3100 (its own build directory via `NEXT_DIST_DIR`, a `DATABASE_URL` nothing answers, local auth bypass) used only by `outage.spec.ts`.
 
-The Playwright config (`playwright.config.ts`) includes a `webServer` block that automatically starts `npm run dev` before running tests. If the dev server is already running on port 3000, it reuses the existing server.
+The Playwright config (`playwright.config.ts`) starts its own servers (`npm run dev` on 3000, the database-down server on 3100) and never reuses a running one: if either port is busy, the run fails. Stop your dev server first.
 
-**Never run E2E against a dev server connected to a real database.** A server Playwright starts gets `DATABASE_URL=""` unless the shell exports one, so `.env.local` is ignored. A server you started yourself is *reused as-is*, whatever database it points at. Stop it before `npm run test:e2e`.
+**E2E never touches real services.** A server Playwright starts gets `DATABASE_URL=""` unless the shell exports one, and empty Upstash variables, so neither `.env.local`'s database nor the shared Redis is used.
 
 ### Local database
 

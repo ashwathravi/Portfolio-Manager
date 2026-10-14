@@ -83,7 +83,9 @@ export default defineConfig({
                 ...noSharedRedis,
             },
             url: 'http://localhost:3000',
-            reuseExistingServer: !process.env.CI,
+            // Never reuse a running server: it may be connected to a real
+            // database or the shared Redis. A busy port fails the run instead.
+            reuseExistingServer: false,
             timeout: 120_000,
         },
         {
@@ -104,7 +106,9 @@ export default defineConfig({
                 ...noSharedRedis,
             },
             url: 'http://localhost:3100/api/health',
-            reuseExistingServer: !process.env.CI,
+            // Never reuse a running server: it may be connected to a real
+            // database or the shared Redis. A busy port fails the run instead.
+            reuseExistingServer: false,
             timeout: 120_000,
         },
     ],

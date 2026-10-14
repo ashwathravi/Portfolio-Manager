@@ -6,8 +6,10 @@ import {
     clientIpAddress,
     createMemoryRateLimitStore,
     createUpstashRateLimitStore,
+    rateLimitKeyPrefix,
     rateLimitRouteKey,
     resolveRateLimitStore,
+    resolveUpstashCredentials,
 } from "./rate-limit.ts";
 
 const MINUTE = { limit: 2, windowSeconds: 60 };
@@ -84,6 +86,20 @@ describe("createUpstashRateLimitStore", () => {
         assert.deepEqual(await store.consume("blocked", MINUTE), { allowed: false, retryAfterSeconds: 31 });
     });
 
+    test("lets the request through when Redis fails", async (t) => {
+        t.mock.method(console, "warn", () => {});
+        const store = createUpstashRateLimitStore(redis, {
+            keyPrefix: "atlas:rl:test",
+            createLimiter: () => ({
+                limit: async () => {
+                    throw new Error("WRONGPASS invalid or missing auth token");
+                },
+            }),
+        });
+
+        assert.deepEqual(await store.consume("k", MINUTE), { allowed: true, retryAfterSeconds: 0 });
+    });
+
     test("creates one limiter per rule, prefixed by environment and rule", async () => {
         const prefixes: string[] = [];
         const store = createUpstashRateLimitStore(redis, {
@@ -116,5 +132,47 @@ describe("resolveRateLimitStore", () => {
         t.mock.method(console, "warn", () => {});
         assert.equal(resolveRateLimitStore({}).kind, "memory");
         assert.equal(resolveRateLimitStore({ NODE_ENV: "production", KV_REST_API_URL: "https://x.upstash.io" }).kind, "memory");
+    });
+});
+
+describe("resolveUpstashCredentials", () => {
+    test("prefers the complete Marketplace pair", () => {
+        assert.deepEqual(resolveUpstashCredentials({
+            KV_REST_API_URL: "https://kv.upstash.io",
+            KV_REST_API_TOKEN: "kv-token",
+            UPSTASH_REDIS_REST_URL: "https://other.upstash.io",
+            UPSTASH_REDIS_REST_TOKEN: "other-token",
+        }), { url: "https://kv.upstash.io", token: "kv-token" });
+    });
+
+    test("never mixes a URL from one pair with the token from the other", () => {
+        assert.deepEqual(resolveUpstashCredentials({
+            KV_REST_API_URL: "https://kv.upstash.io",
+            UPSTASH_REDIS_REST_URL: "https://other.upstash.io",
+            UPSTASH_REDIS_REST_TOKEN: "other-token",
+        }), { url: "https://other.upstash.io", token: "other-token" });
+        assert.equal(resolveUpstashCredentials({
+            KV_REST_API_URL: "https://kv.upstash.io",
+            UPSTASH_REDIS_REST_TOKEN: "other-token",
+        }), null);
+    });
+});
+
+describe("rateLimitKeyPrefix", () => {
+    test("one namespace for production and one for local runs", () => {
+        assert.equal(rateLimitKeyPrefix({ VERCEL_ENV: "production", VERCEL_GIT_COMMIT_REF: "master" }), "atlas:rl:production");
+        assert.equal(rateLimitKeyPrefix({}), "atlas:rl:local");
+    });
+
+    test("a namespace per preview branch", () => {
+        assert.equal(
+            rateLimitKeyPrefix({ VERCEL_ENV: "preview", VERCEL_GIT_COMMIT_REF: "feat/Phase-1 rate limiting" }),
+            "atlas:rl:preview:feat-phase-1-rate-limiting",
+        );
+        assert.notEqual(
+            rateLimitKeyPrefix({ VERCEL_ENV: "preview", VERCEL_GIT_COMMIT_REF: "a" }),
+            rateLimitKeyPrefix({ VERCEL_ENV: "preview", VERCEL_GIT_COMMIT_REF: "b" }),
+        );
+        assert.equal(rateLimitKeyPrefix({ VERCEL_ENV: "preview" }), "atlas:rl:preview:unknown");
     });
 });
