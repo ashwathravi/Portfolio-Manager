@@ -9,6 +9,15 @@ test.describe('Login', () => {
     await expect(page.getByRole('button', { name: /Continue with Google/ })).toBeVisible();
     await expect(page.getByRole('navigation', { name: 'Main navigation' })).toHaveCount(0);
   });
+
+  test('links to the public privacy policy', async ({ context, page }) => {
+    await context.clearCookies();
+    await page.goto('/login');
+
+    await page.getByRole('link', { name: 'Privacy Policy' }).click();
+    await expect(page).toHaveURL(/\/privacy$/);
+    await expect(page.getByRole('heading', { level: 1, name: 'Privacy Policy' })).toBeVisible();
+  });
 });
 
 test.describe('Login — design review fixes', () => {

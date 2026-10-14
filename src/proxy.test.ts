@@ -69,6 +69,22 @@ describe("API proxy security", () => {
         assert.equal(response.status, 200);
     });
 
+    test("keeps the privacy policy public when production auth is unavailable", async () => {
+        setNodeEnv("production");
+
+        assert.equal((await proxy(pageRequest("/privacy"))).status, 200);
+        assert.equal((await proxy(pageRequest("/privacy/private"))).status, 503);
+    });
+
+    test("serves the privacy policy to signed-out visitors when sign-in is configured", async () => {
+        configureAuth();
+
+        const response = await proxy(pageRequest("/privacy"));
+
+        assert.equal(response.status, 200);
+        assert.equal(response.headers.get("location"), null);
+    });
+
     test("keeps only exact public asset paths open", async () => {
         setNodeEnv("production");
 

@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { ArrowRight } from "lucide-react";
 import { BrandMark } from "@/components/layout/BrandMark";
@@ -75,6 +76,10 @@ export default async function LoginPage({
                         )}
                     </p>
                 )}
+
+                <p className="pm-login-legal">
+                    <Link href="/privacy">Privacy Policy</Link>
+                </p>
             </section>
         </div>
     );

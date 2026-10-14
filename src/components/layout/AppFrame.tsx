@@ -8,6 +8,9 @@ import { TweaksPanel } from "@/components/layout/TweaksPanel";
 import { CommandCenter } from "@/components/command/CommandCenter";
 import { PageHeaderProvider } from "@/components/layout/PageHeaderContext";
 
+// Sign-in and the public privacy policy render without the sidebar/topbar.
+const CHROMELESS_PATHS = new Set(["/login", "/privacy"]);
+
 export function AppFrame({ children }: { children: React.ReactNode }) {
     const pathname = usePathname();
 
@@ -19,8 +22,10 @@ export function AppFrame({ children }: { children: React.ReactNode }) {
         };
     }, [pathname]);
 
-    if (pathname === "/login") {
-        return <main className="min-h-screen">{children}</main>;
+    if (CHROMELESS_PATHS.has(pathname)) {
+        // The body never scrolls (overflow-hidden in the root layout), so
+        // this main is the scroll container for the long privacy policy.
+        return <main className="h-screen overflow-y-auto">{children}</main>;
     }
 
     return (
