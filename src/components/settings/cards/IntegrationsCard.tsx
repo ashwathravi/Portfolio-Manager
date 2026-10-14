@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { Plus, Link2, CheckCircle2, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
-import { clientApiScopeHeaders } from "@/lib/api/client-scope";
 import { useSettingsStore } from "@/lib/stores/settingsStore";
 import {
     connectedPlaidAccountMatchesDiscovered,
@@ -162,7 +161,7 @@ export function IntegrationsCard() {
         try {
             const exchangeResponse = await fetch("/api/plaid/exchange-public-token", {
                 method: "POST",
-                headers: clientApiScopeHeaders({ "Content-Type": "application/json" }),
+                headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     publicToken,
                     metadata,
@@ -207,7 +206,7 @@ export function IntegrationsCard() {
         try {
             const tokenResponse = await fetch("/api/plaid/link-token", {
                 method: "POST",
-                headers: clientApiScopeHeaders({ "Content-Type": "application/json" }),
+                headers: { "Content-Type": "application/json" },
             });
             if (!tokenResponse.ok) {
                 throw new Error(await readApiError(tokenResponse, "Unable to create Plaid link token"));

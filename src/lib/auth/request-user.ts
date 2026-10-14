@@ -1,7 +1,7 @@
 import type { Session } from "next-auth";
 import { redirect } from "next/navigation";
 
-import { auth } from "@/auth";
+import { getRequestSession } from "@/lib/auth/session";
 import {
     authRuntimeMode,
     getLocalDevUserId,
@@ -22,7 +22,7 @@ interface ResolveRequestUserOptions {
 
 export async function resolveRequestUserId({
     env = process.env,
-    getSession = auth,
+    getSession = getRequestSession,
 }: ResolveRequestUserOptions = {}): Promise<string | null> {
     const mode = authRuntimeMode(env);
     if (mode === "invalid") throw new AuthConfigurationError();

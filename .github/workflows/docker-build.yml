@@ -21,11 +21,12 @@ permissions:
 
 jobs:
   build:
+    # Builds the image on every run. Publishing happens in publish-image,
+    # only after all checks pass on master.
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
       contents: read
-      packages: write
 
     steps:
       - name: Checkout code
@@ -35,14 +36,6 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
-
-      - name: Log in to Container Registry
-        if: github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Extract metadata
         id: meta
@@ -57,11 +50,11 @@ jobs:
             type=sha,prefix=sha-
             type=raw,value=latest,enable={{is_default_branch}}
 
-      - name: Build and push Docker image
+      - name: Build Docker image
         uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v5
         with:
           context: .
-          push: ${{ github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
+          push: false
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
@@ -82,11 +75,14 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: '20'
+          node-version: '24'
           cache: 'npm'
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
 
       - name: Run linter
         run: npm run lint
@@ -95,8 +91,6 @@ jobs:
         run: npm test
 
       - name: Build Next.js
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: npm run build
 
   e2e-tests:
@@ -107,7 +101,7 @@ jobs:
       contents: read
     services:
       postgres:
-        image: postgres:16
+        image: postgres:17
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -120,7 +114,10 @@ jobs:
           --health-timeout 5s
           --health-retries 5
     env:
-      DATABASE_URL: postgres://postgres:postgres@localhost:5432/atlas_wealth_test?sslmode=disable
+      # Owner: migrations and fixtures. App: a login created by the prepare
+      # step as a member of app_runtime, so E2E exercises production grants.
+      ADMIN_DATABASE_URL: postgres://postgres:postgres@localhost:5432/atlas_wealth_test?sslmode=disable
+      APP_DATABASE_URL: postgres://atlas_app_e2e:atlas-app-e2e@localhost:5432/atlas_wealth_test?sslmode=disable
 
     steps:
       - name: Checkout code
@@ -131,7 +128,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: '20'
+          node-version: '24'
           cache: 'npm'
 
       - name: Install dependencies
@@ -147,111 +144,14 @@ jobs:
           CI=true \
             PG_TEST_ADMIN_URL='postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable' \
             bash ./scripts/test-portfolio-ownership-migration.sh
-          psql "$DATABASE_URL" --set=ON_ERROR_STOP=1 <<'SQL'
-          CREATE EXTENSION IF NOT EXISTS pgcrypto;
-          DO $$
-          BEGIN
-            CREATE ROLE anon NOLOGIN;
-          EXCEPTION WHEN duplicate_object THEN
-            NULL;
-          END $$;
-          DO $$
-          BEGIN
-            CREATE ROLE authenticated NOLOGIN;
-          EXCEPTION WHEN duplicate_object THEN
-            NULL;
-          END $$;
-          SQL
-          npx drizzle-kit migrate
-          psql "$DATABASE_URL" --set=ON_ERROR_STOP=1 <<'SQL'
-          DO $$
-          BEGIN
-            BEGIN
-              INSERT INTO portfolios (id, user_id, name)
-              VALUES ('00000000-0000-4000-8000-0000000000f1', NULL, 'Invalid owner fixture');
-              RAISE EXCEPTION 'portfolios.user_id unexpectedly accepted NULL';
-            EXCEPTION WHEN not_null_violation THEN
-              NULL;
-            END;
-
-            BEGIN
-              INSERT INTO portfolios (id, user_id, name)
-              VALUES ('00000000-0000-4000-8000-0000000000f2', 'missing-auth-user', 'Invalid owner fixture');
-              RAISE EXCEPTION 'portfolios.user_id unexpectedly accepted an unmatched owner';
-            EXCEPTION WHEN foreign_key_violation THEN
-              NULL;
-            END;
-          END $$;
-
-          INSERT INTO auth_users (id, name, email, email_verified)
-          VALUES
-            ('00000000-0000-4000-8000-00000000a001', 'E2E User A', 'e2e-a@example.test', now()),
-            ('00000000-0000-4000-8000-00000000a002', 'E2E User B', 'e2e-b@example.test', now())
-          ON CONFLICT (id) DO NOTHING;
-
-          INSERT INTO auth_sessions (session_token, user_id, expires)
-          VALUES
-            ('e2e-session-user-a', '00000000-0000-4000-8000-00000000a001', '2099-01-01T00:00:00Z'),
-            ('e2e-session-user-b', '00000000-0000-4000-8000-00000000a002', '2099-01-01T00:00:00Z')
-          ON CONFLICT (session_token) DO UPDATE
-          SET user_id = EXCLUDED.user_id, expires = EXCLUDED.expires;
-
-          INSERT INTO portfolios (id, user_id, name, description, total_value, cash_balance)
-          VALUES
-            ('00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-00000000a001', 'Main Portfolio', 'Long-term growth portfolio', 487250.32, 12450.00),
-            ('00000000-0000-4000-8000-000000000002', '00000000-0000-4000-8000-00000000a001', 'Growth Portfolio', 'High-growth technology stocks', 152340.50, 5240.00),
-            ('00000000-0000-4000-8000-000000000003', '00000000-0000-4000-8000-00000000a001', 'Dividend Income', 'Dividend-focused investments', 98765.25, 3120.00),
-            ('00000000-0000-4000-8000-000000000009', '00000000-0000-4000-8000-00000000a002', 'Other User Portfolio', 'Must never be visible to user A', 999.00, 0.00)
-          ON CONFLICT (id) DO NOTHING;
-
-          INSERT INTO holdings (
-            id,
-            portfolio_id,
-            symbol,
-            name,
-            quantity,
-            avg_cost,
-            current_price,
-            market_value,
-            allocation
-          )
-          VALUES
-            ('00000000-0000-4000-8000-000000000101', '00000000-0000-4000-8000-000000000001', 'AAPL', 'Apple Inc.', 500, 165.30, 182.45, 91225.00, 18.7),
-            ('00000000-0000-4000-8000-000000000102', '00000000-0000-4000-8000-000000000001', 'MSFT', 'Microsoft Corporation', 300, 325.80, 378.25, 113475.00, 23.3),
-            ('00000000-0000-4000-8000-000000000103', '00000000-0000-4000-8000-000000000001', 'NVDA', 'NVIDIA Corporation', 200, 425.50, 512.80, 102560.00, 21.1),
-            ('00000000-0000-4000-8000-000000000104', '00000000-0000-4000-8000-000000000001', 'GOOGL', 'Alphabet Inc.', 400, 128.90, 141.25, 56500.00, 11.6),
-            ('00000000-0000-4000-8000-000000000105', '00000000-0000-4000-8000-000000000001', 'TSLA', 'Tesla, Inc.', 250, 205.40, 248.75, 62187.50, 12.8),
-            ('00000000-0000-4000-8000-000000000106', '00000000-0000-4000-8000-000000000001', 'AMZN', 'Amazon.com Inc.', 350, 142.30, 165.90, 58065.00, 11.9),
-            ('00000000-0000-4000-8000-000000000109', '00000000-0000-4000-8000-000000000009', 'XUSR', 'Cross Tenant Sentinel', 1, 1.00, 999.00, 999.00, 100.0)
-          ON CONFLICT (id) DO NOTHING;
-
-          INSERT INTO transactions (id, portfolio_id, timestamp, type, symbol, quantity, price, amount, notes)
-          VALUES
-            ('00000000-0000-4000-8000-000000000201', '00000000-0000-4000-8000-000000000001', now(), 'BUY', 'AAPL', 1, 182.45, 182.45, 'User A fixture'),
-            ('00000000-0000-4000-8000-000000000209', '00000000-0000-4000-8000-000000000009', now(), 'BUY', 'XUSR', 1, 999.00, 999.00, 'Cross tenant sentinel')
-          ON CONFLICT (id) DO NOTHING;
-          SQL
-
-          psql "$DATABASE_URL" --set=ON_ERROR_STOP=1 <<'SQL'
-          INSERT INTO auth_users (id, name, email, email_verified)
-          VALUES ('e2e-seed-owner', 'E2E Seed Owner', 'e2e-seed@example.test', now());
-          SQL
-          SEED_USER_ID=e2e-seed-owner node --import tsx scripts/seed.ts
-          psql "$DATABASE_URL" --set=ON_ERROR_STOP=1 <<'SQL'
-          DO $$
-          BEGIN
-            IF (SELECT count(*) FROM portfolios WHERE user_id = 'e2e-seed-owner') <> 3 THEN
-              RAISE EXCEPTION 'owner-scoped seed did not create exactly three portfolios';
-            END IF;
-          END $$;
-          DELETE FROM portfolios WHERE user_id = 'e2e-seed-owner';
-          DELETE FROM auth_users WHERE id = 'e2e-seed-owner';
-          SQL
+          node --import tsx scripts/e2e/prepare-database.ts
 
       - name: Run E2E tests
         run: npm run test:e2e
         env:
           CI: true
+          # The app connects as a member of app_runtime, like production.
+          DATABASE_URL: ${{ env.APP_DATABASE_URL }}
 
       - name: Upload Playwright report
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -260,3 +160,133 @@ jobs:
           name: playwright-report
           path: playwright-report/
           retention-days: 14
+
+  publish-image:
+    # The image is pushed only after every check has passed on master.
+    if: github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    needs: [build, lint-and-test, e2e-tests]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=sha,prefix=sha-
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+
+  deploy-production:
+    # Migrate, then deploy to Vercel, only after every check has passed on
+    # master. Migrations must stay compatible with the code already running
+    # (add first, remove in a later release): there is a gap between them.
+    if: github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    needs: [build, lint-and-test, e2e-tests]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment:
+      name: production
+      url: ${{ vars.PRODUCTION_URL }}
+    concurrency:
+      group: production-deploy
+      cancel-in-progress: false
+    permissions:
+      contents: read
+    env:
+      VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
+      VERCEL_CLI: vercel@64.0.2
+
+    steps:
+      - name: Check deploy settings
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          DATABASE_MIGRATION_URL: ${{ secrets.DATABASE_MIGRATION_URL }}
+          PRODUCTION_URL: ${{ vars.PRODUCTION_URL }}
+        run: |
+          missing=()
+          [ -n "$VERCEL_TOKEN" ] || missing+=("secret VERCEL_TOKEN")
+          [ -n "$DATABASE_MIGRATION_URL" ] || missing+=("secret DATABASE_MIGRATION_URL")
+          [ -n "$VERCEL_ORG_ID" ] || missing+=("variable VERCEL_ORG_ID")
+          [ -n "$VERCEL_PROJECT_ID" ] || missing+=("variable VERCEL_PROJECT_ID")
+          [ -n "$PRODUCTION_URL" ] || missing+=("variable PRODUCTION_URL")
+          if [ "${#missing[@]}" -gt 0 ]; then
+            printf '::error::Production deploy is not configured. Missing: %s. See docs/deployment.md.\n' "$(IFS=', '; echo "${missing[*]}")"
+            exit 1
+          fi
+
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Apply database migrations
+        env:
+          DATABASE_MIGRATION_URL: ${{ secrets.DATABASE_MIGRATION_URL }}
+        run: node --import tsx scripts/migrate.ts
+
+      - name: Build for Vercel
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          npx --yes "$VERCEL_CLI" pull --yes --environment=production --token="$VERCEL_TOKEN"
+          npx --yes "$VERCEL_CLI" build --prod --token="$VERCEL_TOKEN"
+
+      - name: Deploy to production
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: npx --yes "$VERCEL_CLI" deploy --prebuilt --prod --token="$VERCEL_TOKEN"
+
+      - name: Check production readiness
+        env:
+          PRODUCTION_URL: ${{ vars.PRODUCTION_URL }}
+        run: |
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            if curl --fail --silent --show-error --max-time 10 "$PRODUCTION_URL/api/health/ready"; then
+              echo
+              exit 0
+            fi
+            echo " (attempt $attempt failed, retrying)"
+            sleep 6
+          done
+          echo "::error::$PRODUCTION_URL/api/health/ready did not report ready. The deploy is live, but the app cannot reach its database."
+          exit 1

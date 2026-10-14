@@ -355,7 +355,7 @@ export function storePlaidAccessToken({
             stored: true,
             durable: false,
             mode: "memory",
-            reason: "Set PLAID_TOKEN_ENCRYPTION_KEY or INTERNAL_API_SECRET to persist Plaid access tokens across server restarts.",
+            reason: "Set PLAID_TOKEN_ENCRYPTION_KEY to persist Plaid access tokens across server restarts.",
         };
     }
 
@@ -415,11 +415,10 @@ function vaultItemKey(itemId: string, userId?: string | null): string {
     return scopedUserId ? `${scopedUserId}:${itemId}` : itemId;
 }
 
+// Only the dedicated key encrypts Plaid tokens. Reusing another secret (such
+// as INTERNAL_API_SECRET) would tie token decryption to an unrelated rotation.
 function readEncryptionSecret(): string | undefined {
-    const explicit = process.env.PLAID_TOKEN_ENCRYPTION_KEY?.trim();
-    if (explicit) return explicit;
-    const internalSecret = process.env.INTERNAL_API_SECRET?.trim();
-    return internalSecret || undefined;
+    return process.env.PLAID_TOKEN_ENCRYPTION_KEY?.trim() || undefined;
 }
 
 function readKeyVersion(): string {

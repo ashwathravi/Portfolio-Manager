@@ -1,11 +1,16 @@
-
 import { defineConfig } from "drizzle-kit";
 import * as dotenv from "dotenv";
 
-dotenv.config({ path: ".env" });
+// Same precedence as Next.js: .env.local wins over .env.
+dotenv.config({ path: [".env.local", ".env"], quiet: true });
 
-if (!process.env.DATABASE_URL) {
-    console.warn("⚠️ DATABASE_URL not found in .env");
+// Migrations need the table owner. The app's DATABASE_URL is a least-privilege
+// login role (member of app_runtime) that cannot run DDL, so migrations use
+// DATABASE_MIGRATION_URL when it is set.
+const migrationUrl = process.env.DATABASE_MIGRATION_URL || process.env.DATABASE_URL;
+
+if (!migrationUrl) {
+    console.warn("⚠️ Neither DATABASE_MIGRATION_URL nor DATABASE_URL is set");
 }
 
 export default defineConfig({
@@ -13,7 +18,7 @@ export default defineConfig({
     out: "./drizzle",
     dialect: "postgresql",
     dbCredentials: {
-        url: process.env.DATABASE_URL!,
+        url: migrationUrl!,
     },
     verbose: true,
     strict: true,

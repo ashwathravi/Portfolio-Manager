@@ -7,6 +7,8 @@ export interface GoogleAuthProfile {
 export interface GoogleAccessPolicy {
     allowedEmails?: string;
     allowedDomains?: string;
+    /** Deny every sign-in when neither list is set. Defaults to on in production. */
+    requireAllowlist?: boolean;
 }
 
 export interface AuthEnvironment {
@@ -16,23 +18,33 @@ export interface AuthEnvironment {
     AUTH_GOOGLE_SECRET?: string;
     AUTH_LOCAL_DEV_BYPASS?: string;
     AUTH_LOCAL_DEV_USER_ID?: string;
+    AUTH_ALLOWED_EMAILS?: string;
+    AUTH_ALLOWED_DOMAINS?: string;
     INTERNAL_API_SECRET?: string;
 }
 
 export type AuthRuntimeMode = "configured" | "local-bypass" | "invalid";
 
+export function currentAccessPolicy(env: AuthEnvironment = process.env): GoogleAccessPolicy {
+    return {
+        allowedEmails: env.AUTH_ALLOWED_EMAILS,
+        allowedDomains: env.AUTH_ALLOWED_DOMAINS,
+        requireAllowlist: env.NODE_ENV === "production",
+    };
+}
+
 export function isGoogleProfileAllowed(
     profile: GoogleAuthProfile | undefined,
-    policy: GoogleAccessPolicy = {
-        allowedEmails: process.env.AUTH_ALLOWED_EMAILS,
-        allowedDomains: process.env.AUTH_ALLOWED_DOMAINS,
-    },
+    policy: GoogleAccessPolicy = currentAccessPolicy(),
 ): boolean {
     const email = typeof profile?.email === "string" ? profile.email.trim().toLowerCase() : "";
     const emailVerified = profile?.email_verified === true;
     if (!email || !emailVerified) return false;
 
+    // When both lists are set, a profile must match both (email AND domain).
     const allowedEmails = parseCsv(policy.allowedEmails).map((entry) => entry.toLowerCase());
+    const allowedDomainsConfigured = parseCsv(policy.allowedDomains).length > 0;
+    if (policy.requireAllowlist && allowedEmails.length === 0 && !allowedDomainsConfigured) return false;
     if (allowedEmails.length > 0 && !allowedEmails.includes(email)) return false;
 
     const allowedDomains = parseCsv(policy.allowedDomains).map((entry) => entry.toLowerCase());
@@ -42,13 +54,40 @@ export function isGoogleProfileAllowed(
     return allowedDomains.includes(hostedDomain);
 }
 
+/**
+ * Whether an existing session's user is still on the invite list. Checked on
+ * every session read, so removing someone from the list ends their access
+ * immediately rather than when their session expires. At sign-in the domain
+ * list is checked against Google's hosted-domain claim; here, where only the
+ * stored email is available, against the email's domain.
+ */
+export function isSessionEmailAllowed(
+    email: unknown,
+    policy: GoogleAccessPolicy = currentAccessPolicy(),
+): boolean {
+    const allowedEmails = parseCsv(policy.allowedEmails).map((entry) => entry.toLowerCase());
+    const allowedDomains = parseCsv(policy.allowedDomains).map((entry) => entry.toLowerCase());
+    if (allowedEmails.length === 0 && allowedDomains.length === 0) return !policy.requireAllowlist;
+
+    const normalized = typeof email === "string" ? email.trim().toLowerCase() : "";
+    if (!normalized) return false;
+    if (allowedEmails.length > 0 && !allowedEmails.includes(normalized)) return false;
+    if (allowedDomains.length === 0) return true;
+    return allowedDomains.includes(normalized.slice(normalized.lastIndexOf("@") + 1));
+}
+
 export function authRuntimeMode(env: AuthEnvironment = process.env): AuthRuntimeMode {
     const authValues = [
         env.AUTH_SECRET?.trim(),
         env.AUTH_GOOGLE_ID?.trim(),
         env.AUTH_GOOGLE_SECRET?.trim(),
     ];
-    if (authValues.every(Boolean)) return "configured";
+    if (authValues.every(Boolean)) {
+        // Production never runs with open sign-up: without an invite list any
+        // verified Google account could create an account.
+        if (env.NODE_ENV === "production" && !hasAccessAllowlist(env)) return "invalid";
+        return "configured";
+    }
 
     const authIsAbsent = authValues.every((value) => !value);
     const localBypassEnabled = env.AUTH_LOCAL_DEV_BYPASS?.trim() === "1";
@@ -63,6 +102,10 @@ export function authRuntimeMode(env: AuthEnvironment = process.env): AuthRuntime
     }
 
     return "invalid";
+}
+
+export function hasAccessAllowlist(env: AuthEnvironment = process.env): boolean {
+    return parseCsv(env.AUTH_ALLOWED_EMAILS).length > 0 || parseCsv(env.AUTH_ALLOWED_DOMAINS).length > 0;
 }
 
 export function isAuthConfigured(env: AuthEnvironment = process.env): boolean {

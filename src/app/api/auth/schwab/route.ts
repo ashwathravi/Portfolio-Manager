@@ -1,7 +1,11 @@
 import { type NextRequest, NextResponse } from "next/server";
+import { apiError } from "@/lib/api/security";
 import { schwabClient } from "@/lib/api/schwab/client";
+import { isSchwabIntegrationEnabled } from "@/lib/api/schwab/feature";
 
 export async function GET(req: NextRequest) {
+    if (!isSchwabIntegrationEnabled()) return apiError("Not found", "NOT_FOUND", 404);
+
     const searchParams = req.nextUrl.searchParams;
     const code = searchParams.get("code");
     const error = searchParams.get("error");
