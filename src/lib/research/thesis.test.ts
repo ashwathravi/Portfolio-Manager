@@ -6,8 +6,8 @@ import {
     archiveThesis,
     createThesis,
     deleteThesis,
-    DEFAULT_THESES,
     findThesisByTicker,
+    getDefaultTheses,
     partitionTheses,
     restoreThesis,
     updateThesis,
@@ -16,6 +16,7 @@ import {
 } from './thesis.ts';
 
 const NOW = () => '2026-04-17';
+const SEEDS = getDefaultTheses();
 
 const draft: ThesisDraft = {
     ticker: 'aapl',
@@ -141,41 +142,41 @@ describe('updateThesis', () => {
 
 describe('archiveThesis / restoreThesis', () => {
     test('archive flips status to archived and stamps dateUpdated', () => {
-        const result = archiveThesis(DEFAULT_THESES, 'seed-nvda', { now: NOW });
+        const result = archiveThesis(SEEDS, 'seed-nvda', { now: NOW });
         const nvda = result.find((t) => t.id === 'seed-nvda');
         assert.strictEqual(nvda?.status, 'archived');
         assert.strictEqual(nvda?.dateUpdated, '2026-04-17');
     });
 
     test('restore flips status back to active', () => {
-        const result = restoreThesis(DEFAULT_THESES, 'seed-meta', { now: NOW });
+        const result = restoreThesis(SEEDS, 'seed-meta', { now: NOW });
         const meta = result.find((t) => t.id === 'seed-meta');
         assert.strictEqual(meta?.status, 'active');
     });
 
     test('does not mutate inputs', () => {
-        const snapshot = DEFAULT_THESES.map((t) => ({ ...t }));
-        archiveThesis(DEFAULT_THESES, 'seed-nvda', { now: NOW });
-        assert.deepStrictEqual(DEFAULT_THESES, snapshot);
+        const snapshot = SEEDS.map((t) => ({ ...t }));
+        archiveThesis(SEEDS, 'seed-nvda', { now: NOW });
+        assert.deepStrictEqual(SEEDS, snapshot);
     });
 });
 
 describe('deleteThesis', () => {
     test('removes the matching id', () => {
-        const result = deleteThesis(DEFAULT_THESES, 'seed-nvda');
-        assert.strictEqual(result.length, DEFAULT_THESES.length - 1);
+        const result = deleteThesis(SEEDS, 'seed-nvda');
+        assert.strictEqual(result.length, SEEDS.length - 1);
         assert.ok(!result.find((t) => t.id === 'seed-nvda'));
     });
 
     test('is a no-op for unknown id', () => {
-        const result = deleteThesis(DEFAULT_THESES, 'missing');
-        assert.strictEqual(result.length, DEFAULT_THESES.length);
+        const result = deleteThesis(SEEDS, 'missing');
+        assert.strictEqual(result.length, SEEDS.length);
     });
 });
 
 describe('partitionTheses', () => {
     test('splits active and archived correctly', () => {
-        const { active, archived } = partitionTheses(DEFAULT_THESES);
+        const { active, archived } = partitionTheses(SEEDS);
         assert.strictEqual(active.length, 3);
         assert.strictEqual(archived.length, 1);
         assert.strictEqual(archived[0].id, 'seed-meta');
@@ -184,12 +185,12 @@ describe('partitionTheses', () => {
 
 describe('findThesisByTicker', () => {
     test('normalizes ticker input and returns the match', () => {
-        const hit = findThesisByTicker(DEFAULT_THESES, '  nvda ');
+        const hit = findThesisByTicker(SEEDS, '  nvda ');
         assert.strictEqual(hit?.id, 'seed-nvda');
     });
 
     test('returns undefined when not found', () => {
-        const miss = findThesisByTicker(DEFAULT_THESES, 'ZZZZ');
+        const miss = findThesisByTicker(SEEDS, 'ZZZZ');
         assert.strictEqual(miss, undefined);
     });
 });
@@ -197,7 +198,7 @@ describe('findThesisByTicker', () => {
 describe('addCatalyst', () => {
     test('appends a catalyst with a generated id and stamps dateUpdated', () => {
         const result = addCatalyst(
-            DEFAULT_THESES,
+            SEEDS,
             'seed-nvda',
             { title: 'New Conference', date: '2026-06-01', impact: 'medium' },
             { id: 'cat-new', now: NOW },
@@ -211,19 +212,19 @@ describe('addCatalyst', () => {
 
     test('no-ops for unknown thesis id', () => {
         const result = addCatalyst(
-            DEFAULT_THESES,
+            SEEDS,
             'missing',
             { title: 'x', date: '2026-01-01', impact: 'low' },
             { id: 'cat-x', now: NOW },
         );
-        assert.deepStrictEqual(result, DEFAULT_THESES);
+        assert.deepStrictEqual(result, SEEDS);
     });
 });
 
 describe('addEvidence', () => {
     test('prepends evidence so the newest appears first', () => {
         const result = addEvidence(
-            DEFAULT_THESES,
+            SEEDS,
             'seed-msft',
             { title: 'New Report', type: 'report', date: '2026-04-10', url: 'https://example.com' },
             { id: 'ev-new', now: NOW },
@@ -239,7 +240,7 @@ describe('seed theses', () => {
     test('regression: the newest seed thesis is two weeks old, not years', async () => {
         const { rebaseSeedTheses } = await import('./thesis');
         const now = Date.parse('2026-09-30T05:56:00Z');
-        const rebased = rebaseSeedTheses(DEFAULT_THESES, now);
+        const rebased = rebaseSeedTheses(SEEDS, now);
         const newest = rebased.map((t) => t.dateUpdated).sort().at(-1);
         assert.strictEqual(newest, '2026-09-16');
     });
@@ -247,29 +248,47 @@ describe('seed theses', () => {
     test('rebasing preserves the gaps between dates and leaves non-ISO dates alone', async () => {
         const { rebaseSeedTheses } = await import('./thesis');
         const now = Date.parse('2026-09-30T12:00:00Z');
-        const base = DEFAULT_THESES.find((t) => t.id === 'seed-nvda')!;
-        const out = rebaseSeedTheses(DEFAULT_THESES, now).find((t) => t.id === 'seed-nvda')!;
+        const base = SEEDS.find((t) => t.id === 'seed-nvda')!;
+        const out = rebaseSeedTheses(SEEDS, now).find((t) => t.id === 'seed-nvda')!;
         const gap = (a: string, b: string) => (Date.parse(b) - Date.parse(a)) / 86_400_000;
         assert.strictEqual(gap(out.dateCreated, out.dateUpdated), gap(base.dateCreated, base.dateUpdated));
-        const tsla = rebaseSeedTheses(DEFAULT_THESES, now).find((t) => t.id === 'seed-tsla')!;
+        const tsla = rebaseSeedTheses(SEEDS, now).find((t) => t.id === 'seed-tsla')!;
         assert.ok(tsla.catalysts.some((c) => c.date === 'Monthly'));
+    });
+
+    test('regression: a long-running process rebases again after UTC midnight', () => {
+        // DEFAULT_THESES used to be computed once at module load, so a server
+        // that loaded the module at 23:56 UTC kept rendering the previous
+        // day's dates after midnight while the browser computed the new day,
+        // and /research failed hydration.
+        const newest = (list: readonly Thesis[]) => list.map((t) => t.dateUpdated).sort().at(-1);
+        const lateOnDayN = getDefaultTheses(Date.parse('2026-09-25T23:59:00Z'));
+        const earlyOnDayN1 = getDefaultTheses(Date.parse('2026-09-26T00:01:00Z'));
+        assert.strictEqual(newest(lateOnDayN), '2026-09-11');
+        assert.strictEqual(newest(earlyOnDayN1), '2026-09-12');
+    });
+
+    test('getDefaultTheses returns the same list for every call within a UTC day', () => {
+        const morning = getDefaultTheses(Date.parse('2026-09-30T00:01:00Z'));
+        const night = getDefaultTheses(Date.parse('2026-09-30T23:59:00Z'));
+        assert.strictEqual(morning, night);
     });
 
     test('rebasing is stable within a UTC day', async () => {
         const { rebaseSeedTheses } = await import('./thesis');
-        const morning = rebaseSeedTheses(DEFAULT_THESES, Date.parse('2026-09-30T00:01:00Z'));
-        const night = rebaseSeedTheses(DEFAULT_THESES, Date.parse('2026-09-30T23:59:00Z'));
+        const morning = rebaseSeedTheses(SEEDS, Date.parse('2026-09-30T00:01:00Z'));
+        const night = rebaseSeedTheses(SEEDS, Date.parse('2026-09-30T23:59:00Z'));
         assert.deepStrictEqual(morning, night);
     });
 
     test('seed theses are identifiable as sample data; user theses are not', async () => {
         const { isSeedThesis } = await import('./thesis');
-        assert.ok(DEFAULT_THESES.every((t) => isSeedThesis(t)));
+        assert.ok(SEEDS.every((t) => isSeedThesis(t)));
         assert.strictEqual(isSeedThesis({ id: 'thesis-user-1' }), false);
     });
 
     test('seed copy no longer pins stale calendar years', () => {
-        const text = JSON.stringify(DEFAULT_THESES.map(({ description, hypothesis, bullCase, bearCase, catalysts }) => ({ description, hypothesis, bullCase, bearCase, catalysts: catalysts.map((c) => c.title) })));
+        const text = JSON.stringify(SEEDS.map(({ description, hypothesis, bullCase, bearCase, catalysts }) => ({ description, hypothesis, bullCase, bearCase, catalysts: catalysts.map((c) => c.title) })));
         assert.doesNotMatch(text, /\b(2023|2024|2025)\b|FY2[345]/);
     });
 });

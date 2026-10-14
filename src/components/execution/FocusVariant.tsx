@@ -36,7 +36,7 @@ import {
     type SellDisciplineTask,
 } from "@/lib/risk-policy";
 import { mockPortfolios } from "@/lib/mockData";
-import { DEFAULT_THESES } from "@/lib/research/thesis";
+import { getDefaultTheses } from "@/lib/research/thesis";
 import { useSettingsStore } from "@/lib/stores/settingsStore";
 import type {
     Order,
@@ -479,7 +479,7 @@ function OrderForm({ onSubmit }: OrderFormProps) {
             evaluateSellDiscipline({
                 rules: sellDisciplineRules,
                 holdings: EXECUTION_RISK_POLICY_HOLDINGS,
-                theses: DEFAULT_THESES,
+                theses: getDefaultTheses(),
                 portfolioValue: EXECUTION_POLICY_PORTFOLIO_VALUE,
             }),
         [sellDisciplineRules],
@@ -489,7 +489,7 @@ function OrderForm({ onSubmit }: OrderFormProps) {
         [side, tickerUpper, sellDisciplineSummary.tasks],
     );
     const selectedThesis = useMemo(
-        () => DEFAULT_THESES.find((thesis) => thesis.id === rationaleDraft.thesisId),
+        () => getDefaultTheses().find((thesis) => thesis.id === rationaleDraft.thesisId),
         [rationaleDraft.thesisId],
     );
     const riskPolicyImpact = useMemo(

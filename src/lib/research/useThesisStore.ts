@@ -7,8 +7,8 @@ import {
     archiveThesis,
     createThesis,
     deleteThesis,
-    DEFAULT_THESES,
     findThesisByTicker,
+    getDefaultTheses,
     partitionTheses,
     restoreThesis,
     updateThesis,
@@ -24,7 +24,7 @@ import { getBrowserStorage, loadThesesFromStorage, saveThesesToStorage } from '.
  * user changes survive a refresh until the Supabase-backed API lands.
  */
 export function useThesisStore() {
-    const [theses, setTheses] = useState<Thesis[]>(DEFAULT_THESES);
+    const [theses, setTheses] = useState<Thesis[]>(() => getDefaultTheses());
     const [hydrated, setHydrated] = useState(false);
 
     // Hydrate from localStorage on mount so SSR + initial render match.

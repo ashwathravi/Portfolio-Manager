@@ -1,9 +1,7 @@
 "use client";
 
-import {
-    benchmarkMonthlySeries,
-    portfolioMonthlySeries,
-} from "@/lib/performance/series";
+import { useMemo } from "react";
+import { getExampleMonthlySeries } from "@/lib/performance/series";
 import type { MonthlyValuation } from "@/lib/performance/periodSummary";
 import { EquityCurveCard, type Benchmark } from "./EquityCurveCard";
 import { MetricsByPeriodTable } from "./MetricsByPeriodTable";
@@ -52,26 +50,30 @@ function rescaleReturns(
     return out;
 }
 
-const BENCHMARKS: Benchmark[] = [
-    { key: "sp500", label: "S&P 500", series: benchmarkMonthlySeries },
-    {
-        key: "ndx",
-        label: "NASDAQ-100",
-        series: rescaleReturns(benchmarkMonthlySeries, 1.45),
-    },
-    {
-        key: "russell",
-        label: "Russell 2000",
-        series: rescaleReturns(benchmarkMonthlySeries, 0.72),
-    },
-    {
-        key: "custom",
-        label: "Custom blend",
-        series: rescaleReturns(benchmarkMonthlySeries, 1.15),
-    },
-];
+function buildBenchmarks(sp500: MonthlyValuation[]): Benchmark[] {
+    return [
+        { key: "sp500", label: "S&P 500", series: sp500 },
+        {
+            key: "ndx",
+            label: "NASDAQ-100",
+            series: rescaleReturns(sp500, 1.45),
+        },
+        {
+            key: "russell",
+            label: "Russell 2000",
+            series: rescaleReturns(sp500, 0.72),
+        },
+        {
+            key: "custom",
+            label: "Custom blend",
+            series: rescaleReturns(sp500, 1.15),
+        },
+    ];
+}
 
 export function PerformancePageClient() {
+    const { portfolio, benchmark } = getExampleMonthlySeries();
+    const benchmarks = useMemo(() => buildBenchmarks(benchmark), [benchmark]);
     return (
         <div className="pm-perf-stack">
             <SampleGate
@@ -87,16 +89,16 @@ export function PerformancePageClient() {
                 </SampleDataNotice>
 
                 <EquityCurveCard
-                    portfolio={portfolioMonthlySeries}
-                    benchmarks={BENCHMARKS}
+                    portfolio={portfolio}
+                    benchmarks={benchmarks}
                 />
 
                 <MetricsByPeriodTable
-                    portfolio={portfolioMonthlySeries}
-                    benchmark={benchmarkMonthlySeries}
+                    portfolio={portfolio}
+                    benchmark={benchmark}
                 />
 
-                <MonthlyHeatmapCard portfolio={portfolioMonthlySeries} />
+                <MonthlyHeatmapCard portfolio={portfolio} />
             </SampleGate>
         </div>
     );

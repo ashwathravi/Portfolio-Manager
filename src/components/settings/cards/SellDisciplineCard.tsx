@@ -16,7 +16,7 @@ import {
     type SellDisciplineTriggerType,
 } from "@/lib/risk-policy";
 import { mockPortfolios } from "@/lib/mockData";
-import { DEFAULT_THESES } from "@/lib/research/thesis";
+import { getDefaultTheses } from "@/lib/research/thesis";
 import { useSettingsStore } from "@/lib/stores/settingsStore";
 
 const ACTION_OPTIONS: SellDisciplineAction[] = [
@@ -61,7 +61,7 @@ export function SellDisciplineCard() {
             evaluateSellDiscipline({
                 rules,
                 holdings: SAMPLE_HOLDINGS,
-                theses: DEFAULT_THESES,
+                theses: getDefaultTheses(),
                 portfolioValue: SAMPLE_PORTFOLIO_VALUE,
             }),
         [rules],

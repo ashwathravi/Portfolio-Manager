@@ -11,10 +11,10 @@
  * jitter. If the UI wants a "typing" animation it should stagger
  * rendering in the component layer, not here.
  */
-import { SEED_JOURNAL } from '@/lib/journal/seed';
+import { getSeedJournal } from '@/lib/journal/seed';
 import { mockPortfolios, mockTransactions } from '@/lib/mockData';
 import { ALPHA_RADAR_DEMO_MEMORY_CHUNKS } from '@/lib/alpha-radar/demo-memory';
-import { DEFAULT_THESES } from '@/lib/research/thesis';
+import { getDefaultTheses } from '@/lib/research/thesis';
 import { plan } from './planner';
 import { renderAnswer } from './renderer';
 import { runTool, type AskContext } from './tools';
@@ -28,8 +28,8 @@ export function buildDefaultContext(now: number = Date.now()): AskContext {
         portfolios: mockPortfolios,
         holdings,
         transactions: mockTransactions,
-        entries: SEED_JOURNAL,
-        theses: DEFAULT_THESES,
+        entries: getSeedJournal(now),
+        theses: getDefaultTheses(now),
         alphaRadarMemory: ALPHA_RADAR_DEMO_MEMORY_CHUNKS,
         now,
     };

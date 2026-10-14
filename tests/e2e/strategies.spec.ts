@@ -85,7 +85,7 @@ test.describe('Strategies page — Phase 6 builder shell', () => {
 /**
  * AR-111 — StrategyCard rolling 30d adherence pill.
  *
- * Every card renders its own score pill computed from SEED_JOURNAL. The
+ * Every card renders its own score pill computed from the example journal. The
  * pill carries `data-tier` so downstream styling is tier-aware. We don't
  * assert on an exact number — seed data can tweak over time — but we
  * assert structural invariants.
@@ -238,7 +238,7 @@ test.describe('Strategies page — Adherence rules editor (AR-111)', () => {
 /**
  * AR-111 — AdherenceImpactCard (returns comparison).
  *
- * With SEED_JOURNAL shipping pre-frozen adherence on each entry, the
+ * With the example journal shipping pre-frozen adherence on each entry, the
  * card renders the "Cost of breaking your own rules" view. If a bucket
  * is under-populated (< 10 trades), it falls back to the empty state.
  * We assert whichever it shows today still reads sensibly.
