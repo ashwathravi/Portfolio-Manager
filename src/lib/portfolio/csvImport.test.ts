@@ -112,6 +112,49 @@ describe('parseHoldingsCsv', () => {
         assert.ok(r.skipped >= 3);
     });
 
+    // Regression: blocking the import on any issue made whole broker files
+    // unimportable when their summary, cash and footer rows became issues.
+    test('imports a Schwab-style export: quoted cells, trailing commas, cash and total rows', () => {
+        const csv = [
+            '"Positions for account Individual ...123 as of 05:00 PM ET, 2026/10/13"',
+            '',
+            '"Symbol","Description","Quantity","Price","Market Value","Cost Basis","Security Type",',
+            '"AAPL","APPLE INC","10","$250.00","$2,500.00","$1,500.00","Equity",',
+            '"VTI","VANGUARD TOTAL STOCK MARKET ETF","12","$300.00","$3,600.00","$2,520.00","ETFs & Closed End Funds",',
+            '"Cash & Cash Investments","--","--","--","$1,000.00","--","Cash and Money Market",',
+            '"Account Total","--","--","--","$7,100.00","$4,020.00","--",',
+        ].join('\n');
+        const r = parseHoldingsCsv(csv);
+        assert.deepStrictEqual(r.issues, []);
+        assert.deepStrictEqual(r.rows, [
+            { symbol: 'AAPL', name: 'APPLE INC', quantity: 10, avgCost: 150 },
+            { symbol: 'VTI', name: 'VANGUARD TOTAL STOCK MARKET ETF', quantity: 12, avgCost: 210 },
+        ]);
+        assert.strictEqual(r.skipped, 2);
+    });
+
+    test('imports a Fidelity-style export: core position, trailing commas and footer notes', () => {
+        const csv = [
+            'Account Number,Account Name,Symbol,Description,Quantity,Last Price,Current Value,Cost Basis Total,Average Cost Basis,Type',
+            'Z12345678,Individual,SPAXX**,HELD IN MONEY MARKET,,,$1000.00,,,Cash,',
+            'Z12345678,Individual,AAPL,APPLE INC,10,$250.00,$2500.00,$1500.00,$150.00,Margin,',
+            'Z12345678,Individual,FXAIX,FIDELITY 500 INDEX FUND,5,$200.00,$1000.00,$900.00,$180.00,Cash,',
+            '',
+            '"The data and information in this spreadsheet is provided to you solely for your use."',
+            '"Date downloaded 10/13/2026 5:00 PM ET"',
+        ].join('\n');
+        const r = parseHoldingsCsv(csv);
+        assert.deepStrictEqual(r.issues, []);
+        assert.deepStrictEqual(r.rows.map((x) => [x.symbol, x.quantity, x.avgCost]), [['AAPL', 10, 150], ['FXAIX', 5, 180]]);
+    });
+
+    test('a free-text note in the symbol column is skipped; a lone ticker is still an issue', () => {
+        const r = parseHoldingsCsv('Symbol,Description,Quantity,Average Cost\nAAPL,Apple,10,100\nDate downloaded 10/13/2026\nMSFT');
+        assert.deepStrictEqual(r.rows.map((x) => x.symbol), ['AAPL']);
+        assert.deepStrictEqual(r.issues.map((i) => i.line), [4]);
+        assert.strictEqual(r.skipped, 1);
+    });
+
     test('combines two lots of the same symbol at the weighted average cost', () => {
         const r = parseHoldingsCsv('Symbol,Qty,Avg Price\nAMD,10,100\nAMD,30,120');
         assert.deepStrictEqual(r.rows, [{ symbol: 'AMD', name: '', quantity: 40, avgCost: 115 }]);

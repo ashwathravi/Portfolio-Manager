@@ -106,11 +106,20 @@ describe('fetchQuotes', () => {
         assert.deepStrictEqual(await fetchQuotes(['AAPL']), {});
     });
 
-    test('rejects malformed successful responses instead of treating them as quote maps', async () => {
-        for (const json of [{}, { data: {} }, { data: [null] }, { data: [{ symbol: 'AAPL' }] }]) {
+    test('rejects a successful response that is not a quote envelope', async () => {
+        for (const json of [{}, { data: {} }, [{ symbol: 'AAPL' }]]) {
             mockFetch({ ok: true, json });
             await assert.rejects(fetchQuotes(['AAPL']), /Invalid quotes response/);
         }
+    });
+
+    test('drops malformed entries and keeps the valid quotes in the batch', async () => {
+        const msft = { symbol: 'MSFT', price: 500, change: 2, changePercent: 0.4, timestamp: '2026-10-03T18:11:00.000Z', isRealtime: false };
+        mockFetch({
+            ok: true,
+            json: { data: [null, { symbol: 'AAPL' }, { ...msft, symbol: 'SPY', price: Number.NaN }, msft] },
+        });
+        assert.deepStrictEqual(await fetchQuotes(['AAPL', 'MSFT', 'SPY']), { MSFT: msft });
     });
 
 });

@@ -134,12 +134,38 @@ function isCashRow(cells: string[], col: { symbol: number; name: number; quantit
     const assetType = normalizeHeader(cells[col.assetType] ?? '');
     if (['cash', 'cash balance', 'currency'].includes(assetType)) return true;
     if (CORE_POSITION.test(symbol)) return true;
+    // A cash label that can't be a ticker, e.g. Schwab's "Cash & Cash Investments".
+    if (/^cash\b/i.test(symbol) && !normalizeTicker(symbol)) return true;
     if (assetType) return false;
     // A generic CASH symbol alone is ambiguous. A balance label and no share
     // quantity identify a balance row; priced securities named CASH still import.
     return /^cash$/i.test(symbol)
         && /^(cash balance|cash & cash equivalents|cash and cash equivalents)$/i.test(cells[col.name] ?? '')
         && /^(|--|n\/?a)$/i.test(cells[col.quantity] ?? '');
+}
+
+/**
+ * A broker footer or note: one non-empty cell that can't be a ticker, e.g.
+ * "Date downloaded 10/13/2026". A lone ticker is not a note; it is a broken row.
+ */
+function isNoteRow(cells: string[]): boolean {
+    const filled = cells.filter((cell) => cell);
+    return filled.length === 1 && !normalizeTicker(filled[0].replace(/\*+$/, ''));
+}
+
+/**
+ * Lines a record up with the header. Trailing empty cells (a comma at the end
+ * of every line) are dropped and short records are padded, since writers may
+ * omit empty trailing fields. Extra non-empty cells mean the columns have
+ * shifted, so the record is rejected (null).
+ */
+function fitToHeader(cells: string[], width: number): string[] | null {
+    let end = cells.length;
+    while (end > width && !cells[end - 1]) end--;
+    if (end > width && width > 0) return null;
+    const fitted = cells.slice(0, end);
+    while (fitted.length < width) fitted.push('');
+    return fitted;
 }
 
 /** "$1,234.50" → 1234.5, "(12)" → -12, "" / "--" / "n/a" → null. */
@@ -181,7 +207,8 @@ export function parseHoldingsCsv(text: string): ParseResult {
         const candidate = records[i].cells.map(normalizeHeader);
         if (findColumn(candidate, 'symbol') >= 0 && findColumn(candidate, 'quantity') >= 0) {
             headerIndex = i;
-            headers = candidate;
+            // Width 0 only trims: a comma at the end of the header line adds an empty column.
+            headers = fitToHeader(candidate, 0) ?? candidate;
             break;
         }
     }
@@ -216,14 +243,14 @@ export function parseHoldingsCsv(text: string): ParseResult {
             issues.push({ line: lineNo, message: record.error });
             continue;
         }
-        const cells = record.cells;
-        const rawSymbol = (cells[col.symbol] ?? '').trim();
-        if (cells.every((cell) => !cell) || SUMMARY_SYMBOL.test(rawSymbol)) {
+        const rawSymbol = (record.cells[col.symbol] ?? '').trim();
+        if (record.cells.every((cell) => !cell) || SUMMARY_SYMBOL.test(rawSymbol) || isNoteRow(record.cells)) {
             skipped++;
             continue;
         }
-        if (cells.length !== headers.length) {
-            issues.push({ line: lineNo, message: `Expected ${headers.length} columns, found ${cells.length}.` });
+        const cells = fitToHeader(record.cells, headers.length);
+        if (!cells) {
+            issues.push({ line: lineNo, message: `Expected ${headers.length} columns, found ${record.cells.length}.` });
             continue;
         }
         if (isCashRow(cells, col)) {
