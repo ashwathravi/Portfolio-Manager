@@ -32,9 +32,24 @@ export function createReadinessCheck({
 }: ReadinessCheckOptions): () => Promise<ReadinessResult> {
     let cached: { result: ReadinessResult; expiresAt: number } | null = null;
     let inFlight: Promise<ReadinessResult> | null = null;
+    // A ping that outlived its timeout may still hold a database connection.
+    // Until it settles, report unavailable instead of starting another, so a
+    // hanging database can't fill the pool with readiness queries.
+    let outstandingPing: Promise<unknown> | null = null;
+
+    async function pingOnce(): Promise<DatabaseReadiness> {
+        if (outstandingPing) return "unavailable";
+        const attempt = ping();
+        outstandingPing = attempt;
+        attempt.then(settle, settle);
+        function settle() {
+            if (outstandingPing === attempt) outstandingPing = null;
+        }
+        return pingWithTimeout(attempt, timeoutMs);
+    }
 
     async function check(): Promise<ReadinessResult> {
-        const database = isConfigured() ? await pingWithTimeout(ping, timeoutMs) : "not_configured";
+        const database = isConfigured() ? await pingOnce() : "not_configured";
         return {
             status: database === "ok" ? "ok" : "degraded",
             database,
@@ -58,14 +73,14 @@ export function createReadinessCheck({
     };
 }
 
-async function pingWithTimeout(ping: () => Promise<unknown>, timeoutMs: number): Promise<DatabaseReadiness> {
+async function pingWithTimeout(attempt: Promise<unknown>, timeoutMs: number): Promise<DatabaseReadiness> {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const timeout = new Promise<"unavailable">((resolve) => {
         timer = setTimeout(() => resolve("unavailable"), timeoutMs);
     });
     try {
         return await Promise.race([
-            ping().then((): DatabaseReadiness => "ok", (): DatabaseReadiness => "unavailable"),
+            attempt.then((): DatabaseReadiness => "ok", (): DatabaseReadiness => "unavailable"),
             timeout,
         ]);
     } finally {

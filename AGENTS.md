@@ -41,7 +41,9 @@ npm run test:e2e
 npm run test:e2e:ui
 ```
 
-`test:e2e:local` (`scripts/e2e/run-local.sh`) recreates `atlas_wealth_e2e` in the Docker container, applies migrations and the fixtures in `scripts/e2e/fixtures.sql` through `scripts/e2e/prepare-database.ts` (the same script CI runs), then starts Playwright. It refuses to start if anything is listening on port 3000.
+`test:e2e:local` (`scripts/e2e/run-local.sh`) recreates `atlas_wealth_e2e` in the Docker container, applies migrations and the fixtures in `scripts/e2e/fixtures.sql` through `scripts/e2e/prepare-database.ts` (the same script CI runs), then starts Playwright. It refuses to start if anything is listening on port 3000 or 3100.
+
+Playwright starts two web servers: the main one on port 3000, and a "database down" one on port 3100 (its own build directory via `NEXT_DIST_DIR`, a `DATABASE_URL` nothing answers, local auth bypass) used only by `outage.spec.ts`.
 
 The Playwright config (`playwright.config.ts`) includes a `webServer` block that automatically starts `npm run dev` before running tests. If the dev server is already running on port 3000, it reuses the existing server.
 
@@ -108,6 +110,7 @@ Every page in the application must have a corresponding E2E spec. The current ma
 | `/login` | `login.spec.ts` | Google sign-in without app chrome, shared brand mark, no raw setup text |
 | 404 | `not-found.spec.ts` | Search button opens the palette, link back to Today |
 | Sidebar + IA | `navigation.spec.ts` | Exactly eight sidebar destinations (Help is a Settings tab), section tabs, legacy redirects, identity footer |
+| Database outage | `outage.spec.ts` | Runs against the second web server (port 3100, database configured but unreachable): `/api/health/ready` is 503 `unavailable`; Today, Holdings and Accounts show the outage notice inside their page container, never an empty state |
 | Cross-cutting | `smoke.spec.ts` | Fonts loaded, hydration clean in another timezone, no horizontal overflow at 390px |
 
 ### Adding E2E tests for a new page

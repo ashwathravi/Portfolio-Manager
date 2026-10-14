@@ -74,4 +74,33 @@ describe("createReadinessCheck", () => {
         await check();
         assert.equal(pings, 2);
     });
+
+    test("does not start another ping while a timed-out one is still running", async () => {
+        let clock = 0;
+        let pings = 0;
+        let release: () => void = () => {};
+        const check = createReadinessCheck({
+            isConfigured: () => true,
+            ping: () => {
+                pings += 1;
+                return new Promise<void>((resolve) => {
+                    release = resolve;
+                });
+            },
+            timeoutMs: 10,
+            cacheMs: 100,
+            now: () => clock,
+        });
+
+        assert.equal((await check()).database, "unavailable");
+        clock = 1_000;
+        assert.equal((await check()).database, "unavailable");
+        assert.equal(pings, 1);
+
+        release();
+        await new Promise((resolve) => setImmediate(resolve));
+        clock = 2_000;
+        await check();
+        assert.equal(pings, 2);
+    });
 });

@@ -25,7 +25,9 @@ export default async function AccountsPage() {
         return (
             <>
                 {header}
-                <DataUnavailableNotice what="your accounts" />
+                <div className="pm-page">
+                    <DataUnavailableNotice what="your accounts" />
+                </div>
             </>
         );
     }

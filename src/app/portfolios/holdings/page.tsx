@@ -55,7 +55,9 @@ async function HoldingsContent() {
                     subtitle="Every position across every account"
                     crumbs={["Portfolio", "Holdings"]}
                 />
-                <DataUnavailableNotice what="your holdings" />
+                <div className="pm-holdings-stack">
+                    <DataUnavailableNotice what="your holdings" />
+                </div>
             </>
         );
     }

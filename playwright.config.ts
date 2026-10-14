@@ -60,18 +60,40 @@ export default defineConfig({
             use: { ...devices['Desktop Chrome'] },
         },
     ],
-    webServer: {
-        command: 'npm run dev',
-        env: {
-            ...webServerEnv,
-            ...authServerEnv,
-            // Only use a database the test run was explicitly given (CI exports
-            // one). An empty value stops Next from loading a developer's real
-            // DATABASE_URL out of .env.local into the test server.
-            DATABASE_URL: process.env.DATABASE_URL ?? '',
+    webServer: [
+        {
+            command: 'npm run dev',
+            env: {
+                ...webServerEnv,
+                ...authServerEnv,
+                // Only use a database the test run was explicitly given (CI exports
+                // one). An empty value stops Next from loading a developer's real
+                // DATABASE_URL out of .env.local into the test server.
+                DATABASE_URL: process.env.DATABASE_URL ?? '',
+            },
+            url: 'http://localhost:3000',
+            reuseExistingServer: !process.env.CI,
+            timeout: 120_000,
         },
-        url: 'http://localhost:3000',
-        reuseExistingServer: !process.env.CI,
-        timeout: 120_000,
-    },
+        {
+            // "Database down" server for tests/e2e/outage.spec.ts: a database is
+            // configured but unreachable (nothing listens on port 9). Local auth
+            // bypass, because database sessions need the database. Its own build
+            // directory, because Next allows one dev server per directory.
+            command: 'npm run dev -- --port 3100',
+            env: {
+                ...webServerEnv,
+                NEXT_DIST_DIR: '.next/e2e-outage',
+                DATABASE_URL: 'postgres://outage:outage@127.0.0.1:9/atlas_wealth_outage?sslmode=disable',
+                AUTH_SECRET: '',
+                AUTH_GOOGLE_ID: '',
+                AUTH_GOOGLE_SECRET: '',
+                AUTH_LOCAL_DEV_BYPASS: '1',
+                AUTH_LOCAL_DEV_USER_ID: E2E_USER_ID,
+            },
+            url: 'http://localhost:3100/api/health',
+            reuseExistingServer: !process.env.CI,
+            timeout: 120_000,
+        },
+    ],
 });

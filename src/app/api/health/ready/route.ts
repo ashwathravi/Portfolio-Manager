@@ -8,7 +8,12 @@ export const dynamic = "force-dynamic";
 
 const checkReadiness = createReadinessCheck({
     isConfigured: () => Boolean(process.env.DATABASE_URL?.trim()),
-    ping: () => db.execute(sql`select 1`),
+    // statement_timeout makes Postgres cancel the ping itself, so a slow
+    // database frees the connection instead of holding it open.
+    ping: () => db.transaction(async (tx) => {
+        await tx.execute(sql`set local statement_timeout = '2s'`);
+        await tx.execute(sql`select 1`);
+    }),
 });
 
 /**
