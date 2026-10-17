@@ -189,8 +189,11 @@ function fakeStore({
             const historyEnd = valid.map((bar) => bar.date).sort().at(-1)!;
             const historyStart = valid.map((bar) => bar.date).sort()[0];
             const rejected = input.length - own.filter(isValidBar).length;
-            // Checked before writing, as in the real store: an incomplete history changes nothing.
-            const complete = ![...stored.values()].some((bar) => bar.symbol === symbol && bar.date > historyEnd && bar.date <= through);
+            // Checked before writing, as in the real store: every stored date from the
+            // history's first day through the cut-off must be in it, or nothing changes.
+            const covered = new Set(valid.map((bar) => bar.date));
+            const complete = ![...stored.values()].some((bar) =>
+                bar.symbol === symbol && bar.date >= historyStart && bar.date <= through && !covered.has(bar.date));
             if (!complete) return { stored: 0, rejected, historyStart, complete };
             for (const [key, bar] of stored) if (bar.symbol === symbol && bar.date <= historyEnd) stored.delete(key);
             olderHistory.delete(symbol);
@@ -208,6 +211,17 @@ function fakeStore({
                 attempted.delete(symbol);
             }
             return reset;
+        },
+        async clearSplitHistories(symbols) {
+            const cleared = normalizeSymbols(symbols).filter((symbol) => securities.has(symbol));
+            for (const [key, bar] of stored) if (cleared.includes(bar.symbol)) stored.delete(key);
+            for (const symbol of cleared) {
+                olderHistory.delete(symbol);
+                securities.set(symbol, null);
+                attempted.delete(symbol);
+            }
+            resets.push(...cleared);
+            return cleared;
         },
         async resetHistory(symbols) {
             const reset = normalizeSymbols(symbols).filter((symbol) => securities.get(symbol));
@@ -687,8 +701,9 @@ describe("ingestDailyPrices", () => {
             "history NVDA 2Y",
             "history MSFT 2Y",
         ]);
-        assert.deepEqual(detail.splits, { from: "2026-10-15", to: "2026-10-16", reset: ["NVDA"] });
-        assert.deepEqual(resets, ["NVDA"]);
+        // Both tracked stocks that split are cleared and re-queued (MSFT had nothing stored yet).
+        assert.deepEqual(detail.splits, { from: "2026-10-15", to: "2026-10-16", reset: ["NVDA", "MSFT"] });
+        assert.deepEqual(resets, ["NVDA", "MSFT"]);
         // Only the adjusted history is left: the old-scale bars are gone, the 14th is rescaled.
         assert.deepEqual(storedDates(stored, "NVDA"), ["2024-10-17", "2026-10-14", "2026-10-15", "2026-10-16"]);
         assert.equal(stored.get("NVDA|2026-10-14")?.close, 100);
@@ -786,8 +801,9 @@ describe("ingestDailyPrices", () => {
             assert.deepEqual(marks, []);
             assert.deepEqual(detail.backfillErrors, [{ symbol: "NVDA", error: "No history returned; still queued." }]);
             assert.equal(detail.backfillQueue, 1);
-            // Nothing was deleted either: the old bars wait for a real replacement.
-            assert.equal(stored.get("NVDA|2026-10-15")?.close, 1_000);
+            // Regression: the old-scale bars went with the split, so the post-split
+            // bar is never shown beside them while the refetch keeps failing.
+            assert.deepEqual(storedDates(stored, "NVDA").map((date) => stored.get(`NVDA|${date}`)?.close), [102]);
         }
     });
 
@@ -920,9 +936,9 @@ describe("ingestDailyPrices › backfill retries", () => {
         assert.deepEqual(detail.backfilled, [{ symbol: "NVDA", stored: 0, rejected: 0, historyStart: "2026-10-14", complete: false }]);
         assert.equal(securities.get("NVDA"), null, "still queued");
         assert.ok(attempted.has("NVDA"));
-        // Regression: nothing is rewritten until a history covers every stored bar,
-        // so an adjusted 14th never sits beside an unadjusted 15th.
-        assert.deepEqual(storedDates(stored, "NVDA").map((date) => stored.get(`NVDA|${date}`)?.close), [1_000, 1_010, 102]);
+        // Regression: the split cleared the old-scale 14th and 15th, and nothing is
+        // written until a history covers the stored 16th, so no scales are mixed.
+        assert.deepEqual(storedDates(stored, "NVDA").map((date) => stored.get(`NVDA|${date}`)?.close), [102]);
 
         // The next run's history covers the 15th and 16th: replaced and loaded.
         const caughtUp = fakeAdapter({
@@ -931,6 +947,29 @@ describe("ingestDailyPrices › backfill retries", () => {
         await ingestDailyPrices({ adapter: caughtUp.adapter, store, ...fakeClock() });
         assert.equal(securities.get("NVDA"), "2026-10-14");
         assert.deepEqual(storedDates(stored, "NVDA").map((date) => stored.get(`NVDA|${date}`)?.close), [100, 101, 102]);
+    });
+
+    test("regression: a history missing a stored day in the middle is not written", async () => {
+        const { store, stored, securities } = fakeStore({
+            holdings: ["GAP"],
+            queued: ["GAP"],
+            bars: [
+                { ...dailyBar("SPY", "2026-10-16"), source: "massive" },
+                { ...dailyBar("GAP", "2026-10-14", 50), source: "massive" },
+                { ...dailyBar("GAP", "2026-10-15", 51), source: "massive" },
+                { ...dailyBar("GAP", "2026-10-16", 52), source: "massive" },
+            ],
+        });
+        // The 15th's aggregate was malformed and dropped by the provider adapter.
+        const { adapter } = fakeAdapter({
+            history: { GAP: [ohlc("2026-10-14T04:00:00.000Z", 50), ohlc("2026-10-16T04:00:00.000Z", 52)] },
+        });
+
+        const detail = await ingestDailyPrices({ adapter, store, ...fakeClock() });
+
+        assert.equal(detail.backfilled?.[0].complete, false);
+        assert.equal(securities.get("GAP"), null, "still queued");
+        assert.deepEqual(storedDates(stored, "GAP"), ["2026-10-14", "2026-10-15", "2026-10-16"], "the 15th is not lost");
     });
 
     test("a history that simply ends (no later stored bars) is complete", async () => {

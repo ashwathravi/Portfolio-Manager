@@ -387,6 +387,35 @@ export async function getLatestBarDate(database: Database = db): Promise<string 
 }
 
 /** Puts symbols whose history was loaded back in the queue; returns the ones reset. */
+/** Every stored bar of these symbols. */
+export function buildDeleteBarsQuery(symbols: string[], database: Pick<Database, "delete"> = db) {
+    return database.delete(priceBars).where(inArray(priceBars.symbol, symbols));
+}
+
+/** Puts symbols back in the history queue, loaded or not, clearing any attempt. */
+export function buildRequeueHistoryQuery(symbols: string[], database: Pick<Database, "update"> = db) {
+    return database
+        .update(securities)
+        .set({ historyStartDate: null, historyAttemptedAt: null, updatedAt: new Date() })
+        .where(inArray(securities.symbol, symbols))
+        .returning({ symbol: securities.symbol });
+}
+
+/**
+ * Stocks that split: every stored bar is on the old scale, so all of them
+ * go, and the stocks go back in the history queue, in one transaction.
+ * Until the backfill brings an adjusted history the stock has only bars
+ * stored after this (a price, no move), never a split-sized jump.
+ */
+export async function clearSplitHistories(symbols: Iterable<string>, database: Database = db): Promise<string[]> {
+    const normalized = normalizeSymbols(symbols);
+    if (!normalized.length) return [];
+    return database.transaction(async (tx) => {
+        await buildDeleteBarsQuery(normalized, tx);
+        return (await buildRequeueHistoryQuery(normalized, tx)).map((row) => row.symbol);
+    });
+}
+
 export async function resetHistory(symbols: Iterable<string>, database: Database = db): Promise<string[]> {
     const normalized = normalizeSymbols(symbols);
     if (!normalized.length) return [];
@@ -404,13 +433,12 @@ export async function markHistoryAttempted(symbol: string, at: Date, database: D
     await buildMarkHistoryAttemptedQuery(symbol, at, database);
 }
 
-/** Any stored bar for the symbol after `after`, up to and including `through`. */
-export function buildBarsAfterQuery(symbol: string, after: string, through: string, database: Pick<Database, "select"> = db) {
+/** The symbol's stored bar dates from `from` through `through`. */
+export function buildStoredDatesQuery(symbol: string, from: string, through: string, database: Pick<Database, "select"> = db) {
     return database
         .select({ date: priceBars.date })
         .from(priceBars)
-        .where(and(eq(priceBars.symbol, symbol), sql`${priceBars.date} > ${after}`, lte(priceBars.date, through)))
-        .limit(1);
+        .where(and(eq(priceBars.symbol, symbol), gte(priceBars.date, from), lte(priceBars.date, through)));
 }
 
 export async function markHistoryLoaded(symbol: string, startDate: string, database: Database = db): Promise<void> {
@@ -429,11 +457,12 @@ export function buildDeleteHistoryQuery(symbol: string, through: string, databas
  * provider's adjusted history is the one to keep. Bars after the history's
  * last day (from the daily files, if the history lags) are left alone.
  *
- * Only a `complete` history is written: no stored bar may lie between its
- * last day and `through`. Otherwise nothing changes and the symbol stays
- * queued for the next run (which normally finds the history caught up), so
- * adjusted bars never go in beside uncovered ones. Returns undefined,
- * changing nothing, when no bar is valid.
+ * Only a `complete` history is written: every stored date from its first day
+ * through `through` must be in it (none after its last day, none missing in
+ * between). Otherwise nothing changes and the symbol stays queued for the
+ * next run (which normally finds the history caught up), so adjusted bars
+ * never go in beside uncovered ones and no stored day is lost. Returns
+ * undefined, changing nothing, when no bar is valid.
  */
 export async function replaceHistory(
     symbol: string,
@@ -450,7 +479,9 @@ export async function replaceHistory(
         // Checked before anything is written: a partial rewrite would put
         // adjusted bars beside the uncovered ones, which may be on the old
         // scale. Until a history covers them the stored bars stay as they are.
-        if ((await buildBarsAfterQuery(symbol, historyEnd, through, tx)).length > 0) return false;
+        const covered = new Set(valid.map((bar) => bar.date));
+        const stored = await buildStoredDatesQuery(symbol, historyStart, through, tx);
+        if (stored.some((row) => !covered.has(row.date))) return false;
         await buildDeleteHistoryQuery(symbol, historyEnd, tx);
         for (let start = 0; start < valid.length; start += UPSERT_CHUNK_SIZE) {
             await buildUpsertBarsQuery(valid.slice(start, start + UPSERT_CHUNK_SIZE), tx);

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 import {
     buildBarsQuery,
-    buildBarsAfterQuery,
+    buildDeleteBarsQuery,
     buildDeleteHistoryQuery,
     buildHasBarsQuery,
     buildLatestBarDateQuery,
@@ -13,8 +13,10 @@ import {
     buildPruneUnpricedSecuritiesQuery,
     buildResetUnpricedHistoryQuery,
     buildRecentClosesQuery,
+    buildRequeueHistoryQuery,
     buildResetHistoryQuery,
     buildSymbolsNeedingHistoryCountQuery,
+    buildStoredDatesQuery,
     buildSymbolsNeedingHistoryQuery,
     buildTrackedAmongQuery,
     buildTrackedCountQuery,
@@ -178,10 +180,19 @@ describe("price store queries", () => {
         assert.equal(params[3], "NEWCO");
     });
 
-    test("a replace is complete only without stored bars after the history's last day", () => {
-        const { sql, params } = buildBarsAfterQuery("NVDA", "2026-10-14", "2026-10-16").toSQL();
-        assert.equal(sql, 'select "date" from "price_bars" where ("price_bars"."symbol" = $1 and "price_bars"."date" > $2 and "price_bars"."date" <= $3) limit $4');
-        assert.deepEqual(params, ["NVDA", "2026-10-14", "2026-10-16", 1]);
+    test("a replace reads every stored date from the history's first day through the cut-off", () => {
+        const { sql, params } = buildStoredDatesQuery("NVDA", "2024-10-17", "2026-10-16").toSQL();
+        assert.equal(sql, 'select "date" from "price_bars" where ("price_bars"."symbol" = $1 and "price_bars"."date" >= $2 and "price_bars"."date" <= $3)');
+        assert.deepEqual(params, ["NVDA", "2024-10-17", "2026-10-16"]);
+    });
+
+    test("clearing a split deletes all of a stock's bars and re-queues it, loaded or not", () => {
+        const remove = buildDeleteBarsQuery(["NVDA"]).toSQL();
+        assert.equal(remove.sql, 'delete from "price_bars" where "price_bars"."symbol" in ($1)');
+        assert.deepEqual(remove.params, ["NVDA"]);
+        const requeue = buildRequeueHistoryQuery(["NVDA"]).toSQL();
+        assert.match(requeue.sql, /^update "securities" set "history_start_date" = \$1, "history_attempted_at" = \$2, "updated_at" = \$3 where "securities"\."symbol" in \(\$4\) returning "symbol"$/);
+        assert.deepEqual(requeue.params.slice(0, 2), [null, null]);
     });
 
     test("an attempt is recorded, and loading or resetting clears it", () => {

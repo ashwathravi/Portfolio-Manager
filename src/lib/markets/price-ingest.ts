@@ -16,10 +16,10 @@
  *    picks it up.
  *    Before any of those days is stored, one call asks which stocks split on
  *    them: bars are split-adjusted, so a split puts every earlier stored bar
- *    of that stock on the old scale. Those stocks go back in the history
- *    queue before any day is stored, since the newest stored day is the next
- *    run's bookmark: a failed check or reset stores nothing, and the next run
- *    asks about the same days again.
+ *    of that stock on the old scale. Those bars are deleted and the stocks go
+ *    back in the history queue before any day is stored, since the newest
+ *    stored day is the next run's bookmark: a failed check or reset stores
+ *    nothing, and the next run asks about the same days again.
  * 3. Backfill two years of history for symbols that don't have it yet, one
  *    aggregates call per symbol, while the run's time budget lasts: held
  *    symbols and benchmarks first, and a looked-up symbol only once a daily
@@ -60,6 +60,7 @@ import type { OHLC } from "@/types/market-data";
 
 import { getEasternParts, lastCompletedSession, nextTradingDay, previousTradingDay } from "./market-hours";
 import {
+    clearSplitHistories,
     countSymbolsNeedingHistory,
     getLatestBarDate,
     hasStoredBars,
@@ -140,6 +141,8 @@ export interface PriceIngestStore {
     markHistoryAttempted(symbol: string, at: Date): Promise<void>;
     /** Puts loaded symbols back in the history queue; returns the ones reset. */
     resetHistory(symbols: string[]): Promise<string[]>;
+    /** Stocks that split: deletes their (old-scale) bars and re-queues them; returns those cleared. */
+    clearSplitHistories(symbols: string[]): Promise<string[]>;
     /** Whether any bar is stored for the symbol. */
     hasBars(symbol: string): Promise<boolean>;
     /** Re-queues loaded symbols with no bar at all (an empty backfill); returns those re-queued. */
@@ -310,6 +313,7 @@ export function createPriceIngestStore(database: Database = db): PriceIngestStor
         markHistoryAttempted: (symbol, at) => markHistoryAttempted(symbol, at, database),
         replaceHistory: (symbol, bars, through) => replaceHistory(symbol, bars, through, database),
         resetHistory: (symbols) => resetHistory(symbols, database),
+        clearSplitHistories: (symbols) => clearSplitHistories(symbols, database),
         hasBars: (symbol) => hasStoredBars(symbol, database),
         resetUnpricedHistories: (symbols) => resetUnpricedHistories(symbols, database),
     };
@@ -402,10 +406,13 @@ export async function ingestDailyPrices({
         }
     }
 
-    // Re-queue every tracked stock that split in the window before storing any
+    // Clear every tracked stock that split in the window before storing any
     // day: the newest stored day is the next run's bookmark, so no day may be
-    // stored while its split is unhandled. A split on a day that ends up not
-    // stored (unpublished) costs at most one more history refetch.
+    // stored while its split is unhandled. Every bar stored so far predates
+    // the window, so it is on the old scale: all of them go, and the stock is
+    // re-queued, so a post-split bar is never shown beside them. A split on
+    // a day that ends up not stored (unpublished) costs at most one more
+    // history refetch.
     let splits: PriceIngestDetail["splits"];
     if (splitEvents) {
         const from = window[0];
@@ -413,7 +420,7 @@ export async function ingestDailyPrices({
         const split = normalizeSymbols(
             splitEvents.filter((event) => event.executionDate >= from && event.executionDate <= to).map((event) => event.symbol),
         ).filter((symbol) => tracked.has(symbol));
-        splits = { from, to, reset: split.length > 0 ? await store.resetHistory(split) : [] };
+        splits = { from, to, reset: split.length > 0 ? await store.clearSplitHistories(split) : [] };
     } else {
         splits = { skipped: splitsSkipped ?? stopped.catchUp ?? "no new days" };
     }
