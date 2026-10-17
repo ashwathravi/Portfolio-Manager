@@ -113,13 +113,13 @@ describe('fetchQuotes', () => {
         }
     });
 
-    test('drops malformed entries and keeps the valid quotes in the batch', async () => {
+    test('drops malformed and zero-priced entries and keeps the valid quotes in the batch', async () => {
         const msft = { symbol: 'MSFT', price: 500, change: 2, changePercent: 0.4, timestamp: '2026-10-03T18:11:00.000Z', isRealtime: false };
         mockFetch({
             ok: true,
-            json: { data: [null, { symbol: 'AAPL' }, { ...msft, symbol: 'SPY', price: Number.NaN }, msft] },
+            json: { data: [null, { symbol: 'AAPL' }, { ...msft, symbol: 'SPY', price: Number.NaN }, { ...msft, symbol: 'QQQ', price: 0 }, msft] },
         });
-        assert.deepStrictEqual(await fetchQuotes(['AAPL', 'MSFT', 'SPY']), { MSFT: msft });
+        assert.deepStrictEqual(await fetchQuotes(['AAPL', 'MSFT', 'SPY', 'QQQ']), { MSFT: msft });
     });
 
 });

@@ -47,7 +47,7 @@ const HEADER_ALIASES: Record<'symbol' | 'quantity' | 'avgCost' | 'costBasis' | '
 
 // The ** suffix is an explicit broker core-position marker, not a ticker.
 const CORE_POSITION = /^(spaxx|fdrxx|core)\*\*$/i;
-const SUMMARY_SYMBOL = /^(pending activity|account total|total|--)$/i;
+const SUMMARY_SYMBOL = /^(pending|pending activity|account total|total|--)$/i;
 
 function normalizeHeader(h: string): string {
     return h.trim().toLowerCase().replace(/\s+/g, ' ');

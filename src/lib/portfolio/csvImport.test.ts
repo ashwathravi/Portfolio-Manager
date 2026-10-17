@@ -148,6 +148,13 @@ describe('parseHoldingsCsv', () => {
         assert.deepStrictEqual(r.rows.map((x) => [x.symbol, x.quantity, x.avgCost]), [['AAPL', 10, 150], ['FXAIX', 5, 180]]);
     });
 
+    test('skips a literal Pending summary row but imports real PENDING-prefixed symbols', () => {
+        const r = parseHoldingsCsv('Symbol,Description,Quantity,Average Cost\nAAPL,Apple,10,100\nPending,,,\nPENDX,Pend Corp,5,20');
+        assert.deepStrictEqual(r.issues, []);
+        assert.deepStrictEqual(r.rows.map((x) => x.symbol), ['AAPL', 'PENDX']);
+        assert.strictEqual(r.skipped, 1);
+    });
+
     test('a free-text note in the symbol column is skipped; a lone ticker is still an issue', () => {
         const r = parseHoldingsCsv('Symbol,Description,Quantity,Average Cost\nAAPL,Apple,10,100\nDate downloaded 10/13/2026\nMSFT');
         assert.deepStrictEqual(r.rows.map((x) => x.symbol), ['AAPL']);

@@ -22,8 +22,8 @@ export async function fetchQuotes(symbols: readonly string[]): Promise<Record<st
     }
     const body = await res.json();
     if (!Array.isArray(body?.data)) throw new Error('Invalid quotes response.');
-    // A malformed entry leaves its symbol blank ("—") rather than blanking the
-    // whole batch; a wrong price is never shown either way.
+    // A malformed or zero-priced entry leaves its symbol blank ("—") rather
+    // than blanking the whole batch; a wrong price is never shown either way.
     const quotes: Record<string, Quote> = {};
     for (const quote of body.data) {
         if (!isQuote(quote)) continue;
@@ -37,7 +37,9 @@ function isQuote(value: unknown): value is Quote {
     const quote = value as Partial<Quote> | null;
     return Boolean(quote)
         && typeof quote?.symbol === 'string' && quote.symbol.trim().length > 0
-        && Number.isFinite(quote.price) && Number.isFinite(quote.change)
+        // A provider fills a missing price with 0; showing it would value the holding at $0.
+        && Number.isFinite(quote.price) && (quote.price ?? 0) > 0
+        && Number.isFinite(quote.change)
         && Number.isFinite(quote.changePercent)
         && typeof quote.timestamp === 'string'
         && typeof quote.isRealtime === 'boolean';
