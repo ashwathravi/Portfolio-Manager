@@ -1,6 +1,7 @@
 
 import {
     boolean,
+    check,
     date,
     doublePrecision,
     index,
@@ -478,6 +479,29 @@ export const priceBars = pgTable("price_bars", {
 }, (table) => ({
     pk: primaryKey({ columns: [table.symbol, table.date] }),
     dateIdx: index("price_bars_date_idx").on(table.date),
+    serverOnlyNoClientAccess: serverOnlyNoClientAccessPolicy(),
+    appRuntimeAccess: appRuntimeAccessPolicy(),
+})).enableRLS();
+
+// ---------------------------------------------------------------------------
+// Scheduled jobs — one row per run of a cron job (launch item i48)
+// ---------------------------------------------------------------------------
+export type JobRunStatus = "running" | "succeeded" | "failed";
+
+// A row starts as "running" and is finished with the job's detail or a short
+// error. One that stays "running" with no finished_at was cut off mid-run
+// (the function timed out or the instance died).
+export const jobRuns = pgTable("job_runs", {
+    id: uuid("id").default(sql`gen_random_uuid()`).primaryKey(),
+    job: text("job").notNull(),
+    startedAt: timestamp("started_at").defaultNow().notNull(),
+    finishedAt: timestamp("finished_at"),
+    status: text("status").$type<JobRunStatus>().notNull(),
+    detail: jsonb("detail").$type<Record<string, unknown>>(),
+    error: text("error"),
+}, (table) => ({
+    jobStartedAtIdx: index("job_runs_job_started_at_idx").on(table.job, table.startedAt),
+    statusCheck: check("job_runs_status_check", sql`${table.status} in ('running', 'succeeded', 'failed')`),
     serverOnlyNoClientAccess: serverOnlyNoClientAccessPolicy(),
     appRuntimeAccess: appRuntimeAccessPolicy(),
 })).enableRLS();

@@ -85,6 +85,13 @@
       "when": 1791954696972,
       "tag": "0011_price_store",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1792222724647,
+      "tag": "0012_job_runs",
+      "breakpoints": true
     }
   ]
 }
