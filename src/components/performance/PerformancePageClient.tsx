@@ -25,6 +25,9 @@ import { SampleGate } from "@/components/data-display/SampleGate";
  * All state is local to each card. The client wrapper exists purely to
  * keep the page file thin and to keep the topbar / breadcrumbs / actions
  * in sync with the rest of the Workspace routes.
+ *
+ * `now` is the server's request time, shared with the CSV export, so the
+ * browser hydrates the same months and the export matches the charts.
  */
 
 // Derive alt benchmarks from the single live series we have until AR-11/12
@@ -71,8 +74,8 @@ function buildBenchmarks(sp500: MonthlyValuation[]): Benchmark[] {
     ];
 }
 
-export function PerformancePageClient() {
-    const { portfolio, benchmark } = getExampleMonthlySeries();
+export function PerformancePageClient({ now }: { now: number }) {
+    const { portfolio, benchmark } = getExampleMonthlySeries(now);
     const benchmarks = useMemo(() => buildBenchmarks(benchmark), [benchmark]);
     return (
         <div className="pm-perf-stack">
