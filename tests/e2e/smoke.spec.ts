@@ -39,7 +39,8 @@ test('regression: fonts are self-hosted, with the Latin files preloaded and ever
     // Turbopack cannot parse. The files now ship from src/styles/fonts.
     const googleRequests: string[] = [];
     page.on('request', (request) => {
-        if (/fonts\.(googleapis|gstatic)\.com/.test(request.url())) googleRequests.push(request.url());
+        const { hostname } = new URL(request.url());
+        if (hostname === 'fonts.googleapis.com' || hostname === 'fonts.gstatic.com') googleRequests.push(request.url());
     });
     await page.goto('/');
 
