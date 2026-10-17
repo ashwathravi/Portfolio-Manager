@@ -18,13 +18,17 @@ import {
     type ThesisEvidence,
 } from './thesis';
 import { getBrowserStorage, loadThesesFromStorage, saveThesesToStorage } from './storage';
+import { useRenderNow } from '@/components/providers/RequestTimeProvider';
 
 /**
  * React hook that backs the research workspace. Persists to localStorage so
  * user changes survive a refresh until the Supabase-backed API lands.
  */
 export function useThesisStore() {
-    const [theses, setTheses] = useState<Thesis[]>(() => getDefaultTheses());
+    // The example theses are dated from the server's request time, so the
+    // server render and hydration agree on the day.
+    const renderNow = useRenderNow();
+    const [theses, setTheses] = useState<Thesis[]>(() => getDefaultTheses(renderNow));
     const [hydrated, setHydrated] = useState(false);
 
     // Hydrate from localStorage on mount so SSR + initial render match.

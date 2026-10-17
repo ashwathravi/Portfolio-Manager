@@ -31,6 +31,7 @@ import {
     adherenceTier,
 } from "@/lib/adherence/impact";
 import { getSeedJournal, seedJournalAnchorMs } from "@/lib/journal/seed";
+import { useRenderNow } from "@/components/providers/RequestTimeProvider";
 import { StrategyCard } from "./StrategyCard";
 import { RuleBuilderPanel } from "./RuleBuilderPanel";
 import { BacktestPanel } from "./BacktestPanel";
@@ -133,9 +134,10 @@ export function StrategyBuilderClient({ initialStrategyId }: { initialStrategyId
         ? adherenceByStrategy[selected.id] ?? []
         : [];
 
-    // The example journal and its 30-day windows share one anchor (the
-    // start of the current UTC day), so server and client agree.
-    const journalAnchorMs = seedJournalAnchorMs();
+    // The example journal and its 30-day windows share one anchor: the
+    // start of the UTC day of the server's request time, so server and
+    // client agree.
+    const journalAnchorMs = seedJournalAnchorMs(useRenderNow());
     const seedJournal = getSeedJournal(journalAnchorMs);
 
     // Rolling 30-day score for the selected strategy — `null` when the

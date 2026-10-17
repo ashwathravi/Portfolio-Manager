@@ -50,6 +50,24 @@ test.describe('Hydration across viewer timezones', () => {
     }
 });
 
+test.describe('Hydration across a UTC day boundary', () => {
+    // Regression: example theses and journal dates came from each side's own
+    // clock, so a page rendered just before UTC midnight and hydrated just
+    // after it (or viewed with a browser clock on another day) failed
+    // hydration. The browser now hydrates with the server's request time.
+    for (const path of ['/research', '/strategies', '/execution', '/settings']) {
+        test(`${path} hydrates when the browser is already on the next UTC day`, async ({ page }) => {
+            await page.clock.install({ time: Date.now() + 86_400_000 });
+            const errors: string[] = [];
+            page.on('pageerror', (e) => errors.push(String(e)));
+            page.on('console', (m) => { if (m.type() === 'error' && /Hydration|did not match/i.test(m.text())) errors.push(m.text()); });
+            await page.goto(path);
+            await page.waitForTimeout(1500);
+            expect(errors.filter((e) => /Hydration|did not match/i.test(e))).toEqual([]);
+        });
+    }
+});
+
 test.describe('Phone layout', () => {
     // Regression: 11 routes scrolled sideways at 390px (the content column
     // grew to the top bar's min-content width).

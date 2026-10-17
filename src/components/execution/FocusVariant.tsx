@@ -38,6 +38,7 @@ import {
 import { mockPortfolios } from "@/lib/mockData";
 import { getDefaultTheses } from "@/lib/research/thesis";
 import { useSettingsStore } from "@/lib/stores/settingsStore";
+import { useRenderNow } from "@/components/providers/RequestTimeProvider";
 import type {
     Order,
     OrderInstrumentType,
@@ -474,23 +475,24 @@ function OrderForm({ onSubmit }: OrderFormProps) {
         () => buildOptionGuardrails(isOptionOrder, optionOrderPolicy.checks),
         [isOptionOrder, optionOrderPolicy.checks],
     );
+    const defaultTheses = getDefaultTheses(useRenderNow());
     const sellDisciplineSummary = useMemo(
         () =>
             evaluateSellDiscipline({
                 rules: sellDisciplineRules,
                 holdings: EXECUTION_RISK_POLICY_HOLDINGS,
-                theses: getDefaultTheses(),
+                theses: defaultTheses,
                 portfolioValue: EXECUTION_POLICY_PORTFOLIO_VALUE,
             }),
-        [sellDisciplineRules],
+        [sellDisciplineRules, defaultTheses],
     );
     const sellDisciplineGuardrail = useMemo(
         () => buildSellDisciplineGuardrail(side, tickerUpper, sellDisciplineSummary.tasks),
         [side, tickerUpper, sellDisciplineSummary.tasks],
     );
     const selectedThesis = useMemo(
-        () => getDefaultTheses().find((thesis) => thesis.id === rationaleDraft.thesisId),
-        [rationaleDraft.thesisId],
+        () => defaultTheses.find((thesis) => thesis.id === rationaleDraft.thesisId),
+        [defaultTheses, rationaleDraft.thesisId],
     );
     const riskPolicyImpact = useMemo(
         () =>
