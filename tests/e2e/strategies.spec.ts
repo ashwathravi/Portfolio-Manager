@@ -69,6 +69,21 @@ test.describe('Strategies page — Phase 6 builder shell', () => {
         await expect(cards.nth(1)).toHaveAttribute('aria-pressed', 'true');
     });
 
+    test('regression: a click made while the page hydrates on a slow device still lands', async ({ page }) => {
+        // A request-time hook that switched to the live clock after hydration
+        // re-rendered the builder as it hydrated, which swallowed clicks made
+        // during hydration on slow CPUs (every CI run, never a fast laptop).
+        const cdp = await page.context().newCDPSession(page);
+        await cdp.send('Emulation.setCPUThrottlingRate', { rate: 6 });
+        await page.goto('/strategies', { waitUntil: 'commit' });
+        const cards = page.locator('.pm-strategy-card');
+        await cards.nth(1).click();
+        await expect(cards.nth(1)).toHaveAttribute('aria-pressed', 'true', { timeout: 15_000 });
+        await page.waitForTimeout(2_000);
+        await expect(cards.first()).toHaveAttribute('aria-pressed', 'false');
+        await expect(cards.nth(1)).toHaveAttribute('aria-pressed', 'true');
+    });
+
     test('renders the rule builder, adherence editor, and backtest panel', async ({
         page,
     }) => {
@@ -85,7 +100,7 @@ test.describe('Strategies page — Phase 6 builder shell', () => {
 /**
  * AR-111 — StrategyCard rolling 30d adherence pill.
  *
- * Every card renders its own score pill computed from SEED_JOURNAL. The
+ * Every card renders its own score pill computed from the example journal. The
  * pill carries `data-tier` so downstream styling is tier-aware. We don't
  * assert on an exact number — seed data can tweak over time — but we
  * assert structural invariants.
@@ -238,7 +253,7 @@ test.describe('Strategies page — Adherence rules editor (AR-111)', () => {
 /**
  * AR-111 — AdherenceImpactCard (returns comparison).
  *
- * With SEED_JOURNAL shipping pre-frozen adherence on each entry, the
+ * With the example journal shipping pre-frozen adherence on each entry, the
  * card renders the "Cost of breaking your own rules" view. If a bucket
  * is under-populated (< 10 trades), it falls back to the empty state.
  * We assert whichever it shows today still reads sensibly.

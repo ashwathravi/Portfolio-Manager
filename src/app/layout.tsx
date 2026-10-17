@@ -9,6 +9,7 @@ import { QueryProvider } from "@/components/providers/QueryProvider";
 import { Toaster } from "@/components/ui/sonner";
 import { AppFrame } from "@/components/layout/AppFrame";
 import { IdentityProvider } from "@/components/providers/IdentityProvider";
+import { RequestTimeProvider } from "@/components/providers/RequestTimeProvider";
 import { resolveViewerIdentity } from "@/lib/auth/viewer";
 
 // Self-hosted via next/font so text never silently falls back to system
@@ -35,7 +36,9 @@ export const metadata: Metadata = {
  * Provider stack from outside in:
  *   QueryProvider       — TanStack Query for server state
  *     ThemeProvider     — hydrates `data-theme`/`data-density`/`--pm-accent`
- *       AppFrame         — app chrome for product routes; auth routes render
+ *       IdentityProvider / RequestTimeProvider — the viewer and the
+ *                          request time the server rendered with
+ *         AppFrame       — app chrome for product routes; auth routes render
  *                          without the sidebar/topbar shell
  *
  * Sidebar width is driven by `--pm-sidebar-w` (defined in globals.css) so
@@ -53,6 +56,10 @@ export default async function RootLayout({
   // never baked into a statically prerendered page.
   await connection();
   const identity = await resolveViewerIdentity();
+  // Shared with the browser so hydration computes date-relative example
+  // data from the same instant as this render.
+  // eslint-disable-next-line react-hooks/purity
+  const requestTime = Date.now();
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
@@ -69,7 +76,9 @@ export default async function RootLayout({
         <QueryProvider>
           <ThemeProvider>
             <IdentityProvider identity={identity}>
-              <AppFrame>{children}</AppFrame>
+              <RequestTimeProvider now={requestTime}>
+                <AppFrame>{children}</AppFrame>
+              </RequestTimeProvider>
             </IdentityProvider>
           </ThemeProvider>
         </QueryProvider>

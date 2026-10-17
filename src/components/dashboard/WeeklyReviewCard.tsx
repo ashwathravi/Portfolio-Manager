@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { CalendarClock, CheckCircle2, BellOff } from "lucide-react";
 import type { JournalEntry } from "@/types/trade";
-import { SEED_JOURNAL } from "@/lib/journal/seed";
+import { getSeedJournal } from "@/lib/journal/seed";
 import { generateReview } from "@/lib/reviews/generate";
 import { currentWeekBounds, formatWeekRange } from "@/lib/reviews/weeks";
 import {
@@ -42,11 +42,11 @@ export interface WeeklyReviewCardProps {
     now?: Date;
 }
 
-export function WeeklyReviewCard({ entries = SEED_JOURNAL, now }: WeeklyReviewCardProps) {
+export function WeeklyReviewCard({ entries, now }: WeeklyReviewCardProps) {
     const bounds = useMemo(() => currentWeekBounds(now), [now]);
     const review = useMemo(
-        () => generateReview(entries, bounds),
-        [entries, bounds],
+        () => generateReview(entries ?? getSeedJournal(now?.getTime()), bounds),
+        [entries, now, bounds],
     );
 
     // Hydration-safe: start as `false` so the server + first client
