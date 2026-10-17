@@ -14,11 +14,13 @@
  * Redis failure lets the call through, and Massive's own 429 is the
  * backstop.
  *
- * The log is named after a hash of the API key, not the deployment: a
- * preview and production that share a key share its budget.
+ * There is one log for every deployment (production, previews, local runs
+ * with Redis credentials): the app has one Massive key, and sharing the
+ * budget errs on the safe side if a deployment uses another. Nothing about
+ * the key goes into the log's name.
  */
 
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 
 import { Redis } from "@upstash/redis";
 
@@ -44,10 +46,8 @@ export interface QuotaStore {
     reserve(key: string, rule: QuotaRule): Promise<QuotaDecision>;
 }
 
-/** The quota's log: the API key's hash, never the key itself. */
-export function massiveQuotaKey(apiKey: string): string {
-    return `provider:massive:${createHash("sha256").update(apiKey.trim()).digest("hex").slice(0, 16)}`;
-}
+/** The one log every Massive caller shares. */
+export const MASSIVE_QUOTA_KEY = "provider:massive";
 
 /** Per-process logs: local development, tests, and no Redis. */
 export function createMemoryQuotaStore(now: () => number = () => Date.now()): QuotaStore {
@@ -126,9 +126,9 @@ function getQuotaStore(env: NodeJS.ProcessEnv = process.env): QuotaStore {
     return quotaStore;
 }
 
-/** The shared quota for a Massive API key (default: POLYGON_API_KEY). */
-export function getMassiveQuota(apiKey: string = process.env.POLYGON_API_KEY ?? ""): ProviderQuota {
-    return createProviderQuota(getQuotaStore(), massiveQuotaKey(apiKey));
+/** The quota every Massive caller shares. */
+export function getMassiveQuota(): ProviderQuota {
+    return createProviderQuota(getQuotaStore(), MASSIVE_QUOTA_KEY);
 }
 
 /** Tests: swap in a store, or pass null to resolve from the environment again. */

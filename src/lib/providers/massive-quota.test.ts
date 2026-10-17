@@ -7,7 +7,7 @@ import {
     createRedisQuotaStore,
     getMassiveQuota,
     MASSIVE_CALLS_PER_MINUTE,
-    massiveQuotaKey,
+    MASSIVE_QUOTA_KEY,
     setQuotaStoreForTests,
     type QuotaRedis,
     type QuotaStore,
@@ -99,24 +99,20 @@ function fakeRedis(options: { failing?: boolean } = {}) {
     return { redis: redis as unknown as QuotaRedis, sets, commands };
 }
 
-describe("massiveQuotaKey", () => {
-    test("names the log after the API key's hash, never the key", () => {
-        const key = massiveQuotaKey("secret-test-key");
-        assert.match(key, /^provider:massive:[0-9a-f]{16}$/);
-        assert.ok(!key.includes("secret"));
-        assert.equal(massiveQuotaKey(" secret-test-key "), key);
-        assert.notEqual(massiveQuotaKey("another-key"), key);
+describe("MASSIVE_QUOTA_KEY", () => {
+    test("is one fixed log name, with nothing from the API key in it", () => {
+        assert.equal(MASSIVE_QUOTA_KEY, "provider:massive");
     });
 });
 
 describe("memory quota store", () => {
     test("allows five calls in any rolling minute", () => checkRollingWindow((now) => createMemoryQuotaStore(now)));
 
-    test("callers with the same key share one budget; another key has its own", async () => {
+    test("callers on the same log share one budget; another log has its own", async () => {
         const store = createMemoryQuotaStore(() => 0);
-        const ingest = createProviderQuota(store, massiveQuotaKey("k1"));
-        const routes = createProviderQuota(store, massiveQuotaKey("k1"));
-        const other = createProviderQuota(store, massiveQuotaKey("k2"));
+        const ingest = createProviderQuota(store, MASSIVE_QUOTA_KEY);
+        const routes = createProviderQuota(store, MASSIVE_QUOTA_KEY);
+        const other = createProviderQuota(store, "provider:other");
         for (let i = 0; i < 3; i++) await ingest.reserve();
         for (let i = 0; i < 2; i++) await routes.reserve();
         assert.equal((await ingest.reserve()).allowed, false);
@@ -155,7 +151,7 @@ describe("getMassiveQuota", () => {
 
     test("uses the shared quota store", async () => {
         setQuotaStoreForTests(createMemoryQuotaStore(() => 0));
-        for (let i = 0; i < 5; i++) await getMassiveQuota("k").reserve();
-        assert.equal((await getMassiveQuota("k").reserve()).allowed, false);
+        for (let i = 0; i < 5; i++) await getMassiveQuota().reserve();
+        assert.equal((await getMassiveQuota().reserve()).allowed, false);
     });
 });

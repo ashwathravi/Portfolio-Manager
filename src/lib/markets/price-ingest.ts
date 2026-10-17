@@ -328,7 +328,7 @@ const defaultSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(r
  */
 export function createIngestAdapter(config: Omit<PolygonAdapterConfig, "maxRetries"> = {}, apiKey?: string) {
     return new PolygonMassiveAdapter(apiKey, undefined, {
-        quota: getMassiveQuota(apiKey ?? process.env.POLYGON_API_KEY ?? ""),
+        quota: getMassiveQuota(),
         ...config,
         maxRetries: 0,
     });
