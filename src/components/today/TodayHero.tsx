@@ -6,6 +6,7 @@ import { useAutoRefreshQuotes } from "@/lib/hooks/useAutoRefreshQuotes";
 import { LiveDataIndicator } from "@/components/data-display/LiveDataIndicator";
 import { formatPct, formatUsd } from "@/lib/format";
 import { isTodaysQuote } from "@/lib/markets/quote-session";
+import { useEasternDate } from "@/lib/hooks/useEasternDate";
 
 export interface TodayHeroHolding {
     symbol: string;
@@ -24,12 +25,12 @@ export function TodayHero({ holdings, cashTotal }: { holdings: TodayHeroHolding[
     const symbols = useMemo(() => holdings.map((h) => h.symbol).filter(Boolean), [holdings]);
     const { quotes, isFetching, isError, refreshMs, refetch, lastUpdatedAt } = useAutoRefreshQuotes(symbols);
 
+    const todayEt = useEasternDate();
     const { invested, change, live, today } = useMemo(() => {
         let value = 0;
         let delta = 0;
         let hasLive = false;
         let hasToday = false;
-        const now = new Date();
         for (const h of holdings) {
             const q = quotes[h.symbol.toUpperCase()];
             if (q && Number.isFinite(q.price)) {
@@ -37,7 +38,7 @@ export function TodayHero({ holdings, cashTotal }: { holdings: TodayHeroHolding[
                 hasLive = true;
                 // Before today's close the newest price is the last session's;
                 // its change belongs to that day, not today.
-                if (isTodaysQuote(q, now)) {
+                if (isTodaysQuote(q, todayEt)) {
                     delta += (q.change ?? 0) * h.quantity;
                     hasToday = true;
                 }
@@ -46,7 +47,7 @@ export function TodayHero({ holdings, cashTotal }: { holdings: TodayHeroHolding[
             }
         }
         return { invested: value, change: delta, live: hasLive, today: hasToday };
-    }, [holdings, quotes]);
+    }, [holdings, quotes, todayEt]);
 
     const netWorth = invested + cashTotal;
     const liveIndicator = (

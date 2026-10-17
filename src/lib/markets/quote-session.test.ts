@@ -25,6 +25,11 @@ describe("isTodaysQuote", () => {
         assert.equal(isTodaysQuote(close("2026-10-16T20:00:00.000Z"), new Date("2026-10-17T15:00:00Z")), false);
     });
 
+    test("accepts today's Eastern date as a string", () => {
+        assert.equal(isTodaysQuote(close("2026-10-16T20:00:00.000Z"), "2026-10-16"), true);
+        assert.equal(isTodaysQuote(close("2026-10-16T20:00:00.000Z"), "2026-10-17"), false);
+    });
+
     test("a live quote is always today's, and a bad timestamp never is", () => {
         assert.equal(isTodaysQuote({ timestamp: "2026-10-01T15:00:00Z", isRealtime: true }, new Date("2026-10-16T15:00:00Z")), true);
         assert.equal(isTodaysQuote(close("not a date"), new Date("2026-10-16T15:00:00Z")), false);

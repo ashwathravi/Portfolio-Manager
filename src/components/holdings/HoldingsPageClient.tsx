@@ -28,6 +28,7 @@ import { HoldingsFullTable, type HoldingsTableRow } from "./HoldingsFullTable";
 import { HoldingsSummaryStrip } from "./HoldingsSummaryStrip";
 import { OptionsRiskLedgerCard } from "./OptionsRiskLedgerCard";
 import { isTodaysQuote } from "@/lib/markets/quote-session";
+import { useEasternDate } from "@/lib/hooks/useEasternDate";
 
 /**
  * Phase 4 (AR-74) Holdings page wrapper.
@@ -83,10 +84,10 @@ export function HoldingsPageClient({
         [holdings],
     );
     const { quotes } = useAutoRefreshQuotes(symbols);
+    const todayEt = useEasternDate();
 
     // ---- Enrich with live quote, then derive allocation + today% ----
     const enriched = useMemo(() => {
-        const now = new Date();
         const withQuote = holdings.map((h) => {
             const q = quotes[h.symbol.toUpperCase()];
             const last = Number.isFinite(q?.price) ? q!.price : h.currentPrice;
@@ -95,7 +96,7 @@ export function HoldingsPageClient({
             const totalReturnPct =
                 h.avgCost > 0 ? ((last - h.avgCost) / h.avgCost) * 100 : 0;
             // An earlier session's closing quote prices the row but isn't today's move.
-            const todays = q != null && isTodaysQuote(q, now);
+            const todays = q != null && isTodaysQuote(q, todayEt);
             const todayPct = todays ? q.changePercent : 0;
             const todayChangeAbs =
                 todays && q.change != null ? q.change * h.quantity : 0;
@@ -122,7 +123,7 @@ export function HoldingsPageClient({
             allocationPct: totalMV > 0 ? (r.marketValue / totalMV) * 100 : 0,
         }));
         return { rows: enrichedRows, totalMV };
-    }, [holdings, quotes]);
+    }, [holdings, quotes, todayEt]);
 
     const { rows, totalMV } = enriched;
 
