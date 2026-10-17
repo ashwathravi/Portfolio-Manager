@@ -30,6 +30,7 @@ fi
 # another run holds it, that run holds these ports.
 node scripts/e2e/check-port-free.mjs 3000
 node scripts/e2e/check-port-free.mjs 3100
+node scripts/e2e/check-port-free.mjs 3200
 
 docker compose exec -T db psql -U atlas -d postgres --set=ON_ERROR_STOP=1 --quiet \
     -c 'DROP DATABASE IF EXISTS atlas_wealth_e2e WITH (FORCE);' \

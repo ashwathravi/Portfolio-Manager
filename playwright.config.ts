@@ -34,6 +34,13 @@ const noSharedRedis = {
     UPSTASH_REDIS_REST_TOKEN: '',
 };
 
+// No market-data key either, so test runs never spend the free plan's 5 calls
+// a minute and always see the not-configured state: stored prices on pages,
+// 503 from /api/market-data (tests stub those routes where they need quotes).
+const noMarketData = {
+    POLYGON_API_KEY: '',
+};
+
 export default defineConfig({
     testDir: './tests/e2e',
     fullyParallel: true,
@@ -81,6 +88,7 @@ export default defineConfig({
                 // DATABASE_URL out of .env.local into the test server.
                 DATABASE_URL: process.env.DATABASE_URL ?? '',
                 ...noSharedRedis,
+                ...noMarketData,
             },
             url: 'http://localhost:3000',
             // Never reuse a running server: it may be connected to a real
@@ -104,8 +112,33 @@ export default defineConfig({
                 AUTH_LOCAL_DEV_BYPASS: '1',
                 AUTH_LOCAL_DEV_USER_ID: E2E_USER_ID,
                 ...noSharedRedis,
+                ...noMarketData,
             },
             url: 'http://localhost:3100/api/health',
+            // Never reuse a running server: it may be connected to a real
+            // database or the shared Redis. A busy port fails the run instead.
+            reuseExistingServer: false,
+            timeout: 120_000,
+        },
+        {
+            // "Unusable database URL" server for the second half of
+            // outage.spec.ts: DATABASE_URL holds Vercel's "[SENSITIVE]"
+            // placeholder, as a build or runtime that never received the real
+            // value would. That must read as "no database", not as an outage.
+            command: 'npm run dev -- --port 3200',
+            env: {
+                ...webServerEnv,
+                NEXT_DIST_DIR: '.next/e2e-placeholder',
+                DATABASE_URL: '[SENSITIVE]',
+                AUTH_SECRET: '',
+                AUTH_GOOGLE_ID: '',
+                AUTH_GOOGLE_SECRET: '',
+                AUTH_LOCAL_DEV_BYPASS: '1',
+                AUTH_LOCAL_DEV_USER_ID: E2E_USER_ID,
+                ...noSharedRedis,
+                ...noMarketData,
+            },
+            url: 'http://localhost:3200/api/health',
             // Never reuse a running server: it may be connected to a real
             // database or the shared Redis. A busy port fails the run instead.
             reuseExistingServer: false,

@@ -1,6 +1,7 @@
 import { Suspense } from "react";
-import { marketDataEngine } from "@/lib/api/market-data";
 import { requirePageUserId } from "@/lib/auth/request-user";
+import { isDatabaseConfigured } from "@/db/connection-options";
+import { loadQuotes } from "@/lib/services/market-data-service";
 import { buildUserHoldingsQuery, buildUserPortfolioOptionsQuery } from "@/lib/portfolio-repository";
 import { HoldingsPageClient, type HoldingsSeed } from "@/components/holdings/HoldingsPageClient";
 import { PageHeaderSync } from "@/components/layout/TopBar";
@@ -42,7 +43,7 @@ async function HoldingsContent() {
     } catch (e) {
         // With a configured database a failure is an outage, not an empty
         // portfolio; without one (local runs) the empty table is expected.
-        unavailable = Boolean(process.env.DATABASE_URL?.trim());
+        unavailable = isDatabaseConfigured();
         if (unavailable) console.error("Holdings fetch failed — showing the outage notice.", e);
         else console.warn("Holdings fetch failed without a configured database — showing empty table.", e);
     }
@@ -62,18 +63,9 @@ async function HoldingsContent() {
         );
     }
 
-    // Warm the quote cache so the initial paint has correct prices.
-    let liveQuotes: Record<string, { price: number; change: number; changePercent: number }> = {};
-    try {
-        const symbols = Array.from(
-            new Set(dbHoldings.map((h) => h.symbol).filter(Boolean)),
-        );
-        if (symbols.length > 0) {
-            liveQuotes = await marketDataEngine.getQuotes(symbols);
-        }
-    } catch (e) {
-        console.warn("Failed to warm quote cache for holdings page", e);
-    }
+    // Warm the quote cache so the initial paint has correct prices; without
+    // market data the stored prices stand.
+    const liveQuotes = await loadQuotes(dbHoldings.map((h) => h.symbol));
 
     // Server component: holding age is intentionally request-time derived.
     // eslint-disable-next-line react-hooks/purity

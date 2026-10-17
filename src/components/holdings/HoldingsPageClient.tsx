@@ -27,6 +27,8 @@ import {
 import { HoldingsFullTable, type HoldingsTableRow } from "./HoldingsFullTable";
 import { HoldingsSummaryStrip } from "./HoldingsSummaryStrip";
 import { OptionsRiskLedgerCard } from "./OptionsRiskLedgerCard";
+import { isTodaysQuote } from "@/lib/markets/quote-session";
+import { useEasternDate } from "@/lib/hooks/useEasternDate";
 
 /**
  * Phase 4 (AR-74) Holdings page wrapper.
@@ -82,6 +84,7 @@ export function HoldingsPageClient({
         [holdings],
     );
     const { quotes } = useAutoRefreshQuotes(symbols);
+    const todayEt = useEasternDate();
 
     // ---- Enrich with live quote, then derive allocation + today% ----
     const enriched = useMemo(() => {
@@ -92,9 +95,11 @@ export function HoldingsPageClient({
             const costBasis = h.quantity * h.avgCost;
             const totalReturnPct =
                 h.avgCost > 0 ? ((last - h.avgCost) / h.avgCost) * 100 : 0;
-            const todayPct = q ? q.changePercent : 0;
-            const todayChangeAbs =
-                q?.change != null ? q.change * h.quantity : 0;
+            // An earlier session's closing quote prices the row but isn't today's move.
+            const todays = q != null && isTodaysQuote(q, todayEt);
+            // Null when there is no move from today's session: shown as a dash.
+            const todayPct: number | null = todays ? q.changePercent : null;
+            const todayChangeAbs = todays ? q.change * h.quantity : 0;
             const sector = h.sector ?? sectorFor(h.symbol);
             const bucketAssignment = resolvePolicyBucketAssignment(h);
             const themeWeights = themeWeightsForSymbol(h.symbol, h.themeWeights);
@@ -118,7 +123,7 @@ export function HoldingsPageClient({
             allocationPct: totalMV > 0 ? (r.marketValue / totalMV) * 100 : 0,
         }));
         return { rows: enrichedRows, totalMV };
-    }, [holdings, quotes]);
+    }, [holdings, quotes, todayEt]);
 
     const { rows, totalMV } = enriched;
 
@@ -179,7 +184,8 @@ export function HoldingsPageClient({
                 case "totalReturnPct":
                     return b.totalReturnPct - a.totalReturnPct;
                 case "todayPct":
-                    return b.todayPct - a.todayPct;
+                    // Rows without a move today sort last.
+                    return (b.todayPct ?? -Infinity) - (a.todayPct ?? -Infinity) || 0;
                 case "allocationPct":
                     return b.allocationPct - a.allocationPct;
             }

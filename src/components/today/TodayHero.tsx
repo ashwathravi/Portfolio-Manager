@@ -5,6 +5,8 @@ import { useMemo } from "react";
 import { useAutoRefreshQuotes } from "@/lib/hooks/useAutoRefreshQuotes";
 import { LiveDataIndicator } from "@/components/data-display/LiveDataIndicator";
 import { formatPct, formatUsd } from "@/lib/format";
+import { isTodaysQuote } from "@/lib/markets/quote-session";
+import { useEasternDate } from "@/lib/hooks/useEasternDate";
 
 export interface TodayHeroHolding {
     symbol: string;
@@ -23,22 +25,35 @@ export function TodayHero({ holdings, cashTotal }: { holdings: TodayHeroHolding[
     const symbols = useMemo(() => holdings.map((h) => h.symbol).filter(Boolean), [holdings]);
     const { quotes, isFetching, isError, refreshMs, refetch, lastUpdatedAt } = useAutoRefreshQuotes(symbols);
 
-    const { invested, change, live } = useMemo(() => {
+    const todayEt = useEasternDate();
+    const { invested, change, live, positions, movedToday } = useMemo(() => {
         let value = 0;
         let delta = 0;
         let hasLive = false;
+        let held = 0;
+        let moved = 0;
         for (const h of holdings) {
             const q = quotes[h.symbol.toUpperCase()];
+            if (h.quantity !== 0) held++;
             if (q && Number.isFinite(q.price)) {
                 value += h.quantity * q.price;
-                delta += (q.change ?? 0) * h.quantity;
                 hasLive = true;
+                // Before today's close the newest price is the last session's;
+                // its change belongs to that day, not today.
+                if (isTodaysQuote(q, todayEt)) {
+                    delta += q.change * h.quantity;
+                    if (h.quantity !== 0) moved++;
+                }
             } else {
                 value += h.marketValue || h.quantity * h.currentPrice;
             }
         }
-        return { invested: value, change: delta, live: hasLive };
-    }, [holdings, quotes]);
+        return { invested: value, change: delta, live: hasLive, positions: held, movedToday: moved };
+    }, [holdings, quotes, todayEt]);
+    // The headline is the portfolio's move only when every position has one
+    // from today's session; otherwise it is labelled as covering some of them.
+    const today = movedToday > 0;
+    const complete = today && movedToday === positions;
 
     const netWorth = invested + cashTotal;
     const liveIndicator = (
@@ -75,11 +90,21 @@ export function TodayHero({ holdings, cashTotal }: { holdings: TodayHeroHolding[
             <div className="pm-today-hero-main">
                 <span className="pm-today-label">Net worth</span>
                 <p className="pm-today-networth" data-testid="today-networth">{formatUsd(netWorth)}</p>
-                <p className={`pm-today-change ${live ? (change > 0 ? "pm-pos" : change < 0 ? "pm-neg" : "") : ""}`}>
-                    {live ? (
+                <p
+                    className={`pm-today-change ${today ? (change > 0 ? "pm-pos" : change < 0 ? "pm-neg" : "") : ""}`}
+                    data-testid="today-change"
+                >
+                    {complete ? (
                         <>
                             {formatUsd(change, { signed: true })} ({formatPct(changePct, { signed: true, decimals: 2 })}) today
                         </>
+                    ) : today ? (
+                        // Some positions have no move from today yet (unpriced, or an earlier close).
+                        <>
+                            {formatUsd(change, { signed: true })} today on {movedToday} of {positions} positions
+                        </>
+                    ) : live ? (
+                        "Prices as of the last close"
                     ) : (
                         "Today's change appears when live quotes arrive"
                     )}

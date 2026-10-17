@@ -1,6 +1,12 @@
 import { describe, test } from "node:test";
 import assert from "node:assert";
-import { DATABASE_POOL_OPTIONS, isLocalDatabaseUrl, resolveDatabaseSslMode } from "./connection-options.ts";
+import {
+    DATABASE_POOL_OPTIONS,
+    isDatabaseConfigured,
+    isLocalDatabaseUrl,
+    resolveDatabaseSslMode,
+    usableDatabaseUrl,
+} from "./connection-options.ts";
 
 describe("resolveDatabaseSslMode", () => {
     test("requires SSL when no database URL is configured", () => {
@@ -26,6 +32,36 @@ describe("resolveDatabaseSslMode", () => {
             resolveDatabaseSslMode("postgres://postgres:postgres@127.0.0.1:5432/app"),
             false,
         );
+    });
+});
+
+describe("usableDatabaseUrl", () => {
+    test("keeps a connection URL", () => {
+        const url = "postgres://atlas_app.ref:secret@aws-0-us-west-2.pooler.supabase.com:6543/postgres?sslmode=require";
+        assert.strictEqual(usableDatabaseUrl(url), url);
+        assert.strictEqual(usableDatabaseUrl(` ${url} `), url);
+    });
+
+    // Regression: the production build pulled DATABASE_URL from Vercel as
+    // "[SENSITIVE]" and the client constructor threw "Invalid URL".
+    test("treats Vercel's sensitive placeholder and other non-URLs as missing", () => {
+        for (const value of ["[SENSITIVE]", "not a url", "", "   ", undefined]) {
+            assert.strictEqual(usableDatabaseUrl(value), undefined, String(value));
+        }
+    });
+});
+
+describe("isDatabaseConfigured", () => {
+    test("is true only for a usable connection URL", () => {
+        assert.strictEqual(isDatabaseConfigured({ DATABASE_URL: "postgres://atlas_app:pw@127.0.0.1:54329/atlas_wealth" }), true);
+    });
+
+    // Regression: readiness, the outage notice and Plaid storage counted
+    // Vercel's "[SENSITIVE]" placeholder as a configured database.
+    test("is false for a missing value or Vercel's sensitive placeholder", () => {
+        assert.strictEqual(isDatabaseConfigured({}), false);
+        assert.strictEqual(isDatabaseConfigured({ DATABASE_URL: "   " }), false);
+        assert.strictEqual(isDatabaseConfigured({ DATABASE_URL: "[SENSITIVE]" }), false);
     });
 });
 

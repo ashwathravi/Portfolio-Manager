@@ -41,15 +41,15 @@ npm run test:e2e
 npm run test:e2e:ui
 ```
 
-`test:e2e:local` (`scripts/e2e/run-local.sh`) recreates `atlas_wealth_e2e` in the Docker container, applies migrations and the fixtures in `scripts/e2e/fixtures.sql` through `scripts/e2e/prepare-database.ts` (the same script CI runs), then starts Playwright. It refuses to start if anything is listening on port 3000 or 3100.
+`test:e2e:local` (`scripts/e2e/run-local.sh`) recreates `atlas_wealth_e2e` in the Docker container, applies migrations and the fixtures in `scripts/e2e/fixtures.sql` through `scripts/e2e/prepare-database.ts` (the same script CI runs), then starts Playwright. It refuses to start if anything is listening on port 3000, 3100 or 3200.
 
 Every checkout, git worktrees under `.claude/worktrees/` included, shares one container: `docker-compose.yml` pins the Compose project to `portfolio-manager` (container `atlas-wealth-db`, volume `portfolio-manager_atlas-wealth-db`). A checkout in a directory not named `Portfolio-Manager` may still have `atlas-wealth-db` under its old, directory-named project; `npm run db:up` and `test:e2e:local` then stop and print the commands that move it over, keeping its data (`scripts/db/check-container-project.sh`). Runs from different checkouts take turns through a Postgres advisory lock (`scripts/e2e/run-lock.mjs`): a second run prints which checkout holds the lock and waits up to `E2E_LOCK_WAIT_SECONDS` (default 1800) before exiting 75. The lock lasts exactly as long as the run: the wrapper and a helper process each hold part of it until every process the run started has exited, so if either is killed (even with SIGKILL) the other stops the run and keeps the next one waiting until it has. `test:e2e:local` starts the container if needed but never recreates it; `npm run db:up` applies changes to `docker-compose.yml`. The lock's tests, and the `db:migrate` test, need a database: `SCRIPTS_TEST_DATABASE_URL=postgres://atlas:atlas-local-only@127.0.0.1:54329/atlas_wealth npm test` (CI's e2e job runs them).
 
-Playwright starts two web servers: the main one on port 3000, and a "database down" one on port 3100 (its own build directory via `NEXT_DIST_DIR`, a `DATABASE_URL` nothing answers, local auth bypass) used only by `outage.spec.ts`.
+Playwright starts three web servers: the main one on port 3000; a "database down" one on port 3100 (a `DATABASE_URL` nothing answers); and an "unusable database URL" one on port 3200 (`DATABASE_URL="[SENSITIVE]"`, Vercel's placeholder). The last two have their own build directories via `NEXT_DIST_DIR`, use local auth bypass, and serve only `outage.spec.ts`.
 
-The Playwright config (`playwright.config.ts`) starts its own servers (`npm run dev` on 3000, the database-down server on 3100) and never reuses a running one: if either port is busy, the run fails. Stop your dev server first.
+The Playwright config (`playwright.config.ts`) starts its own servers (on 3000, 3100 and 3200) and never reuses a running one: if any of those ports is busy, the run fails. Stop your dev server first.
 
-**E2E never touches real services.** A server Playwright starts gets `DATABASE_URL=""` unless the shell exports one, and empty Upstash variables, so neither `.env.local`'s database nor the shared Redis is used.
+**E2E never touches real services.** A server Playwright starts gets `DATABASE_URL=""` unless the shell exports one, empty Upstash variables and an empty `POLYGON_API_KEY`, so neither `.env.local`'s database, the shared Redis nor the market-data provider is used.
 
 ### Local database
 
@@ -97,7 +97,7 @@ Every page in the application must have a corresponding E2E spec. The current ma
 | Route | E2E Spec File | Key assertions |
 |-------|--------------|----------------|
 | `/` (Today) | `dashboard.spec.ts` | Single "Today" header with greeting/market state, money-first hero (or connect-account empty state), ranked "Needs your attention", policy strip + disclosure, example section labelled and hideable, no fabricated deltas |
-| `/portfolios/holdings` | `holdings.spec.ts` | Portfolio title + Holdings tab, one heading, table or single empty state, LEAPS ledger only with holdings and tagged Sample, sparklines never invented, Import CSV (preview, issues, exact payload, errors; API 400/cross-tenant 404/unchanged in DB mode), page gutter |
+| `/portfolios/holdings` | `holdings.spec.ts` | Portfolio title + Holdings tab, one heading, table or single empty state, LEAPS ledger only with holdings and tagged Sample, sparklines never invented, Import CSV (preview, issues, exact payload, errors; API 400/cross-tenant 404/unchanged in DB mode), Today P&L counts only today's session, page gutter |
 | `/portfolios/accounts` | `accounts.spec.ts` | Accounts tab, real accounts or empty state (never seeded balances) |
 | `/portfolios/activity` | `activity.spec.ts` | Activity tab, real transactions or empty state, side filters |
 | `/portfolios/detail/[symbol]` | `position-detail.spec.ts` | Symbol title, draft-order prefill link, thesis link, Add to watchlist toggle, not-held state is not a dead end |
@@ -105,15 +105,16 @@ Every page in the application must have a corresponding E2E spec. The current ma
 | `/research` | `research.spec.ts` | One header, one-row tabs, delete in overflow menu, Sample-tagged recent seed theses, saved watchlist (add/refuse duplicates/edit/remove, survives reload), watchlist and journal detail panes, labelled illustrative price strip, Alpha Radar workflows |
 | `/research/thesis/[ticker]` | `thesis.spec.ts` | Memo layout, explained thesis check (no opaque health score), links to position and draft order, not-found state |
 | `/strategies` | `strategies.spec.ts` | "Strategies" title, compact switcher, Duplicate works, stale-backtest flag, legacy `/strategies/[id]` redirects |
-| `/performance`, `/performance/attribution`, `/performance/behaviour` | `performance.spec.ts` | Returns: three cards, one heading, Sample notice, CSV export. Attribution: plain-language verdict, BHB bars, full table with sector/asset-class switch. Behaviour: one continuous trading calendar, mood, P&L density, reviews archive |
+| `/performance`, `/performance/attribution`, `/performance/behaviour` | `performance.spec.ts` | Returns: three cards, one heading, Sample notice, CSV export (same months as the charts after a month rollover). Attribution: plain-language verdict, BHB bars, full table with sector/asset-class switch. Behaviour: one continuous trading calendar, mood, P&L density, reviews archive |
 | `/ask` + ⌘K | `ask.spec.ts` | Command palette (top-bar search + ⌘K), page/ticker/question routing, Ask overlay and page history |
 | `/settings` | `settings.spec.ts` | One column + section rail, legacy `?tab=` links scroll to sections, honest sign-in card, no seeded accounts, example-data toggle |
 | `/help` (Settings › Help) | `help.spec.ts` | Getting started (5 steps), glossary, Alpha Radar notes, single h1 |
-| `/login` | `login.spec.ts` | Google sign-in without app chrome, shared brand mark, no raw setup text |
+| `/login` | `login.spec.ts` | Google sign-in without app chrome, shared brand mark, no raw setup text, link to the privacy policy that keeps the sign-in callback |
+| `/privacy` | `privacy.spec.ts` | Public when signed out, no app chrome, single h1, all policy sections, Plaid end user policy and contact links, scrolls to the end, off-site callbacks dropped, no overflow at 390px |
 | 404 | `not-found.spec.ts` | Search button opens the palette, link back to Today |
 | Sidebar + IA | `navigation.spec.ts` | Exactly eight sidebar destinations (Help is a Settings tab), section tabs, legacy redirects, identity footer |
-| Database outage | `outage.spec.ts` | Runs against the second web server (port 3100, database configured but unreachable): `/api/health/ready` is 503 `unavailable`; Today, Holdings and Accounts show the outage notice inside their page container, never an empty state |
-| Cross-cutting | `smoke.spec.ts` | Fonts loaded, hydration clean in another timezone, no horizontal overflow at 390px |
+| Database outage | `outage.spec.ts` | Port 3100 (database configured but unreachable): `/api/health/ready` is 503 `unavailable`; Today, Holdings and Accounts show the outage notice inside their page container, never an empty state. Port 3200 (`DATABASE_URL="[SENSITIVE]"`): readiness is 503 `not_configured`; the same pages show their empty states and no outage notice |
+| Cross-cutting | `smoke.spec.ts` | Fonts loaded, hydration clean in another timezone and with the browser on the next UTC day, no horizontal overflow at 390px, market-data routes answer 503 `MARKET_DATA_NOT_CONFIGURED` without a provider key, quotes answer from the price store (404 `QUOTE_UNAVAILABLE` for an unpriced symbol), valuation lists unpriced holdings |
 
 ### Adding E2E tests for a new page
 

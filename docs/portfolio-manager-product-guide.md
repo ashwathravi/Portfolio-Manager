@@ -60,7 +60,6 @@ Common variables:
 
 ```bash
 DATABASE_URL="postgresql://..."
-ALPHA_VANTAGE_API_KEY=""
 POLYGON_API_KEY=""
 SEC_EDGAR_USER_AGENT="Portfolio-Manager local contact@example.com"
 ```
@@ -519,14 +518,12 @@ Without database/provider keys, many UI surfaces still render seeded or fallback
 
 ### Market Data Returns Errors
 
-Check:
+Quotes and the other market-data routes need different settings:
 
-- `ALPHA_VANTAGE_API_KEY`.
-- `POLYGON_API_KEY`.
-- Provider rate limits.
-- Network access.
+- **Quotes** (`/api/market-data/quote`, `/api/market-data/quotes`) come from the price store in Postgres, never from Massive, so they need `DATABASE_URL`, not `POLYGON_API_KEY`. Without a database they answer 503 `MARKET_DATA_NOT_CONFIGURED`. A symbol with no stored close yet is 404 `QUOTE_UNAVAILABLE` (left out of a batch); the nightly price ingest stores closes, and starts pricing a looked-up symbol from its next run.
+- **History, fundamentals and search** (`/api/market-data/history`, `historical`, `fundamentals`, `search`) call Massive, so they need `POLYGON_API_KEY`; without it they answer 503 `MARKET_DATA_NOT_CONFIGURED`. A 429 `RATE_LIMITED` means the free plan's five calls a minute are spent.
 
-The app can degrade to empty quotes when providers are unavailable.
+Also check network access to Massive. Pages degrade to dashes, not errors, when a quote is unavailable.
 
 ### Plaid Link Fails
 

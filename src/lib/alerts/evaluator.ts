@@ -39,7 +39,7 @@ export function observeMetric(rule: AlertRule, snapshot: MarketSnapshot): number
         case 'price_change_pct': {
             if (!rule.symbol) return null;
             const quote = snapshot.quotes[rule.symbol.toUpperCase()];
-            return quote ? quote.changePercent : null;
+            return quote?.changePercent ?? null;
         }
         case 'portfolio_value':
             return snapshot.portfolioValue;

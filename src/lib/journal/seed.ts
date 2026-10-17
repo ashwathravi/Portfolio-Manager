@@ -32,16 +32,20 @@ import {
 const DAY_MS = 86_400_000;
 
 /**
- * Anchor for every example journal date: the start of the current UTC day.
- * Dates stay relative (the heatmap, range filters, and "last 30 days"
- * queries behave the same any day), but unlike a module-load
- * `Date.now()` the anchor is identical in a long-running server process
- * and in the browser, so server renders and hydration agree. Pass it as
- * `now` to window calculations over SEED_JOURNAL.
+ * Anchor for every example journal date: the start of the UTC day
+ * containing `now`. Dates stay relative (the heatmap, range filters, and
+ * "last 30 days" queries behave the same any day), and the anchor is the
+ * same in the server render and in the browser, so hydration agrees. Pass
+ * it as `now` to window calculations over `getSeedJournal(now)`.
  */
-export const SEED_JOURNAL_ANCHOR_MS = Math.floor(Date.now() / DAY_MS) * DAY_MS;
-const now = SEED_JOURNAL_ANCHOR_MS;
-const daysAgo = (d: number) => new Date(now - d * DAY_MS).toISOString();
+export function seedJournalAnchorMs(now: number = Date.now()): number {
+    return Math.floor(now / DAY_MS) * DAY_MS;
+}
+
+/** A seed value whose dates are resolved against a day anchor. */
+type AtAnchor<T> = (anchorMs: number) => T;
+
+const daysBefore = (anchorMs: number, d: number) => new Date(anchorMs - d * DAY_MS).toISOString();
 
 /**
  * Helper — builds a `JournalEntry` from the two things we actually
@@ -59,8 +63,8 @@ function entry(
     exitPrice: number,
     openedDaysAgo: number,
     heldDays: number,
-    rationale: JournalEntry['rationale'],
-): JournalEntry {
+    rationale: AtAnchor<JournalEntry['rationale']>,
+): AtAnchor<JournalEntry> {
     const notionalUsd = quantity * entryPrice;
     // Long: profit when exit > entry. Short trades live in the same
     // shape but we don't ship any on first seed — all moods should
@@ -68,7 +72,7 @@ function entry(
     // obvious for readers.
     const perShare = side === 'buy' ? exitPrice - entryPrice : entryPrice - exitPrice;
     const realizedPnlUsd = Math.round(perShare * quantity * 100) / 100;
-    return {
+    return (anchorMs) => ({
         id,
         orderId: `o-${id}`,
         ticker,
@@ -79,10 +83,10 @@ function entry(
         notionalUsd: Math.round(notionalUsd * 100) / 100,
         realizedPnlUsd,
         holdingPeriodDays: heldDays,
-        openedAt: daysAgo(openedDaysAgo),
-        closedAt: daysAgo(openedDaysAgo - heldDays),
-        rationale,
-    };
+        openedAt: daysBefore(anchorMs, openedDaysAgo),
+        closedAt: daysBefore(anchorMs, openedDaysAgo - heldDays),
+        rationale: rationale(anchorMs),
+    });
 }
 
 /**
@@ -99,16 +103,16 @@ function rat(
     capturedDaysAgo: number,
     timeToDecisionMs: number,
     thesisKey: string,
-): JournalEntry['rationale'] {
-    return {
+): AtAnchor<JournalEntry['rationale']> {
+    return (anchorMs) => ({
         thesisId: `seed-${thesisKey}`,
         setupType,
         conviction,
         mood,
         rationale,
-        capturedAt: daysAgo(capturedDaysAgo),
+        capturedAt: daysBefore(anchorMs, capturedDaysAgo),
         timeToDecisionMs,
-    };
+    });
 }
 
 /**
@@ -125,7 +129,7 @@ function rat(
  * The verdict panel pulls the worst-performing mood and the card
  * reads something a real trader would recognize.
  */
-const BASE_JOURNAL: JournalEntry[] = [
+const BASE_JOURNAL: AtAnchor<JournalEntry>[] = [
     // ─── Calm (the bread-and-butter wins) ─────────────────────────
     entry('j-001', 'AAPL', 'buy', 50, 178.40, 192.15, 88, 21,
         rat('conviction_add', 'calm', 7.5, 'Margin expansion through services revenue.', 88, 45_000, 'aapl')),
@@ -272,19 +276,38 @@ function contextForEntry(e: JournalEntry): TradeContext {
 }
 
 /**
- * The exported journal. Each entry is the raw seed plus a frozen
- * `adherence` bundle computed from the strategy the thesis points to.
- * If no strategy maps (or no rules exist for it), the entry keeps the
- * `adherence` slot undefined — the returns-comparison card skips
- * those.
+ * Each entry is the raw seed plus a frozen `adherence` bundle computed
+ * from the strategy the thesis points to. If no strategy maps (or no
+ * rules exist for it), the entry keeps the `adherence` slot undefined —
+ * the returns-comparison card skips those.
  */
-export const SEED_JOURNAL: JournalEntry[] = BASE_JOURNAL.map((e) => {
-    const thesisId = e.rationale?.thesisId;
-    const strategyId = thesisId ? SEED_THESIS_TO_STRATEGY[thesisId] : undefined;
-    if (!strategyId) return e;
-    const rules = SEED_ADHERENCE_RULES[strategyId];
-    if (!rules || rules.length === 0) return e;
-    const ctx = contextForEntry(e);
-    const adherence = evaluateRules(rules, ctx, e.openedAt);
-    return { ...e, adherence };
-});
+function buildSeedJournal(anchorMs: number): JournalEntry[] {
+    return BASE_JOURNAL.map((atAnchor) => {
+        const e = atAnchor(anchorMs);
+        const thesisId = e.rationale?.thesisId;
+        const strategyId = thesisId ? SEED_THESIS_TO_STRATEGY[thesisId] : undefined;
+        if (!strategyId) return e;
+        const rules = SEED_ADHERENCE_RULES[strategyId];
+        if (!rules || rules.length === 0) return e;
+        const ctx = contextForEntry(e);
+        const adherence = evaluateRules(rules, ctx, e.openedAt);
+        return { ...e, adherence };
+    });
+}
+
+let seedJournalCache: { anchorMs: number; entries: JournalEntry[] } | null = null;
+
+/**
+ * The example journal, dated relative to the UTC day of `now`. Memoised
+ * per UTC day, so callers get the same array all day; a long-running
+ * server process re-anchors after midnight instead of rendering the day
+ * it loaded this module, which made the server render and hydration
+ * disagree.
+ */
+export function getSeedJournal(now: number = Date.now()): JournalEntry[] {
+    const anchorMs = seedJournalAnchorMs(now);
+    if (seedJournalCache?.anchorMs !== anchorMs) {
+        seedJournalCache = { anchorMs, entries: buildSeedJournal(anchorMs) };
+    }
+    return seedJournalCache.entries;
+}

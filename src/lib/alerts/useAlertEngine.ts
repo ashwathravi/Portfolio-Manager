@@ -7,6 +7,8 @@ import { useAlertsStore } from '@/lib/stores/alertsStore';
 import { useSettingsStore } from '@/lib/stores/settingsStore';
 import { evaluateAlerts } from './evaluator';
 import type { MarketSnapshot } from './types';
+import { useEasternDate } from '@/lib/hooks/useEasternDate';
+import { isTodaysQuote } from '@/lib/markets/quote-session';
 
 /**
  * Mount once (per app) to evaluate alert rules against live quotes.
@@ -34,6 +36,8 @@ export function useAlertEngine() {
         staleTime: Math.max(refreshSeconds, 15) * 1000,
     });
 
+    const today = useEasternDate();
+
     useEffect(() => {
         if (!quotesMap || Object.keys(quotesMap).length === 0) return;
 
@@ -41,7 +45,8 @@ export function useAlertEngine() {
             quotes: Object.fromEntries(
                 Object.entries(quotesMap).map(([sym, q]) => [
                     sym.toUpperCase(),
-                    { price: q.price, changePercent: q.changePercent / 100 },
+                    // A daily-change rule must not fire on an earlier session's move.
+                    { price: q.price, changePercent: isTodaysQuote(q, today) ? q.changePercent / 100 : null },
                 ]),
             ),
             portfolioValue: 0,
@@ -62,7 +67,7 @@ export function useAlertEngine() {
                 description: `Observed ${formatValue(t.metric, t.observedValue)}`,
             });
         }
-    }, [quotesMap, rules, recordTriggers]);
+    }, [quotesMap, rules, recordTriggers, today]);
 }
 
 function formatValue(metric: string, value: number): string {

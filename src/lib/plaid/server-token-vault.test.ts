@@ -142,6 +142,26 @@ describe("Plaid server token vault", () => {
         assert.equal(hasPlaidAccessToken("item-production"), false);
     });
 
+    test("refuses durable storage when DATABASE_URL is unusable", async (t) => {
+        const original = process.env.DATABASE_URL;
+        t.after(() => {
+            if (original === undefined) delete process.env.DATABASE_URL;
+            else process.env.DATABASE_URL = original;
+        });
+        process.env.DATABASE_URL = "[SENSITIVE]";
+        process.env.PLAID_TOKEN_STORAGE = "postgres";
+        process.env.PLAID_TOKEN_ENCRYPTION_KEY = "test-only-registry-key";
+        setPlaidTokenRegistryStoreForTests(null);
+
+        const result = await storePlaidConnection({
+            userId: "11111111-1111-4111-8111-111111111111",
+            exchange: plaidExchangeFixture(),
+        });
+
+        assert.equal(result.stored, false);
+        assert.match(result.reason ?? "", /DATABASE_URL is required/);
+    });
+
     test("stores Plaid connections in the durable registry without plaintext tokens", async () => {
         process.env.PLAID_TOKEN_STORAGE = "postgres";
         process.env.PLAID_TOKEN_ENCRYPTION_KEY = "test-only-registry-key";

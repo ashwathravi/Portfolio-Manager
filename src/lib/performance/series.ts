@@ -48,38 +48,32 @@ export function buildMonthlySamples(now: number): Array<{ year: number; month: n
     return out;
 }
 
-const MONTHLY_SAMPLES = buildMonthlySamples(Date.now());
-
-const MONTH_LABEL = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-
-function formatMonth(year: number, month: number) {
-    return `${MONTH_LABEL[month]} ${String(year).slice(2)}`;
+export interface ExampleMonthlySeries {
+    portfolio: MonthlyValuation[];
+    benchmark: MonthlyValuation[];
 }
 
-export const portfolioMonthlySeries: MonthlyValuation[] = MONTHLY_SAMPLES.map((s) => ({
-    year: s.year,
-    month: s.month,
-    value: s.account,
-}));
+let monthlySeriesCache: { monthIndex: number; series: ExampleMonthlySeries } | null = null;
 
-export const benchmarkMonthlySeries: MonthlyValuation[] = MONTHLY_SAMPLES.map((s) => ({
-    year: s.year,
-    month: s.month,
-    value: s.benchmark,
-}));
-
-export const equityCurveData = MONTHLY_SAMPLES.map((s) => ({
-    date: formatMonth(s.year, s.month),
-    value: s.account,
-}));
-
-export const accountBalanceData = MONTHLY_SAMPLES.map((s) => ({
-    date: formatMonth(s.year, s.month),
-    account: s.account,
-    deployed: s.deployed,
-}));
-
-export const monthlyPnLData = MONTHLY_SAMPLES.slice(1).map((s, i) => ({
-    month: formatMonth(s.year, s.month),
-    value: s.account - MONTHLY_SAMPLES[i].account,
-}));
+/**
+ * Example portfolio and S&P 500 monthly values ending at the last complete
+ * month before `now`. Memoised per UTC month, so callers get the same
+ * arrays all month; a long-running server process moves to the new month
+ * instead of rendering the month it loaded this module, which made the
+ * server render and hydration disagree.
+ */
+export function getExampleMonthlySeries(now: number = Date.now()): ExampleMonthlySeries {
+    const d = new Date(now);
+    const monthIndex = d.getUTCFullYear() * 12 + d.getUTCMonth();
+    if (monthlySeriesCache?.monthIndex !== monthIndex) {
+        const samples = buildMonthlySamples(now);
+        monthlySeriesCache = {
+            monthIndex,
+            series: {
+                portfolio: samples.map((s) => ({ year: s.year, month: s.month, value: s.account })),
+                benchmark: samples.map((s) => ({ year: s.year, month: s.month, value: s.benchmark })),
+            },
+        };
+    }
+    return monthlySeriesCache.series;
+}

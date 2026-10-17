@@ -1,15 +1,17 @@
 /**
  * GET /api/market-data/quotes?symbols=AAPL,MSFT,GOOG
  *
- * Returns batch quotes via MarketDataService.
+ * Returns batch quotes via MarketDataService: the latest session's closing
+ * prices on the free Massive plan. A symbol without a price is left out of
+ * `data`. 503 when no key is configured.
  * Linear: AR-48
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 
-import { apiError, internalServerError, providerRateLimitError } from '@/lib/api/security';
+import { apiError } from '@/lib/api/security';
+import { marketDataErrorResponse } from '@/lib/api/market-data/route-errors';
 import { getMarketDataService } from '@/lib/services/market-data-service';
-import { PolygonRateLimitError } from '@/lib/providers/polygon-massive-adapter';
 import { symbolsSchema } from '@/lib/validators/market-data';
 
 export async function GET(request: NextRequest) {
@@ -29,10 +31,6 @@ export async function GET(request: NextRequest) {
     const quotes = await service.getBatchQuotes(parsedSymbols.data);
     return NextResponse.json({ data: quotes });
   } catch (err) {
-    if (err instanceof PolygonRateLimitError) {
-      return providerRateLimitError(err.retryAfterMs / 1000);
-    }
-
-    return internalServerError(err, 'Unable to fetch quotes.', 'MARKET_DATA_QUOTES_FAILED');
+    return marketDataErrorResponse(err, 'Unable to fetch quotes.', 'MARKET_DATA_QUOTES_FAILED');
   }
 }

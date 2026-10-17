@@ -23,16 +23,9 @@ const providers: Provider[] = [
     {
         id: "polygon",
         name: "Polygon.io",
-        purpose: "Primary market data provider (real-time quotes, aggregates, references).",
+        purpose: "Market data provider, now Massive (closing prices, daily bars, references).",
         docsUrl: "https://polygon.io/dashboard/api-keys",
         placeholder: "pk_xxxxxxxxxxxxxxxxxxxxxxxxxx",
-    },
-    {
-        id: "alphaVantage",
-        name: "Alpha Vantage",
-        purpose: "Fallback provider for quotes when Polygon is unavailable or rate-limited.",
-        docsUrl: "https://www.alphavantage.co/support/#api-key",
-        placeholder: "XXXXXXXXXXXXXXXX",
     },
     {
         id: "schwab",

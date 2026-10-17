@@ -383,7 +383,7 @@ test.describe('Today watchlist', () => {
 
     test('successful route-shaped quotes render price and change; missing symbols keep dashes', async ({ page }) => {
         await page.route('**/api/market-data/quotes**', (route) => route.fulfill({ status: 200, json: { data: [
-            { symbol: 'COIN', price: 123.45, change: -2.5, changePercent: -1.98, timestamp: '2026-10-03T18:11:00.000Z', isRealtime: false },
+            { symbol: 'COIN', price: 123.45, change: -2.5, changePercent: -1.98, timestamp: new Date().toISOString(), isRealtime: false },
         ] } }));
         await gotoAppPage(page, '/');
         const card = page.getByTestId('today-watchlist');
@@ -395,10 +395,81 @@ test.describe('Today watchlist', () => {
         await expect(pltr.locator('.pm-watchlist-pct')).toHaveText('—');
     });
 
+    test('regression: an earlier session\'s close shows its price but not its move', async ({ page }) => {
+        const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
+        await page.route('**/api/market-data/quotes**', (route) => route.fulfill({ status: 200, json: { data: [
+            { symbol: 'COIN', price: 123.45, change: -2.5, changePercent: -1.98, timestamp: threeDaysAgo, isRealtime: false },
+        ] } }));
+        await gotoAppPage(page, '/');
+        const coin = page.getByTestId('today-watchlist').locator('li').filter({ has: page.getByRole('link', { name: /COIN/ }) });
+        await expect(coin.locator('.pm-watchlist-price')).toHaveText('$123.45');
+        await expect(coin.locator('.pm-watchlist-pct')).toHaveText('—');
+    });
+
     test('regression: no stale fallback prices — a missing quote is a dash', async ({ page }) => {
         await page.route('**/api/market-data/quotes**', (route) => route.fulfill({ status: 500, json: { error: 'down' } }));
         await gotoAppPage(page, '/');
         const card = page.getByTestId('today-watchlist');
         await expect(card.locator('.pm-watchlist-price').first()).toHaveText('—');
+    });
+});
+
+test.describe('Today › Top holdings', () => {
+    // Sparklines fetch history per row; answering here keeps these page loads
+    // off the server's market-data rate limit, which other specs share.
+    test.beforeEach(async ({ page }) => {
+        await page.route('**/api/market-data/historical**', (route) => route.fulfill({ status: 200, json: { data: [] } }));
+    });
+
+    const aapl = (overrides: Record<string, unknown>) => ({
+        data: [{ symbol: 'AAPL', price: 190, change: 2, changePercent: 1.06, timestamp: new Date().toISOString(), isRealtime: false, ...overrides }],
+    });
+    const aaplToday = (page: import('@playwright/test').Page) =>
+        page.getByRole('region', { name: 'Top holdings' }).locator('tbody tr').filter({ hasText: 'AAPL' }).getByTestId('top-holding-today');
+
+    test('with holdings: today\'s move shows in the Today column', async ({ page }) => {
+        await page.route('**/api/market-data/quotes**', (route) => route.fulfill({ status: 200, json: aapl({}) }));
+        await gotoAppPage(page, '/');
+        test.skip(!(await hasHoldings(page)), 'no holdings in this database');
+        await expect(aaplToday(page)).toHaveText('+1.06%');
+    });
+
+    test('regression: an earlier session\'s close or a first close is a dash, not +0.00%', async ({ page }) => {
+        const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
+        await page.route('**/api/market-data/quotes**', (route) => route.fulfill({ status: 200, json: aapl({ timestamp: threeDaysAgo }) }));
+        await gotoAppPage(page, '/');
+        test.skip(!(await hasHoldings(page)), 'no holdings in this database');
+        await expect(aaplToday(page)).toHaveText('—');
+
+        await page.unroute('**/api/market-data/quotes**');
+        await page.route('**/api/market-data/quotes**', (route) => route.fulfill({ status: 200, json: aapl({ change: null, changePercent: null }) }));
+        await gotoAppPage(page, '/');
+        await expect(aaplToday(page)).toHaveText('—');
+    });
+});
+
+test.describe('Today › Net worth hero', () => {
+    const HELD = ['AAPL', 'MSFT', 'NVDA', 'GOOGL', 'TSLA', 'AMZN'];
+    const quote = (symbol: string) => ({ symbol, price: 100, change: 1, changePercent: 1, timestamp: new Date().toISOString(), isRealtime: false });
+
+    test.beforeEach(async ({ page }) => {
+        await page.route('**/api/market-data/historical**', (route) => route.fulfill({ status: 200, json: { data: [] } }));
+    });
+
+    test('with holdings: every position moved today, so the headline is the portfolio\'s move', async ({ page }) => {
+        await page.route('**/api/market-data/quotes**', (route) => route.fulfill({ status: 200, json: { data: HELD.map(quote) } }));
+        await gotoAppPage(page, '/');
+        test.skip(!(await hasHoldings(page)), 'no holdings in this database');
+        await expect(page.getByTestId('today-change')).toHaveText(/^\+\$[\d,]+\.\d{2} \(\+\d+\.\d{2}%\) today$/);
+    });
+
+    test('regression: a move for some positions only is labelled partial, with no portfolio percentage', async ({ page }) => {
+        // Only AAPL has a move from today; the rest are unpriced.
+        await page.route('**/api/market-data/quotes**', (route) => route.fulfill({ status: 200, json: { data: [quote('AAPL')] } }));
+        await gotoAppPage(page, '/');
+        test.skip(!(await hasHoldings(page)), 'no holdings in this database');
+        const change = page.getByTestId('today-change');
+        await expect(change).toHaveText(/^\+\$[\d,]+\.\d{2} today on 1 of \d+ positions$/);
+        await expect(change).not.toContainText('%');
     });
 });
