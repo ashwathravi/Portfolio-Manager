@@ -901,3 +901,13 @@ a.pm-watchlist-sym:hover .pm-watchlist-ticker { text-decoration: underline; }
 .pm-import-issues { margin: 0; padding-left: 18px; font-size: 12px; color: var(--pm-warn); display: grid; gap: 2px; }
 .pm-import-target { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
 .pm-import-error { margin: 0; font-size: 13px; color: var(--pm-danger); }
+
+.pm-data-unavailable {
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--pm-neg) 35%, var(--pm-border));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--pm-neg) 6%, var(--pm-card));
+  font-size: 13.5px;
+  color: var(--pm-fg);
+}
+.pm-data-unavailable strong { font-weight: 600; }

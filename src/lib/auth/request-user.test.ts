@@ -11,6 +11,7 @@ const configuredEnv = {
     AUTH_SECRET: "auth-secret",
     AUTH_GOOGLE_ID: "google-client-id",
     AUTH_GOOGLE_SECRET: "google-client-secret",
+    AUTH_ALLOWED_EMAILS: "owner@example.com",
 };
 
 describe("server page user scope", () => {

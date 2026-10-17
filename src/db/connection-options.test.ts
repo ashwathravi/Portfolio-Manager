@@ -1,6 +1,6 @@
 import { describe, test } from "node:test";
 import assert from "node:assert";
-import { isLocalDatabaseUrl, resolveDatabaseSslMode } from "./connection-options.ts";
+import { DATABASE_POOL_OPTIONS, isLocalDatabaseUrl, resolveDatabaseSslMode } from "./connection-options.ts";
 
 describe("resolveDatabaseSslMode", () => {
     test("requires SSL when no database URL is configured", () => {
@@ -53,5 +53,13 @@ describe("isLocalDatabaseUrl", () => {
         assert.strictEqual(isLocalDatabaseUrl(undefined), false);
         assert.strictEqual(isLocalDatabaseUrl(""), false);
         assert.strictEqual(isLocalDatabaseUrl("not a url"), false);
+    });
+});
+
+describe("DATABASE_POOL_OPTIONS", () => {
+    test("keeps a small pool that releases idle connections", () => {
+        assert.ok(DATABASE_POOL_OPTIONS.max > 0 && DATABASE_POOL_OPTIONS.max <= 10);
+        assert.ok(DATABASE_POOL_OPTIONS.idle_timeout > 0 && DATABASE_POOL_OPTIONS.idle_timeout <= 60);
+        assert.ok(DATABASE_POOL_OPTIONS.max_lifetime >= DATABASE_POOL_OPTIONS.idle_timeout);
     });
 });

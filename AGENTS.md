@@ -41,11 +41,13 @@ npm run test:e2e
 npm run test:e2e:ui
 ```
 
-`test:e2e:local` (`scripts/e2e/run-local.sh`) recreates `atlas_wealth_e2e` in the Docker container, applies migrations and the fixtures in `scripts/e2e/fixtures.sql` through `scripts/e2e/prepare-database.ts` (the same script CI runs), then starts Playwright. It refuses to start if anything is listening on port 3000.
+`test:e2e:local` (`scripts/e2e/run-local.sh`) recreates `atlas_wealth_e2e` in the Docker container, applies migrations and the fixtures in `scripts/e2e/fixtures.sql` through `scripts/e2e/prepare-database.ts` (the same script CI runs), then starts Playwright. It refuses to start if anything is listening on port 3000 or 3100.
 
-The Playwright config (`playwright.config.ts`) includes a `webServer` block that automatically starts `npm run dev` before running tests. If the dev server is already running on port 3000, it reuses the existing server.
+Playwright starts two web servers: the main one on port 3000, and a "database down" one on port 3100 (its own build directory via `NEXT_DIST_DIR`, a `DATABASE_URL` nothing answers, local auth bypass) used only by `outage.spec.ts`.
 
-**Never run E2E against a dev server connected to a real database.** A server Playwright starts gets `DATABASE_URL=""` unless the shell exports one, so `.env.local` is ignored. A server you started yourself is *reused as-is*, whatever database it points at. Stop it before `npm run test:e2e`.
+The Playwright config (`playwright.config.ts`) starts its own servers (`npm run dev` on 3000, the database-down server on 3100) and never reuses a running one: if either port is busy, the run fails. Stop your dev server first.
+
+**E2E never touches real services.** A server Playwright starts gets `DATABASE_URL=""` unless the shell exports one, and empty Upstash variables, so neither `.env.local`'s database nor the shared Redis is used.
 
 ### Local database
 
@@ -109,6 +111,7 @@ Every page in the application must have a corresponding E2E spec. The current ma
 | `/privacy` | `privacy.spec.ts` | Public when signed out, no app chrome, single h1, all policy sections, Plaid end user policy and contact links, scrolls to the end, no overflow at 390px |
 | 404 | `not-found.spec.ts` | Search button opens the palette, link back to Today |
 | Sidebar + IA | `navigation.spec.ts` | Exactly eight sidebar destinations (Help is a Settings tab), section tabs, legacy redirects, identity footer |
+| Database outage | `outage.spec.ts` | Runs against the second web server (port 3100, database configured but unreachable): `/api/health/ready` is 503 `unavailable`; Today, Holdings and Accounts show the outage notice inside their page container, never an empty state |
 | Cross-cutting | `smoke.spec.ts` | Fonts loaded, hydration clean in another timezone, no horizontal overflow at 390px |
 
 ### Adding E2E tests for a new page
@@ -201,11 +204,15 @@ test('myFunction - describes the scenario', () => {
 
 ## CI Pipeline
 
-The GitHub Actions workflow (`.github/workflows/docker-build.yml`) runs three jobs:
+The GitHub Actions workflow (`.github/workflows/docker-build.yml`) runs these jobs:
 
-1. **`build`** — Docker image build and push (only pushes on `main`).
-2. **`lint-and-test`** — Linting (`npm run lint`), unit tests (`npm test`), and Next.js build (`npm run build`).
+1. **`build`** — Builds the Docker image (never pushes).
+2. **`lint-and-test`** — Audits production dependencies (`npm audit --omit=dev --audit-level=high`), lints (`npm run lint`), runs unit tests (`npm test`), and builds Next.js (`npm run build`).
 3. **`e2e-tests`** — Installs Playwright browsers, prepares a Postgres service with `scripts/e2e/prepare-database.ts`, starts the dev server connected as a member of `app_runtime`, and runs all E2E tests. Only runs after `lint-and-test` passes. Uploads the Playwright HTML report as a build artifact.
+4. **`publish-image`** — On `master` only, after the three checks pass: pushes the image to GHCR.
+5. **`deploy-production`** — On `master` only, after the three checks pass: applies migrations, deploys to Vercel, and checks `/api/health/ready`. See `docs/deployment.md`, including the rule that migrations must work with the code already running.
+
+`.github/workflows/codeql.yml` runs CodeQL on pull requests, on `master`, and weekly. `.github/dependabot.yml` opens weekly grouped updates for npm and GitHub Actions.
 
 ### Ensuring CI passes
 

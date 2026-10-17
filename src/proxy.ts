@@ -9,6 +9,7 @@ import {
     getLocalDevUserId,
     isAuthConfigured,
 } from "@/lib/auth/access";
+import { isSchwabIntegrationEnabled } from "@/lib/api/schwab/feature";
 
 type VerifiedRequest = NextRequest & { auth?: Session | null };
 
@@ -28,6 +29,15 @@ const verifiedAuthProxy = auth((request: NextAuthRequest, event: NextFetchEvent)
 
 export async function proxy(request: NextRequest, event?: NextFetchEvent): Promise<Response> {
     const pathname = request.nextUrl.pathname;
+    // Disabled Schwab routes are not found for everyone, signed in or not.
+    if (isSchwabRoute(pathname) && !isSchwabIntegrationEnabled()) {
+        return apiError("Not found", "NOT_FOUND", 404);
+    }
+    if (isAuthJsRoute(pathname)) {
+        // Public, but limited per IP: sign-in and callbacks are what an
+        // attacker would hammer.
+        return (await rateLimitApiRequest(request)) ?? NextResponse.next();
+    }
     if (isPublicRoute(pathname)) return NextResponse.next();
 
     const mode = authRuntimeMode();
@@ -48,7 +58,7 @@ export async function proxy(request: NextRequest, event?: NextFetchEvent): Promi
     return response ?? NextResponse.next();
 }
 
-export function handleVerifiedRequest(request: VerifiedRequest): NextResponse {
+export function handleVerifiedRequest(request: VerifiedRequest): Promise<NextResponse> {
     return applyRequestSecurity(request, request.auth?.user?.id?.trim() || null);
 }
 
@@ -59,7 +69,7 @@ export const config = {
     ],
 };
 
-function applyRequestSecurity(request: NextRequest, userId: string | null): NextResponse {
+async function applyRequestSecurity(request: NextRequest, userId: string | null): Promise<NextResponse> {
     const pathname = request.nextUrl.pathname;
     if (!pathname.startsWith("/api/")) return applyPageAuth(request, userId);
 
@@ -68,14 +78,16 @@ function applyRequestSecurity(request: NextRequest, userId: string | null): Next
     }
 
     if (userId) {
-        return rateLimitApiRequest(request, { userId, authRequired: true }) ?? NextResponse.next();
+        // A signed-in request is limited per user only: one check per call.
+        return (await rateLimitApiRequest(request, { userId, authRequired: true }, { skipIp: true }))
+            ?? NextResponse.next();
     }
 
     if (isAuthConfigured() && !process.env.INTERNAL_API_SECRET?.trim()) {
         return apiError("Unauthorized", "UNAUTHORIZED", 401);
     }
 
-    return applyApiSecurity(request) ?? NextResponse.next();
+    return (await applyApiSecurity(request)) ?? NextResponse.next();
 }
 
 function applyPageAuth(request: NextRequest, userId: string | null): NextResponse {
@@ -93,8 +105,12 @@ function isPublicRoute(pathname: string): boolean {
     return pathname === "/login"
         || pathname === "/privacy"
         || pathname === "/api/health"
-        || PUBLIC_ASSET_PATHS.has(pathname)
-        || isAuthJsRoute(pathname);
+        || pathname === "/api/health/ready"
+        || PUBLIC_ASSET_PATHS.has(pathname);
+}
+
+function isSchwabRoute(pathname: string): boolean {
+    return pathname === "/api/auth/schwab" || pathname.startsWith("/api/schwab/");
 }
 
 function isSessionBackedApiRoute(pathname: string, method: string): boolean {

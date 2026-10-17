@@ -1,7 +1,8 @@
-import { describe, test } from "node:test";
+import { afterEach, describe, test } from "node:test";
 import assert from "node:assert/strict";
 
 import { requireSessionApiUserScope } from "./session-security";
+import { resetApiSecurityForTests } from "./security";
 
 const USER_A = "11111111-1111-4111-8111-111111111111";
 
@@ -18,9 +19,31 @@ const configuredEnv = {
     AUTH_SECRET: "auth-secret",
     AUTH_GOOGLE_ID: "google-client-id",
     AUTH_GOOGLE_SECRET: "google-client-secret",
+    AUTH_ALLOWED_EMAILS: "owner@example.com",
 };
 
 describe("session-backed API user scope", () => {
+    afterEach(() => resetApiSecurityForTests());
+
+    test("limits signed-in users per user, not by the IP they share", async () => {
+        const shared = { "x-forwarded-for": "203.0.113.50" };
+        const anonymous = { env: configuredEnv, getSession: async () => null };
+        const signedIn = {
+            env: configuredEnv,
+            getSession: async () => ({ user: { id: USER_A }, expires: "2099-01-01T00:00:00.000Z" }),
+        };
+
+        // Anonymous callers on the shared IP use up its budget (180 per minute)...
+        let last;
+        for (let i = 0; i < 181; i++) last = await requireSessionApiUserScope(request(shared), anonymous);
+        assert.equal(last?.ok, false);
+        if (last && !last.ok) assert.equal(last.response.status, 429);
+
+        // ...but a signed-in user on that IP still gets through.
+        const result = await requireSessionApiUserScope(request(shared), signedIn);
+        assert.equal(result.ok, true);
+    });
+
     test("rejects a forged Auth.js cookie when Auth.js resolves no session", async () => {
         const result = await requireSessionApiUserScope(
             request({ cookie: "authjs.session-token=opaque-session-token" }),
@@ -82,25 +105,24 @@ describe("session-backed API user scope", () => {
         if (result.ok) assert.equal(result.context.userId, USER_A);
     });
 
-    test("allows a validated internal principal without enabling browser auth", async () => {
-        const result = await requireSessionApiUserScope(
-            request({
-                "x-api-key": "test-secret",
-                "x-user-id": USER_A,
-            }),
-            {
-                env: {
-                    NODE_ENV: "production",
-                    AUTH_SECRET: "partial-only",
-                    INTERNAL_API_SECRET: "test-secret",
-                },
-                getSession: async () => {
-                    throw new Error("partial auth must not trigger a session lookup");
-                },
-            },
-        );
+    test("never accepts the internal secret and a user id header in place of a session", async () => {
+        const headers = { "x-api-key": "test-secret", "x-user-id": USER_A };
+        const noSessionLookup = async () => {
+            throw new Error("incomplete auth must not trigger a session lookup");
+        };
 
-        assert.equal(result.ok, true);
-        if (result.ok) assert.equal(result.context.userId, USER_A);
+        const incomplete = await requireSessionApiUserScope(request(headers), {
+            env: { NODE_ENV: "production", AUTH_SECRET: "partial-only", INTERNAL_API_SECRET: "test-secret" },
+            getSession: noSessionLookup,
+        });
+        assert.equal(incomplete.ok, false);
+        if (!incomplete.ok) assert.equal(incomplete.response.status, 503);
+
+        const configured = await requireSessionApiUserScope(request(headers), {
+            env: { ...configuredEnv, INTERNAL_API_SECRET: "test-secret" },
+            getSession: async () => null,
+        });
+        assert.equal(configured.ok, false);
+        if (!configured.ok) assert.equal(configured.response.status, 401);
     });
 });
