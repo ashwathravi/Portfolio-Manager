@@ -14,6 +14,7 @@ import {
     buildSymbolsNeedingHistoryQuery,
     buildTrackedCountQuery,
     buildTrackSecuritiesQuery,
+    REQUESTED_TRACKING_LOCK,
     buildUpsertBarsQuery,
     dedupeBars,
     isValidBar,
@@ -214,15 +215,25 @@ describe("replaceHistory", () => {
 });
 
 describe("trackRequestedSecurities", () => {
-    /** Just enough of the database for a count, then an insert of the symbols. */
+    /** Just enough of the database for a locked transaction: a count, then an insert. */
     function fakeDatabase(tracked: number) {
         const inserted: string[][] = [];
-        const database = {
-            select: () => ({ from: async () => [{ count: tracked }] }),
+        const steps: string[] = [];
+        const tx = {
+            execute: async (query: unknown) => {
+                steps.push(query === REQUESTED_TRACKING_LOCK ? "lock" : "other");
+            },
+            select: () => ({
+                from: async () => {
+                    steps.push("count");
+                    return [{ count: tracked }];
+                },
+            }),
             insert: () => ({
                 values: (rows: Array<{ symbol: string }>) => ({
                     onConflictDoNothing: () => ({
                         returning: async () => {
+                            steps.push("insert");
                             inserted.push(rows.map((row) => row.symbol));
                             return rows.map(({ symbol }) => ({ symbol }));
                         },
@@ -230,8 +241,23 @@ describe("trackRequestedSecurities", () => {
                 }),
             }),
         };
-        return { database: database as never, inserted };
+        const database = {
+            transaction: async <T>(run: (transaction: typeof tx) => Promise<T>) => {
+                steps.push("begin");
+                const result = await run(tx);
+                steps.push("commit");
+                return result;
+            },
+        };
+        return { database: database as never, inserted, steps };
     }
+
+    test("counts and inserts in one transaction, after taking the reservation lock", async () => {
+        const { database, steps } = fakeDatabase(10);
+        await trackRequestedSecurities(["AAPL"], 100, database);
+        assert.deepEqual(steps, ["begin", "lock", "count", "insert", "commit"]);
+        assert.match(REQUESTED_TRACKING_LOCK.toQuery({ escapeName: (n: string) => n, escapeParam: () => "?", escapeString: (v: string) => `'${v}'` } as never).sql, /^select pg_advisory_xact_lock\(hashtext\('atlas:requested-tracking'\)\)$/);
+    });
 
     test("tracks requested symbols while the store is under its limit", async () => {
         const { database, inserted } = fakeDatabase(10);
