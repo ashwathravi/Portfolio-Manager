@@ -5,6 +5,7 @@ import {
     PolygonApiError,
     PolygonRateLimitError,
     type DailyBar,
+    type SplitEvent,
 } from "@/lib/providers/polygon-massive-adapter";
 import type { OHLC } from "@/types/market-data";
 
@@ -12,6 +13,7 @@ import {
     BENCHMARK_SYMBOLS,
     buildHeldSymbolsQuery,
     createCallPacer,
+    createIngestAdapter,
     historyToBars,
     ingestDailyPrices,
     pacingDelay,
@@ -56,11 +58,14 @@ function fakeAdapter({
     configured = true,
     daily = {},
     history = {},
+    splits = [],
     onCall,
 }: {
     configured?: boolean;
     daily?: Record<string, DailyBar[] | Error>;
     history?: Record<string, OHLC[] | Error>;
+    /** Every split the "provider" knows; answers are cut to the asked range. */
+    splits?: SplitEvent[] | Error;
     onCall?: () => void;
 } = {}) {
     const calls: string[] = [];
@@ -79,6 +84,12 @@ function fakeAdapter({
             const value = history[symbol];
             if (value instanceof Error) throw value;
             return value ?? [];
+        },
+        async getSplits(from, to) {
+            calls.push(`splits ${from} ${to}`);
+            onCall?.();
+            if (splits instanceof Error) throw splits;
+            return splits.filter((split) => split.executionDate >= from && split.executionDate <= to);
         },
     };
     return { adapter, calls };
@@ -104,6 +115,7 @@ function fakeStore({
     ]);
     const stored = new Map(bars.map((bar) => [`${bar.symbol}|${bar.date}`, bar]));
     const marks: Array<[string, string]> = [];
+    const resets: string[] = [];
 
     const store: PriceIngestStore = {
         listHeldSymbols: async () => [...holdings],
@@ -132,8 +144,25 @@ function fakeStore({
             securities.set(symbol, startDate);
             marks.push([symbol, startDate]);
         },
+        async replaceHistory(symbol, input, through) {
+            const own = input.filter((bar) => bar.symbol === symbol && bar.date <= through);
+            const valid = dedupeBars(own.filter(isValidBar));
+            if (valid.length === 0) return undefined;
+            for (const [key, bar] of stored) if (bar.symbol === symbol && bar.date <= through) stored.delete(key);
+            for (const bar of valid) stored.set(`${bar.symbol}|${bar.date}`, bar);
+            const historyStart = valid.map((bar) => bar.date).sort()[0];
+            securities.set(symbol, historyStart);
+            marks.push([symbol, historyStart]);
+            return { stored: valid.length, rejected: input.length - own.filter(isValidBar).length, historyStart };
+        },
+        async resetHistory(symbols) {
+            const reset = normalizeSymbols(symbols).filter((symbol) => securities.get(symbol));
+            for (const symbol of reset) securities.set(symbol, null);
+            resets.push(...reset);
+            return reset;
+        },
     };
-    return { store, securities, stored, marks };
+    return { store, securities, stored, marks, resets };
 }
 
 function storedDates(stored: Map<string, PriceBarInput>, symbol: string): string[] {
@@ -274,6 +303,8 @@ describe("ingestDailyPrices", () => {
 
         assert.equal(calls[0], "daily 2026-10-16");
         assert.equal(calls.filter((call) => call.startsWith("daily")).length, 1);
+        // Nothing stored yet, so no history on an old scale to fix.
+        assert.deepEqual(detail.splits, { skipped: "first run" });
         assert.deepEqual(detail.days, [{ date: "2026-10-16", stored: 2, rejected: 0 }]);
         assert.equal(detail.session, "2026-10-16");
         assert.equal(detail.daysBehind, 0);
@@ -290,7 +321,8 @@ describe("ingestDailyPrices", () => {
 
         const detail = await ingestDailyPrices({ adapter, store, ...fakeClock() });
 
-        assert.deepEqual(calls, missed.slice(0, 5).map((date) => `daily ${date}`));
+        // One splits call for the five days, before any of them is stored.
+        assert.deepEqual(calls, ["splits 2026-10-06 2026-10-12", ...missed.slice(0, 5).map((date) => `daily ${date}`)]);
         assert.deepEqual(detail.days?.map((day) => day.date), missed.slice(0, 5));
         assert.equal(detail.daysBehind, 4);
         assert.equal(detail.stopped?.catchUp, undefined);
@@ -307,6 +339,7 @@ describe("ingestDailyPrices", () => {
         assert.deepEqual(detail.days, []);
         assert.equal(detail.daysBehind, 0);
         assert.equal(detail.calls, 0);
+        assert.deepEqual(detail.splits, { skipped: "up to date" });
     });
 
     test("an unpublished day ends the catch-up without failing, and history stops at the last stored day", async () => {
@@ -323,7 +356,7 @@ describe("ingestDailyPrices", () => {
 
         const detail = await ingestDailyPrices({ adapter, store, ...fakeClock() });
 
-        assert.deepEqual(calls, ["daily 2026-10-14", "daily 2026-10-15", "history AAPL 2Y"]);
+        assert.deepEqual(calls, ["splits 2026-10-14 2026-10-16", "daily 2026-10-14", "daily 2026-10-15", "history AAPL 2Y"]);
         assert.deepEqual(detail.days, [{ date: "2026-10-14", stored: 1, rejected: 0 }]);
         assert.equal(detail.stopped?.catchUp, "not-published");
         assert.equal(detail.daysBehind, 2);
@@ -455,7 +488,7 @@ describe("ingestDailyPrices", () => {
 
         const detail = await ingestDailyPrices({ adapter, store, ...fakeClock() });
 
-        assert.deepEqual(calls, ["daily 2026-10-15", "daily 2026-10-16"]);
+        assert.deepEqual(calls, ["splits 2026-10-15 2026-10-16", "daily 2026-10-15", "daily 2026-10-16"]);
         assert.deepEqual(detail.stopped, { catchUp: "rate-limited", backfill: "rate-limited" });
         assert.equal(detail.daysBehind, 1);
         assert.equal(detail.backfillQueue, 1);
@@ -489,6 +522,151 @@ describe("ingestDailyPrices", () => {
         assert.deepEqual(marks, [["BBB", "2026-10-16"]]);
         assert.equal(securities.get("AAA"), null);
         assert.equal(detail.backfillQueue, 1);
+    });
+
+    test("a split on a stored day re-queues the stock, and the backfill replaces its history on the new scale", async () => {
+        // NVDA split 10-for-1 on Thursday the 15th; its stored history is on the old scale.
+        const { store, stored, resets, securities } = fakeStore({
+            loaded: [...BENCHMARK_SYMBOLS, "NVDA", "AAPL"],
+            queued: ["MSFT"],
+            bars: [
+                { ...dailyBar("NVDA", "2024-10-01", 900), source: "massive" }, // before the refetched window
+                { ...dailyBar("NVDA", "2026-10-14", 1_000), source: "massive" },
+                { ...dailyBar("AAPL", "2026-10-14", 250), source: "massive" },
+            ],
+        });
+        const { adapter, calls } = fakeAdapter({
+            splits: [
+                { symbol: "NVDA", executionDate: "2026-10-15" },
+                { symbol: "MSFT", executionDate: "2026-10-16" }, // queued: its first backfill is adjusted anyway
+                { symbol: "ZZZZ", executionDate: "2026-10-16" }, // not tracked
+            ],
+            daily: {
+                "2026-10-15": [dailyBar("NVDA", "2026-10-15", 101), dailyBar("AAPL", "2026-10-15", 251)],
+                "2026-10-16": [dailyBar("NVDA", "2026-10-16", 102), dailyBar("AAPL", "2026-10-16", 252)],
+            },
+            history: {
+                NVDA: [
+                    ohlc("2024-10-17T04:00:00.000Z", 90),
+                    ohlc("2026-10-14T04:00:00.000Z", 100),
+                    ohlc("2026-10-15T04:00:00.000Z", 101),
+                    ohlc("2026-10-16T04:00:00.000Z", 102),
+                ],
+                MSFT: [ohlc("2026-10-16T04:00:00.000Z", 400)],
+            },
+        });
+
+        const detail = await ingestDailyPrices({ adapter, store, ...fakeClock() });
+
+        assert.deepEqual(calls, [
+            "splits 2026-10-15 2026-10-16",
+            "daily 2026-10-15",
+            "daily 2026-10-16",
+            "history NVDA 2Y",
+            "history MSFT 2Y",
+        ]);
+        assert.deepEqual(detail.splits, { from: "2026-10-15", to: "2026-10-16", reset: ["NVDA"] });
+        assert.deepEqual(resets, ["NVDA"]);
+        // Only the adjusted history is left: the old-scale bars are gone, the 14th is rescaled.
+        assert.deepEqual(storedDates(stored, "NVDA"), ["2024-10-17", "2026-10-14", "2026-10-15", "2026-10-16"]);
+        assert.equal(stored.get("NVDA|2026-10-14")?.close, 100);
+        assert.equal(securities.get("NVDA"), "2024-10-17");
+        // AAPL didn't split.
+        assert.equal(stored.get("AAPL|2026-10-14")?.close, 250);
+        assert.equal(securities.get("AAPL"), "2024-10-16");
+        assert.equal(detail.backfillQueue, 0);
+    });
+
+    test("a split on a day not stored yet is handled by the run that stores it", async () => {
+        const { store, resets, securities } = fakeStore({
+            loaded: [...BENCHMARK_SYMBOLS, "NVDA"],
+            bars: [{ ...dailyBar("SPY", "2026-10-14"), source: "massive" }],
+        });
+        const splits = [{ symbol: "NVDA", executionDate: "2026-10-16" }];
+        const unpublished = fakeAdapter({ splits, daily: { "2026-10-15": [dailyBar("SPY", "2026-10-15")], "2026-10-16": [] } });
+
+        const first = await ingestDailyPrices({ adapter: unpublished.adapter, store, ...fakeClock() });
+
+        assert.deepEqual(first.splits, { from: "2026-10-15", to: "2026-10-15", reset: [] });
+        assert.equal(securities.get("NVDA"), "2024-10-16");
+
+        const published = fakeAdapter({ splits, daily: { "2026-10-16": [dailyBar("SPY", "2026-10-16")] } });
+        const second = await ingestDailyPrices({ adapter: published.adapter, store, ...fakeClock() });
+
+        assert.equal(published.calls[0], "splits 2026-10-16 2026-10-16");
+        assert.deepEqual(second.splits, { from: "2026-10-16", to: "2026-10-16", reset: ["NVDA"] });
+        assert.deepEqual(resets, ["NVDA"]);
+        assert.ok(published.calls.includes("history NVDA 2Y"));
+    });
+
+    test("a failed split check stores nothing, so the next run asks about the same days", async () => {
+        const { store, stored } = fakeStore({ bars: [{ ...dailyBar("SPY", "2026-10-15"), source: "massive" }] });
+        const daily = { "2026-10-16": [dailyBar("SPY", "2026-10-16")] };
+        const failing = fakeAdapter({
+            daily,
+            splits: new PolygonApiError(502, "Bad Gateway", "https://api.polygon.io/v3/reference/splits?apiKey=***"),
+        });
+
+        await assert.rejects(ingestDailyPrices({ adapter: failing.adapter, store, ...fakeClock() }), PolygonApiError);
+        assert.deepEqual(failing.calls, ["splits 2026-10-16 2026-10-16"]);
+        assert.deepEqual(storedDates(stored, "SPY"), ["2026-10-15"]);
+
+        const working = fakeAdapter({ daily });
+        const detail = await ingestDailyPrices({ adapter: working.adapter, store, ...fakeClock() });
+
+        assert.deepEqual(working.calls, ["splits 2026-10-16 2026-10-16", "daily 2026-10-16"]);
+        assert.deepEqual(detail.splits, { from: "2026-10-16", to: "2026-10-16", reset: [] });
+        assert.deepEqual(storedDates(stored, "SPY"), ["2026-10-15", "2026-10-16"]);
+    });
+
+    test("a rate-limited split check ends the run's calls and stores nothing", async () => {
+        const { store, stored } = fakeStore({ queued: ["AAA"], bars: [{ ...dailyBar("SPY", "2026-10-15"), source: "massive" }] });
+        const { adapter, calls } = fakeAdapter({
+            daily: { "2026-10-16": [dailyBar("SPY", "2026-10-16")] },
+            splits: new PolygonRateLimitError(1_000, "https://api.polygon.io/v3/reference/splits?apiKey=***"),
+        });
+
+        const detail = await ingestDailyPrices({ adapter, store, ...fakeClock() });
+
+        assert.deepEqual(calls, ["splits 2026-10-16 2026-10-16"]);
+        assert.deepEqual(detail.stopped, { catchUp: "rate-limited", backfill: "rate-limited" });
+        assert.deepEqual(detail.days, []);
+        assert.deepEqual(detail.splits, { skipped: "rate-limited" });
+        assert.equal(detail.daysBehind, 1);
+        assert.deepEqual(storedDates(stored, "SPY"), ["2026-10-15"]);
+    });
+
+    test("splits not on the plan (403) don't hold up prices", async () => {
+        const { store, stored } = fakeStore({ bars: [{ ...dailyBar("SPY", "2026-10-15"), source: "massive" }] });
+        const { adapter, calls } = fakeAdapter({
+            daily: { "2026-10-16": [dailyBar("SPY", "2026-10-16")] },
+            splits: new PolygonApiError(403, "Forbidden", "https://api.polygon.io/v3/reference/splits?apiKey=***"),
+        });
+
+        const detail = await ingestDailyPrices({ adapter, store, ...fakeClock() });
+
+        assert.deepEqual(calls, ["splits 2026-10-16 2026-10-16", "daily 2026-10-16"]);
+        assert.deepEqual(storedDates(stored, "SPY"), ["2026-10-15", "2026-10-16"]);
+        assert.match((detail.splits as { skipped: string }).skipped, /HTTP 403 Forbidden/);
+        assert.doesNotMatch((detail.splits as { skipped: string }).skipped, /apiKey=(?!\*)/);
+    });
+});
+
+describe("createIngestAdapter", () => {
+    test("makes no retries of its own, so every request goes through the pacer", async () => {
+        let requests = 0;
+        const adapter = createIngestAdapter({
+            fetch: (async () => {
+                requests++;
+                return new Response("{}", { status: 429, headers: { "Retry-After": "30" } });
+            }) as typeof globalThis.fetch,
+            now: () => new Date(FRIDAY_EVENING),
+        }, "test-key");
+
+        await assert.rejects(adapter.getDailyBars("2026-10-16"), PolygonRateLimitError);
+        await assert.rejects(adapter.getHistoricalPrices("AAPL", "2Y"), PolygonRateLimitError);
+        await assert.rejects(adapter.getSplits("2026-10-15", "2026-10-16"), PolygonRateLimitError);
+        assert.equal(requests, 3);
     });
 });
 

@@ -13,7 +13,7 @@
  * labels read.
  */
 
-import { and, asc, count, desc, eq, gte, inArray, isNull, lte, max, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, inArray, isNotNull, isNull, lte, max, sql } from "drizzle-orm";
 
 import { db } from "@/db";
 import { priceBars, securities } from "@/db/schema";
@@ -103,7 +103,7 @@ export function buildTrackSecuritiesQuery(symbols: string[], database: Database 
         .returning({ symbol: securities.symbol });
 }
 
-export function buildUpsertBarsQuery(bars: PriceBarInput[], database: Database = db) {
+export function buildUpsertBarsQuery(bars: PriceBarInput[], database: Pick<Database, "insert"> = db) {
     return database
         .insert(priceBars)
         .values(bars.map((bar) => ({ ...bar, updatedAt: new Date() })))
@@ -178,6 +178,15 @@ export function buildBarsQuery(symbol: string, from: string, to: string, databas
 
 const needsHistory = () => and(isNull(securities.historyStartDate), eq(securities.active, true));
 
+/** Puts symbols back in the history queue (after a split rescales their adjusted bars). */
+export function buildResetHistoryQuery(symbols: string[], database: Database = db) {
+    return database
+        .update(securities)
+        .set({ historyStartDate: null, updatedAt: new Date() })
+        .where(and(inArray(securities.symbol, symbols), isNotNull(securities.historyStartDate)))
+        .returning({ symbol: securities.symbol });
+}
+
 export function buildSymbolsNeedingHistoryQuery(limit: number, database: Database = db) {
     return database
         .select({ symbol: securities.symbol })
@@ -231,16 +240,60 @@ export async function getLatestBarDate(database: Database = db): Promise<string 
     return row?.date ?? null;
 }
 
-export async function markHistoryLoaded(symbol: string, startDate: string, database: Database = db): Promise<void> {
-    await database
+/** Puts symbols whose history was loaded back in the queue; returns the ones reset. */
+export async function resetHistory(symbols: Iterable<string>, database: Database = db): Promise<string[]> {
+    const normalized = normalizeSymbols(symbols);
+    if (!normalized.length) return [];
+    return (await buildResetHistoryQuery(normalized, database)).map((row) => row.symbol);
+}
+
+export function buildMarkHistoryLoadedQuery(symbol: string, startDate: string, database: Pick<Database, "update"> = db) {
+    return database
         .update(securities)
         .set({ historyStartDate: startDate, updatedAt: new Date() })
         .where(eq(securities.symbol, symbol));
 }
 
+export async function markHistoryLoaded(symbol: string, startDate: string, database: Database = db): Promise<void> {
+    await buildMarkHistoryLoadedQuery(symbol, startDate, database);
+}
+
+/** A symbol's bars up to and including `through`. */
+export function buildDeleteHistoryQuery(symbol: string, through: string, database: Pick<Database, "delete"> = db) {
+    return database.delete(priceBars).where(and(eq(priceBars.symbol, symbol), lte(priceBars.date, through)));
+}
+
 /**
- * Inserts or replaces bars. Invalid bars are skipped and counted rather than
- * failing the batch, so one bad provider row can't stop a nightly ingest.
+ * Replaces a symbol's bars up to `through` with a freshly fetched history and
+ * records where it starts, in one transaction. Every older stored bar goes
+ * too: after a split those are on the old scale, and the provider's adjusted
+ * history is the one to keep. Bars after `through` (from the daily files) are
+ * left alone. Returns undefined, changing nothing, when no bar is valid.
+ */
+export async function replaceHistory(
+    symbol: string,
+    bars: readonly PriceBarInput[],
+    through: string,
+    database: Database = db,
+): Promise<{ stored: number; rejected: number; historyStart: string } | undefined> {
+    const own = bars.filter((bar) => bar.symbol === symbol && bar.date <= through);
+    const valid = dedupeBars(own.filter(isValidBar));
+    if (valid.length === 0) return undefined;
+    const historyStart = valid.reduce((earliest, bar) => (bar.date < earliest ? bar.date : earliest), valid[0].date);
+    await database.transaction(async (tx) => {
+        await buildDeleteHistoryQuery(symbol, through, tx);
+        for (let start = 0; start < valid.length; start += UPSERT_CHUNK_SIZE) {
+            await buildUpsertBarsQuery(valid.slice(start, start + UPSERT_CHUNK_SIZE), tx);
+        }
+        await buildMarkHistoryLoadedQuery(symbol, historyStart, tx);
+    });
+    return { stored: valid.length, rejected: bars.length - own.filter(isValidBar).length, historyStart };
+}
+
+/**
+ * Inserts or replaces bars in one transaction. Invalid bars are skipped and
+ * counted rather than failing the batch, so one bad provider row can't stop
+ * a nightly ingest.
  * A repeated (symbol, date) is written once, with its last values.
  */
 export async function upsertBars(
@@ -248,8 +301,14 @@ export async function upsertBars(
     database: Database = db,
 ): Promise<{ stored: number; rejected: number }> {
     const valid = dedupeBars(bars.filter(isValidBar));
-    for (let start = 0; start < valid.length; start += UPSERT_CHUNK_SIZE) {
-        await buildUpsertBarsQuery(valid.slice(start, start + UPSERT_CHUNK_SIZE), database);
+    if (valid.length > 0) {
+        // All chunks or none: the ingest resumes from the newest stored date,
+        // so a day must never be left half-written.
+        await database.transaction(async (tx) => {
+            for (let start = 0; start < valid.length; start += UPSERT_CHUNK_SIZE) {
+                await buildUpsertBarsQuery(valid.slice(start, start + UPSERT_CHUNK_SIZE), tx);
+            }
+        });
     }
     return { stored: valid.length, rejected: bars.filter((bar) => !isValidBar(bar)).length };
 }

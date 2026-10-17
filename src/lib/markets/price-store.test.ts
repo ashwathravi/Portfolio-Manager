@@ -3,9 +3,12 @@ import assert from "node:assert/strict";
 
 import {
     buildBarsQuery,
+    buildDeleteHistoryQuery,
     buildLatestBarDateQuery,
     buildLatestClosesQuery,
+    buildMarkHistoryLoadedQuery,
     buildRecentClosesQuery,
+    buildResetHistoryQuery,
     buildSymbolsNeedingHistoryCountQuery,
     buildSymbolsNeedingHistoryQuery,
     buildTrackSecuritiesQuery,
@@ -13,6 +16,7 @@ import {
     dedupeBars,
     isValidBar,
     normalizeSymbols,
+    replaceHistory,
     selectTrackedBars,
     type PriceBarInput,
 } from "./price-store";
@@ -152,5 +156,39 @@ describe("price store queries", () => {
         const { sql, params } = buildLatestBarDateQuery().toSQL();
         assert.equal(sql, 'select max("date") from "price_bars"');
         assert.deepEqual(params, []);
+    });
+
+    test("a history reset re-queues only symbols whose history was loaded", () => {
+        const { sql, params } = buildResetHistoryQuery(["NVDA", "AAPL"]).toSQL();
+        assert.match(sql, /^update "securities" set "history_start_date" = \$\d+, "updated_at" = \$\d+/i);
+        assert.match(sql, /"securities"\."symbol" in \(\$\d+, \$\d+\) and "securities"\."history_start_date" is not null/i);
+        assert.match(sql, /returning "symbol"$/i);
+        assert.equal(params[0], null);
+        assert.deepEqual(params.slice(2), ["NVDA", "AAPL"]);
+    });
+
+    test("marking history loaded records where it starts", () => {
+        const { sql, params } = buildMarkHistoryLoadedQuery("NVDA", "2024-10-17").toSQL();
+        assert.match(sql, /^update "securities" set "history_start_date" = \$\d+, "updated_at" = \$\d+ where "securities"\."symbol" = \$\d+$/i);
+        assert.equal(params[0], "2024-10-17");
+        assert.equal(params[2], "NVDA");
+    });
+
+    test("a history replace deletes one symbol's bars up to the day given, never later ones", () => {
+        const { sql, params } = buildDeleteHistoryQuery("NVDA", "2026-10-16").toSQL();
+        assert.equal(sql, 'delete from "price_bars" where ("price_bars"."symbol" = $1 and "price_bars"."date" <= $2)');
+        assert.deepEqual(params, ["NVDA", "2026-10-16"]);
+    });
+});
+
+describe("replaceHistory", () => {
+    const untouchable = new Proxy({}, { get: () => () => assert.fail("the database was used") }) as never;
+
+    test("with no valid bar, changes nothing and says so", async () => {
+        const inconsistent = { ...BAR, symbol: "NVDA", high: 1 };
+        assert.equal(await replaceHistory("NVDA", [], "2026-10-16", untouchable), undefined);
+        assert.equal(await replaceHistory("NVDA", [inconsistent], "2026-10-16", untouchable), undefined);
+        // Another symbol's bars, and bars after the cut-off, are never this history.
+        assert.equal(await replaceHistory("NVDA", [BAR, { ...BAR, symbol: "NVDA", date: "2026-10-19" }], "2026-10-16", untouchable), undefined);
     });
 });

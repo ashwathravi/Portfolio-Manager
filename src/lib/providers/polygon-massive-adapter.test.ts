@@ -403,5 +403,46 @@ describe('PolygonMassiveAdapter', () => {
       assert.equal(fundamentals.name, 'Apple Inc.');
       assert.deepEqual(results.map((r) => r.symbol), ['AAPL']);
     });
+
+    test('splits: one call for the date range, unreadable rows dropped', async () => {
+      const { fetch, calls } = fakeFetch(() => ({
+        body: {
+          status: 'OK',
+          results: [
+            { ticker: 'NVDA', execution_date: '2026-10-15', split_from: 1, split_to: 10 },
+            { ticker: ' brk.b ', execution_date: '2026-10-16' },
+            { ticker: '', execution_date: '2026-10-16' },
+            { ticker: 'XYZ', execution_date: 'soon' },
+            { execution_date: '2026-10-16' },
+          ],
+        },
+      }));
+
+      const splits = await adapter(fetch).getSplits('2026-10-15', '2026-10-16');
+
+      assert.deepEqual(calls, [
+        `${BASE}/v3/reference/splits?execution_date.gte=2026-10-15&execution_date.lte=2026-10-16&limit=1000&apiKey=${KEY}`,
+      ]);
+      assert.deepEqual(splits, [
+        { symbol: 'NVDA', executionDate: '2026-10-15' },
+        { symbol: 'BRK.B', executionDate: '2026-10-16' },
+      ]);
+    });
+
+    test('splits: a missing results list is no splits; bad dates are refused before any call', async () => {
+      const { fetch, calls } = fakeFetch(() => ({ body: { status: 'OK' } }));
+      assert.deepEqual(await adapter(fetch).getSplits('2026-10-15', '2026-10-15'), []);
+      await assert.rejects(adapter(fetch).getSplits('2026-10-15', '16 Oct'), /YYYY-MM-DD/);
+      assert.equal(calls.length, 1);
+    });
+
+    test('splits: an HTTP error keeps its status', async () => {
+      const { fetch } = fakeFetch(() => ({ status: 403, body: { status: 'NOT_AUTHORIZED' } }));
+      await assert.rejects(adapter(fetch).getSplits('2026-10-15', '2026-10-16'), (err: unknown) => {
+        assert.ok(err instanceof PolygonApiError);
+        assert.equal(err.status, 403);
+        return true;
+      });
+    });
   });
 });

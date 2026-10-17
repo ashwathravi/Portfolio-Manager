@@ -9,14 +9,21 @@
  *    cut down to the tracked symbols). At most five days a run, so a long
  *    gap closes over a few nights. A day that isn't published yet ends the
  *    catch-up; the next run picks it up.
+ *    Before any of those days is stored, one call asks which stocks split on
+ *    them: bars are split-adjusted, so a split puts every earlier stored bar
+ *    of that stock on the old scale. Those stocks go back in the history
+ *    queue. Asking first means a failed check stores nothing, and the next
+ *    run asks about the same days again.
  * 3. Backfill two years of history for symbols that don't have it yet, one
- *    aggregates call per symbol, while the run's time budget lasts. The rest
- *    wait in the queue for the next run.
+ *    aggregates call per symbol, while the run's time budget lasts. A
+ *    backfill replaces the symbol's stored bars up to that day. The rest wait
+ *    in the queue for the next run.
  *
  * The free Basic plan allows 5 calls a minute, so calls go through a pacer:
  * at most 5 in any 65-second window (a one-call-every-13-seconds pace once
  * the first five are spent), and none that couldn't finish within the budget.
- * A rate-limit answer ends the run's provider calls without failing the job.
+ * The adapter makes no retries of its own, so every request is paced. A
+ * rate-limit answer ends the run's provider calls without failing the job.
  *
  * The newest date in price_bars is the catch-up's bookmark, so it must only
  * ever be a day whose market-wide file was stored. A backfill therefore keeps
@@ -32,6 +39,8 @@ import {
     PolygonMassiveAdapter,
     PolygonRateLimitError,
     type DailyBar,
+    type PolygonAdapterConfig,
+    type SplitEvent,
 } from "@/lib/providers/polygon-massive-adapter";
 import type { OHLC } from "@/types/market-data";
 
@@ -39,10 +48,11 @@ import { getEasternParts, lastCompletedSession, nextTradingDay, previousTradingD
 import {
     countSymbolsNeedingHistory,
     getLatestBarDate,
-    isValidBar,
     listSymbolsNeedingHistory,
     listTrackedSymbols,
     markHistoryLoaded,
+    replaceHistory,
+    resetHistory,
     selectTrackedBars,
     trackSecurities,
     upsertBars,
@@ -76,6 +86,7 @@ export interface PriceIngestAdapter {
     readonly isConfigured: boolean;
     getDailyBars(date: string): Promise<Map<string, DailyBar>>;
     getHistoricalPrices(symbol: string, range: string): Promise<OHLC[]>;
+    getSplits(from: string, to: string): Promise<SplitEvent[]>;
 }
 
 /** The database calls the ingest makes; the price store in production. */
@@ -88,6 +99,14 @@ export interface PriceIngestStore {
     listSymbolsNeedingHistory(limit: number): Promise<string[]>;
     countSymbolsNeedingHistory(): Promise<number>;
     markHistoryLoaded(symbol: string, startDate: string): Promise<void>;
+    /** Replaces a symbol's bars up to `through`; undefined when no bar is valid. */
+    replaceHistory(
+        symbol: string,
+        bars: readonly PriceBarInput[],
+        through: string,
+    ): Promise<{ stored: number; rejected: number; historyStart: string } | undefined>;
+    /** Puts loaded symbols back in the history queue; returns the ones reset. */
+    resetHistory(symbols: string[]): Promise<string[]>;
 }
 
 export interface IngestPricesOptions {
@@ -121,6 +140,12 @@ export type PriceIngestDetail = {
     backfillErrors?: Array<{ symbol: string; error: string }>;
     /** Symbols still waiting for history after this run. */
     backfillQueue?: number;
+    /**
+     * The split check for the days stored this run: the tracked stocks that
+     * split on them, put back in the history queue (`reset`), or why there
+     * was no check.
+     */
+    splits?: { from: string; to: string; reset: string[] } | { skipped: string };
     stopped?: { catchUp?: IngestStopReason; backfill?: IngestStopReason };
     /** Provider calls made. */
     calls?: number;
@@ -230,6 +255,8 @@ export function createPriceIngestStore(database: Database = db): PriceIngestStor
         listSymbolsNeedingHistory: (limit) => listSymbolsNeedingHistory(limit, database),
         countSymbolsNeedingHistory: () => countSymbolsNeedingHistory(database),
         markHistoryLoaded: (symbol, startDate) => markHistoryLoaded(symbol, startDate, database),
+        replaceHistory: (symbol, bars, through) => replaceHistory(symbol, bars, through, database),
+        resetHistory: (symbols) => resetHistory(symbols, database),
     };
 }
 
@@ -240,12 +267,21 @@ export function createPriceIngestStore(database: Database = db): PriceIngestStor
 const defaultSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 /**
+ * The ingest's Massive adapter. It makes no retries of its own: every
+ * request must go through the pacer, and a 429 ends the run's provider calls
+ * instead of being retried (and slept on) inside one.
+ */
+export function createIngestAdapter(config: Omit<PolygonAdapterConfig, "maxRetries"> = {}, apiKey?: string) {
+    return new PolygonMassiveAdapter(apiKey, undefined, { ...config, maxRetries: 0 });
+}
+
+/**
  * Runs one nightly ingest and reports what it did. A provider or database
  * error during the catch-up fails the run (the job records it); a single
  * symbol's failed backfill is reported and leaves it queued for the next run.
  */
 export async function ingestDailyPrices({
-    adapter = new PolygonMassiveAdapter(),
+    adapter = createIngestAdapter(),
     now = () => new Date(),
     database = db,
     store = createPriceIngestStore(database),
@@ -265,11 +301,35 @@ export async function ingestDailyPrices({
     const newlyTracked = await store.trackSecurities([...BENCHMARK_SYMBOLS, ...held]);
     const tracked = await store.listTrackedSymbols();
 
-    // 2. Catch up on missed days, oldest first.
+    // 2. Catch up on missed days, oldest first, asking about splits first.
     const latestBefore = await store.getLatestBarDate();
-    const pending = tradingDaysToIngest(latestBefore, session);
+    const window = tradingDaysToIngest(latestBefore, session).slice(0, MAX_CATCH_UP_DAYS);
+    let splitEvents: SplitEvent[] | undefined;
+    let splitsSkipped: string | undefined;
+    if (window.length === 0) {
+        splitsSkipped = "up to date";
+    } else if (latestBefore === null) {
+        // Nothing stored yet, so no history on an old scale.
+        splitsSkipped = "first run";
+    } else if (!(await pacer.acquire())) {
+        stopped.catchUp = "budget";
+    } else {
+        try {
+            splitEvents = await adapter.getSplits(window[0], window.at(-1)!);
+        } catch (error) {
+            if (error instanceof PolygonRateLimitError) {
+                stopped.catchUp = "rate-limited";
+            } else if (error instanceof PolygonApiError && error.status === 403) {
+                // Not on this plan. Prices still matter more than the check.
+                splitsSkipped = summarizeError(error);
+            } else {
+                throw error;
+            }
+        }
+    }
+
     const days: NonNullable<PriceIngestDetail["days"]> = [];
-    for (const date of pending.slice(0, MAX_CATCH_UP_DAYS)) {
+    for (const date of stopped.catchUp ? [] : window) {
         if (!(await pacer.acquire())) {
             stopped.catchUp = "budget";
             break;
@@ -293,7 +353,22 @@ export async function ingestDailyPrices({
     }
     const latestAfter = days.at(-1)?.date ?? latestBefore;
 
-    // 3. Backfill history, up to the newest day the daily files have covered.
+    // 3. Stocks that split on a stored day go back in the history queue, so
+    // the backfill below rewrites their history on the new scale. A split on
+    // a day not stored yet is found again by the run that stores it.
+    let splits: PriceIngestDetail["splits"];
+    if (splitEvents && days.length > 0) {
+        const from = days[0].date;
+        const to = days.at(-1)!.date;
+        const split = splitEvents
+            .filter((event) => event.executionDate >= from && event.executionDate <= to && tracked.has(event.symbol))
+            .map((event) => event.symbol);
+        splits = { from, to, reset: split.length > 0 ? await store.resetHistory(split) : [] };
+    } else {
+        splits = { skipped: splitsSkipped ?? stopped.catchUp ?? "no new days" };
+    }
+
+    // 4. Backfill history, up to the newest day the daily files have covered.
     // With nothing stored at all, the day before the session: the session
     // itself will come from its daily file.
     const historyThrough = latestAfter ?? previousTradingDay(session);
@@ -324,8 +399,8 @@ export async function ingestDailyPrices({
             }
 
             const bars = historyToBars(symbol, history, historyThrough);
-            const valid = bars.filter(isValidBar);
-            if (valid.length === 0) {
+            const replaced = await store.replaceHistory(symbol, bars, historyThrough);
+            if (!replaced) {
                 // Nothing to store (delisted, not a stock, or listed after
                 // historyThrough). The history is marked as starting at
                 // historyThrough, so the symbol leaves the queue and its bars
@@ -334,10 +409,7 @@ export async function ingestDailyPrices({
                 backfilled.push({ symbol, stored: 0, rejected: bars.length, historyStart: historyThrough, empty: true });
                 continue;
             }
-            const result = await store.upsertBars(bars);
-            const historyStart = valid.reduce((earliest, bar) => (bar.date < earliest ? bar.date : earliest), valid[0].date);
-            await store.markHistoryLoaded(symbol, historyStart);
-            backfilled.push({ symbol, ...result, historyStart });
+            backfilled.push({ symbol, ...replaced });
         }
     }
 
@@ -351,6 +423,7 @@ export async function ingestDailyPrices({
         backfilled,
         backfillErrors,
         backfillQueue: await store.countSymbolsNeedingHistory(),
+        splits,
         stopped,
         calls: pacer.calls,
     };

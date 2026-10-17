@@ -104,6 +104,11 @@ interface PolygonGroupedBar extends PolygonAggBar {
   T: string;
 }
 
+interface PolygonSplitsResponse {
+  status: string;
+  results?: Array<{ ticker?: string; execution_date?: string }>;
+}
+
 interface PolygonGroupedResponse {
   status: string;
   resultsCount?: number;
@@ -142,6 +147,13 @@ interface PolygonTickerSearchResponse {
 // ---------------------------------------------------------------------------
 // Public shapes
 // ---------------------------------------------------------------------------
+
+/** A stock split: from its execution date on, adjusted prices use the new scale. */
+export interface SplitEvent {
+  symbol: string;
+  /** Eastern trading date, YYYY-MM-DD. */
+  executionDate: string;
+}
 
 /**
  * One symbol's bar for one session. Matches the price store's
@@ -540,6 +552,27 @@ export class PolygonMassiveAdapter implements MarketDataProvider {
       });
     }
     return bars;
+  }
+
+  /**
+   * Stock splits executed between two dates, inclusive (one call). Stored
+   * split-adjusted history changes scale on the execution date, so the
+   * nightly ingest refetches those symbols' history.
+   */
+  async getSplits(from: string, to: string): Promise<SplitEvent[]> {
+    this.assertConfigured();
+    if (!ISO_DATE.test(from) || !ISO_DATE.test(to)) {
+      throw new Error(`PolygonMassiveAdapter: Expected dates as YYYY-MM-DD, got "${from}" and "${to}".`);
+    }
+    const url =
+      `${this.baseUrl}/v3/reference/splits` +
+      `?execution_date.gte=${from}&execution_date.lte=${to}&limit=1000&apiKey=${this.apiKey}`;
+    const data = await this.fetchWithRetry<PolygonSplitsResponse>(url);
+    return (data.results ?? []).flatMap((split) =>
+      typeof split?.ticker === 'string' && split.ticker.trim() && typeof split.execution_date === 'string' && ISO_DATE.test(split.execution_date)
+        ? [{ symbol: split.ticker.trim().toUpperCase(), executionDate: split.execution_date }]
+        : [],
+    );
   }
 
   private groupedDailyUrl(date: string): string {
