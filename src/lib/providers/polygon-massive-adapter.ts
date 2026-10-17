@@ -585,7 +585,7 @@ export class PolygonMassiveAdapter implements MarketDataProvider {
    * split-adjusted history changes scale on the execution date, so the
    * nightly ingest refetches those symbols' history.
    */
-  async getSplits(from: string, to: string): Promise<SplitEvent[]> {
+  async getSplits(from: string, to: string, tickers?: readonly string[]): Promise<SplitEvent[]> {
     this.assertConfigured();
     if (!ISO_DATE.test(from) || !ISO_DATE.test(to)) {
       throw new Error(`PolygonMassiveAdapter: Expected dates as YYYY-MM-DD, got "${from}" and "${to}".`);
@@ -593,9 +593,12 @@ export class PolygonMassiveAdapter implements MarketDataProvider {
     // Every adjustment type (forward and reverse splits, stock dividends)
     // rescales adjusted bars. 5000 is the page maximum: far more than a few
     // days of US splits, so one page is the whole answer.
+    // With tickers, only those stocks' actions (the holdings reconciliation
+    // looks back further than a few days, so it narrows the answer).
+    const only = tickers?.length ? `&ticker.any_of=${tickers.map((ticker) => encodeURIComponent(ticker)).join(',')}` : '';
     const url =
       `${this.baseUrl}/stocks/v1/splits` +
-      `?execution_date.gte=${from}&execution_date.lte=${to}&limit=5000&apiKey=${this.apiKey}`;
+      `?execution_date.gte=${from}&execution_date.lte=${to}${only}&limit=5000&apiKey=${this.apiKey}`;
     const data = await this.fetchWithRetry<PolygonSplitsResponse>(url);
     if (data.next_url) {
       console.warn(`PolygonMassiveAdapter: more than one page of splits between ${from} and ${to}; using the first.`);

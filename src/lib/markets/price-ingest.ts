@@ -47,7 +47,13 @@
 import { db } from "@/db";
 import { holdings } from "@/db/schema";
 import { summarizeError } from "@/lib/jobs/runner";
-import { adjustHoldingsForSplit, combineSameDaySplits, describeSplitRatio, type HoldingSplit } from "@/lib/portfolio/split-adjustments";
+import {
+    adjustHoldingsForSplit,
+    listHeldSince,
+    reconcileHoldingSplits,
+    type HoldingSplit,
+    type HoldingSplitOutcome,
+} from "@/lib/portfolio/split-adjustments";
 import { getMassiveQuota } from "@/lib/providers/massive-quota";
 import {
     PolygonApiError,
@@ -104,6 +110,8 @@ export const CALL_ALLOWANCE_MS = 10_000;
 export const RATE_LIMIT_WAIT_MS = 15_000;
 /** More symbols than one run's budget can fetch, so the budget is what stops it. */
 const BACKFILL_BATCH = 50;
+/** Held tickers per holdings-split request (they go in the URL). */
+const HOLDING_SPLITS_BATCH = 200;
 /** How long a looked-up symbol may go without a bar before it stops being tracked. */
 export const UNPRICED_GRACE_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -113,7 +121,8 @@ export interface PriceIngestAdapter {
     getDailyBars(date: string): Promise<Map<string, DailyBar>>;
     /** Daily bars, and how many provider rows couldn't be read (see PolygonMassiveAdapter.getDailyHistory). */
     getDailyHistory(symbol: string, range: string): Promise<{ bars: OHLC[]; unreadable: number }>;
-    getSplits(from: string, to: string): Promise<SplitEvent[]>;
+    /** Splits between two dates, all stocks or only `tickers`. */
+    getSplits(from: string, to: string, tickers?: readonly string[]): Promise<SplitEvent[]>;
 }
 
 /** The database calls the ingest makes; the price store in production. */
@@ -148,6 +157,8 @@ export interface PriceIngestStore {
     clearSplitHistories(symbols: string[]): Promise<string[]>;
     /** Moves held positions to the post-split share count; returns how many were adjusted. */
     adjustHoldingsForSplit(split: HoldingSplit): Promise<number>;
+    /** Each held stock and when its least recently updated position last changed. */
+    listHeldSince(): Promise<Array<{ symbol: string; since: Date }>>;
     /** Whether any bar is stored for the symbol. */
     hasBars(symbol: string): Promise<boolean>;
     /** Re-queues loaded symbols with no bar at all (an empty backfill); returns those re-queued. */
@@ -196,19 +207,16 @@ export type PriceIngestDetail = {
     /**
      * The split check for this run's catch-up days: the tracked stocks that
      * split on them, put back in the history queue (`reset`) before any day
-     * was stored, or why there was no check. `adjusted`: held positions moved
-     * to the post-split share count; `unadjusted`: held stocks that split
-     * without a usable ratio from the provider (left for the user to re-import).
+     * was stored, or why there was no check.
      */
-    splits?:
-        | {
-            from: string;
-            to: string;
-            reset: string[];
-            adjusted?: Array<{ symbol: string; executionDate: string; ratio: string; positions: number }>;
-            unadjusted?: string[];
-        }
-        | { skipped: string };
+    splits?: { from: string; to: string; reset: string[] } | { skipped: string };
+    /**
+     * Held positions moved to the post-split share count, from every split
+     * since each held stock's oldest position was last updated (`adjusted`),
+     * and held stocks with a split that couldn't be applied safely
+     * (`unadjusted`: re-import those), or why there was no check.
+     */
+    holdingSplits?: ({ from: string; to: string } & Partial<HoldingSplitOutcome>) | { skipped: string };
     stopped?: { catchUp?: IngestStopReason; backfill?: IngestStopReason };
     /** Provider calls made. */
     calls?: number;
@@ -330,6 +338,7 @@ export function createPriceIngestStore(database: Database = db): PriceIngestStor
         resetHistory: (symbols) => resetHistory(symbols, database),
         clearSplitHistories: (symbols) => clearSplitHistories(symbols, database),
         adjustHoldingsForSplit: (split) => adjustHoldingsForSplit(split, database),
+        listHeldSince: () => listHeldSince(database),
         hasBars: (symbol) => hasStoredBars(symbol, database),
         resetUnpricedHistories: (symbols) => resetUnpricedHistories(symbols, database),
     };
@@ -429,37 +438,7 @@ export async function ingestDailyPrices({
         const split = normalizeSymbols(
             splitEvents.filter((event) => event.executionDate >= from && event.executionDate <= to).map((event) => event.symbol),
         ).filter((symbol) => tracked.has(symbol));
-        const reset = split.length > 0 ? await store.clearSplitHistories(split) : [];
-
-        // Held positions move to the post-split share count, oldest split first
-        // (see split-adjustments.ts: each split applies once per position).
-        const heldSet = new Set(normalizeSymbols(held));
-        const adjusted: NonNullable<Extract<PriceIngestDetail["splits"], { reset: string[] }>["adjusted"]> = [];
-        const unadjusted: string[] = [];
-        // One update per stock and execution date, with every action that day combined.
-        const byDay = new Map<string, SplitEvent[]>();
-        for (const event of splitEvents) {
-            if (event.executionDate < from || event.executionDate > to || !heldSet.has(event.symbol)) continue;
-            const key = `${event.executionDate}|${event.symbol}`;
-            byDay.set(key, [...(byDay.get(key) ?? []), event]);
-        }
-        for (const key of [...byDay.keys()].sort()) {
-            const events = byDay.get(key)!;
-            const holding = combineSameDaySplits(events);
-            if (!holding) {
-                unadjusted.push(events[0].symbol);
-                continue;
-            }
-            const positions = await store.adjustHoldingsForSplit(holding);
-            if (positions > 0) adjusted.push({ symbol: holding.symbol, executionDate: holding.executionDate, ratio: describeSplitRatio(holding), positions });
-        }
-        splits = {
-            from,
-            to,
-            reset,
-            ...(adjusted.length > 0 ? { adjusted } : {}),
-            ...(unadjusted.length > 0 ? { unadjusted } : {}),
-        };
+        splits = { from, to, reset: split.length > 0 ? await store.clearSplitHistories(split) : [] };
     } else {
         splits = { skipped: splitsSkipped ?? stopped.catchUp ?? "no new days" };
     }
@@ -499,6 +478,50 @@ export async function ingestDailyPrices({
     // Empty days with nothing published after them aren't out yet.
     if (empty.length > 0 && !stopped.catchUp) stopped.catchUp = "not-published";
     const latestAfter = days.findLast((day) => !day.closed)?.date ?? latestBefore;
+
+    // Held positions after splits, separate from the price bookmark: every
+    // split since each held stock's oldest position was last updated, so a
+    // position imported before a split the catch-up never saw (before the
+    // first run, say) is adjusted too. Applying a split is safe to repeat
+    // (split-adjustments.ts), so the same splits are simply seen again each
+    // run. A failure is reported, not fatal: prices don't depend on it.
+    let holdingSplits: PriceIngestDetail["holdingSplits"];
+    const heldSince = await store.listHeldSince();
+    if (heldSince.length === 0) {
+        holdingSplits = { skipped: "nothing held" };
+    } else if (stopped.catchUp === "rate-limited" || stopped.catchUp === "budget") {
+        holdingSplits = { skipped: stopped.catchUp };
+    } else {
+        const from = heldSince.map(({ since }) => getEasternParts(since).date).sort()[0];
+        const symbols = normalizeSymbols(heldSince.map(({ symbol }) => symbol)).sort();
+        if (from > session) {
+            holdingSplits = { skipped: "up to date" };
+        } else {
+            const events: SplitEvent[] = [];
+            let failed: string | undefined;
+            for (let start = 0; start < symbols.length && !failed; start += HOLDING_SPLITS_BATCH) {
+                const batch = symbols.slice(start, start + HOLDING_SPLITS_BATCH);
+                try {
+                    const answer = await paced(() => adapter.getSplits(from, session, batch));
+                    if ("stopped" in answer) failed = answer.stopped;
+                    else events.push(...answer.value);
+                } catch (error) {
+                    failed = summarizeError(error);
+                }
+            }
+            if (failed) {
+                holdingSplits = { skipped: failed };
+            } else {
+                const outcome = await reconcileHoldingSplits(events, new Set(symbols), (split) => store.adjustHoldingsForSplit(split));
+                holdingSplits = {
+                    from,
+                    to: session,
+                    ...(outcome.adjusted.length > 0 ? { adjusted: outcome.adjusted } : {}),
+                    ...(outcome.unadjusted.length > 0 ? { unadjusted: outcome.unadjusted } : {}),
+                };
+            }
+        }
+    }
 
     // Looked-up symbols no daily file has priced in a week (after the catch-up,
     // so one about to be priced isn't dropped) stop being tracked.
@@ -572,6 +595,7 @@ export async function ingestDailyPrices({
         tracked: tracked.size,
         newlyTracked,
         pruned,
+        holdingSplits,
         days,
         daysBehind: tradingDaysToIngest(latestAfter, session).length,
         historyThrough,

@@ -50,24 +50,81 @@ export function splitTakesEffectAt(executionDate: string): Date {
  * dividend, say) as one ratio, so a position gets all of them in one
  * update: the second would otherwise find it already marked as adjusted for
  * that date. The same action listed twice (same provider id) counts once.
- * Undefined when any action has no usable ratio.
+ * Undefined when the day can't be applied safely: an action without a
+ * usable ratio, or several actions of which one has no id (equal ratios
+ * don't prove two rows are the same action, so neither guess is safe).
  */
 export function combineSameDaySplits(
     events: ReadonlyArray<{ symbol: string; executionDate: string; splitFrom?: number; splitTo?: number; id?: string }>,
 ): HoldingSplit | undefined {
     if (events.length === 0) return undefined;
+    if (events.length > 1 && events.some((event) => !event.id)) return undefined;
     const seen = new Set<string>();
     let splitFrom = 1;
     let splitTo = 1;
     for (const event of events) {
         if (event.splitFrom === undefined || event.splitTo === undefined) return undefined;
-        const key = event.id ?? `${event.splitFrom}:${event.splitTo}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
+        if (event.id) {
+            if (seen.has(event.id)) continue;
+            seen.add(event.id);
+        }
         splitFrom *= event.splitFrom;
         splitTo *= event.splitTo;
     }
     return { symbol: events[0].symbol, executionDate: events[0].executionDate, splitFrom, splitTo };
+}
+
+export interface HoldingSplitOutcome {
+    adjusted: Array<{ symbol: string; executionDate: string; ratio: string; positions: number }>;
+    /** Stocks with a split that couldn't be applied safely (no ratio, or ambiguous same-day actions). */
+    unadjusted: string[];
+}
+
+/**
+ * Applies split events to held positions: one update per stock and
+ * execution date, oldest first (so a later split applies on top of an
+ * earlier one). Events for stocks not in `held` are ignored. Safe to repeat
+ * with the same events: see {@link buildAdjustHoldingsForSplitQuery}.
+ */
+export async function reconcileHoldingSplits(
+    events: ReadonlyArray<{ symbol: string; executionDate: string; splitFrom?: number; splitTo?: number; id?: string }>,
+    held: ReadonlySet<string>,
+    adjust: (split: HoldingSplit) => Promise<number>,
+): Promise<HoldingSplitOutcome> {
+    const byDay = new Map<string, typeof events[number][]>();
+    for (const event of events) {
+        if (!held.has(event.symbol)) continue;
+        const key = `${event.executionDate}|${event.symbol}`;
+        byDay.set(key, [...(byDay.get(key) ?? []), event]);
+    }
+    const outcome: HoldingSplitOutcome = { adjusted: [], unadjusted: [] };
+    for (const key of [...byDay.keys()].sort()) {
+        const dayEvents = byDay.get(key)!;
+        const split = combineSameDaySplits(dayEvents);
+        if (!split) {
+            if (!outcome.unadjusted.includes(dayEvents[0].symbol)) outcome.unadjusted.push(dayEvents[0].symbol);
+            continue;
+        }
+        const positions = await adjust(split);
+        if (positions > 0) {
+            outcome.adjusted.push({ symbol: split.symbol, executionDate: split.executionDate, ratio: describeSplitRatio(split), positions });
+        }
+    }
+    return outcome;
+}
+
+/** Each held stock (upper case) and when its least recently updated position last changed. */
+export function buildHeldSinceQuery(database: Database = db) {
+    return database
+        // Mapped like the column itself: a zone-less timestamp read as UTC,
+        // not as the server's local time.
+        .select({ symbol: sql<string>`upper(${holdings.symbol})`, since: sql<Date>`min(${holdings.updatedAt})`.mapWith(holdings.updatedAt) })
+        .from(holdings)
+        .groupBy(sql`upper(${holdings.symbol})`);
+}
+
+export async function listHeldSince(database: Database = db): Promise<Array<{ symbol: string; since: Date }>> {
+    return (await buildHeldSinceQuery(database)).map((row) => ({ symbol: row.symbol, since: row.since }));
 }
 
 /** "10-for-1", "1-for-20". */

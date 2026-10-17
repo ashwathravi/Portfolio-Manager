@@ -4,8 +4,10 @@ import assert from "node:assert/strict";
 import {
     adjustHoldingsForSplit,
     buildAdjustHoldingsForSplitQuery,
+    buildHeldSinceQuery,
     combineSameDaySplits,
     describeSplitRatio,
+    reconcileHoldingSplits,
     splitTakesEffectAt,
 } from "./split-adjustments";
 
@@ -34,8 +36,14 @@ describe("combineSameDaySplits", () => {
             { ...day, splitFrom: 1, splitTo: 10, id: "A" },
             { ...day, splitFrom: 1, splitTo: 10, id: "A" },
         ]), { ...day, splitFrom: 1, splitTo: 10 });
-        // Without ids, identical ratios are taken to be the same action.
-        assert.deepEqual(combineSameDaySplits([{ ...day, splitFrom: 1, splitTo: 10 }, { ...day, splitFrom: 1, splitTo: 10 }]), { ...day, splitFrom: 1, splitTo: 10 });
+    });
+
+    test("regression: several actions of which one has no id are ambiguous, never guessed", () => {
+        // Equal ratios don't prove two rows are the same action.
+        assert.equal(combineSameDaySplits([{ ...day, splitFrom: 1, splitTo: 10 }, { ...day, splitFrom: 1, splitTo: 10 }]), undefined);
+        assert.equal(combineSameDaySplits([{ ...day, splitFrom: 1, splitTo: 2, id: "A" }, { ...day, splitFrom: 1, splitTo: 2 }]), undefined);
+        // A single action needs no id.
+        assert.deepEqual(combineSameDaySplits([{ ...day, splitFrom: 1, splitTo: 10 }]), { ...day, splitFrom: 1, splitTo: 10 });
     });
 
     test("gives up when any action that day has no ratio, rather than applying part of it", () => {
@@ -73,5 +81,33 @@ describe("adjustHoldingsForSplit", () => {
         for (const ratio of [{ splitFrom: 1, splitTo: 1 }, { splitFrom: 0, splitTo: 10 }, { splitFrom: 1, splitTo: -2 }, { splitFrom: Number.NaN, splitTo: 2 }]) {
             assert.equal(await adjustHoldingsForSplit({ ...NVDA, ...ratio }, untouchable), 0);
         }
+    });
+});
+
+describe("buildHeldSinceQuery", () => {
+    test("groups positions by upper-case symbol with their oldest update", () => {
+        const { sql } = buildHeldSinceQuery().toSQL();
+        assert.equal(sql, 'select upper("symbol"), min("updated_at") from "holdings" group by upper("holdings"."symbol")');
+    });
+});
+
+describe("reconcileHoldingSplits", () => {
+    test("one update per stock and day, oldest first; other stocks ignored", async () => {
+        const seen: string[] = [];
+        const outcome = await reconcileHoldingSplits(
+            [
+                { symbol: "NVDA", executionDate: "2026-10-16", splitFrom: 1, splitTo: 2, id: "B" },
+                { symbol: "NVDA", executionDate: "2026-09-15", splitFrom: 1, splitTo: 10, id: "A" },
+                { symbol: "TSLA", executionDate: "2026-09-01", splitFrom: 1, splitTo: 3, id: "T" },
+            ],
+            new Set(["NVDA"]),
+            async (split) => {
+                seen.push(`${split.executionDate} ${split.splitTo}:${split.splitFrom}`);
+                return 1;
+            },
+        );
+        assert.deepEqual(seen, ["2026-09-15 10:1", "2026-10-16 2:1"]);
+        assert.deepEqual(outcome.unadjusted, []);
+        assert.equal(outcome.adjusted.length, 2);
     });
 });

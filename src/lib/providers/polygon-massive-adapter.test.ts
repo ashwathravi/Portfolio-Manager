@@ -476,6 +476,14 @@ describe('PolygonMassiveAdapter', () => {
       ]);
     });
 
+    test('splits: can be narrowed to some tickers', async () => {
+      const { fetch, calls } = fakeFetch(() => ({ body: { status: 'OK', results: [] } }));
+      await adapter(fetch).getSplits('2026-09-01', '2026-10-16', ['BRK.B', 'NVDA']);
+      assert.deepEqual(calls, [
+        `${BASE}/stocks/v1/splits?execution_date.gte=2026-09-01&execution_date.lte=2026-10-16&ticker.any_of=BRK.B,NVDA&limit=5000&apiKey=${KEY}`,
+      ]);
+    });
+
     test('splits: a missing results list is no splits; bad dates are refused before any call', async () => {
       const { fetch, calls } = fakeFetch(() => ({ body: { status: 'OK' } }));
       assert.deepEqual(await adapter(fetch).getSplits('2026-10-15', '2026-10-15'), []);
