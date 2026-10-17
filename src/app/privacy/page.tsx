@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { BrandMark } from "@/components/layout/BrandMark";
+import { withCallback } from "@/lib/auth/callback-url";
 
 export const metadata: Metadata = {
     title: "Privacy Policy | Atlas Wealth",
@@ -11,10 +12,17 @@ export const metadata: Metadata = {
 // the page is public (see isPublicRoute in src/proxy.ts) and renders without
 // the app chrome (src/components/layout/AppFrame.tsx).
 const CONTACT_EMAIL = "ashwath.ravi@gmail.com";
-const LAST_UPDATED = "October 13, 2026";
+const LAST_UPDATED = "October 16, 2026";
 const PLAID_PRIVACY_URL = "https://plaid.com/legal/#end-user-privacy-policy";
 
-export default function PrivacyPage() {
+type SearchParams = Promise<Record<string, string | string[] | undefined>>;
+
+export default async function PrivacyPage({ searchParams }: { searchParams: SearchParams }) {
+    // Opened from the sign-in page, the policy sends people back with the
+    // page they were trying to reach still attached.
+    const { callbackUrl } = await searchParams;
+    const backToSignIn = withCallback("/login", Array.isArray(callbackUrl) ? callbackUrl[0] : callbackUrl);
+
     return (
         <div className="pm-legal-page">
             <article className="pm-legal-doc" aria-labelledby="pm-legal-title">
@@ -62,10 +70,11 @@ export default function PrivacyPage() {
                         </li>
                     </ul>
                     <p>
-                        Some things stay in your browser and are never sent to us: your display settings,
-                        research theses, journal entries, watchlist and Ask history are saved in your browser&rsquo;s
-                        local storage. API keys you enter in Settings are held in memory for the current session
-                        only.
+                        Some things are stored only in your browser, not on our servers: your display
+                        settings, research theses, journal entries, watchlist and Ask history are saved in your
+                        browser&rsquo;s local storage. To show prices, the ticker symbols in your watchlist and
+                        theses are sent to our server and on to the market data provider. API keys you enter in
+                        Settings are held in memory for the current session only.
                     </p>
                     <p>We do not use advertising or analytics cookies, tracking pixels or third-party trackers.</p>
                 </section>
@@ -101,7 +110,8 @@ export default function PrivacyPage() {
                         <li><strong>Supabase</strong> hosts the database.</li>
                         <li>
                             <strong>Market data providers and SEC EDGAR</strong> supply prices and filings. We
-                            send them ticker symbols and filer IDs, never your name, email or account details.
+                            send them ticker symbols, filer IDs and the words you type into ticker search, never
+                            your name, email or account details.
                         </li>
                     </ul>
                     <p>
@@ -114,15 +124,16 @@ export default function PrivacyPage() {
                     <h2 id="privacy-retention">Keeping and deleting your data</h2>
                     <p>
                         We keep your data while your account is open. Email <ContactLink /> to delete your
-                        account: within 30 days we remove your account, linked-account data, portfolios and
-                        transactions from our database and revoke our Plaid access, unless the law requires us
-                        to keep something.
+                        account: within 30 days we remove your account, linked-account data (including our
+                        encrypted access to your institutions), portfolios and transactions from our database,
+                        unless the law requires us to keep something.
                     </p>
                     <p>
-                        To disconnect a single linked account, email us, or remove Atlas Wealth&rsquo;s access
-                        through your institution or at{" "}
-                        <a href="https://my.plaid.com" target="_blank" rel="noreferrer">my.plaid.com</a>.
-                        Data kept in your browser is removed when you clear this site&rsquo;s data.
+                        Plaid keeps its own record of each connection under its policy. To end it, remove Atlas
+                        Wealth through your institution or at{" "}
+                        <a href="https://my.plaid.com" target="_blank" rel="noreferrer">my.plaid.com</a>; to
+                        disconnect a single account from Atlas Wealth, email us. Data kept in your browser is
+                        removed when you clear this site&rsquo;s data.
                     </p>
                 </section>
 
@@ -130,9 +141,11 @@ export default function PrivacyPage() {
                     <h2 id="privacy-security">Security</h2>
                     <p>
                         All traffic is encrypted in transit. The tokens Plaid issues for your linked accounts
-                        are encrypted again before they are stored. The app reaches the database through a
-                        restricted role, and row-level security keeps each user&rsquo;s data separate. No
-                        system is perfectly secure; if a breach affects your data we will tell you promptly.
+                        are encrypted again before they are stored. The database refuses its public data
+                        interfaces, and the app reaches it through a restricted role that cannot change its
+                        structure. Every query for your data is limited to your account in the app&rsquo;s code,
+                        and automated tests check that one account cannot read another&rsquo;s. No system is
+                        perfectly secure; if a breach affects your data we will tell you promptly.
                     </p>
                 </section>
 
@@ -158,7 +171,7 @@ export default function PrivacyPage() {
                 </section>
 
                 <footer className="pm-legal-footer">
-                    <Link href="/login">Back to sign in</Link>
+                    <Link href={backToSignIn}>Back to sign in</Link>
                 </footer>
             </article>
         </div>

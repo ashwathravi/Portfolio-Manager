@@ -18,6 +18,16 @@ test.describe('Login', () => {
     await expect(page).toHaveURL(/\/privacy$/);
     await expect(page.getByRole('heading', { level: 1, name: 'Privacy Policy' })).toBeVisible();
   });
+
+  test('keeps the page a deep link asked for through the privacy policy detour', async ({ context, page }) => {
+    await context.clearCookies();
+    await page.goto('/login?callbackUrl=%2Fexecution');
+
+    await page.getByRole('link', { name: 'Privacy Policy' }).click();
+    await expect(page).toHaveURL(/\/privacy\?callbackUrl=%2Fexecution$/);
+    await page.getByRole('link', { name: 'Back to sign in' }).click();
+    await expect(page).toHaveURL(/\/login\?callbackUrl=%2Fexecution$/);
+  });
 });
 
 test.describe('Login — design review fixes', () => {

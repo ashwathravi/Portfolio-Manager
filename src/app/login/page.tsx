@@ -4,6 +4,7 @@ import { ArrowRight } from "lucide-react";
 import { BrandMark } from "@/components/layout/BrandMark";
 import { auth, signIn } from "@/auth";
 import { isAuthConfigured } from "@/lib/auth/access";
+import { safeCallbackPath, withCallback } from "@/lib/auth/callback-url";
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 
@@ -15,7 +16,7 @@ export default async function LoginPage({
     searchParams: SearchParams;
 }) {
     const params = await searchParams;
-    const callbackUrl = safeRedirectPath(readParam(params.callbackUrl) ?? "/");
+    const callbackUrl = safeCallbackPath(readParam(params.callbackUrl));
     const error = readParam(params.error);
 
     if (isAuthConfigured()) {
@@ -78,7 +79,7 @@ export default async function LoginPage({
                 )}
 
                 <p className="pm-login-legal">
-                    <Link href="/privacy">Privacy Policy</Link>
+                    <Link href={withCallback("/privacy", callbackUrl)}>Privacy Policy</Link>
                 </p>
             </section>
         </div>
@@ -87,9 +88,4 @@ export default async function LoginPage({
 
 function readParam(value: string | string[] | undefined): string | undefined {
     return Array.isArray(value) ? value[0] : value;
-}
-
-function safeRedirectPath(value: string): string {
-    if (!value.startsWith("/") || value.startsWith("//")) return "/";
-    return value;
 }

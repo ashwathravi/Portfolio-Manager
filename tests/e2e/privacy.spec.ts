@@ -49,6 +49,14 @@ test.describe('Privacy policy', () => {
   });
 });
 
+test.describe('Privacy policy — sign-in callback', () => {
+  test('drops a callback that points off the site', async ({ context, page }) => {
+    await context.clearCookies();
+    await page.goto('/privacy?callbackUrl=%2F%2Fevil.test');
+    await expect(page.getByRole('link', { name: 'Back to sign in' })).toHaveAttribute('href', '/login');
+  });
+});
+
 test.describe('Privacy policy — phone layout', () => {
   test.use({ viewport: { width: 390, height: 844 } });
 
