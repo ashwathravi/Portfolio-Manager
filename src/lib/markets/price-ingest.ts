@@ -2,8 +2,10 @@
  * Nightly end-of-day price ingest (launch item i32), run as the daily job
  * "prices" by /api/cron/daily.
  *
- * 1. Track every symbol anyone holds, plus the benchmark ETFs. (Quotes track
- *    any other symbol they are asked for; it is priced the same way.)
+ * 1. Track every symbol anyone holds, plus the benchmark ETFs. (Quote lookups
+ *    track other symbols they are asked for, up to a limit; they are priced
+ *    the same way.) A looked-up symbol that no daily file has priced within
+ *    a week is dropped, so made-up tickers don't hold room under the limit.
  * 2. Catch up: store each trading day after the newest stored date, oldest
  *    first, from Massive's market-wide grouped daily bars (one call per day,
  *    cut down to the tracked symbols). At most five days a run, so a long
@@ -15,7 +17,9 @@
  *    queue. Asking first means a failed check stores nothing, and the next
  *    run asks about the same days again.
  * 3. Backfill two years of history for symbols that don't have it yet, one
- *    aggregates call per symbol, while the run's time budget lasts. A
+ *    aggregates call per symbol, while the run's time budget lasts: held
+ *    symbols and benchmarks first, and a looked-up symbol only once a daily
+ *    file has priced it (a made-up ticker never costs a call). A
  *    backfill replaces the symbol's stored bars up to that day. The rest wait
  *    in the queue for the next run.
  *
@@ -51,6 +55,8 @@ import {
     listSymbolsNeedingHistory,
     listTrackedSymbols,
     markHistoryLoaded,
+    normalizeSymbols,
+    pruneUnpricedSecurities,
     replaceHistory,
     resetHistory,
     selectTrackedBars,
@@ -80,6 +86,8 @@ export const CALL_WINDOW_MS = 65_000;
 export const CALL_ALLOWANCE_MS = 10_000;
 /** More symbols than one run's budget can fetch, so the budget is what stops it. */
 const BACKFILL_BATCH = 50;
+/** How long a looked-up symbol may go without a bar before it stops being tracked. */
+export const UNPRICED_GRACE_MS = 7 * 24 * 60 * 60 * 1000;
 
 /** The adapter calls the ingest makes; PolygonMassiveAdapter in production. */
 export interface PriceIngestAdapter {
@@ -96,8 +104,11 @@ export interface PriceIngestStore {
     listTrackedSymbols(): Promise<Set<string>>;
     getLatestBarDate(): Promise<string | null>;
     upsertBars(bars: readonly PriceBarInput[]): Promise<{ stored: number; rejected: number }>;
-    listSymbolsNeedingHistory(limit: number): Promise<string[]>;
-    countSymbolsNeedingHistory(): Promise<number>;
+    /** The backfill queue, `priority` symbols first. */
+    listSymbolsNeedingHistory(limit: number, priority: readonly string[]): Promise<string[]>;
+    countSymbolsNeedingHistory(priority: readonly string[]): Promise<number>;
+    /** Drops never-priced securities tracked before `trackedBefore`, except `keep`. */
+    pruneUnpricedSecurities(keep: readonly string[], trackedBefore: Date): Promise<string[]>;
     markHistoryLoaded(symbol: string, startDate: string): Promise<void>;
     /** Replaces a symbol's bars up to `through`; undefined when no bar is valid. */
     replaceHistory(
@@ -130,6 +141,8 @@ export type PriceIngestDetail = {
     session?: string;
     tracked?: number;
     newlyTracked?: string[];
+    /** Looked-up symbols dropped for never being priced. */
+    pruned?: string[];
     /** Days stored from the market-wide daily files, oldest first. */
     days?: Array<{ date: string; stored: number; rejected: number }>;
     /** Trading days still to store after this run; 0 when up to date. */
@@ -252,8 +265,9 @@ export function createPriceIngestStore(database: Database = db): PriceIngestStor
         listTrackedSymbols: () => listTrackedSymbols(database),
         getLatestBarDate: () => getLatestBarDate(database),
         upsertBars: (bars) => upsertBars(bars, database),
-        listSymbolsNeedingHistory: (limit) => listSymbolsNeedingHistory(limit, database),
-        countSymbolsNeedingHistory: () => countSymbolsNeedingHistory(database),
+        listSymbolsNeedingHistory: (limit, priority) => listSymbolsNeedingHistory(limit, priority, database),
+        countSymbolsNeedingHistory: (priority) => countSymbolsNeedingHistory(priority, database),
+        pruneUnpricedSecurities: (keep, trackedBefore) => pruneUnpricedSecurities(keep, trackedBefore, database),
         markHistoryLoaded: (symbol, startDate) => markHistoryLoaded(symbol, startDate, database),
         replaceHistory: (symbol, bars, through) => replaceHistory(symbol, bars, through, database),
         resetHistory: (symbols) => resetHistory(symbols, database),
@@ -298,7 +312,8 @@ export async function ingestDailyPrices({
 
     // 1. Track what anyone holds, plus the benchmarks.
     const held = await store.listHeldSymbols();
-    const newlyTracked = await store.trackSecurities([...BENCHMARK_SYMBOLS, ...held]);
+    const priority = normalizeSymbols([...held, ...BENCHMARK_SYMBOLS]);
+    const newlyTracked = await store.trackSecurities(priority);
     const tracked = await store.listTrackedSymbols();
 
     // 2. Catch up on missed days, oldest first, asking about splits first.
@@ -353,6 +368,10 @@ export async function ingestDailyPrices({
     }
     const latestAfter = days.at(-1)?.date ?? latestBefore;
 
+    // Looked-up symbols no daily file has priced in a week (after the catch-up,
+    // so one about to be priced isn't dropped) stop being tracked.
+    const pruned = await store.pruneUnpricedSecurities(priority, new Date(now().getTime() - UNPRICED_GRACE_MS));
+
     // 3. Stocks that split on a stored day go back in the history queue, so
     // the backfill below rewrites their history on the new scale. A split on
     // a day not stored yet is found again by the run that stores it.
@@ -377,7 +396,7 @@ export async function ingestDailyPrices({
     if (stopped.catchUp === "rate-limited" || stopped.catchUp === "budget") {
         stopped.backfill = stopped.catchUp;
     } else {
-        for (const symbol of await store.listSymbolsNeedingHistory(BACKFILL_BATCH)) {
+        for (const symbol of await store.listSymbolsNeedingHistory(BACKFILL_BATCH, priority)) {
             if (!(await pacer.acquire())) {
                 stopped.backfill = "budget";
                 break;
@@ -417,12 +436,13 @@ export async function ingestDailyPrices({
         session,
         tracked: tracked.size,
         newlyTracked,
+        pruned,
         days,
         daysBehind: tradingDaysToIngest(latestAfter, session).length,
         historyThrough,
         backfilled,
         backfillErrors,
-        backfillQueue: await store.countSymbolsNeedingHistory(),
+        backfillQueue: await store.countSymbolsNeedingHistory(priority),
         splits,
         stopped,
         calls: pacer.calls,

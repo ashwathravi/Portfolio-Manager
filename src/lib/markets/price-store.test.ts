@@ -7,6 +7,7 @@ import {
     buildLatestBarDateQuery,
     buildLatestClosesQuery,
     buildMarkHistoryLoadedQuery,
+    buildPruneUnpricedSecuritiesQuery,
     buildRecentClosesQuery,
     buildResetHistoryQuery,
     buildSymbolsNeedingHistoryCountQuery,
@@ -139,19 +140,36 @@ describe("price store queries", () => {
         assert.deepEqual(params, ["AAPL", "2026-01-01", "2026-06-30"]);
     });
 
-    test("the backfill queue takes active symbols without history, oldest first", () => {
+    test("the backfill queue takes active symbols without history that a daily file priced, oldest first", () => {
         const { sql, params } = buildSymbolsNeedingHistoryQuery(5).toSQL();
         assert.match(sql, /"securities"\."history_start_date" is null/i);
         assert.match(sql, /"securities"\."active" = \$\d+/i);
-        assert.match(sql, /order by "securities"\."created_at" asc, "securities"\."symbol" asc limit \$\d+/i);
+        assert.match(sql, /and exists \(select 1 from "price_bars" where "price_bars"\."symbol" = "securities"\."symbol"\)/i);
+        // No positional "order by 0" (Postgres rejects it) without priority symbols.
+        assert.match(sql, /order by "securities"\."created_at" asc, "securities"\."symbol" asc limit \$\d+$/i);
         assert.deepEqual(params, [true, 5]);
     });
 
+    test("the backfill queue takes priority symbols at once, and first", () => {
+        const { sql, params } = buildSymbolsNeedingHistoryQuery(5, ["AAPL", "SPY"]).toSQL();
+        assert.match(sql, /\("securities"\."symbol" in \(\$\d+, \$\d+\) or exists \(select 1 from "price_bars"/i);
+        assert.match(sql, /order by case when "securities"\."symbol" in \(\$\d+, \$\d+\) then 0 else 1 end, "securities"\."created_at" asc/i);
+        assert.deepEqual(params, [true, "AAPL", "SPY", "AAPL", "SPY", 5]);
+    });
+
     test("the backfill queue count uses the same filter as the queue", () => {
-        const { sql, params } = buildSymbolsNeedingHistoryCountQuery().toSQL();
+        const { sql, params } = buildSymbolsNeedingHistoryCountQuery(["AAPL"]).toSQL();
         assert.match(sql, /^select count\(\*\) from "securities" where/i);
-        assert.match(sql, /"securities"\."history_start_date" is null and "securities"\."active" = \$\d+/i);
-        assert.deepEqual(params, [true]);
+        assert.match(sql, /"securities"\."history_start_date" is null and "securities"\."active" = \$\d+ and \("securities"\."symbol" in \(\$\d+\) or exists/i);
+        assert.deepEqual(params, [true, "AAPL"]);
+    });
+
+    test("pruning drops only old, never-priced securities outside the keep list", () => {
+        const before = new Date("2026-10-09T22:30:00Z");
+        const { sql, params } = buildPruneUnpricedSecuritiesQuery(["AAPL"], before).toSQL();
+        assert.equal(sql, 'delete from "securities" where ("securities"."created_at" < $1 and "securities"."history_start_date" is null and "securities"."symbol" not in ($2) and not exists (select 1 from "price_bars" where "price_bars"."symbol" = "securities"."symbol")) returning "symbol"');
+        assert.deepEqual(params, ["2026-10-09T22:30:00.000Z", "AAPL"]);
+        assert.doesNotMatch(buildPruneUnpricedSecuritiesQuery([], before).toSQL().sql, /not in/);
     });
 
     test("the latest stored date is the maximum bar date across all symbols", () => {

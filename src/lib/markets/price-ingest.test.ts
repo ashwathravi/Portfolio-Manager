@@ -101,6 +101,7 @@ function fakeStore({
     loaded = [...BENCHMARK_SYMBOLS],
     queued = [],
     bars = [],
+    trackedAt = {},
 }: {
     holdings?: string[];
     /** Tracked symbols whose history is already loaded. */
@@ -108,20 +109,32 @@ function fakeStore({
     /** Tracked symbols still waiting for history. */
     queued?: string[];
     bars?: PriceBarInput[];
+    /** When a symbol started being tracked; default the morning of the run. */
+    trackedAt?: Record<string, string>;
 } = {}) {
     const securities = new Map<string, string | null>([
         ...loaded.map((symbol) => [symbol, "2024-10-16"] as const),
         ...queued.map((symbol) => [symbol, null] as const),
     ]);
+    const created = new Map([...securities.keys()].map((symbol) => [symbol, Date.parse(trackedAt[symbol] ?? "2026-10-16T12:00:00Z")]));
     const stored = new Map(bars.map((bar) => [`${bar.symbol}|${bar.date}`, bar]));
     const marks: Array<[string, string]> = [];
     const resets: string[] = [];
+    const hasBars = (symbol: string) => [...stored.values()].some((bar) => bar.symbol === symbol);
+    const queue = (priority: readonly string[]) => {
+        const waiting = [...securities].filter(([symbol, start]) => start === null && (priority.includes(symbol) || hasBars(symbol)));
+        return [...waiting.filter(([symbol]) => priority.includes(symbol)), ...waiting.filter(([symbol]) => !priority.includes(symbol))]
+            .map(([symbol]) => symbol);
+    };
 
     const store: PriceIngestStore = {
         listHeldSymbols: async () => [...holdings],
         async trackSecurities(symbols) {
             const added = normalizeSymbols(symbols).filter((symbol) => !securities.has(symbol));
-            for (const symbol of added) securities.set(symbol, null);
+            for (const symbol of added) {
+                securities.set(symbol, null);
+                created.set(symbol, Date.parse(FRIDAY_EVENING));
+            }
             return added;
         },
         listTrackedSymbols: async () => new Set(securities.keys()),
@@ -137,9 +150,17 @@ function fakeStore({
             }
             return { stored: valid.length, rejected: input.length - input.filter(isValidBar).length };
         },
-        listSymbolsNeedingHistory: async (limit) =>
-            [...securities].filter(([, start]) => start === null).map(([symbol]) => symbol).slice(0, limit),
-        countSymbolsNeedingHistory: async () => [...securities.values()].filter((start) => start === null).length,
+        // The real queue's rules: priority symbols, or ones a daily file priced; priority first.
+        listSymbolsNeedingHistory: async (limit, priority) => queue(priority).slice(0, limit),
+        countSymbolsNeedingHistory: async (priority) => queue(priority).length,
+        async pruneUnpricedSecurities(keep, trackedBefore) {
+            const dropped = [...securities]
+                .filter(([symbol, start]) => start === null && !keep.includes(symbol) && !hasBars(symbol)
+                    && (created.get(symbol) ?? 0) < trackedBefore.getTime())
+                .map(([symbol]) => symbol);
+            for (const symbol of dropped) securities.delete(symbol);
+            return dropped;
+        },
         async markHistoryLoaded(symbol, startDate) {
             securities.set(symbol, startDate);
             marks.push([symbol, startDate]);
@@ -148,7 +169,8 @@ function fakeStore({
             const own = input.filter((bar) => bar.symbol === symbol && bar.date <= through);
             const valid = dedupeBars(own.filter(isValidBar));
             if (valid.length === 0) return undefined;
-            for (const [key, bar] of stored) if (bar.symbol === symbol && bar.date <= through) stored.delete(key);
+            const historyEnd = valid.map((bar) => bar.date).sort().at(-1)!;
+            for (const [key, bar] of stored) if (bar.symbol === symbol && bar.date <= historyEnd) stored.delete(key);
             for (const bar of valid) stored.set(`${bar.symbol}|${bar.date}`, bar);
             const historyStart = valid.map((bar) => bar.date).sort()[0];
             securities.set(symbol, historyStart);
@@ -344,6 +366,7 @@ describe("ingestDailyPrices", () => {
 
     test("an unpublished day ends the catch-up without failing, and history stops at the last stored day", async () => {
         const { store, stored, marks } = fakeStore({
+            holdings: ["AAPL"],
             queued: ["AAPL"],
             bars: [{ ...dailyBar("SPY", "2026-10-13"), source: "massive" }],
         });
@@ -390,7 +413,7 @@ describe("ingestDailyPrices", () => {
     });
 
     test("marks a symbol with no history so the queue moves on", async () => {
-        const { store, marks } = fakeStore({ queued: ["GONE", "MISSING"] });
+        const { store, marks } = fakeStore({ holdings: ["GONE", "MISSING"], queued: ["GONE", "MISSING"] });
         const { adapter } = fakeAdapter({
             daily: { "2026-10-16": [dailyBar("SPY", "2026-10-16")] },
             history: { GONE: [], MISSING: new PolygonApiError(404, "Not Found", "https://api.polygon.io/v2/aggs/ticker/MISSING") },
@@ -407,7 +430,7 @@ describe("ingestDailyPrices", () => {
     });
 
     test("with nothing stored and the session unpublished, history stops the day before", async () => {
-        const { store, stored } = fakeStore({ queued: ["AAPL"] });
+        const { store, stored } = fakeStore({ holdings: ["AAPL"], queued: ["AAPL"] });
         const { adapter } = fakeAdapter({
             daily: { "2026-10-16": [] },
             history: { AAPL: [ohlc("2026-10-15T04:00:00.000Z"), ohlc("2026-10-16T04:00:00.000Z")] },
@@ -424,7 +447,7 @@ describe("ingestDailyPrices", () => {
 
     test("paces calls and stops the backfill when the time budget would be exceeded", async () => {
         const queued = Array.from({ length: 20 }, (_, i) => `SYM${String.fromCharCode(65 + i)}`);
-        const { store } = fakeStore({ queued });
+        const { store } = fakeStore({ holdings: queued, queued });
         const clock = fakeClock();
         // Every call takes a second.
         const { adapter, calls } = fakeAdapter({
@@ -446,7 +469,7 @@ describe("ingestDailyPrices", () => {
 
     test("with the default budget, never sleeps longer than a window between calls", async () => {
         const queued = Array.from({ length: 30 }, (_, i) => `Q${i}`);
-        const { store } = fakeStore({ queued });
+        const { store } = fakeStore({ holdings: queued, queued });
         const clock = fakeClock();
         const { adapter } = fakeAdapter({
             daily: { "2026-10-16": [dailyBar("SPY", "2026-10-16")] },
@@ -463,7 +486,7 @@ describe("ingestDailyPrices", () => {
     });
 
     test("a rate limit during the backfill stops it for this run without failing", async () => {
-        const { store, marks } = fakeStore({ queued: ["AAA", "BBB", "CCC", "DDD"] });
+        const { store, marks } = fakeStore({ holdings: ["AAA", "BBB", "CCC", "DDD"], queued: ["AAA", "BBB", "CCC", "DDD"] });
         const { adapter, calls } = fakeAdapter({
             daily: { "2026-10-16": [dailyBar("SPY", "2026-10-16")] },
             history: { CCC: new PolygonRateLimitError(1_000, "https://api.polygon.io/v2/aggs/ticker/CCC") },
@@ -478,7 +501,7 @@ describe("ingestDailyPrices", () => {
     });
 
     test("a rate limit during the catch-up ends the run's calls without failing", async () => {
-        const { store } = fakeStore({ queued: ["AAA"], bars: [{ ...dailyBar("SPY", "2026-10-14"), source: "massive" }] });
+        const { store } = fakeStore({ holdings: ["AAA"], queued: ["AAA"], bars: [{ ...dailyBar("SPY", "2026-10-14"), source: "massive" }] });
         const { adapter, calls } = fakeAdapter({
             daily: {
                 "2026-10-15": [dailyBar("SPY", "2026-10-15")],
@@ -504,7 +527,7 @@ describe("ingestDailyPrices", () => {
     });
 
     test("one symbol's failed backfill is reported and stays queued; the rest continue", async () => {
-        const { store, marks, securities } = fakeStore({ queued: ["AAA", "BBB"] });
+        const { store, marks, securities } = fakeStore({ holdings: ["AAA", "BBB"], queued: ["AAA", "BBB"] });
         const { adapter } = fakeAdapter({
             daily: { "2026-10-16": [dailyBar("SPY", "2026-10-16")] },
             history: {
@@ -527,6 +550,7 @@ describe("ingestDailyPrices", () => {
     test("a split on a stored day re-queues the stock, and the backfill replaces its history on the new scale", async () => {
         // NVDA split 10-for-1 on Thursday the 15th; its stored history is on the old scale.
         const { store, stored, resets, securities } = fakeStore({
+            holdings: ["NVDA", "MSFT"],
             loaded: [...BENCHMARK_SYMBOLS, "NVDA", "AAPL"],
             queued: ["MSFT"],
             bars: [
@@ -579,6 +603,7 @@ describe("ingestDailyPrices", () => {
 
     test("a split on a day not stored yet is handled by the run that stores it", async () => {
         const { store, resets, securities } = fakeStore({
+            holdings: ["NVDA"],
             loaded: [...BENCHMARK_SYMBOLS, "NVDA"],
             bars: [{ ...dailyBar("SPY", "2026-10-14"), source: "massive" }],
         });
@@ -620,7 +645,7 @@ describe("ingestDailyPrices", () => {
     });
 
     test("a rate-limited split check ends the run's calls and stores nothing", async () => {
-        const { store, stored } = fakeStore({ queued: ["AAA"], bars: [{ ...dailyBar("SPY", "2026-10-15"), source: "massive" }] });
+        const { store, stored } = fakeStore({ holdings: ["AAA"], queued: ["AAA"], bars: [{ ...dailyBar("SPY", "2026-10-15"), source: "massive" }] });
         const { adapter, calls } = fakeAdapter({
             daily: { "2026-10-16": [dailyBar("SPY", "2026-10-16")] },
             splits: new PolygonRateLimitError(1_000, "https://api.polygon.io/v3/reference/splits?apiKey=***"),
@@ -649,6 +674,48 @@ describe("ingestDailyPrices", () => {
         assert.deepEqual(storedDates(stored, "SPY"), ["2026-10-15", "2026-10-16"]);
         assert.match((detail.splits as { skipped: string }).skipped, /HTTP 403 Forbidden/);
         assert.doesNotMatch((detail.splits as { skipped: string }).skipped, /apiKey=(?!\*)/);
+    });
+});
+
+describe("ingestDailyPrices › looked-up symbols", () => {
+    test("history waits for a daily file to price a looked-up symbol; held ones go first", async () => {
+        // OLDREAL and HELDFUND were tracked on the 1st; NEWJUNK by a lookup this morning.
+        const { store, stored } = fakeStore({
+            holdings: ["HELDFUND"],
+            queued: ["OLDREAL", "NEWJUNK", "HELDFUND"],
+            trackedAt: { OLDREAL: "2026-10-01T12:00:00Z", HELDFUND: "2026-10-01T12:00:00Z" },
+            bars: [{ ...dailyBar("SPY", "2026-10-15"), source: "massive" }],
+        });
+        const { adapter, calls } = fakeAdapter({
+            daily: { "2026-10-16": [dailyBar("SPY", "2026-10-16"), dailyBar("OLDREAL", "2026-10-16", 40)] },
+            history: { OLDREAL: [ohlc("2026-10-15T04:00:00.000Z", 39)] },
+        });
+
+        const detail = await ingestDailyPrices({ adapter, store, ...fakeClock() });
+
+        // HELDFUND (held, never in a daily file) first; OLDREAL once the 16th's
+        // file priced it (so it isn't dropped either); never NEWJUNK.
+        assert.deepEqual(calls.filter((call) => call.startsWith("history")), ["history HELDFUND 2Y", "history OLDREAL 2Y"]);
+        // The history lags the daily file by a day: the 16th's bar is kept, not replaced away.
+        assert.deepEqual(storedDates(stored, "OLDREAL"), ["2026-10-15", "2026-10-16"]);
+        assert.equal(detail.backfillQueue, 0, "NEWJUNK waits outside the queue until a daily file prices it");
+    });
+
+    test("drops looked-up symbols no daily file priced within a week, never held or recent ones", async () => {
+        const { store, securities } = fakeStore({
+            holdings: ["HELDFUND"],
+            queued: ["JUNK", "PRICED", "RECENT", "HELDFUND"],
+            trackedAt: { JUNK: "2026-10-09T12:00:00Z", PRICED: "2026-10-01T12:00:00Z", HELDFUND: "2026-10-01T12:00:00Z", RECENT: "2026-10-10T12:00:00Z" },
+            bars: [{ ...dailyBar("PRICED", "2026-10-16"), source: "massive" }],
+        });
+        const { adapter } = fakeAdapter();
+
+        const detail = await ingestDailyPrices({ adapter, store, ...fakeClock() });
+
+        // Grace is a week before Friday 22:30Z: JUNK (9th, 12:00Z) is past it, RECENT (10th) is not.
+        assert.deepEqual(detail.pruned, ["JUNK"]);
+        assert.equal(securities.has("JUNK"), false);
+        for (const symbol of ["PRICED", "RECENT", "HELDFUND", ...BENCHMARK_SYMBOLS]) assert.ok(securities.has(symbol), `${symbol} was dropped`);
     });
 });
 

@@ -13,7 +13,7 @@
  * labels read.
  */
 
-import { and, asc, count, desc, eq, gte, inArray, isNotNull, isNull, lte, max, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, exists, gte, inArray, isNotNull, isNull, lt, lte, max, notInArray, or, sql } from "drizzle-orm";
 
 import { db } from "@/db";
 import { priceBars, securities } from "@/db/schema";
@@ -184,7 +184,21 @@ export function buildBarsQuery(symbol: string, from: string, to: string, databas
         .orderBy(asc(priceBars.date));
 }
 
-const needsHistory = () => and(isNull(securities.historyStartDate), eq(securities.active, true));
+/** Any bar stored for the security: it has appeared in a market-wide daily file. */
+const hasBars = (database: Pick<Database, "select">) =>
+    exists(database.select({ one: sql`1` }).from(priceBars).where(eq(priceBars.symbol, securities.symbol)));
+
+/**
+ * Waiting for a history backfill. A symbol only a quote lookup asked for
+ * waits until a daily file has priced it, so a made-up ticker never costs a
+ * provider call; `priority` symbols (held, benchmarks) qualify at once.
+ */
+const needsHistory = (priority: readonly string[], database: Pick<Database, "select">) =>
+    and(
+        isNull(securities.historyStartDate),
+        eq(securities.active, true),
+        priority.length > 0 ? or(inArray(securities.symbol, [...priority]), hasBars(database)) : hasBars(database),
+    );
 
 /** Puts symbols back in the history queue (after a split rescales their adjusted bars). */
 export function buildResetHistoryQuery(symbols: string[], database: Database = db) {
@@ -195,17 +209,38 @@ export function buildResetHistoryQuery(symbols: string[], database: Database = d
         .returning({ symbol: securities.symbol });
 }
 
-export function buildSymbolsNeedingHistoryQuery(limit: number, database: Database = db) {
+/** The backfill queue: `priority` symbols first, then oldest tracked first. */
+export function buildSymbolsNeedingHistoryQuery(limit: number, priority: readonly string[] = [], database: Database = db) {
+    const first = priority.length > 0
+        ? [sql`case when ${inArray(securities.symbol, [...priority])} then 0 else 1 end`]
+        : [];
     return database
         .select({ symbol: securities.symbol })
         .from(securities)
-        .where(needsHistory())
-        .orderBy(asc(securities.createdAt), asc(securities.symbol))
+        .where(needsHistory(priority, database))
+        .orderBy(...first, asc(securities.createdAt), asc(securities.symbol))
         .limit(limit);
 }
 
-export function buildSymbolsNeedingHistoryCountQuery(database: Database = db) {
-    return database.select({ count: count() }).from(securities).where(needsHistory());
+export function buildSymbolsNeedingHistoryCountQuery(priority: readonly string[] = [], database: Database = db) {
+    return database.select({ count: count() }).from(securities).where(needsHistory(priority, database));
+}
+
+/**
+ * Securities nobody holds that never got a bar: tickers a quote lookup asked
+ * for that no daily file has (made up, or not a listed stock). Removing them
+ * frees room under REQUESTED_TRACKING_LIMIT. `keep` (held, benchmarks) stay.
+ */
+export function buildPruneUnpricedSecuritiesQuery(keep: readonly string[], trackedBefore: Date, database: Database = db) {
+    return database
+        .delete(securities)
+        .where(and(
+            lt(securities.createdAt, trackedBefore),
+            isNull(securities.historyStartDate),
+            keep.length > 0 ? notInArray(securities.symbol, [...keep]) : undefined,
+            sql`not ${hasBars(database)}`,
+        ))
+        .returning({ symbol: securities.symbol });
 }
 
 /** The newest bar date stored for any symbol (served by price_bars_date_idx). */
@@ -258,15 +293,29 @@ export async function listTrackedSymbols(database: Database = db): Promise<Set<s
 }
 
 /** Tracked symbols whose history hasn't been backfilled yet, oldest first. */
-export async function listSymbolsNeedingHistory(limit: number, database: Database = db): Promise<string[]> {
-    const rows = await buildSymbolsNeedingHistoryQuery(limit, database);
+export async function listSymbolsNeedingHistory(
+    limit: number,
+    priority: readonly string[] = [],
+    database: Database = db,
+): Promise<string[]> {
+    const rows = await buildSymbolsNeedingHistoryQuery(limit, priority, database);
     return rows.map((row) => row.symbol);
 }
 
 /** How many tracked symbols are still waiting for their history backfill. */
-export async function countSymbolsNeedingHistory(database: Database = db): Promise<number> {
-    const [row] = await buildSymbolsNeedingHistoryCountQuery(database);
+export async function countSymbolsNeedingHistory(priority: readonly string[] = [], database: Database = db): Promise<number> {
+    const [row] = await buildSymbolsNeedingHistoryCountQuery(priority, database);
     return row?.count ?? 0;
+}
+
+/** Removes unpriced securities tracked before `trackedBefore`; returns their symbols. */
+export async function pruneUnpricedSecurities(
+    keep: Iterable<string>,
+    trackedBefore: Date,
+    database: Database = db,
+): Promise<string[]> {
+    const rows = await buildPruneUnpricedSecuritiesQuery(normalizeSymbols(keep), trackedBefore, database);
+    return rows.map((row) => row.symbol);
 }
 
 /** The newest date in price_bars, or null when nothing is stored yet. */
@@ -299,11 +348,13 @@ export function buildDeleteHistoryQuery(symbol: string, through: string, databas
 }
 
 /**
- * Replaces a symbol's bars up to `through` with a freshly fetched history and
- * records where it starts, in one transaction. Every older stored bar goes
- * too: after a split those are on the old scale, and the provider's adjusted
- * history is the one to keep. Bars after `through` (from the daily files) are
- * left alone. Returns undefined, changing nothing, when no bar is valid.
+ * Replaces a symbol's stored bars with a freshly fetched history (cut off at
+ * `through`) and records where it starts, in one transaction. Every stored
+ * bar up to the history's last day goes, older ones too: after a split those
+ * are on the old scale, and the provider's adjusted history is the one to
+ * keep. Bars after the history's last day (from the daily files, if the
+ * history lags) are left alone. Returns undefined, changing nothing, when no
+ * bar is valid.
  */
 export async function replaceHistory(
     symbol: string,
@@ -315,8 +366,9 @@ export async function replaceHistory(
     const valid = dedupeBars(own.filter(isValidBar));
     if (valid.length === 0) return undefined;
     const historyStart = valid.reduce((earliest, bar) => (bar.date < earliest ? bar.date : earliest), valid[0].date);
+    const historyEnd = valid.reduce((latest, bar) => (bar.date > latest ? bar.date : latest), valid[0].date);
     await database.transaction(async (tx) => {
-        await buildDeleteHistoryQuery(symbol, through, tx);
+        await buildDeleteHistoryQuery(symbol, historyEnd, tx);
         for (let start = 0; start < valid.length; start += UPSERT_CHUNK_SIZE) {
             await buildUpsertBarsQuery(valid.slice(start, start + UPSERT_CHUNK_SIZE), tx);
         }
