@@ -2,7 +2,7 @@ import { afterEach, describe, mock, test } from "node:test";
 import assert from "node:assert/strict";
 
 import { marketDataErrorResponse } from "./route-errors";
-import { MarketDataNotConfiguredError } from "@/lib/providers/errors";
+import { MarketDataNotConfiguredError, QuoteUnavailableError } from "@/lib/providers/errors";
 import { PolygonApiError, PolygonRateLimitError } from "@/lib/providers/polygon-massive-adapter";
 
 describe("marketDataErrorResponse", () => {
@@ -22,6 +22,16 @@ describe("marketDataErrorResponse", () => {
             error: "Market data is not configured.",
             code: "MARKET_DATA_NOT_CONFIGURED",
         });
+        assert.equal(logged.mock.callCount(), 0);
+    });
+
+    test("a symbol with no stored price yet is a quiet 404", async () => {
+        const logged = mock.method(console, "error", () => {});
+
+        const response = marketDataErrorResponse(new QuoteUnavailableError("MSFT"), "Unable to fetch quote.", "MARKET_DATA_QUOTE_FAILED");
+
+        assert.equal(response.status, 404);
+        assert.deepEqual(await response.json(), { error: "No price for MSFT yet.", code: "QUOTE_UNAVAILABLE" });
         assert.equal(logged.mock.callCount(), 0);
     });
 

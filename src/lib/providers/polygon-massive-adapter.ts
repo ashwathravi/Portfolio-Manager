@@ -3,10 +3,13 @@
  * Massive (formerly Polygon.io) REST API on the free Basic plan (decision
  * D4): end-of-day data, two years of history, 5 calls a minute.
  *
- * Basic has no snapshot (live quote) endpoints, so a quote is the latest
+ * Basic has no snapshot (live quote) endpoints, so a quote here is the latest
  * session's closing price from the market-wide grouped daily bars, with the
- * change measured against the session before. Two calls price every
- * symbol, and the bars are cached per date (launch item i30).
+ * change measured against the session before (two calls price every symbol;
+ * bars are cached per date in this process). The app itself reads quotes
+ * from the Postgres price store (StoredQuoteProvider) so request paths never
+ * spend the shared rate limit; the nightly ingest (i32) fills that store
+ * through getDailyBars.
  *
  * Environment variables:
  *   POLYGON_API_KEY  — API key appended to every request. Without one the

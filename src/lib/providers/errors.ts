@@ -16,3 +16,14 @@ export class MarketDataNotConfiguredError extends Error {
     this.name = 'MarketDataNotConfiguredError';
   }
 }
+
+/**
+ * A quote was asked for a symbol with no stored price yet. It is tracked from
+ * then on, so the nightly ingest prices it; routes answer 404 meanwhile.
+ */
+export class QuoteUnavailableError extends Error {
+  constructor(readonly symbol: string) {
+    super(`No price stored for ${symbol} yet.`);
+    this.name = 'QuoteUnavailableError';
+  }
+}

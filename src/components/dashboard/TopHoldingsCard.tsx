@@ -5,6 +5,7 @@ import { useMemo } from "react";
 import { PriceSparkline } from "@/components/charts";
 import { useAutoRefreshQuotes } from "@/lib/hooks/useAutoRefreshQuotes";
 import { ArrowUpRight } from "lucide-react";
+import { isTodaysQuote } from "@/lib/markets/quote-session";
 
 /**
  * Phase 3 (AR-72) Top-holdings table card.
@@ -57,11 +58,13 @@ export function TopHoldingsCard({
 
     // Sort by MV desc; slice to limit. Compute totals for the allocation bar.
     const { enriched, totalMV } = useMemo(() => {
+        const now = new Date();
         const withQuote = rows.map((r) => {
             const q = quotes[r.symbol.toUpperCase()];
             const price = Number.isFinite(q?.price) ? q!.price : r.currentPrice;
             const marketValue = r.quantity * price;
-            const todayChangePercent = q ? q.changePercent : 0;
+            // An earlier session's closing quote prices the row but isn't today's move.
+            const todayChangePercent = q && isTodaysQuote(q, now) ? q.changePercent : 0;
             const totalReturnPercent =
                 r.avgCost > 0 ? ((price - r.avgCost) / r.avgCost) * 100 : 0;
             return {

@@ -82,6 +82,32 @@ test.describe('Holdings sparklines', () => {
     });
 });
 
+test.describe('Holdings today P&L', () => {
+    // Regression: before today's close the newest price is the previous
+    // session's close, and its change was shown as today's P&L.
+    const aaplQuote = (timestamp: string) => ({
+        data: [{ symbol: 'AAPL', price: 190, change: 2, changePercent: 1.06, timestamp, isRealtime: false }],
+    });
+    const todayPnL = (page: Page) =>
+        page.locator('.pm-summary-cell').filter({ hasText: 'Today P&L' }).locator('.pm-summary-value');
+
+    test('with holdings: an earlier session\'s change is not counted as today\'s', async ({ page }) => {
+        const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
+        await page.route('**/api/market-data/quotes**', (route) => route.fulfill({ status: 200, json: aaplQuote(threeDaysAgo) }));
+        await gotoAppPage(page, '/portfolios/holdings');
+        test.skip(!(await hasHoldings(page)), 'no holdings in this database');
+        await expect(todayPnL(page)).toHaveText('$0');
+    });
+
+    test('with holdings: today\'s closing change is today\'s P&L', async ({ page }) => {
+        await page.route('**/api/market-data/quotes**', (route) => route.fulfill({ status: 200, json: aaplQuote(new Date().toISOString()) }));
+        await gotoAppPage(page, '/portfolios/holdings');
+        test.skip(!(await hasHoldings(page)), 'no holdings in this database');
+        // The fixture holds 500 AAPL: +$2 a share.
+        await expect(todayPnL(page)).toHaveText('+$1,000');
+    });
+});
+
 test.describe('Holdings layout', () => {
     test('regression: holdings content keeps a page gutter instead of touching the sidebar', async ({ page }) => {
         await gotoAppPage(page, '/portfolios/holdings');

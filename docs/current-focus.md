@@ -35,4 +35,4 @@ Retired routes redirect (307): `/portfolios`, `/portfolios/trade-log`,
 - Store account history (daily snapshots) so Performance can leave example data.
 - Persist theses, journal, and strategies server-side (they are localStorage today).
 - Options positions feed for the LEAPS ledger.
-- Quotes need `POLYGON_API_KEY` (a free Massive Basic key: latest closing prices) — without one the sidebar indices show "—", pages keep stored prices, and the market-data routes return 503.
+- Quotes are read from the Postgres price store, which the nightly ingest fills from Massive (`POLYGON_API_KEY`, a free Basic key: closing prices). Until a symbol has stored closes, pages keep their stored prices and the sidebar indices show "—"; history, fundamentals and search return 503 without the key.

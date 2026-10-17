@@ -5,9 +5,12 @@
  * Controllers and server pages never call providers directly; they go
  * through this service, so the whole app reads one source of prices
  * (launch item i30). The underlying provider is swappable via constructor
- * injection (defaults to a cached PolygonMassiveAdapter). Construction never
- * throws: without POLYGON_API_KEY every request rejects with
- * MarketDataNotConfiguredError, which pages answer with stored prices
+ * injection. By default quotes are read from the Postgres price store that
+ * the nightly ingest fills (StoredQuoteProvider), so serving a page never
+ * spends the free plan's five Massive calls a minute; history, fundamentals
+ * and search go to the PolygonMassiveAdapter. Construction never throws:
+ * without a database (quotes) or POLYGON_API_KEY (the rest) requests reject
+ * with MarketDataNotConfiguredError, which pages answer with stored prices
  * ({@link loadQuotes}) and routes with a 503.
  *
  * Portfolio valuation is delegated to PortfolioValuationEngine (AR-49).
@@ -21,6 +24,7 @@ import {
 } from '@/lib/cache';
 import { MarketDataNotConfiguredError } from '@/lib/providers/errors';
 import { PolygonMassiveAdapter } from '@/lib/providers/polygon-massive-adapter';
+import { StoredQuoteProvider } from '@/lib/markets/stored-quote-provider';
 import type {
   Fundamentals,
   MarketDataProvider,
@@ -51,7 +55,9 @@ export class MarketDataService {
     this.provider =
       provider ??
       new CachedMarketDataProvider(
-        new PolygonMassiveAdapter(),
+        // Quotes come from the price store; Massive serves history,
+        // fundamentals and search.
+        new StoredQuoteProvider(new PolygonMassiveAdapter()),
         new InMemoryCache({ sweepIntervalMs: 60_000 }),
       );
     this.valuationEngine = new PortfolioValuationEngine(this.provider);

@@ -76,11 +76,12 @@ test.describe('Market data without a provider key', () => {
     // E2E servers run with an empty POLYGON_API_KEY. Regression: the adapter
     // threw while being constructed, so every market-data route was a 500.
     // Not configured is now its own answer, and pages keep stored prices.
+    // Quotes come from the price store, so with a database they answer from
+    // it (nothing is stored in E2E); without one they are not configured.
     const notConfigured = { error: 'Market data is not configured.', code: 'MARKET_DATA_NOT_CONFIGURED' };
+    const dbMode = Boolean(process.env.CI || process.env.E2E_DATABASE_AUTH === '1');
 
     for (const path of [
-        '/api/market-data/quote?symbol=AAPL',
-        '/api/market-data/quotes?symbols=AAPL,SPY',
         '/api/market-data/history?symbol=AAPL&range=1M',
         '/api/market-data/historical?symbol=AAPL&timeframe=1D',
         '/api/market-data/fundamentals?symbol=AAPL',
@@ -93,10 +94,27 @@ test.describe('Market data without a provider key', () => {
         });
     }
 
-    test('portfolio valuation answers 503 rather than valuing holdings at $0', async ({ page }) => {
-        test.skip(!process.env.CI && process.env.E2E_DATABASE_AUTH !== '1', 'requires the database-auth E2E mode');
+    test('quotes answer from the price store, or 503 without a database', async ({ page }) => {
+        const batch = await page.request.get('/api/market-data/quotes?symbols=AAPL,SPY');
+        const single = await page.request.get('/api/market-data/quote?symbol=AAPL');
+        if (dbMode) {
+            expect(batch.status()).toBe(200);
+            expect(await batch.json()).toEqual({ data: [] });
+            expect(single.status()).toBe(404);
+            expect(await single.json()).toEqual({ error: 'No price for AAPL yet.', code: 'QUOTE_UNAVAILABLE' });
+        } else {
+            for (const response of [batch, single]) {
+                expect(response.status()).toBe(503);
+                expect(await response.json()).toEqual(notConfigured);
+            }
+        }
+    });
+
+    test('portfolio valuation lists unpriced holdings instead of failing', async ({ page }) => {
+        test.skip(!dbMode, 'requires the database-auth E2E mode');
         const response = await page.request.get('/api/portfolio/00000000-0000-4000-8000-000000000001/value');
-        expect(response.status()).toBe(503);
-        expect(await response.json()).toEqual(notConfigured);
+        expect(response.status()).toBe(206);
+        const { data } = await response.json();
+        expect([...data.errors].sort()).toEqual(['AAPL', 'AMZN', 'GOOGL', 'MSFT', 'NVDA', 'TSLA']);
     });
 });
