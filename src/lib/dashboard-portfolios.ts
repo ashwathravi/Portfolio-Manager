@@ -1,3 +1,5 @@
+import { isDatabaseConfigured } from "@/db/connection-options";
+
 export interface DashboardPortfoliosResult<T> {
     portfolios: T[];
     /**
@@ -10,13 +12,13 @@ export interface DashboardPortfoliosResult<T> {
 
 /**
  * Load the user's portfolios for a page. Without a configured database (local
- * runs with no DATABASE_URL) a failure degrades to an empty list; with one,
- * it is reported as unavailable.
+ * runs with no usable DATABASE_URL) a failure degrades to an empty list; with
+ * one, it is reported as unavailable.
  */
 export async function loadDashboardPortfolios<T>(
     userId: string,
     query: (userId: string) => Promise<T[]>,
-    { databaseConfigured = Boolean(process.env.DATABASE_URL?.trim()) }: { databaseConfigured?: boolean } = {},
+    { databaseConfigured = isDatabaseConfigured() }: { databaseConfigured?: boolean } = {},
 ): Promise<DashboardPortfoliosResult<T>> {
     try {
         return { portfolios: await query(userId), unavailable: false };
