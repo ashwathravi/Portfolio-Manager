@@ -1,5 +1,6 @@
 import { Suspense } from "react";
 import { requirePageUserId } from "@/lib/auth/request-user";
+import { isDatabaseConfigured } from "@/db/connection-options";
 import { loadQuotes } from "@/lib/services/market-data-service";
 import { buildUserHoldingsQuery, buildUserPortfolioOptionsQuery } from "@/lib/portfolio-repository";
 import { HoldingsPageClient, type HoldingsSeed } from "@/components/holdings/HoldingsPageClient";
@@ -42,7 +43,7 @@ async function HoldingsContent() {
     } catch (e) {
         // With a configured database a failure is an outage, not an empty
         // portfolio; without one (local runs) the empty table is expected.
-        unavailable = Boolean(process.env.DATABASE_URL?.trim());
+        unavailable = isDatabaseConfigured();
         if (unavailable) console.error("Holdings fetch failed — showing the outage notice.", e);
         else console.warn("Holdings fetch failed without a configured database — showing empty table.", e);
     }
