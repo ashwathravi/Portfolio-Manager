@@ -1,4 +1,3 @@
-import { marketDataEngine } from '@/lib/api/market-data';
 import { EquityChartCard } from '@/components/dashboard/EquityChartCard';
 import { AllocationCard, type AllocationHolding } from '@/components/dashboard/AllocationCard';
 import { TopHoldingsCard, type TopHoldingsRow } from '@/components/dashboard/TopHoldingsCard';
@@ -19,6 +18,7 @@ import { computeRiskPolicyDashboard } from '@/lib/risk-policy';
 import { loadDashboardPortfolios } from '@/lib/dashboard-portfolios';
 import { DataUnavailableNotice } from '@/components/data-display/DataUnavailableNotice';
 import { requirePageUserId } from '@/lib/auth/request-user';
+import { loadQuotes } from '@/lib/services/market-data-service';
 import { buildDashboardPortfoliosQuery, buildUserTransactionsQuery } from '@/lib/portfolio-repository';
 import { toActivityRows, type TransactionRowInput } from '@/lib/portfolio/activity';
 import { toTodayActivity } from '@/lib/today/rows';
@@ -62,19 +62,14 @@ export default async function Today() {
   const activity = toActivityRows(transactionRows);
 
   // Warm quotes for the first paint; the hero keeps polling client-side.
-  let liveQuotes: Record<string, { price: number; change?: number; changePercent?: number }> = {};
-  try {
-    const symbols = Array.from(new Set(allPortfolios.flatMap((p) => p.holdings.map((h) => h.symbol)).filter(Boolean)));
-    if (symbols.length > 0) liveQuotes = await marketDataEngine.getQuotes(symbols);
-  } catch (e) {
-    console.warn('Failed to fetch live quotes for Today', e);
-  }
+  // Without market data the stored prices stand.
+  const liveQuotes = await loadQuotes(allPortfolios.flatMap((p) => p.holdings.map((h) => h.symbol)));
 
   const cashTotal = allPortfolios.reduce((s, p) => s + (p.cashBalance || 0), 0);
   const allHoldings = allPortfolios.flatMap((p) =>
     p.holdings.map((h) => {
       const quantity = Number(h.quantity) || 0;
-      const currentPrice = Number(liveQuotes[h.symbol]?.price ?? h.currentPrice ?? 0);
+      const currentPrice = Number(liveQuotes[h.symbol.toUpperCase()]?.price ?? h.currentPrice ?? 0);
       return {
         id: h.id,
         portfolio: p.name,

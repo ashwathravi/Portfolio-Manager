@@ -7,9 +7,9 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 
-import { apiError, internalServerError, providerRateLimitError } from '@/lib/api/security';
+import { apiError } from '@/lib/api/security';
+import { marketDataErrorResponse } from '@/lib/api/market-data/route-errors';
 import { getMarketDataService } from '@/lib/services/market-data-service';
-import { PolygonRateLimitError } from '@/lib/providers/polygon-massive-adapter';
 import { marketSearchQuerySchema } from '@/lib/validators/market-data';
 
 export async function GET(request: NextRequest) {
@@ -29,10 +29,6 @@ export async function GET(request: NextRequest) {
     const results = await service.searchSymbol(parsedQuery.data);
     return NextResponse.json({ data: results });
   } catch (err) {
-    if (err instanceof PolygonRateLimitError) {
-      return providerRateLimitError(err.retryAfterMs / 1000);
-    }
-
-    return internalServerError(err, 'Unable to search symbols.', 'MARKET_DATA_SEARCH_FAILED');
+    return marketDataErrorResponse(err, 'Unable to search symbols.', 'MARKET_DATA_SEARCH_FAILED');
   }
 }

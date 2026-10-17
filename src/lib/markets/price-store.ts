@@ -13,13 +13,21 @@
  * labels read.
  */
 
-import { and, asc, desc, eq, gte, inArray, isNull, lte, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, inArray, isNull, lte, sql } from "drizzle-orm";
 
 import { db } from "@/db";
 import { priceBars, securities } from "@/db/schema";
 import { tickerSchema } from "@/lib/validators/market-data";
 
 type Database = typeof db;
+
+/**
+ * The most securities quote lookups may grow the table to. Holdings and the
+ * benchmarks are tracked by the nightly ingest whatever the count; this
+ * bounds what arbitrary symbol lookups can add, and with it the storage and
+ * the ingest's history work they cause.
+ */
+export const REQUESTED_TRACKING_LIMIT = 2_000;
 
 export interface PriceBarInput {
     symbol: string;
@@ -95,7 +103,7 @@ export function selectTrackedBars(bars: readonly PriceBarInput[], tracked: Reado
 // Query builders (compiled in tests; executed by the functions below)
 // ---------------------------------------------------------------------------
 
-export function buildTrackSecuritiesQuery(symbols: string[], database: Database = db) {
+export function buildTrackSecuritiesQuery(symbols: string[], database: Pick<Database, "insert"> = db) {
     return database
         .insert(securities)
         .values(symbols.map((symbol) => ({ symbol })))
@@ -137,6 +145,28 @@ export function buildLatestClosesQuery(symbols: string[], onOrBefore?: string, d
         .orderBy(priceBars.symbol, desc(priceBars.date));
 }
 
+/**
+ * The newest `perSymbol` closes for each symbol, newest first: what a quote
+ * needs (the latest close and the one before it).
+ */
+export function buildRecentClosesQuery(symbols: string[], perSymbol: number, database: Database = db) {
+    const ranked = database
+        .select({
+            symbol: priceBars.symbol,
+            date: priceBars.date,
+            close: priceBars.close,
+            rank: sql<number>`row_number() over (partition by ${priceBars.symbol} order by ${priceBars.date} desc)`.as("rank"),
+        })
+        .from(priceBars)
+        .where(inArray(priceBars.symbol, symbols))
+        .as("ranked");
+    return database
+        .select({ symbol: ranked.symbol, date: ranked.date, close: ranked.close })
+        .from(ranked)
+        .where(lte(ranked.rank, perSymbol))
+        .orderBy(asc(ranked.symbol), desc(ranked.date));
+}
+
 export function buildBarsQuery(symbol: string, from: string, to: string, database: Database = db) {
     return database
         .select({
@@ -163,6 +193,15 @@ export function buildSymbolsNeedingHistoryQuery(limit: number, database: Databas
         .limit(limit);
 }
 
+/** Which of these symbols are tracked already. */
+export function buildTrackedAmongQuery(symbols: string[], database: Pick<Database, "select"> = db) {
+    return database.select({ symbol: securities.symbol }).from(securities).where(inArray(securities.symbol, symbols));
+}
+
+export function buildTrackedCountQuery(database: Pick<Database, "select"> = db) {
+    return database.select({ count: count() }).from(securities);
+}
+
 // ---------------------------------------------------------------------------
 // Operations
 // ---------------------------------------------------------------------------
@@ -173,6 +212,45 @@ export async function trackSecurities(symbols: Iterable<string>, database: Datab
     if (!normalized.length) return [];
     const inserted = await buildTrackSecuritiesQuery(normalized, database);
     return inserted.map((row) => row.symbol);
+}
+
+/**
+ * Serializes requested-tracking reservations across instances. Held for the
+ * transaction only, so it works through a transaction pooler.
+ */
+export const REQUESTED_TRACKING_LOCK = sql`select pg_advisory_xact_lock(hashtext('atlas:requested-tracking'))`;
+
+/**
+ * Starts tracking symbols a quote lookup asked for, only while the table has
+ * room under `limit`. Symbols tracked already take no room. Returns the
+ * symbols added and those refused for lack of room, which stay unpriced
+ * until room frees up. The count and the insert run in one transaction
+ * under an advisory lock, so concurrent instances can't each see room and
+ * together pass the limit.
+ */
+export async function trackRequestedSecurities(
+    symbols: Iterable<string>,
+    limit: number = REQUESTED_TRACKING_LIMIT,
+    database: Database = db,
+): Promise<{ added: string[]; refused: string[] }> {
+    const normalized = normalizeSymbols(symbols);
+    if (!normalized.length) return { added: [], refused: [] };
+    return database.transaction(async (tx) => {
+        await tx.execute(REQUESTED_TRACKING_LOCK);
+        const existing = new Set((await buildTrackedAmongQuery(normalized, tx)).map((row) => row.symbol));
+        const fresh = normalized.filter((symbol) => !existing.has(symbol));
+        if (!fresh.length) return { added: [], refused: [] };
+
+        const [row] = await buildTrackedCountQuery(tx);
+        const room = Math.max(0, limit - Number(row?.count ?? 0));
+        const refused = fresh.slice(room);
+        if (refused.length > 0) {
+            console.warn(`Price store is at its limit of ${limit} securities: not tracking ${refused.length} requested symbol(s).`);
+        }
+        if (room === 0) return { added: [], refused };
+        const inserted = await buildTrackSecuritiesQuery(fresh.slice(0, room), tx);
+        return { added: inserted.map((added) => added.symbol), refused };
+    });
 }
 
 export async function listTrackedSymbols(database: Database = db): Promise<Set<string>> {
@@ -218,6 +296,23 @@ export async function getLatestCloses(
     if (!normalized.length) return new Map();
     const rows = await buildLatestClosesQuery(normalized, onOrBefore, database);
     return new Map(rows.map((row) => [row.symbol, { date: row.date, close: row.close }]));
+}
+
+/** The newest closes per symbol (default: the latest two), newest first. */
+export async function getRecentCloses(
+    symbols: Iterable<string>,
+    perSymbol = 2,
+    database: Database = db,
+): Promise<Map<string, LatestClose[]>> {
+    const normalized = normalizeSymbols(symbols);
+    if (!normalized.length) return new Map();
+    const closes = new Map<string, LatestClose[]>();
+    for (const row of await buildRecentClosesQuery(normalized, perSymbol, database)) {
+        const list = closes.get(row.symbol) ?? [];
+        list.push({ date: row.date, close: row.close });
+        closes.set(row.symbol, list);
+    }
+    return closes;
 }
 
 export async function getBars(

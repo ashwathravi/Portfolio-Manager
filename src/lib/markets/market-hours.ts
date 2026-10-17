@@ -181,6 +181,29 @@ export function lastCompletedSession(now: Date = new Date()): string {
     return previousTradingDay(date);
 }
 
+/**
+ * The instant an Eastern wall-clock time occurs: `minutes` after midnight ET
+ * on `date`, e.g. a session's close from {@link MarketDay.closeMinutes}.
+ * Works out whether EST or EDT applies on that date, so 4:00 PM is 20:00 UTC
+ * in July and 21:00 UTC in December. A time the spring-forward gap skips
+ * (2:00–2:59 AM on that Sunday) has no instant and is refused.
+ */
+export function easternDateTime(date: string, minutes: number): Date {
+    const { utc } = parseDate(date);
+    if (!Number.isInteger(minutes) || minutes < 0 || minutes >= 24 * 60) {
+        throw new RangeError(`Expected whole minutes within a day (0–1439), got ${minutes}`);
+    }
+    // Read the wall clock as if it were UTC, then try EDT (UTC-4) and EST
+    // (UTC-5): the offset whose instant shows that clock in New York is right.
+    const wallClockAsUtc = utc.getTime() + minutes * 60_000;
+    for (const offsetHours of [4, 5]) {
+        const candidate = new Date(wallClockAsUtc + offsetHours * 3_600_000);
+        const parts = getEasternParts(candidate);
+        if (parts.date === date && parts.hour * 60 + parts.minute === minutes) return candidate;
+    }
+    throw new RangeError(`${date} has no ${Math.floor(minutes / 60)}:${String(minutes % 60).padStart(2, "0")} in New York`);
+}
+
 /** NYSE full-day closures in `year`, in date order. */
 export function marketHolidays(year: number): MarketHoliday[] {
     return [...holidaysFor(year)]

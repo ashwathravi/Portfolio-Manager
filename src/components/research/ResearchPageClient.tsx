@@ -447,7 +447,7 @@ function ThesesColumn({
     );
 }
 
-type QuoteMap = Record<string, { price: number; change: number; changePercent: number }> | undefined;
+type QuoteMap = Record<string, { price: number }> | undefined;
 
 function liveWatchPrice(quotes: QuoteMap, ticker: string): number | null {
     const live = quotes?.[ticker.toUpperCase()];
