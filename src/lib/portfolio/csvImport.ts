@@ -36,47 +36,139 @@ export interface ParseResult {
     skipped: number;
 }
 
-const HEADER_ALIASES: Record<'symbol' | 'quantity' | 'avgCost' | 'costBasis' | 'name', readonly string[]> = {
+const HEADER_ALIASES: Record<'symbol' | 'quantity' | 'avgCost' | 'costBasis' | 'name' | 'assetType', readonly string[]> = {
     symbol: ['symbol', 'ticker', 'sym', 'security symbol'],
     quantity: ['quantity', 'qty', 'shares', 'units', 'position'],
     avgCost: ['avg cost', 'average cost', 'avg price', 'average price', 'cost/share', 'cost per share', 'unit cost', 'price paid', 'avg cost basis', 'average cost basis'],
     costBasis: ['cost basis', 'cost basis total', 'total cost', 'cost basis ($)', 'book value'],
+    assetType: ['asset type', 'asset class', 'security type', 'position type'],
     name: ['description', 'name', 'security', 'security name', 'security description'],
 };
 
-const SKIP_SYMBOL = /^(cash|spaxx\*\*|fdrxx\*\*|core\*\*|pending|account total|total|--)/i;
+// The ** suffix is an explicit broker core-position marker, not a ticker.
+const CORE_POSITION = /^(spaxx|fdrxx|core)\*\*$/i;
+const SUMMARY_SYMBOL = /^(pending|pending activity|account total|total|--)$/i;
 
 function normalizeHeader(h: string): string {
-    return h.trim().toLowerCase().replace(/\s+/g, ' ').replace(/^"|"$/g, '');
+    return h.trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
-/** Splits one CSV line, honouring double-quoted fields and escaped quotes. */
-export function splitCsvLine(line: string): string[] {
-    const out: string[] = [];
-    let cur = '';
-    let quoted = false;
-    for (let i = 0; i < line.length; i++) {
-        const c = line[i];
-        if (quoted) {
-            if (c === '"' && line[i + 1] === '"') {
-                cur += '"';
+interface CsvRecord {
+    cells: string[];
+    /** First physical line of the complete record. */
+    line: number;
+    error?: string;
+}
+
+/** Read record boundaries only outside quoted fields, preserving embedded CR/LF. */
+function readCsvRecords(text: string): CsvRecord[] {
+    const records: CsvRecord[] = [];
+    let cells: string[] = [];
+    let field = '';
+    let state: 'unquoted' | 'quoted' | 'closed' = 'unquoted';
+    let line = 1;
+    let recordLine = 1;
+    let error: string | undefined;
+    const finishField = () => {
+        cells.push(field.trim());
+        field = '';
+        state = 'unquoted';
+    };
+    const finishRecord = () => {
+        finishField();
+        records.push({ cells, line: recordLine, error });
+        cells = [];
+        error = undefined;
+    };
+    for (let i = 0; i < text.length; i++) {
+        const c = text[i];
+        const newline = c === '\r' || c === '\n';
+        if (state === 'quoted') {
+            if (c === '"' && text[i + 1] === '"') {
+                field += '"';
                 i++;
             } else if (c === '"') {
-                quoted = false;
+                state = 'closed';
             } else {
-                cur += c;
+                field += c;
+                if (newline) {
+                    if (c === '\r' && text[i + 1] === '\n') field += text[++i];
+                    line++;
+                }
             }
-        } else if (c === '"') {
-            quoted = true;
+        } else if (newline) {
+            finishRecord();
+            if (c === '\r' && text[i + 1] === '\n') i++;
+            recordLine = ++line;
         } else if (c === ',') {
-            out.push(cur);
-            cur = '';
+            finishField();
+        } else if (state === 'closed') {
+            if (!/\s/.test(c)) error ??= 'Unexpected text after a closing quote.';
+        } else if (c === '"') {
+            if (field.trim()) {
+                error ??= 'Unexpected quote in an unquoted field.';
+            } else {
+                field = '';
+                state = 'quoted';
+            }
         } else {
-            cur += c;
+            field += c;
         }
     }
-    out.push(cur);
-    return out.map((v) => v.trim());
+    if (state === 'quoted') error = 'Unterminated quoted field.';
+    finishRecord();
+    return records;
+}
+
+/** Splits one complete CSV record; malformed quoting is rejected. */
+export function splitCsvLine(line: string): string[] {
+    const records = readCsvRecords(line);
+    if (records.length !== 1 || records[0].error) {
+        throw new Error(records[0].error ?? 'Expected one CSV record.');
+    }
+    return records[0].cells;
+}
+
+function isCashRow(cells: string[], col: { symbol: number; name: number; quantity: number; assetType: number }): boolean {
+    const symbol = cells[col.symbol] ?? '';
+    const assetType = normalizeHeader(cells[col.assetType] ?? '');
+    if (['cash', 'cash balance', 'currency'].includes(assetType)) return true;
+    if (CORE_POSITION.test(symbol)) return true;
+    // A cash label that can't be a ticker, e.g. Schwab's "Cash & Cash Investments".
+    if (/^cash\b/i.test(symbol) && !normalizeTicker(symbol)) return true;
+    if (assetType) return false;
+    // A generic CASH symbol alone is ambiguous. A balance label and no share
+    // quantity identify a balance row; priced securities named CASH still import.
+    return /^cash$/i.test(symbol)
+        && /^(cash balance|cash & cash equivalents|cash and cash equivalents)$/i.test(cells[col.name] ?? '')
+        && /^(|--|n\/?a)$/i.test(cells[col.quantity] ?? '');
+}
+
+/**
+ * A broker footer or note: a record with one non-empty cell, either outside
+ * the symbol column ("Total" under Account Number) or in it but not a ticker
+ * ("Date downloaded 10/13/2026"). A lone ticker is a broken row, not a note.
+ */
+function isNoteRow(cells: string[], symbolColumn: number): boolean {
+    const filled = cells.flatMap((cell, index) => (cell ? [index] : []));
+    if (filled.length !== 1) return false;
+    if (filled[0] !== symbolColumn) return true;
+    return !normalizeTicker(cells[symbolColumn].replace(/\*+$/, ''));
+}
+
+/**
+ * Lines a record up with the header. Trailing empty cells (a comma at the end
+ * of every line) are dropped and short records are padded, since writers may
+ * omit empty trailing fields. Extra non-empty cells mean the columns have
+ * shifted, so the record is rejected (null).
+ */
+function fitToHeader(cells: string[], width: number): string[] | null {
+    let end = cells.length;
+    while (end > width && !cells[end - 1]) end--;
+    if (end > width && width > 0) return null;
+    const fitted = cells.slice(0, end);
+    while (fitted.length < width) fitted.push('');
+    return fitted;
 }
 
 /** "$1,234.50" → 1234.5, "(12)" → -12, "" / "--" / "n/a" → null. */
@@ -105,7 +197,7 @@ function findColumn(headers: string[], key: keyof typeof HEADER_ALIASES): number
 }
 
 export function parseHoldingsCsv(text: string): ParseResult {
-    const lines = text.replace(/^﻿/, '').split(/\r?\n/);
+    const records = readCsvRecords(text.replace(/^﻿/, ''));
     const issues: ParseIssue[] = [];
     let skipped = 0;
 
@@ -113,11 +205,13 @@ export function parseHoldingsCsv(text: string): ParseResult {
     // names both a symbol and a quantity column as the header.
     let headerIndex = -1;
     let headers: string[] = [];
-    for (let i = 0; i < Math.min(lines.length, 20); i++) {
-        const candidate = splitCsvLine(lines[i]).map(normalizeHeader);
+    for (let i = 0; i < Math.min(records.length, 20); i++) {
+        if (records[i].error) continue;
+        const candidate = records[i].cells.map(normalizeHeader);
         if (findColumn(candidate, 'symbol') >= 0 && findColumn(candidate, 'quantity') >= 0) {
             headerIndex = i;
-            headers = candidate;
+            // Width 0 only trims: a comma at the end of the header line adds an empty column.
+            headers = fitToHeader(candidate, 0) ?? candidate;
             break;
         }
     }
@@ -135,26 +229,34 @@ export function parseHoldingsCsv(text: string): ParseResult {
         avgCost: findColumn(headers, 'avgCost'),
         costBasis: findColumn(headers, 'costBasis'),
         name: findColumn(headers, 'name'),
+        assetType: findColumn(headers, 'assetType'),
     };
     if (col.avgCost < 0 && col.costBasis < 0) {
         return {
             rows: [],
-            issues: [{ line: headerIndex + 1, message: 'Add an Average cost or a Cost basis column so gains can be calculated.' }],
+            issues: [{ line: records[headerIndex].line, message: 'Add an Average cost or a Cost basis column so gains can be calculated.' }],
             skipped: 0,
         };
     }
 
     const merged = new Map<string, ImportRow>();
-    for (let i = headerIndex + 1; i < lines.length; i++) {
-        const lineNo = i + 1;
-        const raw = lines[i];
-        if (!raw.trim()) {
+    for (const record of records.slice(headerIndex + 1)) {
+        const lineNo = record.line;
+        if (record.error) {
+            issues.push({ line: lineNo, message: record.error });
+            continue;
+        }
+        const rawSymbol = (record.cells[col.symbol] ?? '').trim();
+        if (record.cells.every((cell) => !cell) || SUMMARY_SYMBOL.test(rawSymbol) || isNoteRow(record.cells, col.symbol)) {
             skipped++;
             continue;
         }
-        const cells = splitCsvLine(raw);
-        const rawSymbol = (cells[col.symbol] ?? '').trim();
-        if (!rawSymbol || SKIP_SYMBOL.test(rawSymbol)) {
+        const cells = fitToHeader(record.cells, headers.length);
+        if (!cells) {
+            issues.push({ line: lineNo, message: `Expected ${headers.length} columns, found ${record.cells.length}.` });
+            continue;
+        }
+        if (isCashRow(cells, col)) {
             skipped++;
             continue;
         }
