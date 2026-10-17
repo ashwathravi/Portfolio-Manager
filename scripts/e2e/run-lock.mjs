@@ -13,7 +13,8 @@
 // A run starts only once it holds both, so if either process dies, the other
 // keeps the next run out while this one stops. If the wrapper dies, even by
 // SIGKILL, the helper stops the run (SIGTERM); if the helper or a connection
-// dies, the wrapper does.
+// dies, the wrapper does. The command starts behind a barrier
+// (start-when-told.sh) that opens only once the helper is watching it.
 //
 //   E2E_LOCK_DATABASE_URL=postgres://… node scripts/e2e/run-lock.mjs <command> [args…]
 //
@@ -33,6 +34,7 @@ const RUNNING_LOCK = 3001;
 const LOCK_POLL_MS = 2000;
 const RUN_POLL_MS = 250;
 const EXIT_LOCK_TIMEOUT = 75; // EX_TEMPFAIL: try again later
+const START_BARRIER = path.join(path.dirname(fileURLToPath(import.meta.url)), "start-when-told.sh");
 
 const holding = process.argv[2] === "--hold";
 const databaseUrl = process.env.E2E_LOCK_DATABASE_URL?.trim();
@@ -133,14 +135,17 @@ async function waitForLock(sql, lock, deadline, waiting, abandoned) {
 // The helper. Takes the turn lock, waits for the running lock to be free (a
 // run whose helper died keeps it until that run has stopped), frees it again
 // for the wrapper, and tells the wrapper {locked: true}. Learns the run's
-// session id from {run: id}, and treats the IPC channel closing as the wrapper
-// being gone.
+// session id from {run: id} and answers {watching: id}, and treats the IPC
+// channel closing as the wrapper being gone.
 async function holdLock() {
     let run;
     let wrapperGone = false;
     let holdingTurn = false;
     process.on("message", (message) => {
-        run = message.run;
+        if (message.run !== undefined && process.connected) {
+            run = message.run;
+            process.send({ watching: run });
+        }
     });
     process.on("disconnect", () => {
         wrapperGone = true;
@@ -235,7 +240,14 @@ async function runWithLock() {
     }
 
     // A session of its own, so the helper can watch and stop the whole run.
-    child = spawn(command, commandArgs, { detached: true, stdio: ["ignore", "inherit", "inherit"] });
+    // The command waits behind the barrier until the helper is watching that
+    // session; if this wrapper dies first, the barrier's stdin closes and the
+    // command never runs.
+    child = spawn("/bin/sh", [START_BARRIER, command, ...commandArgs], {
+        detached: true,
+        stdio: ["pipe", "inherit", "inherit"],
+    });
+    child.stdin.on("error", () => {}); // EPIPE if the barrier is already gone
     const status = new Promise((resolve) => {
         child.once("error", (error) => {
             console.error(`Could not start ${command}: ${error.message}`);
@@ -244,6 +256,11 @@ async function runWithLock() {
         child.once("exit", (code, signal) => resolve(code ?? 128 + (constants.signals[signal] ?? 0)));
     });
     if (child.pid !== undefined && helper.connected) {
+        helper.on("message", (message) => {
+            if (message.watching === child.pid && !lockLost) {
+                child.stdin.end("go\n");
+            }
+        });
         helper.send({ run: child.pid });
         // The run is outside the terminal's process group, so pass on what
         // Ctrl-C (or a kill aimed at this process) would have sent it.
