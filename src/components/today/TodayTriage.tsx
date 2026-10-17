@@ -10,7 +10,7 @@ import { buildTriage } from "@/lib/today/triage";
 import { currentWeekBounds } from "@/lib/reviews/weeks";
 import { generateReview } from "@/lib/reviews/generate";
 import { getReviewState, isReviewActive } from "@/lib/reviews/storage";
-import { SEED_JOURNAL } from "@/lib/journal/seed";
+import { getSeedJournal } from "@/lib/journal/seed";
 import { SampleTag } from "@/components/data-display/SampleTag";
 import { useShowSampleData } from "@/lib/hooks/useShowSampleData";
 
@@ -30,7 +30,7 @@ export function TodayTriage({ policyActions }: { policyActions: RiskPolicyNextAc
 
     useEffect(() => {
         const now = Date.now();
-        const review = generateReview(SEED_JOURNAL, currentWeekBounds(new Date(now)));
+        const review = generateReview(getSeedJournal(now), currentWeekBounds(new Date(now)));
         // eslint-disable-next-line react-hooks/set-state-in-effect -- client-only clock + localStorage state
         setMountedNow(now);
         setReviewDue(isReviewActive(getReviewState(review.id), now));

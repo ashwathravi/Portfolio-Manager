@@ -16,8 +16,9 @@ import {
     type SellDisciplineTriggerType,
 } from "@/lib/risk-policy";
 import { mockPortfolios } from "@/lib/mockData";
-import { DEFAULT_THESES } from "@/lib/research/thesis";
+import { getDefaultTheses } from "@/lib/research/thesis";
 import { useSettingsStore } from "@/lib/stores/settingsStore";
+import { useRequestTime } from "@/components/providers/RequestTimeProvider";
 
 const ACTION_OPTIONS: SellDisciplineAction[] = [
     "trim",
@@ -56,15 +57,16 @@ export function SellDisciplineCard() {
     const [blockAdds, setBlockAdds] = useState(true);
     const [reasons, setReasons] = useState<Record<string, string>>({});
 
+    const theses = getDefaultTheses(useRequestTime());
     const summary = useMemo(
         () =>
             evaluateSellDiscipline({
                 rules,
                 holdings: SAMPLE_HOLDINGS,
-                theses: DEFAULT_THESES,
+                theses,
                 portfolioValue: SAMPLE_PORTFOLIO_VALUE,
             }),
-        [rules],
+        [rules, theses],
     );
     const taskByRuleId = useMemo(
         () => new Map(summary.tasks.map((task) => [task.ruleId, task])),

@@ -30,7 +30,8 @@ import {
     rollingAdherenceScore,
     adherenceTier,
 } from "@/lib/adherence/impact";
-import { SEED_JOURNAL, SEED_JOURNAL_ANCHOR_MS } from "@/lib/journal/seed";
+import { getSeedJournal, seedJournalAnchorMs } from "@/lib/journal/seed";
+import { useRequestTime } from "@/components/providers/RequestTimeProvider";
 import { StrategyCard } from "./StrategyCard";
 import { RuleBuilderPanel } from "./RuleBuilderPanel";
 import { BacktestPanel } from "./BacktestPanel";
@@ -64,7 +65,7 @@ import { AdherenceImpactCard } from "./AdherenceImpactCard";
  * different concept, different vocabulary. Seed map comes from
  * `SEED_ADHERENCE_RULES`; strategies not in the map start with an
  * empty list. The rolling 30-day adherence score rendered in the panel
- * header is computed from `SEED_JOURNAL` — once the journal is wired to
+ * header is computed from `getSeedJournal()` — once the journal is wired to
  * the store, swap to `useJournalStore.getState().entries` and the tier
  * follows for free.
  */
@@ -133,20 +134,25 @@ export function StrategyBuilderClient({ initialStrategyId }: { initialStrategyId
         ? adherenceByStrategy[selected.id] ?? []
         : [];
 
+    // The example journal and its 30-day windows share one anchor: the
+    // start of the UTC day of the server's request time, so server and
+    // client agree.
+    const journalAnchorMs = seedJournalAnchorMs(useRequestTime());
+    const seedJournal = getSeedJournal(journalAnchorMs);
+
     // Rolling 30-day score for the selected strategy — `null` when the
     // window has no journal entries for this strategy (header shows no
     // badge rather than a misleading "100/100").
     const rollingScore = useMemo(() => {
         if (!selected) return null;
         return rollingAdherenceScore(
-            SEED_JOURNAL,
+            seedJournal,
             selected.id,
             SEED_THESIS_TO_STRATEGY,
             30,
-            // Same anchor as the example journal, so server and client agree.
-            SEED_JOURNAL_ANCHOR_MS,
+            journalAnchorMs,
         );
-    }, [selected]);
+    }, [selected, seedJournal, journalAnchorMs]);
     const rollingTier = useMemo(
         () => adherenceTier(rollingScore),
         [rollingScore],
@@ -159,15 +165,15 @@ export function StrategyBuilderClient({ initialStrategyId }: { initialStrategyId
         const map: Record<string, number | null> = {};
         for (const s of strategies) {
             map[s.id] = rollingAdherenceScore(
-                SEED_JOURNAL,
+                seedJournal,
                 s.id,
                 SEED_THESIS_TO_STRATEGY,
                 30,
-                SEED_JOURNAL_ANCHOR_MS,
+                journalAnchorMs,
             );
         }
         return map;
-    }, [strategies]);
+    }, [strategies, seedJournal, journalAnchorMs]);
 
     // -- Rule/conjunction/universe/guardrail mutators ------------------
     const updateSelected = useCallback(
@@ -314,7 +320,7 @@ export function StrategyBuilderClient({ initialStrategyId }: { initialStrategyId
                 <BacktestPanel strategy={selected} stale={backtestStale} />
             </section>
 
-            <AdherenceImpactCard entries={SEED_JOURNAL} />
+            <AdherenceImpactCard entries={seedJournal} />
         </div>
     );
 }

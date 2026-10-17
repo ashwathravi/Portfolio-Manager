@@ -14,7 +14,7 @@ import type { JournalEntry } from '@/types/trade';
 import type { Holding, Portfolio, Transaction } from '@/lib/mockData';
 import { sectorFor } from '@/lib/holdings/sector';
 import { searchAlphaRadarSemanticChunks, type AlphaRadarSemanticChunk } from '@/lib/alpha-radar/memory';
-import { DEFAULT_THESES, findThesisByTicker, type Thesis } from '@/lib/research/thesis';
+import { findThesisByTicker, getDefaultTheses, type Thesis } from '@/lib/research/thesis';
 import {
     DEFAULT_CASH_DEPLOYMENT_RULE,
     computeCashPolicySummary,
@@ -435,7 +435,7 @@ export function trim_to_target(
 
 export function missing_theses(ctx: AskContext, _args: Record<string, unknown> = {}): AskRow[] {
     void _args;
-    const theses = ctx.theses ?? DEFAULT_THESES;
+    const theses = ctx.theses ?? getDefaultTheses(ctx.now);
     return ctx.holdings
         .filter((holding) => !findThesisByTicker(theses, holding.ticker))
         .sort((a, b) => b.marketValue - a.marketValue)
