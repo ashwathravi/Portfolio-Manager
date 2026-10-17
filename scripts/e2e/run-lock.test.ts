@@ -146,6 +146,22 @@ describe('run-lock.mjs', { skip: !DATABASE_URL && 'SCRIPTS_TEST_DATABASE_URL is 
         assert.deepStrictEqual(lines(log), ['run-start', 'run-term', 'run-exited', 'next-ran']);
     });
 
+    test('a command that leaves a process behind keeps the next run out until it is gone, even if the helper dies', async () => {
+        const log = newLog('leftover');
+        // The leftover ignores SIGTERM, so only waiting for it is safe.
+        const run = startRun('(trap "" TERM; sleep 2; echo leftover-done >> "$LOG") & echo command-exited >> "$LOG"', log);
+        await waitFor(() => lines(log).includes('command-exited'), 'the command to exit');
+        await new Promise((resolve) => setTimeout(resolve, 300)); // the wrapper sees it exit
+        const helper = spawnSync('pgrep', ['-P', String(run.pid), '-f', '--', 'run-lock.mjs --hold'], { encoding: 'utf8' });
+        assert.match(helper.stdout, /^\d+\n$/);
+        process.kill(Number(helper.stdout), 'SIGKILL');
+        const next = startRun('echo next-ran >> "$LOG"', log, { E2E_LOCK_WAIT_SECONDS: '10' });
+
+        assert.strictEqual(await run.exited, 0);
+        assert.strictEqual(await next.exited, 0);
+        assert.deepStrictEqual(lines(log), ['command-exited', 'leftover-done', 'next-ran']);
+    });
+
     test('names the holder in its own database, not a session holding the same key in another', async () => {
         // Advisory locks are per database, but pg_locks lists the whole server.
         const otherDatabase = new URL(DATABASE_URL!);

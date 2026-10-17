@@ -218,6 +218,7 @@ async function runWithLock() {
     }
 
     let child;
+    let commandExited = false;
     let finished = false;
     let lockLost = false;
     const loseLock = () => {
@@ -283,16 +284,30 @@ async function runWithLock() {
             process.on(signal, () => signalProcessGroup(child.pid, signal));
         }
     }
-    helperExited.then(loseLock);
+    helperExited.then(() => {
+        if (!commandExited) {
+            loseLock();
+        } else if (!finished && child.pid !== undefined) {
+            // Released below; if it died before the leftovers were gone, stop them here.
+            signalProcessGroup(child.pid, "SIGTERM");
+        }
+    });
 
     const exitStatus = await status;
-    if (lockLost && child.pid !== undefined) {
+    commandExited = true;
+    // The command may have left processes behind in its session. Told the run
+    // is over, the helper stops them (SIGTERM) and keeps the turn until they
+    // are gone; this wrapper keeps the running lock until then too, in case
+    // the helper dies first.
+    if (helper.connected) {
+        helper.disconnect();
+    }
+    if (child.pid !== undefined) {
         while (processGroupAlive(child.pid)) {
             await sleep(RUN_POLL_MS);
         }
     }
     finished = true;
-    // The helper releases the turn once the run's processes are all gone.
     await releaseHelper();
     await running.end();
     return lockLost ? 1 : exitStatus;
