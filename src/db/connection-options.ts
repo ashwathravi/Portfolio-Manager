@@ -30,6 +30,27 @@ export function isLocalDatabaseUrl(connectionString: string | undefined): boolea
     }
 }
 
+/**
+ * The connection string to build the client from, or undefined when there is
+ * no usable one. A value that isn't a URL counts as missing instead of being
+ * thrown on: the deploy pipeline builds the app with variables pulled from
+ * Vercel, which hands Sensitive ones over as a "[SENSITIVE]" placeholder (the
+ * real value only exists at runtime), and the build loads this module.
+ */
+export function usableDatabaseUrl(connectionString: string | undefined): string | undefined {
+    const value = connectionString?.trim();
+    if (!value) {
+        return undefined;
+    }
+
+    try {
+        new URL(value);
+        return value;
+    } catch {
+        return undefined;
+    }
+}
+
 export function resolveDatabaseSslMode(connectionString: string | undefined): DatabaseSslMode {
     if (!connectionString) {
         return "require";
