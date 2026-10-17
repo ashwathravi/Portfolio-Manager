@@ -85,11 +85,18 @@ test.describe('Holdings sparklines', () => {
 test.describe('Holdings today P&L', () => {
     // Regression: before today's close the newest price is the previous
     // session's close, and its change was shown as today's P&L.
+    // Sparklines fetch history per row; answering here keeps these page loads
+    // off the server's market-data rate limit, which other specs share.
+    test.beforeEach(async ({ page }) => {
+        await page.route('**/api/market-data/historical**', (route) => route.fulfill({ status: 200, json: { data: [] } }));
+    });
     const aaplQuote = (timestamp: string) => ({
         data: [{ symbol: 'AAPL', price: 190, change: 2, changePercent: 1.06, timestamp, isRealtime: false }],
     });
     const todayPnL = (page: Page) =>
         page.locator('.pm-summary-cell').filter({ hasText: 'Today P&L' }).locator('.pm-summary-value');
+    const aaplToday = (page: Page) =>
+        page.getByTestId('holdings-table').locator('tbody tr').filter({ hasText: 'AAPL' }).getByTestId('holding-today');
 
     test('with holdings: an earlier session\'s change is not counted as today\'s', async ({ page }) => {
         const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
@@ -97,6 +104,8 @@ test.describe('Holdings today P&L', () => {
         await gotoAppPage(page, '/portfolios/holdings');
         test.skip(!(await hasHoldings(page)), 'no holdings in this database');
         await expect(todayPnL(page)).toHaveText('$0');
+        // No move from today: a dash, never "+0.00%".
+        await expect(aaplToday(page)).toHaveText('—');
     });
 
     test('with holdings: today\'s closing change is today\'s P&L', async ({ page }) => {
@@ -105,6 +114,17 @@ test.describe('Holdings today P&L', () => {
         test.skip(!(await hasHoldings(page)), 'no holdings in this database');
         // The fixture holds 500 AAPL: +$2 a share.
         await expect(todayPnL(page)).toHaveText('+$1,000');
+        await expect(aaplToday(page)).toHaveText('+1.06%');
+    });
+
+    test('with holdings: a first close with nothing to compare against has no move', async ({ page }) => {
+        await page.route('**/api/market-data/quotes**', (route) => route.fulfill({ status: 200, json: {
+            data: [{ symbol: 'AAPL', price: 190, change: null, changePercent: null, timestamp: new Date().toISOString(), isRealtime: false }],
+        } }));
+        await gotoAppPage(page, '/portfolios/holdings');
+        test.skip(!(await hasHoldings(page)), 'no holdings in this database');
+        await expect(todayPnL(page)).toHaveText('$0');
+        await expect(aaplToday(page)).toHaveText('—');
     });
 });
 

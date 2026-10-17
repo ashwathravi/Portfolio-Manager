@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 import { isTodaysQuote } from "./quote-session";
 
-const close = (timestamp: string) => ({ timestamp, isRealtime: false });
+const close = (timestamp: string) => ({ timestamp, isRealtime: false, change: 1.5, changePercent: 0.6 });
 
 describe("isTodaysQuote", () => {
     test("a close from today's session is today's move", () => {
@@ -31,7 +31,25 @@ describe("isTodaysQuote", () => {
     });
 
     test("a live quote is always today's, and a bad timestamp never is", () => {
-        assert.equal(isTodaysQuote({ timestamp: "2026-10-01T15:00:00Z", isRealtime: true }, new Date("2026-10-16T15:00:00Z")), true);
+        assert.equal(isTodaysQuote({ ...close("2026-10-01T15:00:00Z"), isRealtime: true }, new Date("2026-10-16T15:00:00Z")), true);
         assert.equal(isTodaysQuote(close("not a date"), new Date("2026-10-16T15:00:00Z")), false);
+    });
+
+    test("a quote with no earlier close to compare with has no move, even from today's session", () => {
+        // A newly tracked symbol's first stored close.
+        const first = { ...close("2026-10-16T20:00:00.000Z"), change: null, changePercent: null };
+        assert.equal(isTodaysQuote(first, "2026-10-16"), false);
+        assert.equal(isTodaysQuote({ ...first, isRealtime: true }, "2026-10-16"), false);
+        assert.equal(isTodaysQuote({ ...close("2026-10-16T20:00:00.000Z"), changePercent: Number.NaN }, "2026-10-16"), false);
+    });
+
+    test("narrows the change to a number", () => {
+        const quote: { timestamp: string; isRealtime: boolean; change: number | null; changePercent: number | null } = close("2026-10-16T20:00:00.000Z");
+        if (isTodaysQuote(quote, "2026-10-16")) {
+            const percent: number = quote.changePercent;
+            assert.equal(percent, 0.6);
+        } else {
+            assert.fail("expected today's move");
+        }
     });
 });

@@ -4,7 +4,6 @@ import { loadQuotes } from '@/lib/services/market-data-service';
 import { buildUserHoldingPositionsQuery } from '@/lib/portfolio-repository';
 import { HoldingDetailView, type HoldingDetail, type AccountPosition } from '@/components/holdings/HoldingDetailView';
 import { PageHeaderSync } from '@/components/layout/TopBar';
-import { isTodaysQuote } from '@/lib/markets/quote-session';
 
 export const dynamic = 'force-dynamic';
 
@@ -32,9 +31,11 @@ async function HoldingDetailContent({ symbol }: { symbol: string }) {
     // Try the latest quote; fall back to the last-known snapshot from the DB.
     const live = (await loadQuotes([upper]))[upper];
     const livePrice = live?.price;
-    // An earlier session's close prices the position, but its change isn't today's.
-    const todays = live && isTodaysQuote(live) ? live : null;
-    const quote = live ? { price: live.price, change: todays?.change ?? null, changePercent: todays?.changePercent ?? null } : null;
+    // The view decides on the client whether the change is today's, so a page
+    // left open past midnight ET stops calling Friday's move "today".
+    const quote = live
+        ? { price: live.price, change: live.change, changePercent: live.changePercent, timestamp: live.timestamp, isRealtime: live.isRealtime }
+        : null;
     const header = (
         <PageHeaderSync
             title={upper}
@@ -85,8 +86,6 @@ async function HoldingDetailContent({ symbol }: { symbol: string }) {
         symbol: upper,
         name: firstRow.name,
         price: currentPrice,
-        change: todays?.change ?? null,
-        changePercent: todays?.changePercent ?? null,
         totalShares,
         totalEquity,
         avgCost: blendedAvgCost,

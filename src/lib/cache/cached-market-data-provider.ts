@@ -94,6 +94,8 @@ export class CachedMarketDataProvider implements MarketDataProvider {
     const pending: Promise<void>[] = [];
     const misses: string[] = [];
     const seenMisses = new Set<string>();
+    /** Symbols whose shared in-flight request failed; this batch asks again. */
+    const retries: string[] = [];
 
     // Check cache for each symbol individually
     for (const symbol of symbols) {
@@ -106,9 +108,17 @@ export class CachedMarketDataProvider implements MarketDataProvider {
 
       const existing = this.inflight.get(key) as Promise<Quote | undefined> | undefined;
       if (existing) {
-        pending.push(existing.then((quote) => {
-          if (quote) resultsByKey.set(key, quote);
-        }));
+        // A single-quote request for an unpriced symbol rejects; sharing it
+        // must not cost this batch its other quotes. The symbol is asked for
+        // again in this batch's own terms (left out when there's no price).
+        pending.push(existing.then(
+          (quote) => {
+            if (quote) resultsByKey.set(key, quote);
+          },
+          () => {
+            retries.push(symbol);
+          },
+        ));
         continue;
       }
 
@@ -146,6 +156,13 @@ export class CachedMarketDataProvider implements MarketDataProvider {
     }
 
     await Promise.all(pending);
+    if (retries.length > 0) {
+      for (const quote of await this.inner.getBatchQuotes(retries)) {
+        const key = `quote:${quote.symbol.toUpperCase()}`;
+        this.cache.set(key, quote, this.ttlQuote);
+        resultsByKey.set(key, quote);
+      }
+    }
     return symbols
       .map((symbol) => resultsByKey.get(`quote:${symbol.toUpperCase()}`))
       .filter((quote): quote is Quote => quote !== undefined);
