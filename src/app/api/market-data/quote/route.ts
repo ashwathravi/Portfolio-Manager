@@ -1,15 +1,16 @@
 /**
  * GET /api/market-data/quote?symbol=AAPL
  *
- * Returns a single real-time quote via MarketDataService.
+ * Returns a single quote via MarketDataService: the latest session's
+ * closing price on the free Massive plan. 503 when no key is configured.
  * Linear: AR-48
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 
-import { apiError, internalServerError, providerRateLimitError } from '@/lib/api/security';
+import { apiError } from '@/lib/api/security';
+import { marketDataErrorResponse } from '@/lib/api/market-data/route-errors';
 import { getMarketDataService } from '@/lib/services/market-data-service';
-import { PolygonRateLimitError } from '@/lib/providers/polygon-massive-adapter';
 import { tickerSchema } from '@/lib/validators/market-data';
 
 export async function GET(request: NextRequest) {
@@ -29,10 +30,6 @@ export async function GET(request: NextRequest) {
     const quote = await service.getQuote(parsedSymbol.data);
     return NextResponse.json({ data: quote });
   } catch (err) {
-    if (err instanceof PolygonRateLimitError) {
-      return providerRateLimitError(err.retryAfterMs / 1000);
-    }
-
-    return internalServerError(err, 'Unable to fetch quote.', 'MARKET_DATA_QUOTE_FAILED');
+    return marketDataErrorResponse(err, 'Unable to fetch quote.', 'MARKET_DATA_QUOTE_FAILED');
   }
 }

@@ -34,6 +34,13 @@ const noSharedRedis = {
     UPSTASH_REDIS_REST_TOKEN: '',
 };
 
+// No market-data key either, so test runs never spend the free plan's 5 calls
+// a minute and always see the not-configured state: stored prices on pages,
+// 503 from /api/market-data (tests stub those routes where they need quotes).
+const noMarketData = {
+    POLYGON_API_KEY: '',
+};
+
 export default defineConfig({
     testDir: './tests/e2e',
     fullyParallel: true,
@@ -81,6 +88,7 @@ export default defineConfig({
                 // DATABASE_URL out of .env.local into the test server.
                 DATABASE_URL: process.env.DATABASE_URL ?? '',
                 ...noSharedRedis,
+                ...noMarketData,
             },
             url: 'http://localhost:3000',
             // Never reuse a running server: it may be connected to a real
@@ -104,6 +112,7 @@ export default defineConfig({
                 AUTH_LOCAL_DEV_BYPASS: '1',
                 AUTH_LOCAL_DEV_USER_ID: E2E_USER_ID,
                 ...noSharedRedis,
+                ...noMarketData,
             },
             url: 'http://localhost:3100/api/health',
             // Never reuse a running server: it may be connected to a real

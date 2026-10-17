@@ -81,7 +81,10 @@ export class CachedMarketDataProvider implements MarketDataProvider {
 
   async getQuote(symbol: string): Promise<Quote> {
     const key = `quote:${symbol.toUpperCase()}`;
-    return this.getOrFetch(key, this.ttlQuote, () => this.inner.getQuote(symbol));
+    const quote = await this.getOrFetch<Quote | undefined>(key, this.ttlQuote, () => this.inner.getQuote(symbol));
+    // A batch already in flight for this symbol can come back without it;
+    // the provider's own answer (or error) for the symbol is the right one.
+    return quote ?? this.inner.getQuote(symbol);
   }
 
   async getBatchQuotes(symbols: string[]): Promise<Quote[]> {
@@ -91,6 +94,8 @@ export class CachedMarketDataProvider implements MarketDataProvider {
     const pending: Promise<void>[] = [];
     const misses: string[] = [];
     const seenMisses = new Set<string>();
+    /** Symbols whose shared in-flight request failed; this batch asks again. */
+    const retries: string[] = [];
 
     // Check cache for each symbol individually
     for (const symbol of symbols) {
@@ -101,11 +106,19 @@ export class CachedMarketDataProvider implements MarketDataProvider {
         continue;
       }
 
-      const existing = this.inflight.get(key) as Promise<Quote> | undefined;
+      const existing = this.inflight.get(key) as Promise<Quote | undefined> | undefined;
       if (existing) {
-        pending.push(existing.then((quote) => {
-          resultsByKey.set(key, quote);
-        }));
+        // A single-quote request for an unpriced symbol rejects; sharing it
+        // must not cost this batch its other quotes. The symbol is asked for
+        // again in this batch's own terms (left out when there's no price).
+        pending.push(existing.then(
+          (quote) => {
+            if (quote) resultsByKey.set(key, quote);
+          },
+          () => {
+            retries.push(symbol);
+          },
+        ));
         continue;
       }
 
@@ -115,7 +128,9 @@ export class CachedMarketDataProvider implements MarketDataProvider {
       }
     }
 
-    // Fetch only the misses in a single batch call
+    // Fetch only the misses in a single batch call. A symbol the provider
+    // has no price for is left out of the result, not an error: one fund or
+    // crypto ticker must not cost every other symbol its quote.
     if (misses.length > 0) {
       const batch = this.inner.getBatchQuotes(misses).then((fetched) => {
         const quoteMap = new Map<string, Quote>();
@@ -129,22 +144,25 @@ export class CachedMarketDataProvider implements MarketDataProvider {
 
       for (const symbol of misses) {
         const key = `quote:${symbol.toUpperCase()}`;
-        const quotePromise = batch.then((quoteMap) => {
-          const quote = quoteMap.get(key);
-          if (!quote) throw new Error(`No quote returned for ${symbol.toUpperCase()}`);
-          return quote;
-        });
+        const quotePromise = batch.then((quoteMap) => quoteMap.get(key));
         const trackedPromise = quotePromise.finally(() => {
           if (this.inflight.get(key) === trackedPromise) this.inflight.delete(key);
         });
         this.inflight.set(key, trackedPromise);
         pending.push(trackedPromise.then((quote) => {
-          resultsByKey.set(key, quote);
+          if (quote) resultsByKey.set(key, quote);
         }));
       }
     }
 
     await Promise.all(pending);
+    if (retries.length > 0) {
+      for (const quote of await this.inner.getBatchQuotes(retries)) {
+        const key = `quote:${quote.symbol.toUpperCase()}`;
+        this.cache.set(key, quote, this.ttlQuote);
+        resultsByKey.set(key, quote);
+      }
+    }
     return symbols
       .map((symbol) => resultsByKey.get(`quote:${symbol.toUpperCase()}`))
       .filter((quote): quote is Quote => quote !== undefined);

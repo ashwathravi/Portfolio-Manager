@@ -61,6 +61,14 @@ describe('observeMetric', () => {
         assert.strictEqual(observeMetric(rule, baseSnapshot), 0.0123);
     });
 
+    test('price_change_pct has nothing to read when today\'s change is unknown', () => {
+        // The latest price is an earlier session's close: its move is not today's.
+        const rule: AlertRule = { ...baseRule, metric: 'price_change_pct', comparator: 'lte', threshold: 0.5 };
+        const snapshot: MarketSnapshot = { ...baseSnapshot, quotes: { AAPL: { price: 175.5, changePercent: null } } };
+        assert.strictEqual(observeMetric(rule, snapshot), null);
+        assert.deepStrictEqual(evaluateAlerts([rule], snapshot), []);
+    });
+
     test('portfolio_value reads the portfolio total', () => {
         const rule: AlertRule = { ...baseRule, metric: 'portfolio_value', symbol: undefined };
         assert.strictEqual(observeMetric(rule, baseSnapshot), 125000);

@@ -13,8 +13,9 @@
 export interface Quote {
   symbol: string;
   price: number;
-  change: number;
-  changePercent: number;
+  /** Change since the previous close; null when there is no earlier close to compare with. */
+  change: number | null;
+  changePercent: number | null;
   /** ISO-8601 timestamp of the quote */
   timestamp: string;
   /** Whether the quote reflects real-time or delayed data */

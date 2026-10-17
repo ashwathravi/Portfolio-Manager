@@ -2,6 +2,7 @@ import { describe, test } from "node:test";
 import assert from "node:assert";
 
 import {
+    easternDateTime,
     formatEtClock,
     getEasternParts,
     getMarketDay,
@@ -296,5 +297,48 @@ describe("lastCompletedSession", () => {
     test("on a holiday is the trading day before", () => {
         // Thanksgiving 2026, mid-afternoon
         assert.strictEqual(lastCompletedSession(new Date("2026-11-26T21:00:00Z")), "2026-11-25");
+    });
+});
+
+describe("easternDateTime", () => {
+    test("a summer close is 20:00 UTC (EDT)", () => {
+        assert.strictEqual(easternDateTime("2026-07-02", 16 * 60).toISOString(), "2026-07-02T20:00:00.000Z");
+    });
+
+    test("an early close in November is 18:00 UTC (EST)", () => {
+        assert.strictEqual(easternDateTime("2026-11-27", 13 * 60).toISOString(), "2026-11-27T18:00:00.000Z");
+    });
+
+    test("a winter close is 21:00 UTC (EST)", () => {
+        assert.strictEqual(easternDateTime("2026-12-01", 16 * 60).toISOString(), "2026-12-01T21:00:00.000Z");
+    });
+
+    test("follows the clock change on the DST switch days themselves", () => {
+        // 2026-03-08: clocks jump 2:00 → 3:00 AM; noon is already EDT.
+        assert.strictEqual(easternDateTime("2026-03-08", 12 * 60).toISOString(), "2026-03-08T16:00:00.000Z");
+        assert.strictEqual(easternDateTime("2026-03-08", 60).toISOString(), "2026-03-08T06:00:00.000Z");
+        // 2026-11-01: clocks fall back 2:00 → 1:00 AM; noon is EST again.
+        assert.strictEqual(easternDateTime("2026-11-01", 12 * 60).toISOString(), "2026-11-01T17:00:00.000Z");
+    });
+
+    test("midnight is the start of the Eastern date, not the UTC one", () => {
+        assert.strictEqual(easternDateTime("2026-07-02", 0).toISOString(), "2026-07-02T04:00:00.000Z");
+        assert.strictEqual(easternDateTime("2026-12-31", 23 * 60 + 59).toISOString(), "2027-01-01T04:59:00.000Z");
+    });
+
+    test("round-trips through getEasternParts", () => {
+        const parts = getEasternParts(easternDateTime("2026-11-27", 13 * 60));
+        assert.deepStrictEqual([parts.date, parts.hour, parts.minute], ["2026-11-27", 13, 0]);
+    });
+
+    test("refuses a time the spring-forward gap skips", () => {
+        assert.throws(() => easternDateTime("2026-03-08", 2 * 60 + 30), RangeError);
+    });
+
+    test("refuses minutes outside one day and malformed dates", () => {
+        assert.throws(() => easternDateTime("2026-07-02", -1), RangeError);
+        assert.throws(() => easternDateTime("2026-07-02", 24 * 60), RangeError);
+        assert.throws(() => easternDateTime("2026-07-02", 90.5), RangeError);
+        assert.throws(() => easternDateTime("2026-02-30", 600), RangeError);
     });
 });

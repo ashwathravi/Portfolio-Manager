@@ -1,5 +1,5 @@
-import { marketDataEngine } from "@/lib/api/market-data";
 import { requirePageUserId } from "@/lib/auth/request-user";
+import { loadQuotes } from "@/lib/services/market-data-service";
 import { loadDashboardPortfolios } from "@/lib/dashboard-portfolios";
 import { buildDashboardPortfoliosQuery } from "@/lib/portfolio-repository";
 import { buildAccountRows, summarizeAccounts } from "@/lib/portfolio/accounts";
@@ -32,16 +32,9 @@ export default async function AccountsPage() {
         );
     }
 
-    let quotes: Record<string, number> = {};
-    try {
-        const symbols = [...new Set(portfolios.flatMap((p) => p.holdings.map((h) => h.symbol.toUpperCase())))];
-        if (symbols.length > 0) {
-            const live = await marketDataEngine.getQuotes(symbols);
-            quotes = Object.fromEntries(Object.entries(live).map(([s, q]) => [s.toUpperCase(), q.price]));
-        }
-    } catch (e) {
-        console.warn("Accounts quote warm-up failed — using cached prices.", e);
-    }
+    // Without market data the stored prices stand.
+    const live = await loadQuotes(portfolios.flatMap((p) => p.holdings.map((h) => h.symbol)));
+    const quotes: Record<string, number> = Object.fromEntries(Object.entries(live).map(([s, q]) => [s, q.price]));
 
     const rows = buildAccountRows(portfolios, quotes);
     return (

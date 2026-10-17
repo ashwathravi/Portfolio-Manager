@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import { cn } from "@/lib/utils";
 import { formatEtClock, isMarketOpen } from "@/lib/markets/market-hours";
 import { useAutoRefreshQuotes } from "@/lib/hooks/useAutoRefreshQuotes";
+import { useEasternDate } from "@/lib/hooks/useEasternDate";
+import { isTodaysQuote } from "@/lib/markets/quote-session";
 
 /**
  * Sidebar Market Card (AR-66)
@@ -82,18 +84,21 @@ export function SidebarMarketCard() {
     const { quotes } = useAutoRefreshQuotes(INDEX_SYMBOLS);
 
     // Derive a flat {symbol → percentChange} map so the row render stays
-    // dumb. `MarketQuote.changePercent` is stored in *percent* units
-    // (1.35 → 1.35%, matching `alpha-vantage.test.ts` and the existing
+    // dumb. `Quote.changePercent` is stored in *percent* units (1.35 →
+    // 1.35%, pinned in `polygon-massive-adapter.test.ts` and matching the
     // alert engine's `/ 100` conversion), so we pass it through unchanged.
+    // Only today's session counts: during the session the newest close is
+    // yesterday's, and its move is not the market's current one.
+    const todayEt = useEasternDate();
     const deltas = useMemo(() => {
         const out: Record<string, number | null> = {};
         for (const row of INDICES) {
             const q = quotes[row.symbol];
             out[row.symbol] =
-                q && typeof q.changePercent === "number" ? q.changePercent : null;
+                q && typeof q.changePercent === "number" && isTodaysQuote(q, todayEt) ? q.changePercent : null;
         }
         return out;
-    }, [quotes]);
+    }, [quotes, todayEt]);
 
     return (
         <section className="pm-market-card" aria-label="Market status">

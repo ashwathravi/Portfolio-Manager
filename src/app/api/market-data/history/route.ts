@@ -7,9 +7,9 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 
-import { apiError, internalServerError, providerRateLimitError } from '@/lib/api/security';
+import { apiError } from '@/lib/api/security';
+import { marketDataErrorResponse } from '@/lib/api/market-data/route-errors';
 import { getMarketDataService } from '@/lib/services/market-data-service';
-import { PolygonRateLimitError } from '@/lib/providers/polygon-massive-adapter';
 import { historyRangeSchema, tickerSchema } from '@/lib/validators/market-data';
 
 export async function GET(request: NextRequest) {
@@ -39,10 +39,6 @@ export async function GET(request: NextRequest) {
     const bars = await service.getHistoricalPrices(parsedSymbol.data, parsedRange.data);
     return NextResponse.json({ data: bars });
   } catch (err) {
-    if (err instanceof PolygonRateLimitError) {
-      return providerRateLimitError(err.retryAfterMs / 1000);
-    }
-
-    return internalServerError(err, 'Unable to fetch historical prices.', 'MARKET_DATA_HISTORY_FAILED');
+    return marketDataErrorResponse(err, 'Unable to fetch historical prices.', 'MARKET_DATA_HISTORY_FAILED');
   }
 }

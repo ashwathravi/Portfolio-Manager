@@ -11,10 +11,11 @@
   - Alpha Radar 13F research tables for tracked filers, SEC filings, parsed holdings, quarterly changes, reports, and refresh runs
   - Relations are portfolio -> holdings and portfolio -> transactions.
 - Database access is centralized in `src/db/index.ts` using `postgres` + `drizzle-orm`. If `DATABASE_URL` is missing, the app does not fail build, but database-backed features degrade at runtime.
-- Market data is routed through `MarketDataEngine`:
-  - optional primary provider
-  - Alpha Vantage secondary/fallback provider
-  - current singleton is instantiated without a primary provider, so runtime uses Alpha Vantage directly.
+- Market data goes through one service, `getMarketDataService()` (`src/lib/services/market-data-service.ts`), for server pages (`loadQuotes`) and the `/api/market-data` routes alike:
+  - quotes come from the Postgres price store (`StoredQuoteProvider`, `src/lib/markets/stored-quote-provider.ts`): the latest two stored closes per symbol, which the nightly ingest writes from Massive's grouped daily bars. Request paths never call Massive for prices. A symbol with no stored close is left out (a single quote is 404 `QUOTE_UNAVAILABLE`) and starts being tracked for the next ingest, while the store has fewer than 2,000 securities (`REQUESTED_TRACKING_LIMIT`). With only one stored close a quote's `change` and `changePercent` are null, and `isTodaysQuote` (`src/lib/markets/quote-session.ts`) decides whether a change is today's move. Without `DATABASE_URL`, quotes reject with `MarketDataNotConfiguredError`.
+  - history, fundamentals and search go to `PolygonMassiveAdapter` on the free Massive Basic plan; without `POLYGON_API_KEY` those reject with `MarketDataNotConfiguredError` (routes answer 503). The ingest also needs the key.
+  - an in-memory cache in front (`src/lib/cache`); pages keep their stored prices whenever quotes are unavailable.
+  - a quote's change counts as today's move only for today's Eastern session (`isTodaysQuote`); earlier closes price positions without a "today" change.
 - Schwab integration is server-side:
   - OAuth callback route exchanges auth code for tokens
   - order route validates an app-level order payload and maps it to Schwab's order format
