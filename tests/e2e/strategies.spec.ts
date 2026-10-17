@@ -69,6 +69,21 @@ test.describe('Strategies page — Phase 6 builder shell', () => {
         await expect(cards.nth(1)).toHaveAttribute('aria-pressed', 'true');
     });
 
+    test('regression: a click made while the page hydrates on a slow device still lands', async ({ page }) => {
+        // A request-time hook that switched to the live clock after hydration
+        // re-rendered the builder as it hydrated, which swallowed clicks made
+        // during hydration on slow CPUs (every CI run, never a fast laptop).
+        const cdp = await page.context().newCDPSession(page);
+        await cdp.send('Emulation.setCPUThrottlingRate', { rate: 6 });
+        await page.goto('/strategies', { waitUntil: 'commit' });
+        const cards = page.locator('.pm-strategy-card');
+        await cards.nth(1).click();
+        await expect(cards.nth(1)).toHaveAttribute('aria-pressed', 'true', { timeout: 15_000 });
+        await page.waitForTimeout(2_000);
+        await expect(cards.first()).toHaveAttribute('aria-pressed', 'false');
+        await expect(cards.nth(1)).toHaveAttribute('aria-pressed', 'true');
+    });
+
     test('renders the rule builder, adherence editor, and backtest panel', async ({
         page,
     }) => {

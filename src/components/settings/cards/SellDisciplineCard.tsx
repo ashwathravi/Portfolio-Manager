@@ -18,7 +18,7 @@ import {
 import { mockPortfolios } from "@/lib/mockData";
 import { getDefaultTheses } from "@/lib/research/thesis";
 import { useSettingsStore } from "@/lib/stores/settingsStore";
-import { useRenderNow } from "@/components/providers/RequestTimeProvider";
+import { useRequestTime } from "@/components/providers/RequestTimeProvider";
 
 const ACTION_OPTIONS: SellDisciplineAction[] = [
     "trim",
@@ -57,7 +57,7 @@ export function SellDisciplineCard() {
     const [blockAdds, setBlockAdds] = useState(true);
     const [reasons, setReasons] = useState<Record<string, string>>({});
 
-    const theses = getDefaultTheses(useRenderNow());
+    const theses = getDefaultTheses(useRequestTime());
     const summary = useMemo(
         () =>
             evaluateSellDiscipline({

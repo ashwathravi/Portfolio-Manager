@@ -38,7 +38,7 @@ import {
 import { mockPortfolios } from "@/lib/mockData";
 import { getDefaultTheses } from "@/lib/research/thesis";
 import { useSettingsStore } from "@/lib/stores/settingsStore";
-import { useRenderNow } from "@/components/providers/RequestTimeProvider";
+import { useRequestTime } from "@/components/providers/RequestTimeProvider";
 import type {
     Order,
     OrderInstrumentType,
@@ -475,7 +475,7 @@ function OrderForm({ onSubmit }: OrderFormProps) {
         () => buildOptionGuardrails(isOptionOrder, optionOrderPolicy.checks),
         [isOptionOrder, optionOrderPolicy.checks],
     );
-    const defaultTheses = getDefaultTheses(useRenderNow());
+    const defaultTheses = getDefaultTheses(useRequestTime());
     const sellDisciplineSummary = useMemo(
         () =>
             evaluateSellDiscipline({

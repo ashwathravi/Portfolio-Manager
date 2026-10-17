@@ -18,7 +18,7 @@ import {
     type ThesisEvidence,
 } from './thesis';
 import { getBrowserStorage, loadThesesFromStorage, saveThesesToStorage } from './storage';
-import { useRenderNow } from '@/components/providers/RequestTimeProvider';
+import { useRequestTime } from '@/components/providers/RequestTimeProvider';
 
 /**
  * React hook that backs the research workspace. Persists to localStorage so
@@ -27,8 +27,8 @@ import { useRenderNow } from '@/components/providers/RequestTimeProvider';
 export function useThesisStore() {
     // The example theses are dated from the server's request time, so the
     // server render and hydration agree on the day.
-    const renderNow = useRenderNow();
-    const [theses, setTheses] = useState<Thesis[]>(() => getDefaultTheses(renderNow));
+    const requestTime = useRequestTime();
+    const [theses, setTheses] = useState<Thesis[]>(() => getDefaultTheses(requestTime));
     const [hydrated, setHydrated] = useState(false);
 
     // Hydrate from localStorage on mount so SSR + initial render match.
