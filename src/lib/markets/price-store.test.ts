@@ -13,6 +13,7 @@ import {
     buildResetHistoryQuery,
     buildSymbolsNeedingHistoryCountQuery,
     buildSymbolsNeedingHistoryQuery,
+    buildTrackedAmongQuery,
     buildTrackedCountQuery,
     buildTrackSecuritiesQuery,
     REQUESTED_TRACKING_LOCK,
@@ -222,8 +223,8 @@ describe("replaceHistory", () => {
 });
 
 describe("trackRequestedSecurities", () => {
-    /** Just enough of the database for a locked transaction: a count, then an insert. */
-    function fakeDatabase(tracked: number) {
+    /** Just enough of the database for a locked transaction: tracked lookup, count, insert. */
+    function fakeDatabase(tracked: number, existing: string[] = []) {
         const inserted: string[][] = [];
         const steps: string[] = [];
         const tx = {
@@ -231,10 +232,17 @@ describe("trackRequestedSecurities", () => {
                 steps.push(query === REQUESTED_TRACKING_LOCK ? "lock" : "other");
             },
             select: () => ({
-                from: async () => {
-                    steps.push("count");
-                    return [{ count: tracked }];
-                },
+                // Awaited as is: the count. With .where(): the tracked lookup.
+                from: () => ({
+                    then: (resolve: (rows: unknown) => void) => {
+                        steps.push("count");
+                        resolve([{ count: tracked }]);
+                    },
+                    where: async () => {
+                        steps.push("existing");
+                        return existing.map((symbol) => ({ symbol }));
+                    },
+                }),
             }),
             insert: () => ({
                 values: (rows: Array<{ symbol: string }>) => ({
@@ -262,34 +270,51 @@ describe("trackRequestedSecurities", () => {
     test("counts and inserts in one transaction, after taking the reservation lock", async () => {
         const { database, steps } = fakeDatabase(10);
         await trackRequestedSecurities(["AAPL"], 100, database);
-        assert.deepEqual(steps, ["begin", "lock", "count", "insert", "commit"]);
+        assert.deepEqual(steps, ["begin", "lock", "existing", "count", "insert", "commit"]);
         assert.match(REQUESTED_TRACKING_LOCK.toQuery({ escapeName: (n: string) => n, escapeParam: () => "?", escapeString: (v: string) => `'${v}'` } as never).sql, /^select pg_advisory_xact_lock\(hashtext\('atlas:requested-tracking'\)\)$/);
     });
 
     test("tracks requested symbols while the store is under its limit", async () => {
         const { database, inserted } = fakeDatabase(10);
-        assert.deepEqual(await trackRequestedSecurities(["aapl", "MSFT"], 100, database), ["AAPL", "MSFT"]);
+        assert.deepEqual(await trackRequestedSecurities(["aapl", "MSFT"], 100, database), { added: ["AAPL", "MSFT"], refused: [] });
         assert.deepEqual(inserted, [["AAPL", "MSFT"]]);
     });
 
     test("tracks only as many as fit, and none at the limit", async () => {
         const nearly = fakeDatabase(98);
-        assert.deepEqual(await trackRequestedSecurities(["A", "B", "C"], 100, nearly.database), ["A", "B"]);
+        assert.deepEqual(await trackRequestedSecurities(["A", "B", "C"], 100, nearly.database), { added: ["A", "B"], refused: ["C"] });
 
         const full = fakeDatabase(100);
-        assert.deepEqual(await trackRequestedSecurities(["A"], 100, full.database), []);
+        assert.deepEqual(await trackRequestedSecurities(["A"], 100, full.database), { added: [], refused: ["A"] });
         assert.deepEqual(full.inserted, []);
 
         const over = fakeDatabase(150);
-        assert.deepEqual(await trackRequestedSecurities(["A"], 100, over.database), []);
+        assert.deepEqual(await trackRequestedSecurities(["A"], 100, over.database), { added: [], refused: ["A"] });
+    });
+
+    test("regression: symbols tracked already take no room", async () => {
+        // One slot left; BTC-USD is tracked (but unpriced), NEW is not.
+        const { database, inserted } = fakeDatabase(1_999, ["BTC-USD"]);
+        assert.deepEqual(await trackRequestedSecurities(["BTC-USD", "NEW"], 2_000, database), { added: ["NEW"], refused: [] });
+        assert.deepEqual(inserted, [["NEW"]]);
+
+        const allTracked = fakeDatabase(2_000, ["BTC-USD"]);
+        assert.deepEqual(await trackRequestedSecurities(["BTC-USD"], 2_000, allTracked.database), { added: [], refused: [] });
+        assert.deepEqual(allTracked.steps, ["begin", "lock", "existing", "commit"]);
     });
 
     test("never counts or writes for nothing trackable", async () => {
         const untouchable = new Proxy({}, { get: () => () => assert.fail("the database was used") }) as never;
-        assert.deepEqual(await trackRequestedSecurities(["", "AAPL260116C00250000"], 100, untouchable), []);
+        assert.deepEqual(await trackRequestedSecurities(["", "AAPL260116C00250000"], 100, untouchable), { added: [], refused: [] });
     });
 
     test("the limit counts every tracked security", () => {
         assert.equal(buildTrackedCountQuery().toSQL().sql, 'select count(*) from "securities"');
+    });
+
+    test("finds which requested symbols are tracked already", () => {
+        const { sql, params } = buildTrackedAmongQuery(["BTC-USD", "NEW"]).toSQL();
+        assert.equal(sql, 'select "symbol" from "securities" where "securities"."symbol" in ($1, $2)');
+        assert.deepEqual(params, ["BTC-USD", "NEW"]);
     });
 });
