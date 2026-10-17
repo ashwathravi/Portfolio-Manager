@@ -1,6 +1,9 @@
 import type { Metadata } from "next";
 import { connection } from "next/server";
-import { IBM_Plex_Mono, IBM_Plex_Sans } from "next/font/google";
+// IBM Plex Sans / Plex Mono, self-hosted from files in the repo so text never
+// silently falls back to system fonts and builds never fetch from Google.
+// Plex has true tabular figures, which every money column relies on.
+import "@/styles/fonts/ibm-plex";
 import "./globals.css";
 import "../styles/ledger-refinements.css";
 import { cn } from "@/lib/utils";
@@ -10,19 +13,6 @@ import { Toaster } from "@/components/ui/sonner";
 import { AppFrame } from "@/components/layout/AppFrame";
 import { IdentityProvider } from "@/components/providers/IdentityProvider";
 import { resolveViewerIdentity } from "@/lib/auth/viewer";
-
-// Self-hosted via next/font so text never silently falls back to system
-// fonts. Plex has true tabular figures, which every money column relies on.
-const appSans = IBM_Plex_Sans({
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
-  display: "swap",
-});
-const appMono = IBM_Plex_Mono({
-  subsets: ["latin"],
-  weight: ["400", "500", "600"],
-  display: "swap",
-});
 
 export const metadata: Metadata = {
   title: "Atlas Wealth | Personal Investment Operating System",
@@ -55,12 +45,6 @@ export default async function RootLayout({
   const identity = await resolveViewerIdentity();
   return (
     <html lang="en" suppressHydrationWarning>
-      <head>
-        {/* Font variables are set here rather than via a className on <html>:
-            ThemeProvider toggles `dark` on <html>, and a React-owned className
-            there would overwrite it on re-render. */}
-        <style>{`:root{--font-app-sans:${appSans.style.fontFamily};--font-app-mono:${appMono.style.fontFamily}}`}</style>
-      </head>
       <body
         className={cn(
           "min-h-screen bg-background font-sans antialiased overflow-hidden",
