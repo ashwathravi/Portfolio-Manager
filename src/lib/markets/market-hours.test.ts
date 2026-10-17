@@ -215,6 +215,23 @@ describe("NYSE trading calendar", () => {
         assert.throws(() => getMarketDay("2026-02-30"), RangeError);
     });
 
+    test("refuses years before the calendar starts instead of guessing", () => {
+        // NYSE first closed for Martin Luther King, Jr. Day in 1998.
+        assert.throws(() => getMarketDay("1997-01-20"), RangeError);
+        assert.throws(() => marketHolidays(1999), RangeError);
+        assert.throws(() => previousTradingDay("2000-01-03"), RangeError);
+        assert.strictEqual(getMarketDay("2000-01-03").isTradingDay, true);
+    });
+
+    test("knows the one-off closures since 2000", () => {
+        for (const date of ["2001-09-11", "2001-09-14", "2004-06-11", "2007-01-02", "2012-10-29", "2012-10-30", "2018-12-05"]) {
+            assert.strictEqual(getMarketDay(date).isTradingDay, false, date);
+        }
+        assert.strictEqual(getMarketDay("2018-12-05").holiday, "National Day of Mourning for President George H. W. Bush");
+        assert.strictEqual(previousTradingDay("2018-12-06"), "2018-12-04");
+        assert.strictEqual(nextTradingDay("2001-09-10"), "2001-09-17");
+    });
+
     test("previous and next trading days skip weekends and holidays", () => {
         assert.strictEqual(previousTradingDay("2026-09-08"), "2026-09-04"); // over Labor Day weekend
         assert.strictEqual(nextTradingDay("2026-12-24"), "2026-12-28"); // over Christmas

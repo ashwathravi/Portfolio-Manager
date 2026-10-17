@@ -5,8 +5,9 @@
  * questions: is the market open right now, and which session closed last?
  * Regular hours are 9:30 AM – 4:00 PM ET on trading days, with a 1:00 PM
  * close on the three early-close days. Holidays follow NYSE Rule 7.2 and are
- * computed rather than listed, so the calendar never runs out; the tests pin
- * it to the dates NYSE publishes.
+ * computed rather than listed, so the calendar never runs out; one-off
+ * closures are listed. It covers 2000 onward, and the tests pin it to the
+ * dates NYSE publishes.
  *
  * Every date here is an Eastern calendar date in `YYYY-MM-DD` form. Clock
  * readings go through `Intl.DateTimeFormat` in `America/New_York`, which
@@ -19,8 +20,25 @@ const NYSE_EARLY_CLOSE_MINUTES = 13 * 60; // 1:00 PM ET
 
 const ET_ZONE = "America/New_York";
 
-/** One-off closures NYSE announces outside Rule 7.2 (e.g. national days of mourning). */
+/**
+ * The calendar covers 2000 onward. Earlier years had different holiday rules
+ * (no Martin Luther King, Jr. Day before 1998, for one), so they are refused
+ * rather than answered wrongly. Nothing here needs prices that old: the free
+ * data tier keeps two years of history.
+ */
+export const FIRST_CALENDAR_YEAR = 2000;
+
+/** Full-day closures NYSE announced outside Rule 7.2 since 2000. */
 const SPECIAL_CLOSURES: Record<string, string> = {
+    "2001-09-11": "September 11 attacks",
+    "2001-09-12": "September 11 attacks",
+    "2001-09-13": "September 11 attacks",
+    "2001-09-14": "September 11 attacks",
+    "2004-06-11": "National Day of Mourning for President Ronald Reagan",
+    "2007-01-02": "National Day of Mourning for President Gerald Ford",
+    "2012-10-29": "Hurricane Sandy",
+    "2012-10-30": "Hurricane Sandy",
+    "2018-12-05": "National Day of Mourning for President George H. W. Bush",
     "2025-01-09": "National Day of Mourning for President Jimmy Carter",
 };
 
@@ -190,6 +208,7 @@ const earlyCloseCache = new Map<number, Set<string>>();
 function holidaysFor(year: number): Map<string, string> {
     const cached = holidayCache.get(year);
     if (cached) return cached;
+    assertCalendarYear(year);
 
     const days = new Map<string, string>();
     // A Saturday New Year's Day is not moved to Friday: that Friday closes
@@ -216,6 +235,7 @@ function holidaysFor(year: number): Map<string, string> {
 function earlyClosesFor(year: number): Set<string> {
     const cached = earlyCloseCache.get(year);
     if (cached) return cached;
+    assertCalendarYear(year);
 
     const days = new Set<string>();
     // July 3 and December 24 close early only when they fall Monday–Thursday;
@@ -228,6 +248,12 @@ function earlyClosesFor(year: number): Set<string> {
 
     earlyCloseCache.set(year, days);
     return days;
+}
+
+function assertCalendarYear(year: number): void {
+    if (!Number.isInteger(year) || year < FIRST_CALENDAR_YEAR) {
+        throw new RangeError(`The market calendar starts in ${FIRST_CALENDAR_YEAR}; got ${year}`);
+    }
 }
 
 /** Rule 7.2: a Saturday holiday closes the Friday before, a Sunday one the Monday after. */
@@ -281,7 +307,11 @@ function parseDate(date: string): { year: number; weekday: number; utc: Date } {
     if (!match || !utc || utc.toISOString().slice(0, 10) !== date) {
         throw new RangeError(`Expected a calendar date as YYYY-MM-DD, got "${date}"`);
     }
-    return { year: Number(match[1]), weekday: utc.getUTCDay(), utc };
+    const year = Number(match[1]);
+    if (year < FIRST_CALENDAR_YEAR) {
+        throw new RangeError(`The market calendar starts in ${FIRST_CALENDAR_YEAR}; got "${date}"`);
+    }
+    return { year, weekday: utc.getUTCDay(), utc };
 }
 
 function isoDate(year: number, month: number, day: number): string {
