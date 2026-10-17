@@ -11,6 +11,7 @@ import {
     buildResetHistoryQuery,
     buildSymbolsNeedingHistoryCountQuery,
     buildSymbolsNeedingHistoryQuery,
+    buildTrackedCountQuery,
     buildTrackSecuritiesQuery,
     buildUpsertBarsQuery,
     dedupeBars,
@@ -18,6 +19,7 @@ import {
     normalizeSymbols,
     replaceHistory,
     selectTrackedBars,
+    trackRequestedSecurities,
     type PriceBarInput,
 } from "./price-store";
 
@@ -190,5 +192,53 @@ describe("replaceHistory", () => {
         assert.equal(await replaceHistory("NVDA", [inconsistent], "2026-10-16", untouchable), undefined);
         // Another symbol's bars, and bars after the cut-off, are never this history.
         assert.equal(await replaceHistory("NVDA", [BAR, { ...BAR, symbol: "NVDA", date: "2026-10-19" }], "2026-10-16", untouchable), undefined);
+    });
+});
+
+describe("trackRequestedSecurities", () => {
+    /** Just enough of the database for a count, then an insert of the symbols. */
+    function fakeDatabase(tracked: number) {
+        const inserted: string[][] = [];
+        const database = {
+            select: () => ({ from: async () => [{ count: tracked }] }),
+            insert: () => ({
+                values: (rows: Array<{ symbol: string }>) => ({
+                    onConflictDoNothing: () => ({
+                        returning: async () => {
+                            inserted.push(rows.map((row) => row.symbol));
+                            return rows.map(({ symbol }) => ({ symbol }));
+                        },
+                    }),
+                }),
+            }),
+        };
+        return { database: database as never, inserted };
+    }
+
+    test("tracks requested symbols while the store is under its limit", async () => {
+        const { database, inserted } = fakeDatabase(10);
+        assert.deepEqual(await trackRequestedSecurities(["aapl", "MSFT"], 100, database), ["AAPL", "MSFT"]);
+        assert.deepEqual(inserted, [["AAPL", "MSFT"]]);
+    });
+
+    test("tracks only as many as fit, and none at the limit", async () => {
+        const nearly = fakeDatabase(98);
+        assert.deepEqual(await trackRequestedSecurities(["A", "B", "C"], 100, nearly.database), ["A", "B"]);
+
+        const full = fakeDatabase(100);
+        assert.deepEqual(await trackRequestedSecurities(["A"], 100, full.database), []);
+        assert.deepEqual(full.inserted, []);
+
+        const over = fakeDatabase(150);
+        assert.deepEqual(await trackRequestedSecurities(["A"], 100, over.database), []);
+    });
+
+    test("never counts or writes for nothing trackable", async () => {
+        const untouchable = new Proxy({}, { get: () => () => assert.fail("the database was used") }) as never;
+        assert.deepEqual(await trackRequestedSecurities(["", "AAPL260116C00250000"], 100, untouchable), []);
+    });
+
+    test("the limit counts every tracked security", () => {
+        assert.equal(buildTrackedCountQuery().toSQL().sql, 'select count(*) from "securities"');
     });
 });

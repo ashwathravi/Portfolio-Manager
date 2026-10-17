@@ -122,6 +122,15 @@ describe('fetchQuotes', () => {
         assert.deepStrictEqual(await fetchQuotes(['AAPL', 'MSFT', 'SPY', 'QQQ']), { MSFT: msft });
     });
 
+    test('keeps a quote whose change is unknown, but not one with half a change', async () => {
+        const first = { symbol: 'NEWCO', price: 25, change: null, changePercent: null, timestamp: '2026-10-16T20:00:00.000Z', isRealtime: false };
+        mockFetch({
+            ok: true,
+            json: { data: [first, { ...first, symbol: 'HALF', change: 1 }, { ...first, symbol: 'TEXT', change: '1', changePercent: '1' }] },
+        });
+        assert.deepStrictEqual(await fetchQuotes(['NEWCO', 'HALF', 'TEXT']), { NEWCO: first });
+    });
+
 });
 
 describe('fetchHistorical', () => {

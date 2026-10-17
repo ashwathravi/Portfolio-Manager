@@ -22,6 +22,22 @@ test.describe('Position detail', () => {
         await expect(page.getByTestId('position-price')).not.toContainText('today');
     });
 
+    test('a move from today\'s session is labelled "today" until the Eastern date changes', async ({ page }) => {
+        // The fixtures store two IBM closes ending today (Eastern): 200 → 205.
+        await page.clock.install({ time: new Date() });
+        await gotoAppPage(page, '/portfolios/detail/IBM');
+        const price = page.getByTestId('position-price');
+        await expect(price).toBeVisible();
+        test.skip((await price.textContent())?.includes('Quote unavailable') ?? true, 'no stored closes without a database');
+        await expect(price).toContainText('$205.00');
+        await expect(price).toContainText('+2.50% today');
+
+        // Left open past midnight ET: the price stays, the label goes.
+        await page.clock.fastForward('24:00:00');
+        await expect(price).not.toContainText('today');
+        await expect(price).toContainText('$205.00');
+    });
+
     test('offers a draft order prefilled with the symbol', async ({ page }) => {
         await gotoAppPage(page, '/portfolios/detail/NVDA');
         await expect(page.getByRole('link', { name: 'Draft order' })).toHaveAttribute('href', '/execution?symbol=NVDA');

@@ -6,7 +6,8 @@
  * The nightly ingest stores each session's closes once; a quote is the
  * latest stored close and the change since the close before it. A symbol
  * with no stored close yet is left out of the answer and starts being
- * tracked, so the next ingest prices it.
+ * tracked, so the next ingest prices it, while the store is under its
+ * limit of tracked securities (REQUESTED_TRACKING_LIMIT).
  *
  * History, fundamentals and search still go to the reference provider.
  */
@@ -16,7 +17,7 @@ import { MarketDataNotConfiguredError, QuoteUnavailableError } from '@/lib/provi
 import type { Fundamentals, MarketDataProvider, OHLC, Quote, SymbolResult } from '@/types/market-data';
 
 import { easternDateTime, getMarketDay } from './market-hours';
-import { getRecentCloses, normalizeSymbols, trackSecurities, type LatestClose } from './price-store';
+import { getRecentCloses, normalizeSymbols, trackRequestedSecurities, type LatestClose } from './price-store';
 
 const NYSE_CLOSE_MINUTES = 16 * 60;
 /** How many tracked symbols an instance remembers before starting over. */
@@ -27,14 +28,14 @@ export interface QuoteStore {
   configured(): boolean;
   /** The latest two closes per symbol, newest first. */
   recentCloses(symbols: string[]): Promise<Map<string, LatestClose[]>>;
-  /** Start tracking symbols so the nightly ingest prices them. */
+  /** Start tracking symbols so the nightly ingest prices them (bounded by the store's limit). */
   track(symbols: string[]): Promise<unknown>;
 }
 
 const DATABASE_QUOTE_STORE: QuoteStore = {
   configured: () => Boolean(usableDatabaseUrl(process.env.DATABASE_URL)),
   recentCloses: (symbols) => getRecentCloses(symbols, 2),
-  track: (symbols) => trackSecurities(symbols),
+  track: (symbols) => trackRequestedSecurities(symbols),
 };
 
 /** When a session's close happened: 4:00 PM ET, or 1:00 PM on early-close days. */
@@ -47,18 +48,22 @@ export function sessionCloseTime(date: string): string {
   }
 }
 
-/** A closing quote from a symbol's newest stored closes, or undefined without a positive close. */
+/**
+ * A closing quote from a symbol's newest stored closes, or undefined without
+ * a positive close. With only one close stored (a newly tracked symbol) the
+ * change is unknown, so it is null rather than zero.
+ */
 export function quoteFromCloses(symbol: string, closes: readonly LatestClose[]): Quote | undefined {
   const [latest, previous] = closes;
   if (!latest || !(latest.close > 0)) return undefined;
 
   const previousClose = previous && previous.close > 0 ? previous.close : 0;
-  const change = previousClose > 0 ? latest.close - previousClose : 0;
+  const change = previousClose > 0 ? latest.close - previousClose : null;
   return {
     symbol,
     price: latest.close,
     change,
-    changePercent: previousClose > 0 ? (change / previousClose) * 100 : 0,
+    changePercent: change !== null ? (change / previousClose) * 100 : null,
     timestamp: sessionCloseTime(latest.date),
     isRealtime: false,
   };

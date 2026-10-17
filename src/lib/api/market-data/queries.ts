@@ -39,8 +39,9 @@ function isQuote(value: unknown): value is Quote {
         && typeof quote?.symbol === 'string' && quote.symbol.trim().length > 0
         // A provider fills a missing price with 0; showing it would value the holding at $0.
         && Number.isFinite(quote.price) && (quote.price ?? 0) > 0
-        && Number.isFinite(quote.change)
-        && Number.isFinite(quote.changePercent)
+        // No earlier close: both changes are null (unknown), never a made-up zero.
+        && ((quote.change === null && quote.changePercent === null)
+            || (Number.isFinite(quote.change) && Number.isFinite(quote.changePercent)))
         && typeof quote.timestamp === 'string'
         && typeof quote.isRealtime === 'boolean';
 }

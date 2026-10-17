@@ -413,3 +413,37 @@ test.describe('Today watchlist', () => {
         await expect(card.locator('.pm-watchlist-price').first()).toHaveText('—');
     });
 });
+
+test.describe('Today › Top holdings', () => {
+    // Sparklines fetch history per row; answering here keeps these page loads
+    // off the server's market-data rate limit, which other specs share.
+    test.beforeEach(async ({ page }) => {
+        await page.route('**/api/market-data/historical**', (route) => route.fulfill({ status: 200, json: { data: [] } }));
+    });
+
+    const aapl = (overrides: Record<string, unknown>) => ({
+        data: [{ symbol: 'AAPL', price: 190, change: 2, changePercent: 1.06, timestamp: new Date().toISOString(), isRealtime: false, ...overrides }],
+    });
+    const aaplToday = (page: import('@playwright/test').Page) =>
+        page.getByRole('region', { name: 'Top holdings' }).locator('tbody tr').filter({ hasText: 'AAPL' }).getByTestId('top-holding-today');
+
+    test('with holdings: today\'s move shows in the Today column', async ({ page }) => {
+        await page.route('**/api/market-data/quotes**', (route) => route.fulfill({ status: 200, json: aapl({}) }));
+        await gotoAppPage(page, '/');
+        test.skip(!(await hasHoldings(page)), 'no holdings in this database');
+        await expect(aaplToday(page)).toHaveText('+1.06%');
+    });
+
+    test('regression: an earlier session\'s close or a first close is a dash, not +0.00%', async ({ page }) => {
+        const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
+        await page.route('**/api/market-data/quotes**', (route) => route.fulfill({ status: 200, json: aapl({ timestamp: threeDaysAgo }) }));
+        await gotoAppPage(page, '/');
+        test.skip(!(await hasHoldings(page)), 'no holdings in this database');
+        await expect(aaplToday(page)).toHaveText('—');
+
+        await page.unroute('**/api/market-data/quotes**');
+        await page.route('**/api/market-data/quotes**', (route) => route.fulfill({ status: 200, json: aapl({ change: null, changePercent: null }) }));
+        await gotoAppPage(page, '/');
+        await expect(aaplToday(page)).toHaveText('—');
+    });
+});

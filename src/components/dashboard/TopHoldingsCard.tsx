@@ -64,8 +64,9 @@ export function TopHoldingsCard({
             const q = quotes[r.symbol.toUpperCase()];
             const price = Number.isFinite(q?.price) ? q!.price : r.currentPrice;
             const marketValue = r.quantity * price;
-            // An earlier session's closing quote prices the row but isn't today's move.
-            const todayChangePercent = q && isTodaysQuote(q, todayEt) ? q.changePercent : 0;
+            // An earlier session's closing quote prices the row but isn't
+            // today's move: null, shown as a dash, never "+0.00%".
+            const todayChangePercent: number | null = q && isTodaysQuote(q, todayEt) ? q.changePercent : null;
             const totalReturnPercent =
                 r.avgCost > 0 ? ((price - r.avgCost) / r.avgCost) * 100 : 0;
             return {
@@ -125,7 +126,9 @@ export function TopHoldingsCard({
                             enriched.map((r) => {
                                 const allocPct =
                                     totalMV > 0 ? (r.marketValue / totalMV) * 100 : 0;
-                                const todayNeg = r.todayChangePercent < 0;
+                                const todayClass = r.todayChangePercent === null
+                                    ? "pm-num-muted"
+                                    : r.todayChangePercent < 0 ? "pm-num-neg" : "pm-num-pos";
                                 return (
                                     <tr key={r.id}>
                                         <td>
@@ -138,8 +141,8 @@ export function TopHoldingsCard({
                                         </td>
                                         <td className="num">{fmtQty(r.quantity)}</td>
                                         <td className="num">{fmtCurrency(r.marketValue)}</td>
-                                        <td className={`num ${todayNeg ? "pm-num-neg" : "pm-num-pos"}`}>
-                                            {fmtSignedPct(r.todayChangePercent)}
+                                        <td className={`num ${todayClass}`} data-testid="top-holding-today">
+                                            {r.todayChangePercent === null ? "—" : fmtSignedPct(r.todayChangePercent)}
                                         </td>
                                         <td className={`num ${r.totalReturnPercent < 0 ? "pm-num-neg" : "pm-num-pos"}`}>
                                             {fmtSignedPct(r.totalReturnPercent)}

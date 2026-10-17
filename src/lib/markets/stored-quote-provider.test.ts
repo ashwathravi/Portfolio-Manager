@@ -44,8 +44,13 @@ describe("quoteFromCloses", () => {
         });
     });
 
-    test("a first close reads as unchanged; no positive close is no quote", () => {
-        assert.equal(quoteFromCloses("NEW", [{ date: "2026-10-16", close: 10 }])?.change, 0);
+    test("a first close has a price but no change; no positive close is no quote", () => {
+        const first = quoteFromCloses("NEW", [{ date: "2026-10-16", close: 10 }]);
+        assert.equal(first?.price, 10);
+        assert.equal(first?.change, null);
+        assert.equal(first?.changePercent, null);
+        // A zero earlier close can't be compared with either.
+        assert.equal(quoteFromCloses("NEW", [{ date: "2026-10-16", close: 10 }, { date: "2026-10-15", close: 0 }])?.changePercent, null);
         assert.equal(quoteFromCloses("BAD", [{ date: "2026-10-16", close: 0 }]), undefined);
         assert.equal(quoteFromCloses("NONE", []), undefined);
     });

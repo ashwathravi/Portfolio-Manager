@@ -173,7 +173,7 @@ describe('PolygonMassiveAdapter', () => {
       await assert.rejects(provider.getQuote('ZERO'), PolygonApiError);
     });
 
-    test('a symbol with no earlier close reads as unchanged', async () => {
+    test('a symbol with no earlier close has a price but no change', async () => {
       const { fetch } = fakeFetch(byDate({
         '2026-07-02': { body: grouped(bar('NEWCO', 25)) },
         '2026-07-01': { body: grouped() },
@@ -181,7 +181,7 @@ describe('PolygonMassiveAdapter', () => {
 
       const quote = await adapter(fetch).getQuote('NEWCO');
 
-      assert.deepEqual([quote.price, quote.change, quote.changePercent], [25, 0, 0]);
+      assert.deepEqual([quote.price, quote.change, quote.changePercent], [25, null, null]);
     });
 
     test('cache each day\'s bars: repeat and concurrent calls share two requests', async () => {

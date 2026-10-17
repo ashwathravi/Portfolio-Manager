@@ -21,6 +21,14 @@ import { tickerSchema } from "@/lib/validators/market-data";
 
 type Database = typeof db;
 
+/**
+ * The most securities quote lookups may grow the table to. Holdings and the
+ * benchmarks are tracked by the nightly ingest whatever the count; this
+ * bounds what arbitrary symbol lookups can add, and with it the storage and
+ * the ingest's history work they cause.
+ */
+export const REQUESTED_TRACKING_LIMIT = 2_000;
+
 export interface PriceBarInput {
     symbol: string;
     /** Eastern trading date, YYYY-MM-DD. */
@@ -205,6 +213,10 @@ export function buildLatestBarDateQuery(database: Database = db) {
     return database.select({ date: max(priceBars.date) }).from(priceBars);
 }
 
+export function buildTrackedCountQuery(database: Database = db) {
+    return database.select({ count: count() }).from(securities);
+}
+
 // ---------------------------------------------------------------------------
 // Operations
 // ---------------------------------------------------------------------------
@@ -215,6 +227,29 @@ export async function trackSecurities(symbols: Iterable<string>, database: Datab
     if (!normalized.length) return [];
     const inserted = await buildTrackSecuritiesQuery(normalized, database);
     return inserted.map((row) => row.symbol);
+}
+
+/**
+ * Starts tracking symbols a quote lookup asked for, only while the table has
+ * room under `limit`; returns the ones added. Symbols past the limit stay
+ * unpriced until room frees up.
+ */
+export async function trackRequestedSecurities(
+    symbols: Iterable<string>,
+    limit: number = REQUESTED_TRACKING_LIMIT,
+    database: Database = db,
+): Promise<string[]> {
+    const normalized = normalizeSymbols(symbols);
+    if (!normalized.length) return [];
+    const [row] = await buildTrackedCountQuery(database);
+    const room = limit - Number(row?.count ?? 0);
+    if (room < normalized.length) {
+        console.warn(
+            `Price store is at its limit of ${limit} securities: not tracking ${normalized.length - Math.max(room, 0)} requested symbol(s).`,
+        );
+    }
+    if (room <= 0) return [];
+    return trackSecurities(normalized.slice(0, room), database);
 }
 
 export async function listTrackedSymbols(database: Database = db): Promise<Set<string>> {

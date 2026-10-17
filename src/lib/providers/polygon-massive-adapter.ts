@@ -308,14 +308,14 @@ function closingQuote(symbol: string, sessions: ClosingSessions): Quote | undefi
   if (!bar || !(bar.close > 0)) return undefined;
 
   // Without an earlier close (the symbol's first session) there is no
-  // change to measure, so it reads as unchanged.
+  // change to measure: it is unknown, not zero.
   const previousClose = sessions.previous.get(symbol)?.close ?? 0;
-  const change = previousClose > 0 ? bar.close - previousClose : 0;
+  const change = previousClose > 0 ? bar.close - previousClose : null;
   return {
     symbol,
     price: bar.close,
     change,
-    changePercent: previousClose > 0 ? (change / previousClose) * 100 : 0,
+    changePercent: change !== null ? (change / previousClose) * 100 : null,
     timestamp: sessions.closedAt,
     isRealtime: false,
   };

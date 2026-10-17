@@ -77,7 +77,8 @@ test.describe('Market data without a provider key', () => {
     // threw while being constructed, so every market-data route was a 500.
     // Not configured is now its own answer, and pages keep stored prices.
     // Quotes come from the price store, so with a database they answer from
-    // it (nothing is stored in E2E); without one they are not configured.
+    // it (the fixtures store closes only for IBM); without one they are not
+    // configured.
     const notConfigured = { error: 'Market data is not configured.', code: 'MARKET_DATA_NOT_CONFIGURED' };
     const dbMode = Boolean(process.env.CI || process.env.E2E_DATABASE_AUTH === '1');
 

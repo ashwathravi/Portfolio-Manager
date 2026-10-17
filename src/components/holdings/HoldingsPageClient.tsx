@@ -97,9 +97,9 @@ export function HoldingsPageClient({
                 h.avgCost > 0 ? ((last - h.avgCost) / h.avgCost) * 100 : 0;
             // An earlier session's closing quote prices the row but isn't today's move.
             const todays = q != null && isTodaysQuote(q, todayEt);
-            const todayPct = todays ? q.changePercent : 0;
-            const todayChangeAbs =
-                todays && q.change != null ? q.change * h.quantity : 0;
+            // Null when there is no move from today's session: shown as a dash.
+            const todayPct: number | null = todays ? q.changePercent : null;
+            const todayChangeAbs = todays ? q.change * h.quantity : 0;
             const sector = h.sector ?? sectorFor(h.symbol);
             const bucketAssignment = resolvePolicyBucketAssignment(h);
             const themeWeights = themeWeightsForSymbol(h.symbol, h.themeWeights);
@@ -184,7 +184,8 @@ export function HoldingsPageClient({
                 case "totalReturnPct":
                     return b.totalReturnPct - a.totalReturnPct;
                 case "todayPct":
-                    return b.todayPct - a.todayPct;
+                    // Rows without a move today sort last.
+                    return (b.todayPct ?? -Infinity) - (a.todayPct ?? -Infinity) || 0;
                 case "allocationPct":
                     return b.allocationPct - a.allocationPct;
             }
