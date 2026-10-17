@@ -103,7 +103,7 @@ export function selectTrackedBars(bars: readonly PriceBarInput[], tracked: Reado
 // Query builders (compiled in tests; executed by the functions below)
 // ---------------------------------------------------------------------------
 
-export function buildTrackSecuritiesQuery(symbols: string[], database: Database = db) {
+export function buildTrackSecuritiesQuery(symbols: string[], database: Pick<Database, "insert"> = db) {
     return database
         .insert(securities)
         .values(symbols.map((symbol) => ({ symbol })))
@@ -193,7 +193,7 @@ export function buildSymbolsNeedingHistoryQuery(limit: number, database: Databas
         .limit(limit);
 }
 
-export function buildTrackedCountQuery(database: Database = db) {
+export function buildTrackedCountQuery(database: Pick<Database, "select"> = db) {
     return database.select({ count: count() }).from(securities);
 }
 
@@ -210,8 +210,16 @@ export async function trackSecurities(symbols: Iterable<string>, database: Datab
 }
 
 /**
+ * Serializes requested-tracking reservations across instances. Held for the
+ * transaction only, so it works through a transaction pooler.
+ */
+export const REQUESTED_TRACKING_LOCK = sql`select pg_advisory_xact_lock(hashtext('atlas:requested-tracking'))`;
+
+/**
  * Starts tracking symbols a quote lookup asked for, only while the table has
- * room under `limit`; returns the ones added. Symbols past the limit stay
+ * room under `limit`; returns the ones added. The count and the insert run
+ * in one transaction under an advisory lock, so concurrent instances can't
+ * each see room and together pass the limit. Symbols past the limit stay
  * unpriced until room frees up.
  */
 export async function trackRequestedSecurities(
@@ -221,15 +229,19 @@ export async function trackRequestedSecurities(
 ): Promise<string[]> {
     const normalized = normalizeSymbols(symbols);
     if (!normalized.length) return [];
-    const [row] = await buildTrackedCountQuery(database);
-    const room = limit - Number(row?.count ?? 0);
-    if (room < normalized.length) {
-        console.warn(
-            `Price store is at its limit of ${limit} securities: not tracking ${normalized.length - Math.max(room, 0)} requested symbol(s).`,
-        );
-    }
-    if (room <= 0) return [];
-    return trackSecurities(normalized.slice(0, room), database);
+    return database.transaction(async (tx) => {
+        await tx.execute(REQUESTED_TRACKING_LOCK);
+        const [row] = await buildTrackedCountQuery(tx);
+        const room = limit - Number(row?.count ?? 0);
+        if (room < normalized.length) {
+            console.warn(
+                `Price store is at its limit of ${limit} securities: not tracking ${normalized.length - Math.max(room, 0)} requested symbol(s).`,
+            );
+        }
+        if (room <= 0) return [];
+        const inserted = await buildTrackSecuritiesQuery(normalized.slice(0, room), tx);
+        return inserted.map((added) => added.symbol);
+    });
 }
 
 export async function listTrackedSymbols(database: Database = db): Promise<Set<string>> {

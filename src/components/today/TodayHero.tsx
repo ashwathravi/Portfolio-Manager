@@ -26,28 +26,34 @@ export function TodayHero({ holdings, cashTotal }: { holdings: TodayHeroHolding[
     const { quotes, isFetching, isError, refreshMs, refetch, lastUpdatedAt } = useAutoRefreshQuotes(symbols);
 
     const todayEt = useEasternDate();
-    const { invested, change, live, today } = useMemo(() => {
+    const { invested, change, live, positions, movedToday } = useMemo(() => {
         let value = 0;
         let delta = 0;
         let hasLive = false;
-        let hasToday = false;
+        let held = 0;
+        let moved = 0;
         for (const h of holdings) {
             const q = quotes[h.symbol.toUpperCase()];
+            if (h.quantity !== 0) held++;
             if (q && Number.isFinite(q.price)) {
                 value += h.quantity * q.price;
                 hasLive = true;
                 // Before today's close the newest price is the last session's;
                 // its change belongs to that day, not today.
                 if (isTodaysQuote(q, todayEt)) {
-                    delta += (q.change ?? 0) * h.quantity;
-                    hasToday = true;
+                    delta += q.change * h.quantity;
+                    if (h.quantity !== 0) moved++;
                 }
             } else {
                 value += h.marketValue || h.quantity * h.currentPrice;
             }
         }
-        return { invested: value, change: delta, live: hasLive, today: hasToday };
+        return { invested: value, change: delta, live: hasLive, positions: held, movedToday: moved };
     }, [holdings, quotes, todayEt]);
+    // The headline is the portfolio's move only when every position has one
+    // from today's session; otherwise it is labelled as covering some of them.
+    const today = movedToday > 0;
+    const complete = today && movedToday === positions;
 
     const netWorth = invested + cashTotal;
     const liveIndicator = (
@@ -84,10 +90,18 @@ export function TodayHero({ holdings, cashTotal }: { holdings: TodayHeroHolding[
             <div className="pm-today-hero-main">
                 <span className="pm-today-label">Net worth</span>
                 <p className="pm-today-networth" data-testid="today-networth">{formatUsd(netWorth)}</p>
-                <p className={`pm-today-change ${today ? (change > 0 ? "pm-pos" : change < 0 ? "pm-neg" : "") : ""}`}>
-                    {today ? (
+                <p
+                    className={`pm-today-change ${today ? (change > 0 ? "pm-pos" : change < 0 ? "pm-neg" : "") : ""}`}
+                    data-testid="today-change"
+                >
+                    {complete ? (
                         <>
                             {formatUsd(change, { signed: true })} ({formatPct(changePct, { signed: true, decimals: 2 })}) today
+                        </>
+                    ) : today ? (
+                        // Some positions have no move from today yet (unpriced, or an earlier close).
+                        <>
+                            {formatUsd(change, { signed: true })} today on {movedToday} of {positions} positions
                         </>
                     ) : live ? (
                         "Prices as of the last close"
