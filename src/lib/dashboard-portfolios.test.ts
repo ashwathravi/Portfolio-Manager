@@ -50,4 +50,21 @@ describe("loadDashboardPortfolios", () => {
             warnings.restore();
         }
     });
+
+    test("treats an unusable DATABASE_URL as not configured by default", async () => {
+        const original = process.env.DATABASE_URL;
+        process.env.DATABASE_URL = "[SENSITIVE]";
+        const warnings = silence("warn");
+        try {
+            const result = await loadDashboardPortfolios("user-a", async () => {
+                throw new Error("client has no connection string");
+            });
+
+            assert.deepStrictEqual(result, { portfolios: [], unavailable: false });
+        } finally {
+            warnings.restore();
+            if (original === undefined) delete process.env.DATABASE_URL;
+            else process.env.DATABASE_URL = original;
+        }
+    });
 });

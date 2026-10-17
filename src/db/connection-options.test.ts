@@ -1,6 +1,12 @@
 import { describe, test } from "node:test";
 import assert from "node:assert";
-import { DATABASE_POOL_OPTIONS, isLocalDatabaseUrl, resolveDatabaseSslMode, usableDatabaseUrl } from "./connection-options.ts";
+import {
+    DATABASE_POOL_OPTIONS,
+    isDatabaseConfigured,
+    isLocalDatabaseUrl,
+    resolveDatabaseSslMode,
+    usableDatabaseUrl,
+} from "./connection-options.ts";
 
 describe("resolveDatabaseSslMode", () => {
     test("requires SSL when no database URL is configured", () => {
@@ -42,6 +48,20 @@ describe("usableDatabaseUrl", () => {
         for (const value of ["[SENSITIVE]", "not a url", "", "   ", undefined]) {
             assert.strictEqual(usableDatabaseUrl(value), undefined, String(value));
         }
+    });
+});
+
+describe("isDatabaseConfigured", () => {
+    test("is true only for a usable connection URL", () => {
+        assert.strictEqual(isDatabaseConfigured({ DATABASE_URL: "postgres://atlas_app:pw@127.0.0.1:54329/atlas_wealth" }), true);
+    });
+
+    // Regression: readiness, the outage notice and Plaid storage counted
+    // Vercel's "[SENSITIVE]" placeholder as a configured database.
+    test("is false for a missing value or Vercel's sensitive placeholder", () => {
+        assert.strictEqual(isDatabaseConfigured({}), false);
+        assert.strictEqual(isDatabaseConfigured({ DATABASE_URL: "   " }), false);
+        assert.strictEqual(isDatabaseConfigured({ DATABASE_URL: "[SENSITIVE]" }), false);
     });
 });
 

@@ -41,11 +41,11 @@ npm run test:e2e
 npm run test:e2e:ui
 ```
 
-`test:e2e:local` (`scripts/e2e/run-local.sh`) recreates `atlas_wealth_e2e` in the Docker container, applies migrations and the fixtures in `scripts/e2e/fixtures.sql` through `scripts/e2e/prepare-database.ts` (the same script CI runs), then starts Playwright. It refuses to start if anything is listening on port 3000 or 3100.
+`test:e2e:local` (`scripts/e2e/run-local.sh`) recreates `atlas_wealth_e2e` in the Docker container, applies migrations and the fixtures in `scripts/e2e/fixtures.sql` through `scripts/e2e/prepare-database.ts` (the same script CI runs), then starts Playwright. It refuses to start if anything is listening on port 3000, 3100 or 3200.
 
-Playwright starts two web servers: the main one on port 3000, and a "database down" one on port 3100 (its own build directory via `NEXT_DIST_DIR`, a `DATABASE_URL` nothing answers, local auth bypass) used only by `outage.spec.ts`.
+Playwright starts three web servers: the main one on port 3000; a "database down" one on port 3100 (a `DATABASE_URL` nothing answers); and an "unusable database URL" one on port 3200 (`DATABASE_URL="[SENSITIVE]"`, Vercel's placeholder). The last two have their own build directories via `NEXT_DIST_DIR`, use local auth bypass, and serve only `outage.spec.ts`.
 
-The Playwright config (`playwright.config.ts`) starts its own servers (`npm run dev` on 3000, the database-down server on 3100) and never reuses a running one: if either port is busy, the run fails. Stop your dev server first.
+The Playwright config (`playwright.config.ts`) starts its own servers (on 3000, 3100 and 3200) and never reuses a running one: if any of those ports is busy, the run fails. Stop your dev server first.
 
 **E2E never touches real services.** A server Playwright starts gets `DATABASE_URL=""` unless the shell exports one, empty Upstash variables and an empty `POLYGON_API_KEY`, so neither `.env.local`'s database, the shared Redis nor the market-data provider is used.
 
@@ -111,7 +111,7 @@ Every page in the application must have a corresponding E2E spec. The current ma
 | `/privacy` | `privacy.spec.ts` | Public when signed out, no app chrome, single h1, all policy sections, Plaid end user policy and contact links, scrolls to the end, off-site callbacks dropped, no overflow at 390px |
 | 404 | `not-found.spec.ts` | Search button opens the palette, link back to Today |
 | Sidebar + IA | `navigation.spec.ts` | Exactly eight sidebar destinations (Help is a Settings tab), section tabs, legacy redirects, identity footer |
-| Database outage | `outage.spec.ts` | Runs against the second web server (port 3100, database configured but unreachable): `/api/health/ready` is 503 `unavailable`; Today, Holdings and Accounts show the outage notice inside their page container, never an empty state |
+| Database outage | `outage.spec.ts` | Port 3100 (database configured but unreachable): `/api/health/ready` is 503 `unavailable`; Today, Holdings and Accounts show the outage notice inside their page container, never an empty state. Port 3200 (`DATABASE_URL="[SENSITIVE]"`): readiness is 503 `not_configured`; the same pages show their empty states and no outage notice |
 | Cross-cutting | `smoke.spec.ts` | Fonts loaded, hydration clean in another timezone and with the browser on the next UTC day, no horizontal overflow at 390px, market-data routes answer 503 `MARKET_DATA_NOT_CONFIGURED` without a provider key, quotes answer from the price store (404 `QUOTE_UNAVAILABLE` for an unpriced symbol), valuation lists unpriced holdings, `/api/cron/daily` reaches the route without a session and refuses with 503 `CRON_NOT_CONFIGURED` without `CRON_SECRET` |
 
 ### Adding E2E tests for a new page

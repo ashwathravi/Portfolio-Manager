@@ -128,5 +128,30 @@ export default defineConfig({
             reuseExistingServer: false,
             timeout: 120_000,
         },
+        {
+            // "Unusable database URL" server for the second half of
+            // outage.spec.ts: DATABASE_URL holds Vercel's "[SENSITIVE]"
+            // placeholder, as a build or runtime that never received the real
+            // value would. That must read as "no database", not as an outage.
+            command: 'npm run dev -- --port 3200',
+            env: {
+                ...webServerEnv,
+                NEXT_DIST_DIR: '.next/e2e-placeholder',
+                DATABASE_URL: '[SENSITIVE]',
+                AUTH_SECRET: '',
+                AUTH_GOOGLE_ID: '',
+                AUTH_GOOGLE_SECRET: '',
+                AUTH_LOCAL_DEV_BYPASS: '1',
+                AUTH_LOCAL_DEV_USER_ID: E2E_USER_ID,
+                ...noSharedRedis,
+                ...noMarketData,
+                ...noCronSecret,
+            },
+            url: 'http://localhost:3200/api/health',
+            // Never reuse a running server: it may be connected to a real
+            // database or the shared Redis. A busy port fails the run instead.
+            reuseExistingServer: false,
+            timeout: 120_000,
+        },
     ],
 });

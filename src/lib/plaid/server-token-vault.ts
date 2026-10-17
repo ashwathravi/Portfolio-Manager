@@ -14,6 +14,7 @@ import {
 import { dirname, resolve } from "node:path";
 import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/db";
+import { isDatabaseConfigured } from "@/db/connection-options";
 import { plaidAccounts, plaidItems } from "@/db/schema";
 import type { PlaidDiscoveredAccount, PlaidPublicTokenExchangeResult } from "./types";
 
@@ -76,7 +77,7 @@ const AUTH_TAG_LENGTH = 16;
 const DEFAULT_KEY_VERSION = "v1";
 
 const drizzlePlaidTokenRegistryStore: PlaidTokenRegistryStore = {
-    configured: () => Boolean(process.env.DATABASE_URL?.trim()),
+    configured: () => isDatabaseConfigured(),
     async upsertConnection(input) {
         const [item] = await db.insert(plaidItems)
             .values({
