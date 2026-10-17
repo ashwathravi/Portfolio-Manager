@@ -3,7 +3,9 @@ import assert from "node:assert/strict";
 
 import {
     buildBarsQuery,
+    buildLatestBarDateQuery,
     buildLatestClosesQuery,
+    buildSymbolsNeedingHistoryCountQuery,
     buildSymbolsNeedingHistoryQuery,
     buildTrackSecuritiesQuery,
     buildUpsertBarsQuery,
@@ -128,5 +130,18 @@ describe("price store queries", () => {
         assert.match(sql, /"securities"\."active" = \$\d+/i);
         assert.match(sql, /order by "securities"\."created_at" asc, "securities"\."symbol" asc limit \$\d+/i);
         assert.deepEqual(params, [true, 5]);
+    });
+
+    test("the backfill queue count uses the same filter as the queue", () => {
+        const { sql, params } = buildSymbolsNeedingHistoryCountQuery().toSQL();
+        assert.match(sql, /^select count\(\*\) from "securities" where/i);
+        assert.match(sql, /"securities"\."history_start_date" is null and "securities"\."active" = \$\d+/i);
+        assert.deepEqual(params, [true]);
+    });
+
+    test("the latest stored date is the maximum bar date across all symbols", () => {
+        const { sql, params } = buildLatestBarDateQuery().toSQL();
+        assert.equal(sql, 'select max("date") from "price_bars"');
+        assert.deepEqual(params, []);
     });
 });

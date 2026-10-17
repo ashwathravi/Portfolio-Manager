@@ -13,7 +13,7 @@
  * labels read.
  */
 
-import { and, asc, desc, eq, gte, inArray, isNull, lte, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, inArray, isNull, lte, max, sql } from "drizzle-orm";
 
 import { db } from "@/db";
 import { priceBars, securities } from "@/db/schema";
@@ -154,13 +154,24 @@ export function buildBarsQuery(symbol: string, from: string, to: string, databas
         .orderBy(asc(priceBars.date));
 }
 
+const needsHistory = () => and(isNull(securities.historyStartDate), eq(securities.active, true));
+
 export function buildSymbolsNeedingHistoryQuery(limit: number, database: Database = db) {
     return database
         .select({ symbol: securities.symbol })
         .from(securities)
-        .where(and(isNull(securities.historyStartDate), eq(securities.active, true)))
+        .where(needsHistory())
         .orderBy(asc(securities.createdAt), asc(securities.symbol))
         .limit(limit);
+}
+
+export function buildSymbolsNeedingHistoryCountQuery(database: Database = db) {
+    return database.select({ count: count() }).from(securities).where(needsHistory());
+}
+
+/** The newest bar date stored for any symbol (served by price_bars_date_idx). */
+export function buildLatestBarDateQuery(database: Database = db) {
+    return database.select({ date: max(priceBars.date) }).from(priceBars);
 }
 
 // ---------------------------------------------------------------------------
@@ -184,6 +195,18 @@ export async function listTrackedSymbols(database: Database = db): Promise<Set<s
 export async function listSymbolsNeedingHistory(limit: number, database: Database = db): Promise<string[]> {
     const rows = await buildSymbolsNeedingHistoryQuery(limit, database);
     return rows.map((row) => row.symbol);
+}
+
+/** How many tracked symbols are still waiting for their history backfill. */
+export async function countSymbolsNeedingHistory(database: Database = db): Promise<number> {
+    const [row] = await buildSymbolsNeedingHistoryCountQuery(database);
+    return row?.count ?? 0;
+}
+
+/** The newest date in price_bars, or null when nothing is stored yet. */
+export async function getLatestBarDate(database: Database = db): Promise<string | null> {
+    const [row] = await buildLatestBarDateQuery(database);
+    return row?.date ?? null;
 }
 
 export async function markHistoryLoaded(symbol: string, startDate: string, database: Database = db): Promise<void> {
