@@ -33,7 +33,7 @@ A failed migration stops the job before anything is deployed. Migrations are not
 
 ## Scheduled jobs
 
-Vercel Cron calls `GET /api/cron/daily` at 22:30 UTC on weekdays (`vercel.json`): 6:30 PM ET in summer, 5:30 PM in winter, after the close. Hobby runs a cron job once a day at most and may start it up to an hour late. Vercel sends `Authorization: Bearer <CRON_SECRET>`; the route compares it in constant time and answers 503 when `CRON_SECRET` is unset and 401 for a wrong token. The proxy lets `/api/cron/*` through without a session (limited to 10 calls a minute per IP), so every route there must check the secret itself (`createCronHandler` in `src/lib/jobs/cron.ts`).
+Vercel Cron calls `GET /api/cron/daily` at 22:30 UTC on weekdays (`vercel.json`): 6:30 PM ET in summer, 5:30 PM in winter, after the close. Hobby runs a cron job once a day at most and may start it up to an hour late. Vercel sends `Authorization: Bearer <CRON_SECRET>`; the route compares it in constant time and answers 503 when `CRON_SECRET` is unset and 401 for a wrong token. One run at a time: a run holds a Postgres advisory lock (transaction-scoped, so it works through the pooler) until it finishes, and a request that arrives meanwhile, such as a manual run during the scheduled one, answers 409 `CRON_RUNNING` and runs nothing. The proxy lets `/api/cron/*` through without a session (limited to 10 calls a minute per IP), so every route there must check the secret itself (`createCronHandler` in `src/lib/jobs/cron.ts`).
 
 The route runs these jobs in order; one failing doesn't stop the next:
 
