@@ -1,0 +1,28 @@
+/*
+ * Metric-matched fallbacks shown until Plex loads (font-display: swap), so the
+ * swap does not shift layout. The values are the ones next/font/google
+ * generated for these families.
+ */
+@font-face {
+  font-family: "IBM Plex Sans Fallback";
+  src: local("Arial");
+  ascent-override: 101.32%;
+  descent-override: 27.18%;
+  line-gap-override: 0%;
+  size-adjust: 101.17%;
+}
+
+@font-face {
+  font-family: "IBM Plex Mono Fallback";
+  src: local("Arial");
+  ascent-override: 76.16%;
+  descent-override: 20.43%;
+  line-gap-override: 0%;
+  size-adjust: 134.59%;
+}
+
+/* Read by --font-inter / --font-jetbrains-mono in app/globals.css. */
+:root {
+  --font-app-sans: "IBM Plex Sans", "IBM Plex Sans Fallback";
+  --font-app-mono: "IBM Plex Mono", "IBM Plex Mono Fallback";
+}

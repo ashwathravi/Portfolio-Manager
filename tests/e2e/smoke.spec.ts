@@ -33,6 +33,48 @@ test('regression: the app font is loaded (IBM Plex), not a silent system fallbac
     expect(loaded).toBe(true);
 });
 
+test('regression: fonts are self-hosted, with the Latin files preloaded and every subset available', async ({ page }) => {
+    // next/font/google fetched the fonts from Google on every compile, and the
+    // dev server showed a Build Error page whenever Google answered with URLs
+    // Turbopack cannot parse. The files now ship from src/styles/fonts.
+    const googleRequests: string[] = [];
+    page.on('request', (request) => {
+        const { hostname } = new URL(request.url());
+        if (hostname === 'fonts.googleapis.com' || hostname === 'fonts.gstatic.com') googleRequests.push(request.url());
+    });
+    await page.goto('/');
+
+    // Latin Plex Sans plus the three Latin Plex Mono weights, as before.
+    const preloads = await page.locator('link[rel="preload"][as="font"]').evaluateAll(
+        (links) => links.map((link) => new URL((link as HTMLLinkElement).href).pathname),
+    );
+    expect(preloads).toHaveLength(4);
+    for (const path of preloads) expect(path).toMatch(/^\/_next\/static\/media\/.+\.woff2$/);
+
+    const faces = await page.evaluate(async () => {
+        const load = async (font: string, text?: string) =>
+            (await document.fonts.load(font, text)).map((face) => ({ family: face.family, status: face.status, unicodeRange: face.unicodeRange }));
+        return {
+            mono: await load('600 16px "IBM Plex Mono"', '0123456789'),
+            // Δ labels the dashboard's period readouts; it comes from the Greek file.
+            greek: await load('600 16px "IBM Plex Sans"', 'Δ'),
+        };
+    });
+    expect(faces.mono.length).toBeGreaterThan(0);
+    for (const face of faces.mono) expect(face).toMatchObject({ family: expect.stringMatching(/IBM Plex Mono/), status: 'loaded' });
+    expect(faces.greek).toHaveLength(1);
+    expect(faces.greek[0]).toMatchObject({ family: expect.stringMatching(/IBM Plex Sans/), status: 'loaded' });
+    expect(faces.greek[0].unicodeRange).toMatch(/U\+370-377/i);
+
+    const fontFiles = await page.evaluate(() => performance.getEntriesByType('resource')
+        .map((entry) => new URL(entry.name))
+        .filter((url) => url.pathname.endsWith('.woff2'))
+        .map((url) => `${url.origin === location.origin ? '' : url.origin}${url.pathname}`));
+    expect(fontFiles.length).toBeGreaterThan(0);
+    for (const file of fontFiles) expect(file).toMatch(/^\/_next\/static\/media\//);
+    expect(googleRequests).toEqual([]);
+});
+
 test.describe('Hydration across viewer timezones', () => {
     // Regression: dates and times formatted in the server's timezone made
     // Behaviour, Research, and Trade fail hydration for viewers elsewhere.
