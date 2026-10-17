@@ -68,7 +68,7 @@ describe('fetchQuotes', () => {
     });
 
     test('uppercases and joins symbols into the query string', async () => {
-        mockFetch({ ok: true, json: {} });
+        mockFetch({ ok: true, json: { data: [] } });
         await fetchQuotes(['aapl', ' msft ']);
         assert.strictEqual(
             calls[0].url,
@@ -95,23 +95,33 @@ describe('fetchQuotes', () => {
         await assert.rejects(fetchQuotes(['AAPL']), /Failed to fetch quotes \(500\)/);
     });
 
-    test('returns the parsed quote map on success', async () => {
+    test('indexes the actual route envelope by normalized symbol without losing quote metadata', async () => {
+        const quote = { symbol: ' aapl ', price: 100, change: -1, changePercent: -1, timestamp: '2026-10-03T18:11:00.000Z', isRealtime: false };
+        mockFetch({ ok: true, json: { data: [quote] } });
+        assert.deepStrictEqual(await fetchQuotes(['AAPL', 'MSFT']), { AAPL: { ...quote, symbol: 'AAPL' } });
+    });
+
+    test('empty/partial successful batches leave missing symbols absent', async () => {
+        mockFetch({ ok: true, json: { data: [] } });
+        assert.deepStrictEqual(await fetchQuotes(['AAPL']), {});
+    });
+
+    test('rejects a successful response that is not a quote envelope', async () => {
+        for (const json of [{}, { data: {} }, [{ symbol: 'AAPL' }]]) {
+            mockFetch({ ok: true, json });
+            await assert.rejects(fetchQuotes(['AAPL']), /Invalid quotes response/);
+        }
+    });
+
+    test('drops malformed and zero-priced entries and keeps the valid quotes in the batch', async () => {
+        const msft = { symbol: 'MSFT', price: 500, change: 2, changePercent: 0.4, timestamp: '2026-10-03T18:11:00.000Z', isRealtime: false };
         mockFetch({
             ok: true,
-            json: {
-                AAPL: {
-                    symbol: 'AAPL',
-                    price: 100,
-                    change: 1,
-                    changePercent: 1,
-                    volume: 1,
-                    timestamp: 0,
-                },
-            },
+            json: { data: [null, { symbol: 'AAPL' }, { ...msft, symbol: 'SPY', price: Number.NaN }, { ...msft, symbol: 'QQQ', price: 0 }, msft] },
         });
-        const result = await fetchQuotes(['AAPL']);
-        assert.strictEqual(result.AAPL.price, 100);
+        assert.deepStrictEqual(await fetchQuotes(['AAPL', 'MSFT', 'SPY', 'QQQ']), { MSFT: msft });
     });
+
 });
 
 describe('fetchHistorical', () => {
