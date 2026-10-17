@@ -15,6 +15,12 @@ describe('splitCsvLine', () => {
         assert.deepStrictEqual(splitCsvLine('X,"He said ""hi""",1'), ['X', 'He said "hi"', '1']);
         assert.deepStrictEqual(splitCsvLine('a,,b'), ['a', '', 'b']);
     });
+    test('rejects malformed records and preserves trailing empty fields', () => {
+        assert.deepStrictEqual(splitCsvLine('AAPL,"Apple\nInc",10,'), ['AAPL', 'Apple\nInc', '10', '']);
+        for (const record of ['AAPL,"Apple', 'AAPL,App"le,10', 'AAPL,"Apple"oops,10', 'AAPL,10\nMSFT,20']) {
+            assert.throws(() => splitCsvLine(record));
+        }
+    });
 });
 
 describe('parseNumber', () => {
@@ -40,6 +46,50 @@ describe('parseHoldingsCsv', () => {
         ]);
     });
 
+    test('keeps quoted multiline descriptions as one holding, never a phantom row', () => {
+        for (const newline of ['\n', '\r\n', '\r']) {
+            const r = parseHoldingsCsv(`Symbol,Description,Quantity,Average Cost${newline}AAPL,"Apple${newline}INC,Whatever,10,100${newline}""quoted""",10,100${newline}MSFT,Microsoft,2,300`);
+            assert.deepStrictEqual(r.issues, []);
+            assert.deepStrictEqual(r.rows, [
+                { symbol: 'AAPL', name: `Apple${newline}INC,Whatever,10,100${newline}"quoted"`, quantity: 10, avgCost: 100 },
+                { symbol: 'MSFT', name: 'Microsoft', quantity: 2, avgCost: 300 },
+            ]);
+        }
+        const simple = parseHoldingsCsv('Symbol,Description,Quantity,Average Cost\nAAPL,"Apple\nInc",10,100');
+        assert.deepStrictEqual(simple.issues, []);
+        assert.strictEqual(simple.rows[0]?.symbol, 'AAPL');
+    });
+
+    test('reports malformed quoting and column counts at the record starting line', () => {
+        const r = parseHoldingsCsv('Symbol,Description,Quantity,Average Cost\nAAPL,"Apple\nInc",10,100\nBAD,"Name"oops,1,1\nMSFT,Micro"soft,1,1\nGOOG,Google,1,1,extra\nMETA,Meta,1\nNVDA,Nvidia,1,1');
+        assert.deepStrictEqual(r.rows.map((r) => r.symbol), ['AAPL', 'NVDA']);
+        assert.deepStrictEqual(r.issues.map((i) => i.line), [4, 5, 6, 7]);
+        const unclosed = parseHoldingsCsv('Symbol,Description,Quantity,Average Cost\nAAPL,"Apple\nINC,Whatever,10,100');
+        assert.deepStrictEqual(unclosed.rows, []);
+        assert.deepStrictEqual(unclosed.issues.map((i) => i.line), [2]);
+        assert.match(unclosed.issues[0].message, /unterminated/i);
+    });
+
+    test('preserves CASH and prefix-like securities; cash needs export context', () => {
+        const r = parseHoldingsCsv('Symbol,Description,Quantity,Average Cost,Asset Type\nCASH,Pathward,10,100,Stock\nCASHX,Fund,20,1,Mutual Fund\nTOTALX,Security,1,1,Stock\nPENDINGX,Security,1,1,Stock\nCASH,Cash balance,100,1,Cash\nUSD,US dollars,100,1,Currency\nSPAXX**,Broker core position,100,1,\nAccount Total,,,,');
+        assert.deepStrictEqual(r.rows.map((r) => r.symbol), ['CASH', 'CASHX', 'TOTALX', 'PENDINGX']);
+        assert.deepStrictEqual(r.issues, []);
+        assert.strictEqual(r.skipped, 4);
+        const ambiguous = parseHoldingsCsv('Symbol,Quantity,Average Cost\nCASH,10,100\nCASHX,20,1\nSPAXX,30,1');
+        assert.deepStrictEqual(ambiguous.rows.map((r) => r.symbol), ['CASH', 'CASHX', 'SPAXX']);
+        assert.deepStrictEqual(ambiguous.issues, []);
+        assert.strictEqual(ambiguous.skipped, 0);
+        const balance = parseHoldingsCsv('Symbol,Description,Quantity,Average Cost\nCASH,Cash balance,,');
+        assert.strictEqual(balance.skipped, 1);
+        assert.deepStrictEqual(balance.issues, []);
+        const corrupt = parseHoldingsCsv('Symbol,Description,Quantity,Average Cost\nCASH,Cash balance,oops,1');
+        assert.strictEqual(corrupt.skipped, 0);
+        assert.match(corrupt.issues[0].message, /quantity/);
+        const security = parseHoldingsCsv('Symbol,Description,Quantity,Average Cost,Asset Type\nCASH,Cash balance,,1,Stock');
+        assert.strictEqual(security.skipped, 0);
+        assert.match(security.issues[0].message, /quantity/);
+    });
+
     test('derives average cost from a total cost-basis column', () => {
         const r = parseHoldingsCsv('Ticker,Shares,Cost Basis Total\nAAPL,4,"$600.00"');
         assert.deepStrictEqual(r.rows, [{ symbol: 'AAPL', name: '', quantity: 4, avgCost: 150 }]);
@@ -60,6 +110,69 @@ describe('parseHoldingsCsv', () => {
         assert.deepStrictEqual(r.rows.map((x) => x.symbol), ['VTI']);
         assert.deepStrictEqual(r.issues, []);
         assert.ok(r.skipped >= 3);
+    });
+
+    // Regression: blocking the import on any issue made whole broker files
+    // unimportable when their summary, cash and footer rows became issues.
+    test('imports a Schwab-style export: quoted cells, trailing commas, cash and total rows', () => {
+        const csv = [
+            '"Positions for account Individual ...123 as of 05:00 PM ET, 2026/10/13"',
+            '',
+            '"Symbol","Description","Quantity","Price","Market Value","Cost Basis","Security Type",',
+            '"AAPL","APPLE INC","10","$250.00","$2,500.00","$1,500.00","Equity",',
+            '"VTI","VANGUARD TOTAL STOCK MARKET ETF","12","$300.00","$3,600.00","$2,520.00","ETFs & Closed End Funds",',
+            '"Cash & Cash Investments","--","--","--","$1,000.00","--","Cash and Money Market",',
+            '"Account Total","--","--","--","$7,100.00","$4,020.00","--",',
+        ].join('\n');
+        const r = parseHoldingsCsv(csv);
+        assert.deepStrictEqual(r.issues, []);
+        assert.deepStrictEqual(r.rows, [
+            { symbol: 'AAPL', name: 'APPLE INC', quantity: 10, avgCost: 150 },
+            { symbol: 'VTI', name: 'VANGUARD TOTAL STOCK MARKET ETF', quantity: 12, avgCost: 210 },
+        ]);
+        assert.strictEqual(r.skipped, 2);
+    });
+
+    test('imports a Fidelity-style export: core position, trailing commas and footer notes', () => {
+        const csv = [
+            'Account Number,Account Name,Symbol,Description,Quantity,Last Price,Current Value,Cost Basis Total,Average Cost Basis,Type',
+            'Z12345678,Individual,SPAXX**,HELD IN MONEY MARKET,,,$1000.00,,,Cash,',
+            'Z12345678,Individual,AAPL,APPLE INC,10,$250.00,$2500.00,$1500.00,$150.00,Margin,',
+            'Z12345678,Individual,FXAIX,FIDELITY 500 INDEX FUND,5,$200.00,$1000.00,$900.00,$180.00,Cash,',
+            '',
+            '"The data and information in this spreadsheet is provided to you solely for your use."',
+            '"Date downloaded 10/13/2026 5:00 PM ET"',
+        ].join('\n');
+        const r = parseHoldingsCsv(csv);
+        assert.deepStrictEqual(r.issues, []);
+        assert.deepStrictEqual(r.rows.map((x) => [x.symbol, x.quantity, x.avgCost]), [['AAPL', 10, 150], ['FXAIX', 5, 180]]);
+    });
+
+    test('skips a literal Pending summary row but imports real PENDING-prefixed symbols', () => {
+        const r = parseHoldingsCsv('Symbol,Description,Quantity,Average Cost\nAAPL,Apple,10,100\nPending,,,\nPENDX,Pend Corp,5,20');
+        assert.deepStrictEqual(r.issues, []);
+        assert.deepStrictEqual(r.rows.map((x) => x.symbol), ['AAPL', 'PENDX']);
+        assert.strictEqual(r.skipped, 1);
+    });
+
+    test('skips one-word footers outside the symbol column, even ticker-like ones', () => {
+        const csv = [
+            'Account Number,Account Name,Symbol,Description,Quantity,Average Cost Basis',
+            'Z12345678,Individual,AAPL,APPLE INC,10,$150.00',
+            'Total',
+            'Disclaimer',
+        ].join('\n');
+        const r = parseHoldingsCsv(csv);
+        assert.deepStrictEqual(r.issues, []);
+        assert.deepStrictEqual(r.rows.map((x) => x.symbol), ['AAPL']);
+        assert.strictEqual(r.skipped, 2);
+    });
+
+    test('a free-text note in the symbol column is skipped; a lone ticker is still an issue', () => {
+        const r = parseHoldingsCsv('Symbol,Description,Quantity,Average Cost\nAAPL,Apple,10,100\nDate downloaded 10/13/2026\nMSFT');
+        assert.deepStrictEqual(r.rows.map((x) => x.symbol), ['AAPL']);
+        assert.deepStrictEqual(r.issues.map((i) => i.line), [4]);
+        assert.strictEqual(r.skipped, 1);
     });
 
     test('combines two lots of the same symbol at the weighted average cost', () => {

@@ -62,7 +62,7 @@ export function ImportHoldingsDialog({
     };
 
     const rows = useMemo(() => parsed?.rows ?? [], [parsed]);
-    const canImport = rows.length > 0 && !submitting && (target !== NEW_ACCOUNT || newName.trim().length > 0);
+    const canImport = rows.length > 0 && parsed?.issues.length === 0 && !submitting && (target !== NEW_ACCOUNT || newName.trim().length > 0);
 
     const submit = async () => {
         if (!canImport) return;
@@ -125,7 +125,13 @@ export function ImportHoldingsDialog({
                                 type="file"
                                 accept=".csv,text/csv"
                                 aria-label="CSV file"
-                                onChange={(e) => void onFile(e.target.files?.[0])}
+                                onChange={(e) => {
+                                    const file = e.target.files?.[0];
+                                    // Clear the selection so choosing the same, corrected
+                                    // file again still fires change and re-parses it.
+                                    e.target.value = '';
+                                    void onFile(file);
+                                }}
                             />
                         </label>
 
@@ -162,13 +168,16 @@ export function ImportHoldingsDialog({
                                     </div>
                                 )}
                                 {parsed.issues.length > 0 && (
-                                    <ul className="pm-import-issues" aria-label="Rows not imported">
-                                        {parsed.issues.slice(0, 10).map((i) => (
-                                            <li key={`${i.line}-${i.message}`}>
-                                                Line {i.line}: {i.message}
-                                            </li>
-                                        ))}
-                                    </ul>
+                                    <>
+                                        <p role="alert">Fix the listed issues and upload the CSV again before importing.</p>
+                                        <ul className="pm-import-issues" aria-label="Rows not imported">
+                                            {parsed.issues.slice(0, 10).map((i) => (
+                                                <li key={`${i.line}-${i.message}`}>
+                                                    Line {i.line}: {i.message}
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    </>
                                 )}
                             </div>
                         )}
