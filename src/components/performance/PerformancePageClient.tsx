@@ -1,9 +1,7 @@
 "use client";
 
-import {
-    benchmarkMonthlySeries,
-    portfolioMonthlySeries,
-} from "@/lib/performance/series";
+import { useMemo } from "react";
+import { getExampleMonthlySeries } from "@/lib/performance/series";
 import type { MonthlyValuation } from "@/lib/performance/periodSummary";
 import { EquityCurveCard, type Benchmark } from "./EquityCurveCard";
 import { MetricsByPeriodTable } from "./MetricsByPeriodTable";
@@ -27,6 +25,9 @@ import { SampleGate } from "@/components/data-display/SampleGate";
  * All state is local to each card. The client wrapper exists purely to
  * keep the page file thin and to keep the topbar / breadcrumbs / actions
  * in sync with the rest of the Workspace routes.
+ *
+ * `now` is the server's request time, shared with the CSV export, so the
+ * browser hydrates the same months and the export matches the charts.
  */
 
 // Derive alt benchmarks from the single live series we have until AR-11/12
@@ -52,26 +53,30 @@ function rescaleReturns(
     return out;
 }
 
-const BENCHMARKS: Benchmark[] = [
-    { key: "sp500", label: "S&P 500", series: benchmarkMonthlySeries },
-    {
-        key: "ndx",
-        label: "NASDAQ-100",
-        series: rescaleReturns(benchmarkMonthlySeries, 1.45),
-    },
-    {
-        key: "russell",
-        label: "Russell 2000",
-        series: rescaleReturns(benchmarkMonthlySeries, 0.72),
-    },
-    {
-        key: "custom",
-        label: "Custom blend",
-        series: rescaleReturns(benchmarkMonthlySeries, 1.15),
-    },
-];
+function buildBenchmarks(sp500: MonthlyValuation[]): Benchmark[] {
+    return [
+        { key: "sp500", label: "S&P 500", series: sp500 },
+        {
+            key: "ndx",
+            label: "NASDAQ-100",
+            series: rescaleReturns(sp500, 1.45),
+        },
+        {
+            key: "russell",
+            label: "Russell 2000",
+            series: rescaleReturns(sp500, 0.72),
+        },
+        {
+            key: "custom",
+            label: "Custom blend",
+            series: rescaleReturns(sp500, 1.15),
+        },
+    ];
+}
 
-export function PerformancePageClient() {
+export function PerformancePageClient({ now }: { now: number }) {
+    const { portfolio, benchmark } = getExampleMonthlySeries(now);
+    const benchmarks = useMemo(() => buildBenchmarks(benchmark), [benchmark]);
     return (
         <div className="pm-perf-stack">
             <SampleGate
@@ -87,16 +92,16 @@ export function PerformancePageClient() {
                 </SampleDataNotice>
 
                 <EquityCurveCard
-                    portfolio={portfolioMonthlySeries}
-                    benchmarks={BENCHMARKS}
+                    portfolio={portfolio}
+                    benchmarks={benchmarks}
                 />
 
                 <MetricsByPeriodTable
-                    portfolio={portfolioMonthlySeries}
-                    benchmark={benchmarkMonthlySeries}
+                    portfolio={portfolio}
+                    benchmark={benchmark}
                 />
 
-                <MonthlyHeatmapCard portfolio={portfolioMonthlySeries} />
+                <MonthlyHeatmapCard portfolio={portfolio} />
             </SampleGate>
         </div>
     );

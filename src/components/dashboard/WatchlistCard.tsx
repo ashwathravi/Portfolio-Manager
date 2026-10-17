@@ -6,6 +6,8 @@ import { Pencil } from "lucide-react";
 import { useAutoRefreshQuotes } from "@/lib/hooks/useAutoRefreshQuotes";
 import { useWatchlist } from "@/lib/research/useWatchlist";
 import { SampleTag } from "@/components/data-display/SampleTag";
+import { useEasternDate } from "@/lib/hooks/useEasternDate";
+import { isTodaysQuote } from "@/lib/markets/quote-session";
 
 /**
  * Today › Watchlist. Reads the same saved watchlist as Research, with live
@@ -25,6 +27,7 @@ export function WatchlistCard({ limit = 5, className }: WatchlistCardProps) {
     const shown = items.slice(0, limit);
     const symbols = useMemo(() => shown.map((r) => r.ticker), [shown]);
     const { quotes } = useAutoRefreshQuotes(symbols);
+    const todayEt = useEasternDate();
     const hasSample = shown.some((r) => r.sample);
 
     return (
@@ -57,7 +60,8 @@ export function WatchlistCard({ limit = 5, className }: WatchlistCardProps) {
                     {shown.map((r) => {
                         const q = quotes[r.ticker];
                         const price = q && Number.isFinite(q.price) && q.price > 0 ? q.price : null;
-                        const pct = q && Number.isFinite(q.changePercent) ? q.changePercent : null;
+                        // An earlier session's change is not the current move.
+                        const pct = q && Number.isFinite(q.changePercent) && isTodaysQuote(q, todayEt) ? q.changePercent : null;
                         return (
                             <li key={r.id} className="pm-watchlist-row">
                                 <Link href={`/portfolios/detail/${r.ticker}`} className="pm-watchlist-sym">

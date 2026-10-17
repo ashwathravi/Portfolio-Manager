@@ -98,8 +98,11 @@ export interface AlertTrigger {
 }
 
 export interface MarketSnapshot {
-    /** Current prices by symbol (uppercased). */
-    quotes: Record<string, { price: number; changePercent: number }>;
+    /**
+     * Current prices by symbol (uppercased). changePercent is today's move,
+     * or null when the latest price is an earlier session's close.
+     */
+    quotes: Record<string, { price: number; changePercent: number | null }>;
     /** Total portfolio market value in base currency. */
     portfolioValue: number;
     /** Portfolio day change as a fraction (0.012 = +1.2%). */

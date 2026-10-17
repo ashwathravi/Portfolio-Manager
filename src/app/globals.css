@@ -1543,6 +1543,8 @@
 }
 .pm-num-pos { color: var(--pm-success); }
 .pm-num-neg { color: var(--pm-danger); }
+/* No figure to show (e.g. no move from today's session): a neutral dash. */
+.pm-num-muted { color: var(--pm-fg-subtle); }
 
 /* ---- Activity feed (AR-72 right col) ---- */
 

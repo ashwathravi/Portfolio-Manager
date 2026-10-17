@@ -15,6 +15,7 @@ import {
   buildOwnedPortfolioHoldingsQuery,
   buildOwnedPortfolioQuery,
 } from '@/lib/portfolio-repository';
+import { MarketDataNotConfiguredError } from '@/lib/providers/errors';
 import type { MarketDataProvider, Quote } from '@/types/market-data';
 
 // ---------------------------------------------------------------------------
@@ -55,6 +56,20 @@ export interface PortfolioValuationOptions {
   userId: string;
 }
 
+/** The two lookups a valuation makes; injectable so tests run without a database. */
+export interface PortfolioValuationQueries {
+  ownedPortfolio(userId: string, portfolioId: string): PromiseLike<Array<{ id: string }>>;
+  ownedHoldings(
+    userId: string,
+    portfolioId: string,
+  ): PromiseLike<Array<{ symbol: string; name: string; quantity: string; avgCost: string }>>;
+}
+
+const DATABASE_QUERIES: PortfolioValuationQueries = {
+  ownedPortfolio: buildOwnedPortfolioQuery,
+  ownedHoldings: buildOwnedPortfolioHoldingsQuery,
+};
+
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
@@ -71,7 +86,10 @@ const BATCH_CHUNK_SIZE = 75;
 // ---------------------------------------------------------------------------
 
 export class PortfolioValuationEngine {
-  constructor(private readonly provider: MarketDataProvider) {}
+  constructor(
+    private readonly provider: MarketDataProvider,
+    private readonly queries: PortfolioValuationQueries = DATABASE_QUERIES,
+  ) {}
 
   /**
    * Compute the live valuation of every holding in a portfolio.
@@ -86,14 +104,14 @@ export class PortfolioValuationEngine {
       throw new PortfolioAccessError('Portfolio user scope is required');
     }
 
-    const [allowedPortfolio] = await buildOwnedPortfolioQuery(options.userId, portfolioId);
+    const [allowedPortfolio] = await this.queries.ownedPortfolio(options.userId, portfolioId);
 
     if (!allowedPortfolio) {
       throw new PortfolioAccessError();
     }
 
     // 1. Fetch holdings from DB
-    const rows = await buildOwnedPortfolioHoldingsQuery(options.userId, portfolioId);
+    const rows = await this.queries.ownedHoldings(options.userId, portfolioId);
 
     // Early return for empty portfolio
     if (rows.length === 0) {
@@ -200,7 +218,9 @@ export class PortfolioValuationEngine {
    * if one chunk fails.
    *
    * Individual symbol failures are captured in the errors array rather
-   * than rejecting the entire valuation.
+   * than rejecting the entire valuation. Market data that isn't configured
+   * is not a pricing failure, so it rejects instead of valuing every
+   * holding at zero.
    */
   private async fetchPricesInChunks(
     symbols: string[],
@@ -235,6 +255,7 @@ export class PortfolioValuationEngine {
           }
         }
       } else {
+        if (result.reason instanceof MarketDataNotConfiguredError) throw result.reason;
         // Entire chunk failed — record all symbols as errors
         errors.push(...chunks[i]);
       }

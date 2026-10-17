@@ -2,12 +2,13 @@ import { sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
 
 import { db } from "@/db";
+import { isDatabaseConfigured } from "@/db/connection-options";
 import { createReadinessCheck } from "@/lib/health/readiness";
 
 export const dynamic = "force-dynamic";
 
 const checkReadiness = createReadinessCheck({
-    isConfigured: () => Boolean(process.env.DATABASE_URL?.trim()),
+    isConfigured: () => isDatabaseConfigured(),
     // statement_timeout makes Postgres cancel the ping itself, so a slow
     // database frees the connection instead of holding it open.
     ping: () => db.transaction(async (tx) => {

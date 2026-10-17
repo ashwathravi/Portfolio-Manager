@@ -68,3 +68,16 @@ VALUES
   ('00000000-0000-4000-8000-000000000201', '00000000-0000-4000-8000-000000000001', now(), 'BUY', 'AAPL', 1, 182.45, 182.45, 'User A fixture'),
   ('00000000-0000-4000-8000-000000000209', '00000000-0000-4000-8000-000000000009', now(), 'BUY', 'XUSR', 1, 999.00, 999.00, 'Cross tenant sentinel')
 ON CONFLICT (id) DO NOTHING;
+
+-- Two stored closes for a symbol nobody holds, ending on the Eastern date the
+-- fixtures were applied: the position detail page has a closing quote from
+-- "today" to label, and to stop labelling once the date moves on.
+INSERT INTO securities (symbol, name, history_start_date)
+VALUES ('IBM', 'International Business Machines', (now() AT TIME ZONE 'America/New_York')::date - 1)
+ON CONFLICT (symbol) DO NOTHING;
+
+INSERT INTO price_bars (symbol, date, open, high, low, close, volume, source)
+VALUES
+  ('IBM', (now() AT TIME ZONE 'America/New_York')::date - 1, 200, 202, 198, 200, 1000, 'e2e'),
+  ('IBM', (now() AT TIME ZONE 'America/New_York')::date, 200, 206, 199, 205, 1000, 'e2e')
+ON CONFLICT (symbol, date) DO NOTHING;

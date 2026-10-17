@@ -32,7 +32,7 @@ Persistence and providers
   +-- Postgres via Drizzle
   +-- Plaid API
   +-- Schwab API
-  +-- Polygon/Massive and Alpha Vantage market data
+  +-- Massive (formerly Polygon) market data
   +-- SEC EDGAR
 ```
 
@@ -161,9 +161,9 @@ LocalStorage must not store:
 
 Important files:
 
-- `src/lib/api/market-data/index.ts`
-- `src/lib/api/market-data/alpha-vantage.ts`
+- `src/lib/api/market-data/route-errors.ts`
 - `src/lib/providers/polygon-massive-adapter.ts`
+- `src/lib/providers/errors.ts`
 - `src/lib/services/market-data-service.ts`
 - `src/lib/services/portfolio-valuation-engine.ts`
 - `src/lib/cache/*`
@@ -352,7 +352,6 @@ Expected server-only secrets:
 - `PLAID_CLIENT_ID`
 - `PLAID_SECRET`
 - `POLYGON_API_KEY`
-- `ALPHA_VANTAGE_API_KEY`
 - `SCHWAB_CLIENT_ID`
 - `SCHWAB_CLIENT_SECRET`
 - `SCHWAB_ACCESS_TOKEN`

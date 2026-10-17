@@ -1,7 +1,7 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert';
 import { toActivityRows } from '@/lib/portfolio/activity';
-import { DEFAULT_THESES } from '@/lib/research/thesis';
+import { getDefaultTheses } from '@/lib/research/thesis';
 import { toTodayActivity, toTodayTheses } from './rows';
 
 describe('toTodayActivity', () => {
@@ -27,7 +27,7 @@ describe('toTodayActivity', () => {
 
 describe('toTodayTheses', () => {
     test('uses the research store theses (active only), newest first, with links', () => {
-        const rows = toTodayTheses(DEFAULT_THESES);
+        const rows = toTodayTheses(getDefaultTheses());
         assert.ok(rows.length > 0);
         assert.ok(rows.every((r) => r.href?.startsWith('/research/thesis/')));
         assert.ok(!rows.some((r) => r.tag === 'META'), 'archived META thesis excluded');
