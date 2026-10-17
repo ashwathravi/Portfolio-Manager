@@ -52,8 +52,11 @@ test.describe('Privacy policy', () => {
 test.describe('Privacy policy — sign-in callback', () => {
   test('drops a callback that points off the site', async ({ context, page }) => {
     await context.clearCookies();
-    await page.goto('/privacy?callbackUrl=%2F%2Fevil.test');
-    await expect(page.getByRole('link', { name: 'Back to sign in' })).toHaveAttribute('href', '/login');
+    // "//host", and "/<tab>/host", which browsers normalize to "//host".
+    for (const callback of ['%2F%2Fevil.test', '%2F%09%2Fevil.test']) {
+      await page.goto(`/privacy?callbackUrl=${callback}`);
+      await expect(page.getByRole('link', { name: 'Back to sign in' })).toHaveAttribute('href', '/login');
+    }
   });
 });
 

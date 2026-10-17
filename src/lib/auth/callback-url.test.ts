@@ -13,6 +13,17 @@ describe("safeCallbackPath", () => {
             assert.equal(safeCallbackPath(value), "/", String(value));
         }
     });
+
+    test("refuses targets a browser would normalize to another site", () => {
+        // Browsers strip tabs and newlines and read "\\" as "/" in URLs.
+        for (const value of ["/\t/evil.test", "/\n/evil.test", "/\r\n/evil.test", "/\\/evil.test", "/\t\\evil.test"]) {
+            assert.equal(safeCallbackPath(value), "/", JSON.stringify(value));
+        }
+    });
+
+    test("returns the normalized path", () => {
+        assert.equal(safeCallbackPath("/research/../execution#ticket"), "/execution#ticket");
+    });
 });
 
 describe("withCallback", () => {

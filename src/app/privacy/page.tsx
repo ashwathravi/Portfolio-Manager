@@ -107,6 +107,11 @@ export default async function PrivacyPage({ searchParams }: { searchParams: Sear
                         </li>
                         <li><strong>Google</strong> handles sign-in.</li>
                         <li><strong>Vercel</strong> hosts the app.</li>
+                        <li>
+                            <strong>Upstash</strong> keeps short-lived request counters that limit how often
+                            each visitor can call the app. They are keyed by your IP address or account ID and
+                            the page called, and expire within minutes.
+                        </li>
                         <li><strong>Supabase</strong> hosts the database.</li>
                         <li>
                             <strong>Market data providers and SEC EDGAR</strong> supply prices and filings. We
