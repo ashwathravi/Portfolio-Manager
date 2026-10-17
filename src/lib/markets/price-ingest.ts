@@ -9,8 +9,11 @@
  * 2. Catch up: store each trading day after the newest stored date, oldest
  *    first, from Massive's market-wide grouped daily bars (one call per day,
  *    cut down to the tracked symbols). At most five days a run, so a long
- *    gap closes over a few nights. A day that isn't published yet ends the
- *    catch-up; the next run picks it up.
+ *    gap closes over a few nights. An empty file followed by a published
+ *    one was a day the market closed after all (one the calendar doesn't
+ *    know); it is recorded as closed and passed. An empty file with nothing
+ *    published after it isn't out yet and ends the catch-up; the next run
+ *    picks it up.
  *    Before any of those days is stored, one call asks which stocks split on
  *    them: bars are split-adjusted, so a split puts every earlier stored bar
  *    of that stock on the old scale. Those stocks go back in the history
@@ -172,7 +175,7 @@ export type PriceIngestDetail = {
      * because the day's bar for them was invalid, or because it is their
      * first bar after an empty backfill.
      */
-    days?: Array<{ date: string; stored: number; rejected: number; requeued?: string[] }>;
+    days?: Array<{ date: string; stored: number; rejected: number; requeued?: string[]; closed?: true }>;
     /** Trading days still to store after this run; 0 when up to date. */
     daysBehind?: number;
     /** Histories end on this day; later days come from the daily files. */
@@ -416,6 +419,8 @@ export async function ingestDailyPrices({
     }
 
     const days: NonNullable<PriceIngestDetail["days"]> = [];
+    /** Empty days not yet known to be closures: one with a published day after it was. */
+    let empty: string[] = [];
     for (const date of stopped.catchUp ? [] : window) {
         const answer = await paced(() => adapter.getDailyBars(date));
         if ("stopped" in answer) {
@@ -424,9 +429,14 @@ export async function ingestDailyPrices({
         }
         const daily: Map<string, DailyBar> = answer.value;
         if (daily.size === 0) {
-            stopped.catchUp = "not-published";
-            break;
+            empty.push(date);
+            continue;
         }
+        // A later session is published, so the empty days before it were
+        // closures the calendar didn't know. Storing this day moves the
+        // bookmark past them.
+        for (const closed of empty) days.push({ date: closed, stored: 0, rejected: 0, closed: true });
+        empty = [];
         const bars = selectTrackedBars([...daily.values()].map((bar) => ({ ...bar, source: PRICE_SOURCE })), tracked);
         // Before the day is stored (it becomes the bookmark, so it is never
         // read again): a tracked bar it can't store is recovered through the
@@ -440,7 +450,9 @@ export async function ingestDailyPrices({
         ];
         days.push({ date, ...(await store.upsertBars(bars)), ...(requeued.length > 0 ? { requeued } : {}) });
     }
-    const latestAfter = days.at(-1)?.date ?? latestBefore;
+    // Empty days with nothing published after them aren't out yet.
+    if (empty.length > 0 && !stopped.catchUp) stopped.catchUp = "not-published";
+    const latestAfter = days.findLast((day) => !day.closed)?.date ?? latestBefore;
 
     // Looked-up symbols no daily file has priced in a week (after the catch-up,
     // so one about to be priced isn't dropped) stop being tracked.

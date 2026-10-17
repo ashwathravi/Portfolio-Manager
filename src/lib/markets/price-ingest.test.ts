@@ -187,13 +187,14 @@ function fakeStore({
             const valid = dedupeBars(own.filter(isValidBar));
             if (valid.length === 0) return undefined;
             const historyEnd = valid.map((bar) => bar.date).sort().at(-1)!;
+            const historyStart = valid.map((bar) => bar.date).sort()[0];
+            const rejected = input.length - own.filter(isValidBar).length;
+            // Checked before writing, as in the real store: an incomplete history changes nothing.
+            const complete = ![...stored.values()].some((bar) => bar.symbol === symbol && bar.date > historyEnd && bar.date <= through);
+            if (!complete) return { stored: 0, rejected, historyStart, complete };
             for (const [key, bar] of stored) if (bar.symbol === symbol && bar.date <= historyEnd) stored.delete(key);
             olderHistory.delete(symbol);
             for (const bar of valid) stored.set(`${bar.symbol}|${bar.date}`, bar);
-            const historyStart = valid.map((bar) => bar.date).sort()[0];
-            const rejected = input.length - own.filter(isValidBar).length;
-            const complete = ![...stored.values()].some((bar) => bar.symbol === symbol && bar.date > historyEnd && bar.date <= through);
-            if (!complete) return { stored: valid.length, rejected, historyStart, complete };
             securities.set(symbol, historyStart);
             attempted.delete(symbol);
             marks.push([symbol, historyStart]);
@@ -385,6 +386,38 @@ describe("ingestDailyPrices", () => {
         assert.deepEqual(storedDates(stored, "SPY"), ["2026-10-05", ...missed.slice(0, 5)]);
     });
 
+    test("regression: an empty day followed by a published one was a closure, and is passed", async () => {
+        // Wednesday the 14th closed unexpectedly (unknown to the calendar).
+        const { store, stored } = fakeStore({ bars: [{ ...dailyBar("SPY", "2026-10-13"), source: "massive" }] });
+        const { adapter } = fakeAdapter({
+            daily: { "2026-10-14": [], "2026-10-15": [dailyBar("SPY", "2026-10-15")], "2026-10-16": [dailyBar("SPY", "2026-10-16")] },
+        });
+
+        const detail = await ingestDailyPrices({ adapter, store, ...fakeClock() });
+
+        assert.deepEqual(detail.days, [
+            { date: "2026-10-14", stored: 0, rejected: 0, closed: true },
+            { date: "2026-10-15", stored: 1, rejected: 0 },
+            { date: "2026-10-16", stored: 1, rejected: 0 },
+        ]);
+        assert.deepEqual(detail.stopped, {});
+        assert.equal(detail.daysBehind, 0);
+        assert.equal(detail.historyThrough, "2026-10-16");
+        assert.deepEqual(storedDates(stored, "SPY"), ["2026-10-13", "2026-10-15", "2026-10-16"]);
+    });
+
+    test("empty days with nothing published after them wait for the next run", async () => {
+        const { store, stored } = fakeStore({ bars: [{ ...dailyBar("SPY", "2026-10-14"), source: "massive" }] });
+        const { adapter } = fakeAdapter({ daily: { "2026-10-15": [], "2026-10-16": [] } });
+
+        const detail = await ingestDailyPrices({ adapter, store, ...fakeClock() });
+
+        assert.deepEqual(detail.days, []);
+        assert.equal(detail.stopped?.catchUp, "not-published");
+        assert.equal(detail.daysBehind, 2);
+        assert.deepEqual(storedDates(stored, "SPY"), ["2026-10-14"]);
+    });
+
     test("does nothing more when the store is already up to date", async () => {
         const { store } = fakeStore({ bars: [{ ...dailyBar("SPY", "2026-10-16"), source: "massive" }] });
         const { adapter, calls } = fakeAdapter();
@@ -413,7 +446,8 @@ describe("ingestDailyPrices", () => {
 
         const detail = await ingestDailyPrices({ adapter, store, ...fakeClock() });
 
-        assert.deepEqual(calls, ["splits 2026-10-14 2026-10-16", "daily 2026-10-14", "daily 2026-10-15", "history AAPL 2Y"]);
+        // The 15th is empty, so the 16th is asked for: nothing there either, so neither is out yet.
+        assert.deepEqual(calls, ["splits 2026-10-14 2026-10-16", "daily 2026-10-14", "daily 2026-10-15", "daily 2026-10-16", "history AAPL 2Y"]);
         assert.deepEqual(detail.days, [{ date: "2026-10-14", stored: 1, rejected: 0 }]);
         assert.equal(detail.stopped?.catchUp, "not-published");
         assert.equal(detail.daysBehind, 2);
@@ -883,10 +917,12 @@ describe("ingestDailyPrices › backfill retries", () => {
 
         const detail = await ingestDailyPrices({ adapter: lagging.adapter, store, ...fakeClock() });
 
-        assert.deepEqual(detail.backfilled, [{ symbol: "NVDA", stored: 1, rejected: 0, historyStart: "2026-10-14", complete: false }]);
+        assert.deepEqual(detail.backfilled, [{ symbol: "NVDA", stored: 0, rejected: 0, historyStart: "2026-10-14", complete: false }]);
         assert.equal(securities.get("NVDA"), null, "still queued");
         assert.ok(attempted.has("NVDA"));
-        assert.equal(stored.get("NVDA|2026-10-14")?.close, 100);
+        // Regression: nothing is rewritten until a history covers every stored bar,
+        // so an adjusted 14th never sits beside an unadjusted 15th.
+        assert.deepEqual(storedDates(stored, "NVDA").map((date) => stored.get(`NVDA|${date}`)?.close), [1_000, 1_010, 102]);
 
         // The next run's history covers the 15th and 16th: replaced and loaded.
         const caughtUp = fakeAdapter({
@@ -961,8 +997,9 @@ describe("ingestDailyPrices › looked-up symbols", () => {
         // HELDFUND (held, never in a daily file) first; OLDREAL once the 16th's
         // file priced it (so it isn't dropped either); never NEWJUNK.
         assert.deepEqual(calls.filter((call) => call.startsWith("history")), ["history HELDFUND 2Y", "history OLDREAL 2Y"]);
-        // The history lags the daily file by a day: the 16th's bar is kept, not replaced away.
-        assert.deepEqual(storedDates(stored, "OLDREAL"), ["2026-10-15", "2026-10-16"]);
+        // The history lags the daily file by a day: nothing is written until
+        // it covers the 16th, and the 16th's bar stays.
+        assert.deepEqual(storedDates(stored, "OLDREAL"), ["2026-10-16"]);
         // OLDREAL stays queued until a history covers the 16th; NEWJUNK waits
         // outside the queue until a daily file prices it.
         assert.equal(detail.backfillQueue, 1);

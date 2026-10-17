@@ -429,11 +429,11 @@ export function buildDeleteHistoryQuery(symbol: string, through: string, databas
  * provider's adjusted history is the one to keep. Bars after the history's
  * last day (from the daily files, if the history lags) are left alone.
  *
- * The history is marked loaded only when it is `complete`: no stored bar lies
- * between its last day and `through`. Otherwise those bars could be on the
- * old scale, so the symbol stays queued for the next run (which normally
- * finds the history caught up). Returns undefined, changing nothing, when no
- * bar is valid.
+ * Only a `complete` history is written: no stored bar may lie between its
+ * last day and `through`. Otherwise nothing changes and the symbol stays
+ * queued for the next run (which normally finds the history caught up), so
+ * adjusted bars never go in beside uncovered ones. Returns undefined,
+ * changing nothing, when no bar is valid.
  */
 export async function replaceHistory(
     symbol: string,
@@ -447,15 +447,18 @@ export async function replaceHistory(
     const historyStart = valid.reduce((earliest, bar) => (bar.date < earliest ? bar.date : earliest), valid[0].date);
     const historyEnd = valid.reduce((latest, bar) => (bar.date > latest ? bar.date : latest), valid[0].date);
     const complete = await database.transaction(async (tx) => {
+        // Checked before anything is written: a partial rewrite would put
+        // adjusted bars beside the uncovered ones, which may be on the old
+        // scale. Until a history covers them the stored bars stay as they are.
+        if ((await buildBarsAfterQuery(symbol, historyEnd, through, tx)).length > 0) return false;
         await buildDeleteHistoryQuery(symbol, historyEnd, tx);
         for (let start = 0; start < valid.length; start += UPSERT_CHUNK_SIZE) {
             await buildUpsertBarsQuery(valid.slice(start, start + UPSERT_CHUNK_SIZE), tx);
         }
-        if ((await buildBarsAfterQuery(symbol, historyEnd, through, tx)).length > 0) return false;
         await buildMarkHistoryLoadedQuery(symbol, historyStart, tx);
         return true;
     });
-    return { stored: valid.length, rejected: bars.length - own.filter(isValidBar).length, historyStart, complete };
+    return { stored: complete ? valid.length : 0, rejected: bars.length - own.filter(isValidBar).length, historyStart, complete };
 }
 
 /**
