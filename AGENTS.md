@@ -112,7 +112,7 @@ Every page in the application must have a corresponding E2E spec. The current ma
 | 404 | `not-found.spec.ts` | Search button opens the palette, link back to Today |
 | Sidebar + IA | `navigation.spec.ts` | Exactly eight sidebar destinations (Help is a Settings tab), section tabs, legacy redirects, identity footer |
 | Database outage | `outage.spec.ts` | Runs against the second web server (port 3100, database configured but unreachable): `/api/health/ready` is 503 `unavailable`; Today, Holdings and Accounts show the outage notice inside their page container, never an empty state |
-| Cross-cutting | `smoke.spec.ts` | Fonts loaded, hydration clean in another timezone, no horizontal overflow at 390px, market-data routes answer 503 `MARKET_DATA_NOT_CONFIGURED` without a provider key, quotes answer from the price store (404 `QUOTE_UNAVAILABLE` for an unpriced symbol), valuation lists unpriced holdings |
+| Cross-cutting | `smoke.spec.ts` | Fonts loaded, hydration clean in another timezone, no horizontal overflow at 390px, market-data routes answer 503 `MARKET_DATA_NOT_CONFIGURED` without a provider key, quotes answer from the price store (404 `QUOTE_UNAVAILABLE` for an unpriced symbol), valuation lists unpriced holdings, `/api/cron/daily` reaches the route without a session and refuses with 503 `CRON_NOT_CONFIGURED` without `CRON_SECRET` |
 
 ### Adding E2E tests for a new page
 

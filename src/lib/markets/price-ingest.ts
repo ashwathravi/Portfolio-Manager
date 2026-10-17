@@ -2,7 +2,8 @@
  * Nightly end-of-day price ingest (launch item i32), run as the daily job
  * "prices" by /api/cron/daily.
  *
- * 1. Track every symbol anyone holds, plus the benchmark ETFs.
+ * 1. Track every symbol anyone holds, plus the benchmark ETFs. (Quotes track
+ *    any other symbol they are asked for; it is priced the same way.)
  * 2. Catch up: store each trading day after the newest stored date, oldest
  *    first, from Massive's market-wide grouped daily bars (one call per day,
  *    cut down to the tracked symbols). At most five days a run, so a long

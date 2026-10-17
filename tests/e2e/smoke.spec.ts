@@ -118,3 +118,23 @@ test.describe('Market data without a provider key', () => {
         expect([...data.errors].sort()).toEqual(['AAPL', 'AMZN', 'GOOGL', 'MSFT', 'NVDA', 'TSLA']);
     });
 });
+
+test.describe('Scheduled jobs without CRON_SECRET', () => {
+    // The proxy lets /api/cron/* through without a session and the route
+    // checks the secret itself. E2E servers have no secret, so it must refuse
+    // with 503, not ask for a session (401/redirect) and never run the jobs.
+    test('/api/cron/daily fails closed, with or without a token or session', async ({ playwright, baseURL }) => {
+        const notConfigured = { error: 'Scheduled jobs are not configured.', code: 'CRON_NOT_CONFIGURED' };
+        const sessionless = await playwright.request.newContext({ baseURL, storageState: { cookies: [], origins: [] } });
+        try {
+            const attempts: Array<Record<string, string>> = [{}, { authorization: 'Bearer guess' }];
+            for (const headers of attempts) {
+                const response = await sessionless.get('/api/cron/daily', { headers, maxRedirects: 0 });
+                expect(response.status()).toBe(503);
+                expect(await response.json()).toEqual(notConfigured);
+            }
+        } finally {
+            await sessionless.dispose();
+        }
+    });
+});

@@ -31,6 +31,28 @@ A failed migration stops the job before anything is deployed. Migrations are not
 | `/api/health` | The process is up. No database call. Used by the Docker `HEALTHCHECK`. |
 | `/api/health/ready` | The app can reach its database: 200, or 503 with `database: "not_configured"` or `"unavailable"`. Cached for 10 seconds. Both routes are public. |
 
+## Scheduled jobs
+
+Vercel Cron calls `GET /api/cron/daily` at 22:30 UTC on weekdays (`vercel.json`): 6:30 PM ET in summer, 5:30 PM in winter, after the close. Hobby runs a cron job once a day at most and may start it up to an hour late. Vercel sends `Authorization: Bearer <CRON_SECRET>`; the route compares it in constant time and answers 503 when `CRON_SECRET` is unset and 401 for a wrong token. The proxy lets `/api/cron/*` through without a session (limited to 10 calls a minute per IP), so every route there must check the secret itself (`createCronHandler` in `src/lib/jobs/cron.ts`).
+
+The route runs these jobs in order; one failing doesn't stop the next:
+
+| Job | What it does |
+|---|---|
+| `expired-sessions` | Deletes Auth.js sessions whose expiry has passed and reports how many. |
+| `prices` | The nightly price ingest (`src/lib/markets/price-ingest.ts`): tracks every held symbol and the benchmark ETFs, stores each missed trading day from Massive's grouped daily bars for every tracked symbol (those, plus any symbol a quote was asked for), up to five days a run, then backfills two years of history for newly tracked symbols until its 240-second budget runs out. Skips (and succeeds) without `POLYGON_API_KEY`. |
+
+The response is 200 when every job succeeded and 500 when any failed, with each job's outcome. Every run is also a row in `job_runs` (`status` is `running`, `succeeded` or `failed`; `detail` holds what the job reported; a row left `running` was cut off). To see the latest runs:
+
+```sql
+select job, started_at, finished_at, status, error, detail
+from job_runs order by started_at desc limit 10;
+```
+
+To run the jobs by hand, use **Run** next to the job in the Vercel dashboard (Settings → Cron Jobs), which sends the secret for you.
+
+The route sets `maxDuration = 300`, the most Hobby allows, which needs Fluid compute (on by default for new projects).
+
 ## One-time setup
 
 Already done: the `production` GitHub environment (deployments from `master` only), and the repository variables `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID` and `PRODUCTION_URL`.
@@ -59,10 +81,14 @@ Set these for **Production only**, never Preview: a preview runs branch code, an
 | `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET` | From the Google OAuth client (redirect URI `https://atlas-wealth-lovat.vercel.app/api/auth/callback/google`). |
 | `AUTH_ALLOWED_EMAILS` | Comma-separated invite list. Required: without it production refuses sign-in. |
 | `DATABASE_URL` | Supabase **transaction** pooler (port 6543) as `atlas_app.<project-ref>`, the least-privilege login (see `docs/local-database-secrets.md`). |
+| `CRON_SECRET` | A generated value (`openssl rand -hex 32`). Vercel sends it to the cron route; without it no scheduled job runs. Never print or paste it. |
+| `POLYGON_API_KEY` | The Massive Basic key the nightly price ingest uses. |
 | `PLAID_*`, `PLAID_TOKEN_ENCRYPTION_KEY` | When account linking goes live. |
 
 ```bash
 vercel env add AUTH_ALLOWED_EMAILS production
+# Generates the cron secret and pipes it straight in, so it is never shown:
+openssl rand -hex 32 | tr -d '\n' | vercel env add CRON_SECRET production
 ```
 
 ## Rolling back
