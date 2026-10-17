@@ -9,8 +9,8 @@ import postgres from 'postgres';
 // Needs a Postgres to take the lock in; CI's e2e job sets this. Advisory locks
 // are per database and real runs lock in `postgres`, so locally any other
 // database in the Docker container works without holding up a real run:
-//   E2E_LOCK_TEST_DATABASE_URL=postgres://atlas:atlas-local-only@127.0.0.1:54329/atlas_wealth
-const DATABASE_URL = process.env.E2E_LOCK_TEST_DATABASE_URL?.trim();
+//   SCRIPTS_TEST_DATABASE_URL=postgres://atlas:atlas-local-only@127.0.0.1:54329/atlas_wealth
+const DATABASE_URL = process.env.SCRIPTS_TEST_DATABASE_URL?.trim();
 const SCRIPT = 'scripts/e2e/run-lock.mjs';
 
 const workDirectory = mkdtempSync(path.join(tmpdir(), 'run-lock-test-'));
@@ -71,7 +71,7 @@ async function waitFor(condition: () => boolean, what: string, timeoutMs = 15_00
     }
 }
 
-describe('run-lock.mjs', { skip: !DATABASE_URL && 'E2E_LOCK_TEST_DATABASE_URL is not set', timeout: 60_000 }, () => {
+describe('run-lock.mjs', { skip: !DATABASE_URL && 'SCRIPTS_TEST_DATABASE_URL is not set', timeout: 60_000 }, () => {
     test('a second run waits for the first, says which run it waits for, then runs', async () => {
         const log = newLog('serial');
         const first = startRun('echo first-start >> "$LOG"; sleep 2; echo first-end >> "$LOG"', log);

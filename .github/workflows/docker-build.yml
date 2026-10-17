@@ -146,11 +146,11 @@ jobs:
             bash ./scripts/test-portfolio-ownership-migration.sh
           node --import tsx scripts/e2e/prepare-database.ts
 
-      # npm test skips these without a database; this job has one.
-      - name: Test the local E2E run lock
-        run: node --import tsx --test scripts/e2e/run-lock.test.ts
+      # npm test skips the parts of these that need a database; this job has one.
+      - name: Test the scripts that need a database
+        run: node --import tsx --test scripts/e2e/run-lock.test.ts scripts/db/init-local.test.ts
         env:
-          E2E_LOCK_TEST_DATABASE_URL: ${{ env.ADMIN_DATABASE_URL }}
+          SCRIPTS_TEST_DATABASE_URL: ${{ env.ADMIN_DATABASE_URL }}
 
       - name: Run E2E tests
         run: npm run test:e2e

@@ -11,7 +11,8 @@ services:
   # Nothing here may depend on the checkout's path (no bind mounts): Compose
   # recreates the container when the resolved config changes, so a path-
   # dependent setting would restart Postgres under every other checkout.
-  # db:setup and scripts/e2e/prepare-database.ts apply scripts/db/init-local.sql.
+  # db:setup, db:migrate and scripts/e2e/prepare-database.ts apply
+  # scripts/db/init-local.sql instead.
   db:
     image: postgres:17-alpine
     container_name: atlas-wealth-db

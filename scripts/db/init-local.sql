@@ -1,5 +1,5 @@
--- Applied before migrations by db:setup (scripts/setup-local-db.ts) and by
--- scripts/e2e/prepare-database.ts; safe to run again.
+-- Applied before migrations by db:setup (scripts/setup-local-db.ts), db:migrate
+-- (scripts/db/init-local.ts) and scripts/e2e/prepare-database.ts; safe to run again.
 -- Mirrors what Supabase provides so migrations apply unchanged: the pgcrypto
 -- extension and the anon/authenticated roles that migration 0008 names in
 -- its deny-all policies.

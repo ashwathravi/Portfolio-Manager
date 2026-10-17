@@ -43,7 +43,7 @@ npm run test:e2e:ui
 
 `test:e2e:local` (`scripts/e2e/run-local.sh`) recreates `atlas_wealth_e2e` in the Docker container, applies migrations and the fixtures in `scripts/e2e/fixtures.sql` through `scripts/e2e/prepare-database.ts` (the same script CI runs), then starts Playwright. It refuses to start if anything is listening on port 3000 or 3100.
 
-Every checkout, git worktrees under `.claude/worktrees/` included, shares one container: `docker-compose.yml` pins the Compose project to `portfolio-manager` (container `atlas-wealth-db`, volume `portfolio-manager_atlas-wealth-db`). Runs from different checkouts take turns through a Postgres advisory lock (`scripts/e2e/run-lock.mjs`): a second run prints which checkout holds the lock and waits up to `E2E_LOCK_WAIT_SECONDS` (default 1800) before exiting 75. The lock lasts exactly as long as the run: it is released only once every process the run started has exited, and if the wrapper process is killed (even with SIGKILL) the run is stopped first. `test:e2e:local` starts the container if needed but never recreates it; `npm run db:up` applies changes to `docker-compose.yml`. The lock's own tests need a database: `E2E_LOCK_TEST_DATABASE_URL=postgres://atlas:atlas-local-only@127.0.0.1:54329/atlas_wealth npm test` (CI's e2e job runs them).
+Every checkout, git worktrees under `.claude/worktrees/` included, shares one container: `docker-compose.yml` pins the Compose project to `portfolio-manager` (container `atlas-wealth-db`, volume `portfolio-manager_atlas-wealth-db`). Runs from different checkouts take turns through a Postgres advisory lock (`scripts/e2e/run-lock.mjs`): a second run prints which checkout holds the lock and waits up to `E2E_LOCK_WAIT_SECONDS` (default 1800) before exiting 75. The lock lasts exactly as long as the run: it is released only once every process the run started has exited, and if the wrapper process is killed (even with SIGKILL) the run is stopped first. `test:e2e:local` starts the container if needed but never recreates it; `npm run db:up` applies changes to `docker-compose.yml`. The lock's tests, and the `db:migrate` test, need a database: `SCRIPTS_TEST_DATABASE_URL=postgres://atlas:atlas-local-only@127.0.0.1:54329/atlas_wealth npm test` (CI's e2e job runs them).
 
 Playwright starts two web servers: the main one on port 3000, and a "database down" one on port 3100 (its own build directory via `NEXT_DIST_DIR`, a `DATABASE_URL` nothing answers, local auth bypass) used only by `outage.spec.ts`.
 
@@ -62,7 +62,7 @@ npm run db:setup             # migrate, create the app login and local dev user,
 npm run dev
 ```
 
-`DATABASE_URL` is the app's least-privilege login (a member of `app_runtime`, migration 0010); `DATABASE_MIGRATION_URL` is the table owner, used only by `db:migrate` and `db:setup`. `db:setup` refuses to run against anything but localhost. It also applies `scripts/db/init-local.sql` (the pgcrypto extension and the Supabase roles migrations expect); the container has no bind mounts, so its config is the same from every checkout and one checkout's `db:up` never restarts Postgres under another.
+`DATABASE_URL` is the app's least-privilege login (a member of `app_runtime`, migration 0010); `DATABASE_MIGRATION_URL` is the table owner, used only by `db:migrate` and `db:setup`. `db:setup` refuses to run against anything but localhost. It, and `db:migrate` when its URL is local, apply `scripts/db/init-local.sql` first (the pgcrypto extension and the Supabase roles migrations expect); the container has no bind mounts, so its config is the same from every checkout and one checkout's `db:up` never restarts Postgres under another.
 
 ---
 
@@ -209,7 +209,7 @@ The GitHub Actions workflow (`.github/workflows/docker-build.yml`) runs these jo
 
 1. **`build`** — Builds the Docker image (never pushes).
 2. **`lint-and-test`** — Audits production dependencies (`npm audit --omit=dev --audit-level=high`), lints (`npm run lint`), runs unit tests (`npm test`), and builds Next.js (`npm run build`).
-3. **`e2e-tests`** — Installs Playwright browsers, prepares a Postgres service with `scripts/e2e/prepare-database.ts`, runs the local run lock's tests against it, starts the dev server connected as a member of `app_runtime`, and runs all E2E tests. Only runs after `lint-and-test` passes. Uploads the Playwright HTML report as a build artifact.
+3. **`e2e-tests`** — Installs Playwright browsers, prepares a Postgres service with `scripts/e2e/prepare-database.ts`, runs the tests of the scripts that need a database against it, starts the dev server connected as a member of `app_runtime`, and runs all E2E tests. Only runs after `lint-and-test` passes. Uploads the Playwright HTML report as a build artifact.
 4. **`publish-image`** — On `master` only, after the three checks pass: pushes the image to GHCR.
 5. **`deploy-production`** — On `master` only, after the three checks pass: applies migrations, deploys to Vercel, and checks `/api/health/ready`. See `docs/deployment.md`, including the rule that migrations must work with the code already running.
 
