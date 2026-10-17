@@ -21,6 +21,13 @@ describe("safeCallbackPath", () => {
         }
     });
 
+    test("refuses paths whose dot segments normalize to another site", () => {
+        // Same-origin while resolving, but the returned "//evil.test" is not.
+        for (const value of ["/..//evil.test", "/.//evil.test", "/a/..//evil.test", "/%2e%2e//evil.test"]) {
+            assert.equal(safeCallbackPath(value), "/", JSON.stringify(value));
+        }
+    });
+
     test("returns the normalized path", () => {
         assert.equal(safeCallbackPath("/research/../execution#ticket"), "/execution#ticket");
     });

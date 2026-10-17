@@ -5,8 +5,9 @@ const SAME_SITE = "https://same-site.invalid";
 /**
  * Where to send someone after they sign in. The value is resolved as a URL,
  * the way a browser will, and kept only if it stays on this site; that
- * catches "//host", "/\host" and "/<tab>/host" (browsers drop tabs and
- * newlines). Anything else falls back to Today. Returns the normalized path.
+ * catches "//host", "/\host", "/<tab>/host" (browsers drop tabs and
+ * newlines) and "/..//host". Anything else falls back to Today. Returns the
+ * normalized path.
  */
 export function safeCallbackPath(value: string | null | undefined): string {
     if (!value || !value.startsWith("/")) return "/";
@@ -17,7 +18,11 @@ export function safeCallbackPath(value: string | null | undefined): string {
         return "/";
     }
     if (url.origin !== SAME_SITE) return "/";
-    return `${url.pathname}${url.search}${url.hash}`;
+    const path = `${url.pathname}${url.search}${url.hash}`;
+    // Dot segments can normalize into "//host" after that check ("/..//host"),
+    // so the exact string handed to redirect() is checked as well.
+    if (path.startsWith("//") || new URL(path, SAME_SITE).origin !== SAME_SITE) return "/";
+    return path;
 }
 
 /**

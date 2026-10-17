@@ -62,7 +62,9 @@ export default async function PrivacyPage({ searchParams }: { searchParams: Sear
                         </li>
                         <li>
                             <strong>Data you add.</strong> Portfolios, holdings and transactions you import from
-                            CSV or enter by hand, and the SEC filers you follow in Alpha Radar.
+                            CSV or enter by hand, and the SEC filers you add to Alpha Radar. During the beta,
+                            Alpha Radar&rsquo;s list of filers and any notes on them are shared by every account,
+                            so don&rsquo;t put anything private there.
                         </li>
                         <li>
                             <strong>Sign-in cookies and request logs.</strong> A session cookie keeps you signed
@@ -150,9 +152,11 @@ export default async function PrivacyPage({ searchParams }: { searchParams: Sear
                         All traffic is encrypted in transit. The tokens Plaid issues for your linked accounts
                         are encrypted again before they are stored. The database refuses its public data
                         interfaces, and the app reaches it through a restricted role that cannot change its
-                        structure. Every query for your data is limited to your account in the app&rsquo;s code,
-                        and automated tests check that one account cannot read another&rsquo;s. No system is
-                        perfectly secure; if a breach affects your data we will tell you promptly.
+                        structure. Every query for your portfolios, holdings, transactions and linked accounts is limited
+                        to your account in the app&rsquo;s code, and automated tests check that one account cannot
+                        read another&rsquo;s. Alpha Radar&rsquo;s filer list is the exception: it is shared during
+                        the beta. No system is perfectly secure; if a breach affects your data we will tell you
+                        promptly.
                     </p>
                 </section>
 
