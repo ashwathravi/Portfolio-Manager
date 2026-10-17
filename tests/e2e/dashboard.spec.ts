@@ -383,7 +383,7 @@ test.describe('Today watchlist', () => {
 
     test('successful route-shaped quotes render price and change; missing symbols keep dashes', async ({ page }) => {
         await page.route('**/api/market-data/quotes**', (route) => route.fulfill({ status: 200, json: { data: [
-            { symbol: 'COIN', price: 123.45, change: -2.5, changePercent: -1.98, timestamp: '2026-10-03T18:11:00.000Z', isRealtime: false },
+            { symbol: 'COIN', price: 123.45, change: -2.5, changePercent: -1.98, timestamp: new Date().toISOString(), isRealtime: false },
         ] } }));
         await gotoAppPage(page, '/');
         const card = page.getByTestId('today-watchlist');
@@ -393,6 +393,17 @@ test.describe('Today watchlist', () => {
         const pltr = card.locator('li').filter({ has: page.getByRole('link', { name: /PLTR/ }) });
         await expect(pltr.locator('.pm-watchlist-price')).toHaveText('—');
         await expect(pltr.locator('.pm-watchlist-pct')).toHaveText('—');
+    });
+
+    test('regression: an earlier session\'s close shows its price but not its move', async ({ page }) => {
+        const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
+        await page.route('**/api/market-data/quotes**', (route) => route.fulfill({ status: 200, json: { data: [
+            { symbol: 'COIN', price: 123.45, change: -2.5, changePercent: -1.98, timestamp: threeDaysAgo, isRealtime: false },
+        ] } }));
+        await gotoAppPage(page, '/');
+        const coin = page.getByTestId('today-watchlist').locator('li').filter({ has: page.getByRole('link', { name: /COIN/ }) });
+        await expect(coin.locator('.pm-watchlist-price')).toHaveText('$123.45');
+        await expect(coin.locator('.pm-watchlist-pct')).toHaveText('—');
     });
 
     test('regression: no stale fallback prices — a missing quote is a dash', async ({ page }) => {

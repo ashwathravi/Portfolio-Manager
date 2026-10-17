@@ -12,9 +12,10 @@
   - Relations are portfolio -> holdings and portfolio -> transactions.
 - Database access is centralized in `src/db/index.ts` using `postgres` + `drizzle-orm`. If `DATABASE_URL` is missing, the app does not fail build, but database-backed features degrade at runtime.
 - Market data goes through one service, `getMarketDataService()` (`src/lib/services/market-data-service.ts`), for server pages (`loadQuotes`) and the `/api/market-data` routes alike:
-  - `PolygonMassiveAdapter` on the free Massive Basic plan: quotes are the latest session's closes from the grouped daily bars, plus daily history and reference data
-  - an in-memory cache in front (`src/lib/cache`)
-  - without `POLYGON_API_KEY` requests reject with `MarketDataNotConfiguredError`: pages keep stored prices, routes answer 503.
+  - quotes come from the Postgres price store (`StoredQuoteProvider`, `src/lib/markets/stored-quote-provider.ts`): the latest two stored closes per symbol, which the nightly ingest writes from Massive's grouped daily bars. Request paths never call Massive for prices. A symbol with no stored close is left out (a single quote is 404 `QUOTE_UNAVAILABLE`) and starts being tracked for the next ingest. Without `DATABASE_URL`, quotes reject with `MarketDataNotConfiguredError`.
+  - history, fundamentals and search go to `PolygonMassiveAdapter` on the free Massive Basic plan; without `POLYGON_API_KEY` those reject with `MarketDataNotConfiguredError` (routes answer 503). The ingest also needs the key.
+  - an in-memory cache in front (`src/lib/cache`); pages keep their stored prices whenever quotes are unavailable.
+  - a quote's change counts as today's move only for today's Eastern session (`isTodaysQuote`); earlier closes price positions without a "today" change.
 - Schwab integration is server-side:
   - OAuth callback route exchanges auth code for tokens
   - order route validates an app-level order payload and maps it to Schwab's order format
