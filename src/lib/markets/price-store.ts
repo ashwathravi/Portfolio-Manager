@@ -61,12 +61,29 @@ export function normalizeSymbols(symbols: Iterable<string>): string[] {
 export function isValidBar(bar: PriceBarInput): boolean {
     const prices = [bar.open, bar.high, bar.low, bar.close];
     return tickerSchema.safeParse(bar.symbol).success
-        && ISO_DATE.test(bar.date)
+        && isCalendarDate(bar.date)
         && bar.source.trim().length > 0
         && prices.every((value) => Number.isFinite(value) && value > 0)
         && Number.isFinite(bar.volume) && bar.volume >= 0
         && bar.high >= Math.max(bar.open, bar.close, bar.low)
         && bar.low <= Math.min(bar.open, bar.close);
+}
+
+/** YYYY-MM-DD that names a real day: 2026-02-30 and 2026-13-01 are refused. */
+function isCalendarDate(date: string): boolean {
+    if (!ISO_DATE.test(date)) return false;
+    const [year, month, day] = date.split("-").map(Number);
+    return new Date(Date.UTC(year, month - 1, day)).toISOString().slice(0, 10) === date;
+}
+
+/**
+ * One bar per (symbol, date), keeping the last one given. Postgres refuses an
+ * upsert that touches the same row twice, which overlapping backfill pages would.
+ */
+export function dedupeBars(bars: readonly PriceBarInput[]): PriceBarInput[] {
+    const byKey = new Map<string, PriceBarInput>();
+    for (const bar of bars) byKey.set(`${bar.symbol}|${bar.date}`, bar);
+    return [...byKey.values()];
 }
 
 /** Keeps the bars whose symbol is in the tracked set. */
@@ -179,16 +196,17 @@ export async function markHistoryLoaded(symbol: string, startDate: string, datab
 /**
  * Inserts or replaces bars. Invalid bars are skipped and counted rather than
  * failing the batch, so one bad provider row can't stop a nightly ingest.
+ * A repeated (symbol, date) is written once, with its last values.
  */
 export async function upsertBars(
     bars: readonly PriceBarInput[],
     database: Database = db,
 ): Promise<{ stored: number; rejected: number }> {
-    const valid = bars.filter(isValidBar);
+    const valid = dedupeBars(bars.filter(isValidBar));
     for (let start = 0; start < valid.length; start += UPSERT_CHUNK_SIZE) {
         await buildUpsertBarsQuery(valid.slice(start, start + UPSERT_CHUNK_SIZE), database);
     }
-    return { stored: valid.length, rejected: bars.length - valid.length };
+    return { stored: valid.length, rejected: bars.filter((bar) => !isValidBar(bar)).length };
 }
 
 export async function getLatestCloses(

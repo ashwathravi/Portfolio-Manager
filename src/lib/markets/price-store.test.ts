@@ -7,6 +7,7 @@ import {
     buildSymbolsNeedingHistoryQuery,
     buildTrackSecuritiesQuery,
     buildUpsertBarsQuery,
+    dedupeBars,
     isValidBar,
     normalizeSymbols,
     selectTrackedBars,
@@ -50,6 +51,8 @@ describe("isValidBar", () => {
         ["a NaN close", { ...BAR, close: Number.NaN }],
         ["negative volume", { ...BAR, volume: -1 }],
         ["a timestamp instead of a date", { ...BAR, date: "2026-10-09T00:00:00Z" }],
+        ["February 30", { ...BAR, date: "2026-02-30" }],
+        ["a thirteenth month", { ...BAR, date: "2026-13-01" }],
         ["a lowercase symbol", { ...BAR, symbol: "aapl" }],
         ["no source", { ...BAR, source: " " }],
     ] as const) {
@@ -57,6 +60,16 @@ describe("isValidBar", () => {
             assert.equal(isValidBar(bar), false);
         });
     }
+});
+
+describe("dedupeBars", () => {
+    test("keeps one bar per symbol and date, the last one given", () => {
+        const bars = [BAR, { ...BAR, symbol: "MSFT" }, { ...BAR, close: 253 }, { ...BAR, date: "2026-10-08" }];
+        assert.deepEqual(
+            dedupeBars(bars).map((bar) => [bar.symbol, bar.date, bar.close]),
+            [["AAPL", "2026-10-09", 253], ["MSFT", "2026-10-09", 254], ["AAPL", "2026-10-08", 254]],
+        );
+    });
 });
 
 describe("selectTrackedBars", () => {
