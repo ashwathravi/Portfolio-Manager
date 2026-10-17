@@ -454,6 +454,10 @@ export const securities = pgTable("securities", {
     referenceUpdatedAt: timestamp("reference_updated_at"),
     // Null until the history backfill has run; then the earliest date it covers.
     historyStartDate: date("history_start_date", { mode: "string" }),
+    // The last backfill attempt that left the symbol queued (an error, or no
+    // complete history yet). The queue takes never-tried symbols first, then
+    // the least recently tried, so persistent failures can't block the rest.
+    historyAttemptedAt: timestamp("history_attempted_at"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, () => ({

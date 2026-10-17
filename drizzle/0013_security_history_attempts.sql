@@ -1,0 +1,1 @@
+ALTER TABLE "securities" ADD COLUMN "history_attempted_at" timestamp;

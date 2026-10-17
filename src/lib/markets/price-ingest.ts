@@ -63,6 +63,7 @@ import {
     isValidBar,
     listSymbolsNeedingHistory,
     listTrackedSymbols,
+    markHistoryAttempted,
     markHistoryLoaded,
     normalizeSymbols,
     pruneUnpricedSecurities,
@@ -122,12 +123,18 @@ export interface PriceIngestStore {
     /** Drops never-priced securities tracked before `trackedBefore`, except `keep`. */
     pruneUnpricedSecurities(keep: readonly string[], trackedBefore: Date): Promise<string[]>;
     markHistoryLoaded(symbol: string, startDate: string): Promise<void>;
-    /** Replaces a symbol's bars up to `through`; undefined when no bar is valid. */
+    /**
+     * Replaces a symbol's bars from a fetched history; undefined when no bar
+     * is valid. `complete` false: stored bars lie beyond the history's last
+     * day, so it stays queued.
+     */
     replaceHistory(
         symbol: string,
         bars: readonly PriceBarInput[],
         through: string,
-    ): Promise<{ stored: number; rejected: number; historyStart: string } | undefined>;
+    ): Promise<{ stored: number; rejected: number; historyStart: string; complete: boolean } | undefined>;
+    /** Records an attempt that left the symbol queued, so retries rotate. */
+    markHistoryAttempted(symbol: string, at: Date): Promise<void>;
     /** Puts loaded symbols back in the history queue; returns the ones reset. */
     resetHistory(symbols: string[]): Promise<string[]>;
     /** Whether any bar is stored for the symbol. */
@@ -170,7 +177,8 @@ export type PriceIngestDetail = {
     daysBehind?: number;
     /** Histories end on this day; later days come from the daily files. */
     historyThrough?: string;
-    backfilled?: Array<{ symbol: string; stored: number; rejected: number; historyStart: string; empty?: true }>;
+    /** `complete` false: stored bars lie beyond the history, so it stays queued. */
+    backfilled?: Array<{ symbol: string; stored: number; rejected: number; historyStart: string; complete?: boolean; empty?: true }>;
     backfillErrors?: Array<{ symbol: string; error: string }>;
     /** Symbols still waiting for history after this run. */
     backfillQueue?: number;
@@ -296,6 +304,7 @@ export function createPriceIngestStore(database: Database = db): PriceIngestStor
         countSymbolsNeedingHistory: (priority) => countSymbolsNeedingHistory(priority, database),
         pruneUnpricedSecurities: (keep, trackedBefore) => pruneUnpricedSecurities(keep, trackedBefore, database),
         markHistoryLoaded: (symbol, startDate) => markHistoryLoaded(symbol, startDate, database),
+        markHistoryAttempted: (symbol, at) => markHistoryAttempted(symbol, at, database),
         replaceHistory: (symbol, bars, through) => replaceHistory(symbol, bars, through, database),
         resetHistory: (symbols) => resetHistory(symbols, database),
         hasBars: (symbol) => hasStoredBars(symbol, database),
@@ -460,6 +469,7 @@ export async function ingestDailyPrices({
                     history = [];
                 } else {
                     backfillErrors.push({ symbol, error: summarizeError(error) });
+                    await store.markHistoryAttempted(symbol, now());
                     continue;
                 }
             }
@@ -471,6 +481,7 @@ export async function ingestDailyPrices({
                 // priced today) but no history yet: it stays queued, so
                 // old-scale bars never stay beside new ones. The next run asks again.
                 backfillErrors.push({ symbol, error: "No history returned; still queued." });
+                await store.markHistoryAttempted(symbol, now());
                 continue;
             }
             if (!replaced) {
@@ -483,7 +494,16 @@ export async function ingestDailyPrices({
                 backfilled.push({ symbol, stored: 0, rejected: bars.length, historyStart: historyThrough, empty: true });
                 continue;
             }
-            backfilled.push({ symbol, ...replaced });
+            const { complete, ...result } = replaced;
+            if (complete) {
+                backfilled.push({ symbol, ...result });
+            } else {
+                // The history ends before bars already stored (it lags the
+                // daily files): those could be on the old scale, so the
+                // symbol stays queued until a history covers them.
+                await store.markHistoryAttempted(symbol, now());
+                backfilled.push({ symbol, ...result, complete: false });
+            }
         }
     }
 

@@ -3,10 +3,12 @@ import assert from "node:assert/strict";
 
 import {
     buildBarsQuery,
+    buildBarsAfterQuery,
     buildDeleteHistoryQuery,
     buildHasBarsQuery,
     buildLatestBarDateQuery,
     buildLatestClosesQuery,
+    buildMarkHistoryAttemptedQuery,
     buildMarkHistoryLoadedQuery,
     buildPruneUnpricedSecuritiesQuery,
     buildResetUnpricedHistoryQuery,
@@ -149,15 +151,15 @@ describe("price store queries", () => {
         assert.match(sql, /"securities"\."history_start_date" is null/i);
         assert.match(sql, /"securities"\."active" = \$\d+/i);
         assert.match(sql, /and exists \(select 1 from "price_bars" where "price_bars"\."symbol" = "securities"\."symbol"\)/i);
-        // No positional "order by 0" (Postgres rejects it) without priority symbols.
-        assert.match(sql, /order by "securities"\."created_at" asc, "securities"\."symbol" asc limit \$\d+$/i);
+        // Never tried first; no positional "order by 0" (Postgres rejects it) without priority symbols.
+        assert.match(sql, /order by "securities"\."history_attempted_at" asc nulls first, "securities"\."created_at" asc, "securities"\."symbol" asc limit \$\d+$/i);
         assert.deepEqual(params, [true, 5]);
     });
 
     test("the backfill queue takes priority symbols at once, and first", () => {
         const { sql, params } = buildSymbolsNeedingHistoryQuery(5, ["AAPL", "SPY"]).toSQL();
         assert.match(sql, /\("securities"\."symbol" in \(\$\d+, \$\d+\) or exists \(select 1 from "price_bars"/i);
-        assert.match(sql, /order by case when "securities"\."symbol" in \(\$\d+, \$\d+\) then 0 else 1 end, "securities"\."created_at" asc/i);
+        assert.match(sql, /order by "securities"\."history_attempted_at" asc nulls first, case when "securities"\."symbol" in \(\$\d+, \$\d+\) then 0 else 1 end, "securities"\."created_at" asc/i);
         assert.deepEqual(params, [true, "AAPL", "SPY", "AAPL", "SPY", 5]);
     });
 
@@ -170,10 +172,26 @@ describe("price store queries", () => {
 
     test("re-queuing unpriced histories touches only loaded symbols with no bar at all", () => {
         const { sql, params } = buildResetUnpricedHistoryQuery(["NEWCO"]).toSQL();
-        assert.match(sql, /^update "securities" set "history_start_date" = \$\d+, "updated_at" = \$\d+ where/);
+        assert.match(sql, /^update "securities" set "history_start_date" = \$\d+, "history_attempted_at" = \$\d+, "updated_at" = \$\d+ where/);
         assert.match(sql, /"securities"\."symbol" in \(\$\d+\) and "securities"\."history_start_date" is not null and not exists \(select 1 from "price_bars" where "price_bars"\."symbol" = "securities"\."symbol"\)\) returning "symbol"$/);
-        assert.equal(params[0], null);
-        assert.equal(params[2], "NEWCO");
+        assert.deepEqual(params.slice(0, 2), [null, null]);
+        assert.equal(params[3], "NEWCO");
+    });
+
+    test("a replace is complete only without stored bars after the history's last day", () => {
+        const { sql, params } = buildBarsAfterQuery("NVDA", "2026-10-14", "2026-10-16").toSQL();
+        assert.equal(sql, 'select "date" from "price_bars" where ("price_bars"."symbol" = $1 and "price_bars"."date" > $2 and "price_bars"."date" <= $3) limit $4');
+        assert.deepEqual(params, ["NVDA", "2026-10-14", "2026-10-16", 1]);
+    });
+
+    test("an attempt is recorded, and loading or resetting clears it", () => {
+        const at = new Date("2026-10-16T22:31:00Z");
+        const attempt = buildMarkHistoryAttemptedQuery("NVDA", at).toSQL();
+        assert.equal(attempt.sql, 'update "securities" set "history_attempted_at" = $1, "updated_at" = $2 where "securities"."symbol" = $3');
+        assert.deepEqual(attempt.params, [at.toISOString(), at.toISOString(), "NVDA"]);
+        for (const { sql } of [buildMarkHistoryLoadedQuery("NVDA", "2024-10-17").toSQL(), buildResetHistoryQuery(["NVDA"]).toSQL(), buildResetUnpricedHistoryQuery(["NVDA"]).toSQL()]) {
+            assert.match(sql, /"history_attempted_at" = \$\d+/);
+        }
     });
 
     test("checking for stored bars reads at most one row", () => {
@@ -198,18 +216,18 @@ describe("price store queries", () => {
 
     test("a history reset re-queues only symbols whose history was loaded", () => {
         const { sql, params } = buildResetHistoryQuery(["NVDA", "AAPL"]).toSQL();
-        assert.match(sql, /^update "securities" set "history_start_date" = \$\d+, "updated_at" = \$\d+/i);
+        assert.match(sql, /^update "securities" set "history_start_date" = \$\d+, "history_attempted_at" = \$\d+, "updated_at" = \$\d+/i);
         assert.match(sql, /"securities"\."symbol" in \(\$\d+, \$\d+\) and "securities"\."history_start_date" is not null/i);
         assert.match(sql, /returning "symbol"$/i);
-        assert.equal(params[0], null);
-        assert.deepEqual(params.slice(2), ["NVDA", "AAPL"]);
+        assert.deepEqual(params.slice(0, 2), [null, null], "a reset is a fresh start for retries too");
+        assert.deepEqual(params.slice(3), ["NVDA", "AAPL"]);
     });
 
     test("marking history loaded records where it starts", () => {
         const { sql, params } = buildMarkHistoryLoadedQuery("NVDA", "2024-10-17").toSQL();
-        assert.match(sql, /^update "securities" set "history_start_date" = \$\d+, "updated_at" = \$\d+ where "securities"\."symbol" = \$\d+$/i);
-        assert.equal(params[0], "2024-10-17");
-        assert.equal(params[2], "NVDA");
+        assert.match(sql, /^update "securities" set "history_start_date" = \$\d+, "history_attempted_at" = \$\d+, "updated_at" = \$\d+ where "securities"\."symbol" = \$\d+$/i);
+        assert.deepEqual(params.slice(0, 2), ["2024-10-17", null]);
+        assert.equal(params[3], "NVDA");
     });
 
     test("a history replace deletes one symbol's bars up to the day given, never later ones", () => {

@@ -126,13 +126,17 @@ function fakeStore({
     const stored = new Map(bars.map((bar) => [`${bar.symbol}|${bar.date}`, bar]));
     const marks: Array<[string, string]> = [];
     const resets: string[] = [];
+    const attempted = new Map<string, number>();
     // A loaded symbol has history older than anything a test stores; it
     // isn't modelled bar by bar, so it never moves the catch-up bookmark.
     const olderHistory = new Set(loaded);
     const barsFor = (symbol: string) => olderHistory.has(symbol) || [...stored.values()].some((bar) => bar.symbol === symbol);
+    // Never tried first (priority first among them), then least recently tried.
     const queue = (priority: readonly string[]) => {
         const waiting = [...securities].filter(([symbol, start]) => start === null && (priority.includes(symbol) || barsFor(symbol)));
-        return [...waiting.filter(([symbol]) => priority.includes(symbol)), ...waiting.filter(([symbol]) => !priority.includes(symbol))]
+        const fresh = waiting.filter(([symbol]) => !attempted.has(symbol));
+        const tried = waiting.filter(([symbol]) => attempted.has(symbol)).sort(([a], [b]) => attempted.get(a)! - attempted.get(b)!);
+        return [...fresh.filter(([symbol]) => priority.includes(symbol)), ...fresh.filter(([symbol]) => !priority.includes(symbol)), ...tried]
             .map(([symbol]) => symbol);
     };
 
@@ -172,7 +176,11 @@ function fakeStore({
         },
         async markHistoryLoaded(symbol, startDate) {
             securities.set(symbol, startDate);
+            attempted.delete(symbol);
             marks.push([symbol, startDate]);
+        },
+        async markHistoryAttempted(symbol, at) {
+            attempted.set(symbol, at.getTime());
         },
         async replaceHistory(symbol, input, through) {
             const own = input.filter((bar) => bar.symbol === symbol && bar.date <= through);
@@ -183,24 +191,34 @@ function fakeStore({
             olderHistory.delete(symbol);
             for (const bar of valid) stored.set(`${bar.symbol}|${bar.date}`, bar);
             const historyStart = valid.map((bar) => bar.date).sort()[0];
+            const rejected = input.length - own.filter(isValidBar).length;
+            const complete = ![...stored.values()].some((bar) => bar.symbol === symbol && bar.date > historyEnd && bar.date <= through);
+            if (!complete) return { stored: valid.length, rejected, historyStart, complete };
             securities.set(symbol, historyStart);
+            attempted.delete(symbol);
             marks.push([symbol, historyStart]);
-            return { stored: valid.length, rejected: input.length - own.filter(isValidBar).length, historyStart };
+            return { stored: valid.length, rejected, historyStart, complete };
         },
         hasBars: async (symbol) => barsFor(symbol),
         async resetUnpricedHistories(symbols) {
             const reset = normalizeSymbols(symbols).filter((symbol) => securities.get(symbol) && !barsFor(symbol));
-            for (const symbol of reset) securities.set(symbol, null);
+            for (const symbol of reset) {
+                securities.set(symbol, null);
+                attempted.delete(symbol);
+            }
             return reset;
         },
         async resetHistory(symbols) {
             const reset = normalizeSymbols(symbols).filter((symbol) => securities.get(symbol));
-            for (const symbol of reset) securities.set(symbol, null);
+            for (const symbol of reset) {
+                securities.set(symbol, null);
+                attempted.delete(symbol);
+            }
             resets.push(...reset);
             return reset;
         },
     };
-    return { store, securities, stored, marks, resets };
+    return { store, securities, stored, marks, resets, attempted };
 }
 
 function storedDates(stored: Map<string, PriceBarInput>, symbol: string): string[] {
@@ -844,6 +862,86 @@ describe("ingestDailyPrices › incomplete days", () => {
     });
 });
 
+describe("ingestDailyPrices › backfill retries", () => {
+    test("regression: a split stock whose refetched history stops short of stored bars stays queued", async () => {
+        // The aggregates lag the daily files: the history ends on the 14th,
+        // but the 15th's daily bar (before the split on the 16th) is stored.
+        const { store, stored, securities, attempted } = fakeStore({
+            holdings: ["NVDA"],
+            loaded: [...BENCHMARK_SYMBOLS, "NVDA"],
+            bars: [
+                { ...dailyBar("SPY", "2026-10-15"), source: "massive" },
+                { ...dailyBar("NVDA", "2026-10-14", 1_000), source: "massive" },
+                { ...dailyBar("NVDA", "2026-10-15", 1_010), source: "massive" },
+            ],
+        });
+        const lagging = fakeAdapter({
+            splits: [{ symbol: "NVDA", executionDate: "2026-10-16" }],
+            daily: { "2026-10-16": [dailyBar("SPY", "2026-10-16"), dailyBar("NVDA", "2026-10-16", 102)] },
+            history: { NVDA: [ohlc("2026-10-14T04:00:00.000Z", 100)] },
+        });
+
+        const detail = await ingestDailyPrices({ adapter: lagging.adapter, store, ...fakeClock() });
+
+        assert.deepEqual(detail.backfilled, [{ symbol: "NVDA", stored: 1, rejected: 0, historyStart: "2026-10-14", complete: false }]);
+        assert.equal(securities.get("NVDA"), null, "still queued");
+        assert.ok(attempted.has("NVDA"));
+        assert.equal(stored.get("NVDA|2026-10-14")?.close, 100);
+
+        // The next run's history covers the 15th and 16th: replaced and loaded.
+        const caughtUp = fakeAdapter({
+            history: { NVDA: [ohlc("2026-10-14T04:00:00.000Z", 100), ohlc("2026-10-15T04:00:00.000Z", 101), ohlc("2026-10-16T04:00:00.000Z", 102)] },
+        });
+        await ingestDailyPrices({ adapter: caughtUp.adapter, store, ...fakeClock() });
+        assert.equal(securities.get("NVDA"), "2026-10-14");
+        assert.deepEqual(storedDates(stored, "NVDA").map((date) => stored.get(`NVDA|${date}`)?.close), [100, 101, 102]);
+    });
+
+    test("a history that simply ends (no later stored bars) is complete", async () => {
+        const { store, securities } = fakeStore({ holdings: ["GONE"], queued: ["GONE"], bars: [{ ...dailyBar("SPY", "2026-10-15"), source: "massive" }] });
+        const { adapter } = fakeAdapter({
+            daily: { "2026-10-16": [dailyBar("SPY", "2026-10-16")] },
+            history: { GONE: [ohlc("2025-03-03T05:00:00.000Z", 5)] }, // delisted in March 2025
+        });
+
+        const detail = await ingestDailyPrices({ adapter, store, ...fakeClock() });
+
+        assert.deepEqual(detail.backfilled, [{ symbol: "GONE", stored: 1, rejected: 0, historyStart: "2025-03-03" }]);
+        assert.equal(securities.get("GONE"), "2025-03-03");
+    });
+
+    test("regression: symbols that keep failing move to the back, so the rest of the queue makes progress", async () => {
+        // Ten held symbols; the first three always fail. The budget allows
+        // only a few calls a run, which used to go to the same failures.
+        const held = Array.from({ length: 10 }, (_, i) => `H${i}`);
+        const failing = new Set(["H0", "H1", "H2"]);
+        const { store, securities } = fakeStore({ holdings: held, queued: held, bars: [{ ...dailyBar("SPY", "2026-10-16"), source: "massive" }] });
+        const history = Object.fromEntries(held.map((symbol) => [
+            symbol,
+            failing.has(symbol)
+                ? new PolygonApiError(502, "Bad Gateway", `https://api.polygon.io/v2/aggs/ticker/${symbol}?apiKey=***`)
+                : [ohlc("2026-10-15T04:00:00.000Z")],
+        ]));
+
+        const attemptsPerRun: string[][] = [];
+        let clockStart = Date.parse(FRIDAY_EVENING);
+        for (let run = 0; run < 3; run++) {
+            const clock = fakeClock(new Date(clockStart).toISOString());
+            const { adapter, calls } = fakeAdapter({ history });
+            // A budget for five calls: one window, no waiting.
+            await ingestDailyPrices({ adapter, store, now: clock.now, sleep: clock.sleep, budgetMs: 60_000 });
+            attemptsPerRun.push(calls.filter((call) => call.startsWith("history")).map((call) => call.split(" ")[1]));
+            clockStart += 24 * 60 * 60 * 1000;
+        }
+
+        assert.deepEqual(attemptsPerRun[0], ["H0", "H1", "H2", "H3", "H4"]);
+        // Next runs take the never-tried first, then the failures, oldest attempt first.
+        assert.deepEqual(attemptsPerRun[1], ["H5", "H6", "H7", "H8", "H9"]);
+        assert.deepEqual(attemptsPerRun[2], ["H0", "H1", "H2"]);
+        for (const symbol of held.filter((symbol) => !failing.has(symbol))) assert.notEqual(securities.get(symbol), null, `${symbol} never loaded`);
+    });
+});
+
 describe("ingestDailyPrices › looked-up symbols", () => {
     test("history waits for a daily file to price a looked-up symbol; held ones go first", async () => {
         // OLDREAL and HELDFUND were tracked on the 1st; NEWJUNK by a lookup this morning.
@@ -865,7 +963,10 @@ describe("ingestDailyPrices › looked-up symbols", () => {
         assert.deepEqual(calls.filter((call) => call.startsWith("history")), ["history HELDFUND 2Y", "history OLDREAL 2Y"]);
         // The history lags the daily file by a day: the 16th's bar is kept, not replaced away.
         assert.deepEqual(storedDates(stored, "OLDREAL"), ["2026-10-15", "2026-10-16"]);
-        assert.equal(detail.backfillQueue, 0, "NEWJUNK waits outside the queue until a daily file prices it");
+        // OLDREAL stays queued until a history covers the 16th; NEWJUNK waits
+        // outside the queue until a daily file prices it.
+        assert.equal(detail.backfillQueue, 1);
+        assert.deepEqual(detail.backfilled?.find((entry) => entry.symbol === "OLDREAL")?.complete, false);
     });
 
     test("drops looked-up symbols no daily file priced within a week, never held or recent ones", async () => {

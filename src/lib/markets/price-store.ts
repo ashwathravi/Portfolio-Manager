@@ -204,12 +204,16 @@ const needsHistory = (priority: readonly string[], database: Pick<Database, "sel
 export function buildResetHistoryQuery(symbols: string[], database: Database = db) {
     return database
         .update(securities)
-        .set({ historyStartDate: null, updatedAt: new Date() })
+        .set({ historyStartDate: null, historyAttemptedAt: null, updatedAt: new Date() })
         .where(and(inArray(securities.symbol, symbols), isNotNull(securities.historyStartDate)))
         .returning({ symbol: securities.symbol });
 }
 
-/** The backfill queue: `priority` symbols first, then oldest tracked first. */
+/**
+ * The backfill queue: symbols never tried first (`priority` ones first among
+ * them, then oldest tracked), then retries, least recently tried first. A
+ * symbol that keeps failing moves to the back, so it can't block the rest.
+ */
 export function buildSymbolsNeedingHistoryQuery(limit: number, priority: readonly string[] = [], database: Database = db) {
     const first = priority.length > 0
         ? [sql`case when ${inArray(securities.symbol, [...priority])} then 0 else 1 end`]
@@ -218,8 +222,16 @@ export function buildSymbolsNeedingHistoryQuery(limit: number, priority: readonl
         .select({ symbol: securities.symbol })
         .from(securities)
         .where(needsHistory(priority, database))
-        .orderBy(...first, asc(securities.createdAt), asc(securities.symbol))
+        .orderBy(sql`${securities.historyAttemptedAt} asc nulls first`, ...first, asc(securities.createdAt), asc(securities.symbol))
         .limit(limit);
+}
+
+/** Records a backfill attempt that left the symbol queued. */
+export function buildMarkHistoryAttemptedQuery(symbol: string, at: Date, database: Pick<Database, "update"> = db) {
+    return database
+        .update(securities)
+        .set({ historyAttemptedAt: at, updatedAt: at })
+        .where(eq(securities.symbol, symbol));
 }
 
 export function buildSymbolsNeedingHistoryCountQuery(priority: readonly string[] = [], database: Database = db) {
@@ -251,7 +263,7 @@ export function buildPruneUnpricedSecuritiesQuery(keep: readonly string[], track
 export function buildResetUnpricedHistoryQuery(symbols: string[], database: Database = db) {
     return database
         .update(securities)
-        .set({ historyStartDate: null, updatedAt: new Date() })
+        .set({ historyStartDate: null, historyAttemptedAt: null, updatedAt: new Date() })
         .where(and(inArray(securities.symbol, symbols), isNotNull(securities.historyStartDate), sql`not ${hasBars(database)}`))
         .returning({ symbol: securities.symbol });
 }
@@ -384,8 +396,21 @@ export async function resetHistory(symbols: Iterable<string>, database: Database
 export function buildMarkHistoryLoadedQuery(symbol: string, startDate: string, database: Pick<Database, "update"> = db) {
     return database
         .update(securities)
-        .set({ historyStartDate: startDate, updatedAt: new Date() })
+        .set({ historyStartDate: startDate, historyAttemptedAt: null, updatedAt: new Date() })
         .where(eq(securities.symbol, symbol));
+}
+
+export async function markHistoryAttempted(symbol: string, at: Date, database: Database = db): Promise<void> {
+    await buildMarkHistoryAttemptedQuery(symbol, at, database);
+}
+
+/** Any stored bar for the symbol after `after`, up to and including `through`. */
+export function buildBarsAfterQuery(symbol: string, after: string, through: string, database: Pick<Database, "select"> = db) {
+    return database
+        .select({ date: priceBars.date })
+        .from(priceBars)
+        .where(and(eq(priceBars.symbol, symbol), sql`${priceBars.date} > ${after}`, lte(priceBars.date, through)))
+        .limit(1);
 }
 
 export async function markHistoryLoaded(symbol: string, startDate: string, database: Database = db): Promise<void> {
@@ -399,11 +424,15 @@ export function buildDeleteHistoryQuery(symbol: string, through: string, databas
 
 /**
  * Replaces a symbol's stored bars with a freshly fetched history (cut off at
- * `through`) and records where it starts, in one transaction. Every stored
- * bar up to the history's last day goes, older ones too: after a split those
- * are on the old scale, and the provider's adjusted history is the one to
- * keep. Bars after the history's last day (from the daily files, if the
- * history lags) are left alone. Returns undefined, changing nothing, when no
+ * `through`), in one transaction. Every stored bar up to the history's last
+ * day goes, older ones too: after a split those are on the old scale, and the
+ * provider's adjusted history is the one to keep. Bars after the history's
+ * last day (from the daily files, if the history lags) are left alone.
+ *
+ * The history is marked loaded only when it is `complete`: no stored bar lies
+ * between its last day and `through`. Otherwise those bars could be on the
+ * old scale, so the symbol stays queued for the next run (which normally
+ * finds the history caught up). Returns undefined, changing nothing, when no
  * bar is valid.
  */
 export async function replaceHistory(
@@ -411,20 +440,22 @@ export async function replaceHistory(
     bars: readonly PriceBarInput[],
     through: string,
     database: Database = db,
-): Promise<{ stored: number; rejected: number; historyStart: string } | undefined> {
+): Promise<{ stored: number; rejected: number; historyStart: string; complete: boolean } | undefined> {
     const own = bars.filter((bar) => bar.symbol === symbol && bar.date <= through);
     const valid = dedupeBars(own.filter(isValidBar));
     if (valid.length === 0) return undefined;
     const historyStart = valid.reduce((earliest, bar) => (bar.date < earliest ? bar.date : earliest), valid[0].date);
     const historyEnd = valid.reduce((latest, bar) => (bar.date > latest ? bar.date : latest), valid[0].date);
-    await database.transaction(async (tx) => {
+    const complete = await database.transaction(async (tx) => {
         await buildDeleteHistoryQuery(symbol, historyEnd, tx);
         for (let start = 0; start < valid.length; start += UPSERT_CHUNK_SIZE) {
             await buildUpsertBarsQuery(valid.slice(start, start + UPSERT_CHUNK_SIZE), tx);
         }
+        if ((await buildBarsAfterQuery(symbol, historyEnd, through, tx)).length > 0) return false;
         await buildMarkHistoryLoadedQuery(symbol, historyStart, tx);
+        return true;
     });
-    return { stored: valid.length, rejected: bars.length - own.filter(isValidBar).length, historyStart };
+    return { stored: valid.length, rejected: bars.length - own.filter(isValidBar).length, historyStart, complete };
 }
 
 /**
