@@ -60,7 +60,6 @@ Common variables:
 
 ```bash
 DATABASE_URL="postgresql://..."
-ALPHA_VANTAGE_API_KEY=""
 POLYGON_API_KEY=""
 SEC_EDGAR_USER_AGENT="Portfolio-Manager local contact@example.com"
 ```
@@ -521,8 +520,7 @@ Without database/provider keys, many UI surfaces still render seeded or fallback
 
 Check:
 
-- `ALPHA_VANTAGE_API_KEY`.
-- `POLYGON_API_KEY`.
+- `POLYGON_API_KEY` (without it the market-data routes answer 503 `MARKET_DATA_NOT_CONFIGURED`).
 - Provider rate limits.
 - Network access.
 

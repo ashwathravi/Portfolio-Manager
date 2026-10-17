@@ -11,10 +11,10 @@
   - Alpha Radar 13F research tables for tracked filers, SEC filings, parsed holdings, quarterly changes, reports, and refresh runs
   - Relations are portfolio -> holdings and portfolio -> transactions.
 - Database access is centralized in `src/db/index.ts` using `postgres` + `drizzle-orm`. If `DATABASE_URL` is missing, the app does not fail build, but database-backed features degrade at runtime.
-- Market data is routed through `MarketDataEngine`:
-  - optional primary provider
-  - Alpha Vantage secondary/fallback provider
-  - current singleton is instantiated without a primary provider, so runtime uses Alpha Vantage directly.
+- Market data goes through one service, `getMarketDataService()` (`src/lib/services/market-data-service.ts`), for server pages (`loadQuotes`) and the `/api/market-data` routes alike:
+  - `PolygonMassiveAdapter` on the free Massive Basic plan: quotes are the latest session's closes from the grouped daily bars, plus daily history and reference data
+  - an in-memory cache in front (`src/lib/cache`)
+  - without `POLYGON_API_KEY` requests reject with `MarketDataNotConfiguredError`: pages keep stored prices, routes answer 503.
 - Schwab integration is server-side:
   - OAuth callback route exchanges auth code for tokens
   - order route validates an app-level order payload and maps it to Schwab's order format

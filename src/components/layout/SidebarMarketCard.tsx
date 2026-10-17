@@ -82,8 +82,8 @@ export function SidebarMarketCard() {
     const { quotes } = useAutoRefreshQuotes(INDEX_SYMBOLS);
 
     // Derive a flat {symbol → percentChange} map so the row render stays
-    // dumb. `MarketQuote.changePercent` is stored in *percent* units
-    // (1.35 → 1.35%, matching `alpha-vantage.test.ts` and the existing
+    // dumb. `Quote.changePercent` is stored in *percent* units (1.35 →
+    // 1.35%, pinned in `polygon-massive-adapter.test.ts` and matching the
     // alert engine's `/ 100` conversion), so we pass it through unchanged.
     const deltas = useMemo(() => {
         const out: Record<string, number | null> = {};
