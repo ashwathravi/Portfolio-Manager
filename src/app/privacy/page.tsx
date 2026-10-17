@@ -74,11 +74,14 @@ export default async function PrivacyPage({ searchParams }: { searchParams: Sear
                         </li>
                     </ul>
                     <p>
-                        Some things are stored only in your browser, not on our servers: your display
-                        settings, research theses, journal entries, watchlist and Ask history are saved in your
-                        browser&rsquo;s local storage. To show prices, the ticker symbols in your watchlist and
-                        theses are sent to our server and on to the market data provider. API keys you enter in
-                        Settings are held in memory for the current session only.
+                        Some things are stored only in your browser, not on our servers: your Settings (profile,
+                        display, notification and trading preferences, the account names, last four digits and
+                        balances shown there, and your risk policy, including cash, employer-stock and tax-limit
+                        details), research theses, journal entries, watchlist, price alerts and their notes,
+                        weekly reviews and Ask history. Anyone using the same browser profile can see them, and
+                        clearing this site&rsquo;s data removes them. To show prices, the ticker symbols in your
+                        watchlist and theses are sent to our server and on to the market data provider. API keys
+                        you enter in Settings are held in memory for the current session only.
                     </p>
                     <p>We do not use advertising or analytics cookies, tracking pixels or third-party trackers.</p>
                 </section>
