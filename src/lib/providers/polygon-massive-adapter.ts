@@ -104,9 +104,11 @@ interface PolygonGroupedBar extends PolygonAggBar {
   T: string;
 }
 
+/** GET /stocks/v1/splits (replaces the deprecated /v3/reference/splits). */
 interface PolygonSplitsResponse {
   status: string;
   results?: Array<{ ticker?: string; execution_date?: string }>;
+  next_url?: string;
 }
 
 interface PolygonGroupedResponse {
@@ -564,10 +566,16 @@ export class PolygonMassiveAdapter implements MarketDataProvider {
     if (!ISO_DATE.test(from) || !ISO_DATE.test(to)) {
       throw new Error(`PolygonMassiveAdapter: Expected dates as YYYY-MM-DD, got "${from}" and "${to}".`);
     }
+    // Every adjustment type (forward and reverse splits, stock dividends)
+    // rescales adjusted bars. 5000 is the page maximum: far more than a few
+    // days of US splits, so one page is the whole answer.
     const url =
-      `${this.baseUrl}/v3/reference/splits` +
-      `?execution_date.gte=${from}&execution_date.lte=${to}&limit=1000&apiKey=${this.apiKey}`;
+      `${this.baseUrl}/stocks/v1/splits` +
+      `?execution_date.gte=${from}&execution_date.lte=${to}&limit=5000&apiKey=${this.apiKey}`;
     const data = await this.fetchWithRetry<PolygonSplitsResponse>(url);
+    if (data.next_url) {
+      console.warn(`PolygonMassiveAdapter: more than one page of splits between ${from} and ${to}; using the first.`);
+    }
     return (data.results ?? []).flatMap((split) =>
       typeof split?.ticker === 'string' && split.ticker.trim() && typeof split.execution_date === 'string' && ISO_DATE.test(split.execution_date)
         ? [{ symbol: split.ticker.trim().toUpperCase(), executionDate: split.execution_date }]

@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
     buildBarsQuery,
     buildDeleteHistoryQuery,
+    buildHasBarsQuery,
     buildLatestBarDateQuery,
     buildLatestClosesQuery,
     buildMarkHistoryLoadedQuery,
@@ -163,6 +164,12 @@ describe("price store queries", () => {
         assert.match(sql, /^select count\(\*\) from "securities" where/i);
         assert.match(sql, /"securities"\."history_start_date" is null and "securities"\."active" = \$\d+ and \("securities"\."symbol" in \(\$\d+\) or exists/i);
         assert.deepEqual(params, [true, "AAPL"]);
+    });
+
+    test("checking for stored bars reads at most one row", () => {
+        const { sql, params } = buildHasBarsQuery("NVDA").toSQL();
+        assert.equal(sql, 'select "symbol" from "price_bars" where "price_bars"."symbol" = $1 limit $2');
+        assert.deepEqual(params, ["NVDA", 1]);
     });
 
     test("pruning drops only old, never-priced securities outside the keep list", () => {

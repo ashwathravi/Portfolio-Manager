@@ -409,7 +409,7 @@ describe('PolygonMassiveAdapter', () => {
         body: {
           status: 'OK',
           results: [
-            { ticker: 'NVDA', execution_date: '2026-10-15', split_from: 1, split_to: 10 },
+            { ticker: 'NVDA', execution_date: '2026-10-15', split_from: 1, split_to: 10, adjustment_type: 'forward_split', historical_adjustment_factor: 0.1, id: 'E1' },
             { ticker: ' brk.b ', execution_date: '2026-10-16' },
             { ticker: '', execution_date: '2026-10-16' },
             { ticker: 'XYZ', execution_date: 'soon' },
@@ -421,7 +421,7 @@ describe('PolygonMassiveAdapter', () => {
       const splits = await adapter(fetch).getSplits('2026-10-15', '2026-10-16');
 
       assert.deepEqual(calls, [
-        `${BASE}/v3/reference/splits?execution_date.gte=2026-10-15&execution_date.lte=2026-10-16&limit=1000&apiKey=${KEY}`,
+        `${BASE}/stocks/v1/splits?execution_date.gte=2026-10-15&execution_date.lte=2026-10-16&limit=5000&apiKey=${KEY}`,
       ]);
       assert.deepEqual(splits, [
         { symbol: 'NVDA', executionDate: '2026-10-15' },

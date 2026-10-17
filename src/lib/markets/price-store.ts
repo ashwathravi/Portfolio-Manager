@@ -243,6 +243,10 @@ export function buildPruneUnpricedSecuritiesQuery(keep: readonly string[], track
         .returning({ symbol: securities.symbol });
 }
 
+export function buildHasBarsQuery(symbol: string, database: Database = db) {
+    return database.select({ symbol: priceBars.symbol }).from(priceBars).where(eq(priceBars.symbol, symbol)).limit(1);
+}
+
 /** The newest bar date stored for any symbol (served by price_bars_date_idx). */
 export function buildLatestBarDateQuery(database: Database = db) {
     return database.select({ date: max(priceBars.date) }).from(priceBars);
@@ -328,6 +332,11 @@ export async function pruneUnpricedSecurities(
 ): Promise<string[]> {
     const rows = await buildPruneUnpricedSecuritiesQuery(normalizeSymbols(keep), trackedBefore, database);
     return rows.map((row) => row.symbol);
+}
+
+/** Whether any bar is stored for the symbol. */
+export async function hasStoredBars(symbol: string, database: Database = db): Promise<boolean> {
+    return (await buildHasBarsQuery(symbol, database)).length > 0;
 }
 
 /** The newest date in price_bars, or null when nothing is stored yet. */

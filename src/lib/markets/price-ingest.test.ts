@@ -120,9 +120,9 @@ function fakeStore({
     const stored = new Map(bars.map((bar) => [`${bar.symbol}|${bar.date}`, bar]));
     const marks: Array<[string, string]> = [];
     const resets: string[] = [];
-    const hasBars = (symbol: string) => [...stored.values()].some((bar) => bar.symbol === symbol);
+    const barsFor = (symbol: string) => [...stored.values()].some((bar) => bar.symbol === symbol);
     const queue = (priority: readonly string[]) => {
-        const waiting = [...securities].filter(([symbol, start]) => start === null && (priority.includes(symbol) || hasBars(symbol)));
+        const waiting = [...securities].filter(([symbol, start]) => start === null && (priority.includes(symbol) || barsFor(symbol)));
         return [...waiting.filter(([symbol]) => priority.includes(symbol)), ...waiting.filter(([symbol]) => !priority.includes(symbol))]
             .map(([symbol]) => symbol);
     };
@@ -155,7 +155,7 @@ function fakeStore({
         countSymbolsNeedingHistory: async (priority) => queue(priority).length,
         async pruneUnpricedSecurities(keep, trackedBefore) {
             const dropped = [...securities]
-                .filter(([symbol, start]) => start === null && !keep.includes(symbol) && !hasBars(symbol)
+                .filter(([symbol, start]) => start === null && !keep.includes(symbol) && !barsFor(symbol)
                     && (created.get(symbol) ?? 0) < trackedBefore.getTime())
                 .map(([symbol]) => symbol);
             for (const symbol of dropped) securities.delete(symbol);
@@ -177,6 +177,7 @@ function fakeStore({
             marks.push([symbol, historyStart]);
             return { stored: valid.length, rejected: input.length - own.filter(isValidBar).length, historyStart };
         },
+        hasBars: async (symbol) => barsFor(symbol),
         async resetHistory(symbols) {
             const reset = normalizeSymbols(symbols).filter((symbol) => securities.get(symbol));
             for (const symbol of reset) securities.set(symbol, null);
@@ -601,27 +602,96 @@ describe("ingestDailyPrices", () => {
         assert.equal(detail.backfillQueue, 0);
     });
 
-    test("a split on a day not stored yet is handled by the run that stores it", async () => {
-        const { store, resets, securities } = fakeStore({
+    test("a split in the window is handled before any day is stored, even on a day not published yet", async () => {
+        const { store, resets, stored } = fakeStore({
             holdings: ["NVDA"],
             loaded: [...BENCHMARK_SYMBOLS, "NVDA"],
-            bars: [{ ...dailyBar("SPY", "2026-10-14"), source: "massive" }],
+            bars: [{ ...dailyBar("SPY", "2026-10-14"), source: "massive" }, { ...dailyBar("NVDA", "2026-10-14", 1_000), source: "massive" }],
         });
         const splits = [{ symbol: "NVDA", executionDate: "2026-10-16" }];
-        const unpublished = fakeAdapter({ splits, daily: { "2026-10-15": [dailyBar("SPY", "2026-10-15")], "2026-10-16": [] } });
+        // The 16th's file isn't out, but the split is known: NVDA is re-queued
+        // at once, and its history refetched (already adjusted for it).
+        const unpublished = fakeAdapter({
+            splits,
+            daily: { "2026-10-15": [dailyBar("SPY", "2026-10-15"), dailyBar("NVDA", "2026-10-15", 1_010)], "2026-10-16": [] },
+            history: { NVDA: [ohlc("2026-10-14T04:00:00.000Z", 100), ohlc("2026-10-15T04:00:00.000Z", 101)] },
+        });
 
         const first = await ingestDailyPrices({ adapter: unpublished.adapter, store, ...fakeClock() });
 
-        assert.deepEqual(first.splits, { from: "2026-10-15", to: "2026-10-15", reset: [] });
-        assert.equal(securities.get("NVDA"), "2024-10-16");
+        assert.deepEqual(first.splits, { from: "2026-10-15", to: "2026-10-16", reset: ["NVDA"] });
+        assert.ok(unpublished.calls.includes("history NVDA 2Y"));
+        assert.equal(stored.get("NVDA|2026-10-15")?.close, 101);
 
-        const published = fakeAdapter({ splits, daily: { "2026-10-16": [dailyBar("SPY", "2026-10-16")] } });
+        // The next run stores the 16th, sees the split again and refetches once more.
+        const published = fakeAdapter({
+            splits,
+            daily: { "2026-10-16": [dailyBar("SPY", "2026-10-16"), dailyBar("NVDA", "2026-10-16", 102)] },
+            history: { NVDA: [ohlc("2026-10-14T04:00:00.000Z", 100), ohlc("2026-10-15T04:00:00.000Z", 101), ohlc("2026-10-16T04:00:00.000Z", 102)] },
+        });
         const second = await ingestDailyPrices({ adapter: published.adapter, store, ...fakeClock() });
 
         assert.equal(published.calls[0], "splits 2026-10-16 2026-10-16");
         assert.deepEqual(second.splits, { from: "2026-10-16", to: "2026-10-16", reset: ["NVDA"] });
-        assert.deepEqual(resets, ["NVDA"]);
-        assert.ok(published.calls.includes("history NVDA 2Y"));
+        assert.deepEqual(resets, ["NVDA", "NVDA"]);
+        assert.deepEqual(storedDates(stored, "NVDA").map((date) => stored.get(`NVDA|${date}`)?.close), [100, 101, 102]);
+    });
+
+    test("regression: a failure after an earlier day is stored still leaves that day's split handled", async () => {
+        // The stored 15th becomes the bookmark, so its split must already be in the queue.
+        const { store, stored, securities } = fakeStore({
+            holdings: ["NVDA"],
+            loaded: [...BENCHMARK_SYMBOLS, "NVDA"],
+            bars: [{ ...dailyBar("SPY", "2026-10-14"), source: "massive" }, { ...dailyBar("NVDA", "2026-10-14", 1_000), source: "massive" }],
+        });
+        const failing = fakeAdapter({
+            splits: [{ symbol: "NVDA", executionDate: "2026-10-15" }],
+            daily: {
+                "2026-10-15": [dailyBar("SPY", "2026-10-15"), dailyBar("NVDA", "2026-10-15", 101)],
+                "2026-10-16": new PolygonApiError(502, "Bad Gateway", "https://api.polygon.io/v2/aggs/grouped?apiKey=***"),
+            },
+        });
+
+        await assert.rejects(ingestDailyPrices({ adapter: failing.adapter, store, ...fakeClock() }), PolygonApiError);
+        assert.deepEqual(storedDates(stored, "SPY"), ["2026-10-14", "2026-10-15"]);
+        assert.equal(securities.get("NVDA"), null);
+
+        const next = fakeAdapter({
+            daily: { "2026-10-16": [dailyBar("SPY", "2026-10-16"), dailyBar("NVDA", "2026-10-16", 102)] },
+            history: { NVDA: [ohlc("2026-10-14T04:00:00.000Z", 100), ohlc("2026-10-15T04:00:00.000Z", 101), ohlc("2026-10-16T04:00:00.000Z", 102)] },
+        });
+        await ingestDailyPrices({ adapter: next.adapter, store, ...fakeClock() });
+
+        assert.deepEqual(next.calls, ["splits 2026-10-16 2026-10-16", "daily 2026-10-16", "history NVDA 2Y"]);
+        assert.equal(stored.get("NVDA|2026-10-14")?.close, 100);
+    });
+
+    test("regression: a split stock whose refetch brings nothing back stays queued", async () => {
+        for (const history of [
+            new PolygonApiError(404, "Not Found", "https://api.polygon.io/v2/aggs/ticker/NVDA?apiKey=***"),
+            [],
+            [{ ...ohlc("2026-10-15T04:00:00.000Z"), high: 1 }], // only an invalid bar
+        ]) {
+            const { store, securities, marks, stored } = fakeStore({
+                holdings: ["NVDA"],
+                loaded: [...BENCHMARK_SYMBOLS, "NVDA"],
+                bars: [{ ...dailyBar("SPY", "2026-10-15"), source: "massive" }, { ...dailyBar("NVDA", "2026-10-15", 1_000), source: "massive" }],
+            });
+            const { adapter } = fakeAdapter({
+                splits: [{ symbol: "NVDA", executionDate: "2026-10-16" }],
+                daily: { "2026-10-16": [dailyBar("SPY", "2026-10-16"), dailyBar("NVDA", "2026-10-16", 102)] },
+                history: { NVDA: history },
+            });
+
+            const detail = await ingestDailyPrices({ adapter, store, ...fakeClock() });
+
+            assert.equal(securities.get("NVDA"), null, "NVDA left the queue");
+            assert.deepEqual(marks, []);
+            assert.deepEqual(detail.backfillErrors, [{ symbol: "NVDA", error: "No history returned; still queued." }]);
+            assert.equal(detail.backfillQueue, 1);
+            // Nothing was deleted either: the old bars wait for a real replacement.
+            assert.equal(stored.get("NVDA|2026-10-15")?.close, 1_000);
+        }
     });
 
     test("a failed split check stores nothing, so the next run asks about the same days", async () => {

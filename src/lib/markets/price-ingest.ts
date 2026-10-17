@@ -14,14 +14,16 @@
  *    Before any of those days is stored, one call asks which stocks split on
  *    them: bars are split-adjusted, so a split puts every earlier stored bar
  *    of that stock on the old scale. Those stocks go back in the history
- *    queue. Asking first means a failed check stores nothing, and the next
- *    run asks about the same days again.
+ *    queue before any day is stored, since the newest stored day is the next
+ *    run's bookmark: a failed check or reset stores nothing, and the next run
+ *    asks about the same days again.
  * 3. Backfill two years of history for symbols that don't have it yet, one
  *    aggregates call per symbol, while the run's time budget lasts: held
  *    symbols and benchmarks first, and a looked-up symbol only once a daily
  *    file has priced it (a made-up ticker never costs a call). A
- *    backfill replaces the symbol's stored bars up to that day. The rest wait
- *    in the queue for the next run.
+ *    backfill replaces the symbol's stored bars up to that day; one with
+ *    stored bars that gets no history back stays queued, so old-scale bars
+ *    never stay beside new ones. The rest wait in the queue for the next run.
  *
  * The free Basic plan allows 5 calls a minute, so calls go through a pacer:
  * at most 5 in any 65-second window (a one-call-every-13-seconds pace once
@@ -52,6 +54,7 @@ import { getEasternParts, lastCompletedSession, nextTradingDay, previousTradingD
 import {
     countSymbolsNeedingHistory,
     getLatestBarDate,
+    hasStoredBars,
     listSymbolsNeedingHistory,
     listTrackedSymbols,
     markHistoryLoaded,
@@ -118,6 +121,8 @@ export interface PriceIngestStore {
     ): Promise<{ stored: number; rejected: number; historyStart: string } | undefined>;
     /** Puts loaded symbols back in the history queue; returns the ones reset. */
     resetHistory(symbols: string[]): Promise<string[]>;
+    /** Whether any bar is stored for the symbol. */
+    hasBars(symbol: string): Promise<boolean>;
 }
 
 export interface IngestPricesOptions {
@@ -154,9 +159,9 @@ export type PriceIngestDetail = {
     /** Symbols still waiting for history after this run. */
     backfillQueue?: number;
     /**
-     * The split check for the days stored this run: the tracked stocks that
-     * split on them, put back in the history queue (`reset`), or why there
-     * was no check.
+     * The split check for this run's catch-up days: the tracked stocks that
+     * split on them, put back in the history queue (`reset`) before any day
+     * was stored, or why there was no check.
      */
     splits?: { from: string; to: string; reset: string[] } | { skipped: string };
     stopped?: { catchUp?: IngestStopReason; backfill?: IngestStopReason };
@@ -271,6 +276,7 @@ export function createPriceIngestStore(database: Database = db): PriceIngestStor
         markHistoryLoaded: (symbol, startDate) => markHistoryLoaded(symbol, startDate, database),
         replaceHistory: (symbol, bars, through) => replaceHistory(symbol, bars, through, database),
         resetHistory: (symbols) => resetHistory(symbols, database),
+        hasBars: (symbol) => hasStoredBars(symbol, database),
     };
 }
 
@@ -343,6 +349,22 @@ export async function ingestDailyPrices({
         }
     }
 
+    // Re-queue every tracked stock that split in the window before storing any
+    // day: the newest stored day is the next run's bookmark, so no day may be
+    // stored while its split is unhandled. A split on a day that ends up not
+    // stored (unpublished) costs at most one more history refetch.
+    let splits: PriceIngestDetail["splits"];
+    if (splitEvents) {
+        const from = window[0];
+        const to = window.at(-1)!;
+        const split = normalizeSymbols(
+            splitEvents.filter((event) => event.executionDate >= from && event.executionDate <= to).map((event) => event.symbol),
+        ).filter((symbol) => tracked.has(symbol));
+        splits = { from, to, reset: split.length > 0 ? await store.resetHistory(split) : [] };
+    } else {
+        splits = { skipped: splitsSkipped ?? stopped.catchUp ?? "no new days" };
+    }
+
     const days: NonNullable<PriceIngestDetail["days"]> = [];
     for (const date of stopped.catchUp ? [] : window) {
         if (!(await pacer.acquire())) {
@@ -372,22 +394,7 @@ export async function ingestDailyPrices({
     // so one about to be priced isn't dropped) stop being tracked.
     const pruned = await store.pruneUnpricedSecurities(priority, new Date(now().getTime() - UNPRICED_GRACE_MS));
 
-    // 3. Stocks that split on a stored day go back in the history queue, so
-    // the backfill below rewrites their history on the new scale. A split on
-    // a day not stored yet is found again by the run that stores it.
-    let splits: PriceIngestDetail["splits"];
-    if (splitEvents && days.length > 0) {
-        const from = days[0].date;
-        const to = days.at(-1)!.date;
-        const split = splitEvents
-            .filter((event) => event.executionDate >= from && event.executionDate <= to && tracked.has(event.symbol))
-            .map((event) => event.symbol);
-        splits = { from, to, reset: split.length > 0 ? await store.resetHistory(split) : [] };
-    } else {
-        splits = { skipped: splitsSkipped ?? stopped.catchUp ?? "no new days" };
-    }
-
-    // 4. Backfill history, up to the newest day the daily files have covered.
+    // 3. Backfill history, up to the newest day the daily files have covered.
     // With nothing stored at all, the day before the session: the session
     // itself will come from its daily file.
     const historyThrough = latestAfter ?? previousTradingDay(session);
@@ -419,6 +426,13 @@ export async function ingestDailyPrices({
 
             const bars = historyToBars(symbol, history, historyThrough);
             const replaced = await store.replaceHistory(symbol, bars, historyThrough);
+            if (!replaced && (await store.hasBars(symbol))) {
+                // Stored bars that need replacing (a split, or a symbol first
+                // priced today) but no history yet: it stays queued, so
+                // old-scale bars never stay beside new ones. The next run asks again.
+                backfillErrors.push({ symbol, error: "No history returned; still queued." });
+                continue;
+            }
             if (!replaced) {
                 // Nothing to store (delisted, not a stock, or listed after
                 // historyThrough). The history is marked as starting at
