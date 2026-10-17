@@ -38,6 +38,12 @@ export async function proxy(request: NextRequest, event?: NextFetchEvent): Promi
         // attacker would hammer.
         return (await rateLimitApiRequest(request)) ?? NextResponse.next();
     }
+    if (isCronRoute(pathname)) {
+        // No session: Vercel Cron calls these, and each route checks the
+        // CRON_SECRET bearer token itself (src/lib/jobs/cron.ts), even when
+        // sign-in is misconfigured. Limited per IP against token guessing.
+        return (await rateLimitApiRequest(request)) ?? NextResponse.next();
+    }
     if (isPublicRoute(pathname)) return NextResponse.next();
 
     const mode = authRuntimeMode();
@@ -107,6 +113,10 @@ function isPublicRoute(pathname: string): boolean {
         || pathname === "/api/health"
         || pathname === "/api/health/ready"
         || PUBLIC_ASSET_PATHS.has(pathname);
+}
+
+function isCronRoute(pathname: string): boolean {
+    return pathname.startsWith("/api/cron/");
 }
 
 function isSchwabRoute(pathname: string): boolean {

@@ -1,6 +1,7 @@
 
 import {
     boolean,
+    check,
     date,
     doublePrecision,
     index,
@@ -453,6 +454,10 @@ export const securities = pgTable("securities", {
     referenceUpdatedAt: timestamp("reference_updated_at"),
     // Null until the history backfill has run; then the earliest date it covers.
     historyStartDate: date("history_start_date", { mode: "string" }),
+    // The last backfill attempt that left the symbol queued (an error, or no
+    // complete history yet). The queue takes never-tried symbols first, then
+    // the least recently tried, so persistent failures can't block the rest.
+    historyAttemptedAt: timestamp("history_attempted_at"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, () => ({
@@ -478,6 +483,29 @@ export const priceBars = pgTable("price_bars", {
 }, (table) => ({
     pk: primaryKey({ columns: [table.symbol, table.date] }),
     dateIdx: index("price_bars_date_idx").on(table.date),
+    serverOnlyNoClientAccess: serverOnlyNoClientAccessPolicy(),
+    appRuntimeAccess: appRuntimeAccessPolicy(),
+})).enableRLS();
+
+// ---------------------------------------------------------------------------
+// Scheduled jobs — one row per run of a cron job (launch item i48)
+// ---------------------------------------------------------------------------
+export type JobRunStatus = "running" | "succeeded" | "failed";
+
+// A row starts as "running" and is finished with the job's detail or a short
+// error. One that stays "running" with no finished_at was cut off mid-run
+// (the function timed out or the instance died).
+export const jobRuns = pgTable("job_runs", {
+    id: uuid("id").default(sql`gen_random_uuid()`).primaryKey(),
+    job: text("job").notNull(),
+    startedAt: timestamp("started_at").defaultNow().notNull(),
+    finishedAt: timestamp("finished_at"),
+    status: text("status").$type<JobRunStatus>().notNull(),
+    detail: jsonb("detail").$type<Record<string, unknown>>(),
+    error: text("error"),
+}, (table) => ({
+    jobStartedAtIdx: index("job_runs_job_started_at_idx").on(table.job, table.startedAt),
+    statusCheck: check("job_runs_status_check", sql`${table.status} in ('running', 'succeeded', 'failed')`),
     serverOnlyNoClientAccess: serverOnlyNoClientAccessPolicy(),
     appRuntimeAccess: appRuntimeAccessPolicy(),
 })).enableRLS();

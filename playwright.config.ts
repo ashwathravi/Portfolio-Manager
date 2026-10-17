@@ -41,6 +41,12 @@ const noMarketData = {
     POLYGON_API_KEY: '',
 };
 
+// No cron secret, so /api/cron/* always refuses (503) and a test run never
+// runs the scheduled jobs, whatever .env.local holds.
+const noCronSecret = {
+    CRON_SECRET: '',
+};
+
 export default defineConfig({
     testDir: './tests/e2e',
     fullyParallel: true,
@@ -89,6 +95,7 @@ export default defineConfig({
                 DATABASE_URL: process.env.DATABASE_URL ?? '',
                 ...noSharedRedis,
                 ...noMarketData,
+                ...noCronSecret,
             },
             url: 'http://localhost:3000',
             // Never reuse a running server: it may be connected to a real
@@ -113,6 +120,7 @@ export default defineConfig({
                 AUTH_LOCAL_DEV_USER_ID: E2E_USER_ID,
                 ...noSharedRedis,
                 ...noMarketData,
+                ...noCronSecret,
             },
             url: 'http://localhost:3100/api/health',
             // Never reuse a running server: it may be connected to a real
@@ -137,6 +145,7 @@ export default defineConfig({
                 AUTH_LOCAL_DEV_USER_ID: E2E_USER_ID,
                 ...noSharedRedis,
                 ...noMarketData,
+                ...noCronSecret,
             },
             url: 'http://localhost:3200/api/health',
             // Never reuse a running server: it may be connected to a real
