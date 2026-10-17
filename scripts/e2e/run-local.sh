@@ -15,6 +15,7 @@ if [[ "${E2E_LOCAL_RUN_LOCKED:-}" != "1" ]]; then
     # Start the container if it isn't running, but never recreate it: that
     # would restart Postgres under another checkout's dev server or E2E run.
     # `npm run db:up` applies changes to docker-compose.yml.
+    bash scripts/db/check-container-project.sh
     docker compose up -d --wait --no-recreate db >/dev/null
 
     # Run the rest of this script while holding the lock (scripts/e2e/run-lock.mjs).

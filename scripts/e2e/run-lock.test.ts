@@ -71,6 +71,19 @@ async function waitFor(condition: () => boolean, what: string, timeoutMs = 15_00
     }
 }
 
+// macOS counts processes against `ulimit -u`; Linux also counts threads, so
+// Node itself would not start there.
+test('run-lock.mjs - fails clearly, without running the command, when its helper cannot start', { skip: process.platform !== 'darwin' && 'needs macOS process limits' }, () => {
+    const result = spawnSync('sh', ['-c', `ulimit -u 1 && exec "${process.execPath}" ${SCRIPT} echo ran`], {
+        env: { ...process.env, E2E_LOCK_DATABASE_URL: 'postgres://nobody@127.0.0.1:9/none' },
+        encoding: 'utf8',
+        timeout: 15_000,
+    });
+    assert.strictEqual(result.status, 1, result.stderr);
+    assert.match(result.stderr, /Could not start the E2E lock helper/);
+    assert.strictEqual(result.stdout, '');
+});
+
 describe('run-lock.mjs', { skip: !DATABASE_URL && 'SCRIPTS_TEST_DATABASE_URL is not set', timeout: 60_000 }, () => {
     test('a second run waits for the first, says which run it waits for, then runs', async () => {
         const log = newLog('serial');

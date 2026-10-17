@@ -9,7 +9,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "db:up": "docker compose up -d --wait db",
+    "db:up": "bash ./scripts/db/check-container-project.sh && docker compose up -d --wait db",
     "db:down": "docker compose stop db",
     "db:migrate": "node --import tsx scripts/db/init-local.ts && drizzle-kit migrate",
     "db:setup": "node --import tsx scripts/setup-local-db.ts && node --import tsx scripts/seed.ts",

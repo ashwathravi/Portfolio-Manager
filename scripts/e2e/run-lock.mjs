@@ -191,9 +191,24 @@ async function holdLock() {
 // the turn, runs the command, and passes signals and the exit status through.
 async function runWithLock() {
     // Detached: Ctrl-C must not reach the helper before the run has stopped.
-    const helper = fork(fileURLToPath(import.meta.url), ["--hold"], { detached: true });
-    helper.on("error", () => {}); // IPC to a helper that just died; its exit is handled below
-    const helperExited = new Promise((resolve) => helper.once("exit", (code) => resolve(code ?? 1)));
+    let helper;
+    try {
+        helper = fork(fileURLToPath(import.meta.url), ["--hold"], { detached: true });
+    } catch (error) {
+        console.error(`Could not start the E2E lock helper: ${error.message}`);
+        return 1;
+    }
+    const helperExited = new Promise((resolve) => {
+        helper.once("exit", (code) => resolve(code ?? 1));
+        // A helper that never started may emit no "exit". Later errors are
+        // IPC to a helper that just died; its exit is handled.
+        helper.on("error", (error) => {
+            if (helper.pid === undefined) {
+                console.error(`Could not start the E2E lock helper: ${error.message}`);
+                resolve(1);
+            }
+        });
+    });
     const helperLocked = await Promise.race([
         new Promise((resolve) => helper.once("message", (message) => resolve(message.locked === true))),
         helperExited.then(() => false),
