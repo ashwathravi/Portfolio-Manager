@@ -161,7 +161,8 @@ describe("price store queries", () => {
     test("the backfill queue takes priority symbols at once, and first", () => {
         const { sql, params } = buildSymbolsNeedingHistoryQuery(5, ["AAPL", "SPY"]).toSQL();
         assert.match(sql, /\("securities"\."symbol" in \(\$\d+, \$\d+\) or exists \(select 1 from "price_bars"/i);
-        assert.match(sql, /order by "securities"\."history_attempted_at" asc nulls first, case when "securities"\."symbol" in \(\$\d+, \$\d+\) then 0 else 1 end, "securities"\."created_at" asc/i);
+        // Priority first; within each group, never tried first, then the least recently tried.
+        assert.match(sql, /order by case when "securities"\."symbol" in \(\$\d+, \$\d+\) then 0 else 1 end, "securities"\."history_attempted_at" asc nulls first, "securities"\."created_at" asc/i);
         assert.deepEqual(params, [true, "AAPL", "SPY", "AAPL", "SPY", 5]);
     });
 

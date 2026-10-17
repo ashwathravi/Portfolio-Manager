@@ -430,6 +430,26 @@ describe('PolygonMassiveAdapter', () => {
       assert.deepEqual(results.map((r) => r.symbol), ['AAPL']);
     });
 
+    test('daily history counts the rows it had to leave out; charts get the same bars', async () => {
+      const { fetch } = fakeFetch(() => ({
+        body: {
+          status: 'OK',
+          results: [
+            { t: Date.UTC(2026, 5, 29), o: 1, h: 2, l: 0.5, c: 1.5, v: 10 },
+            { t: Date.UTC(2026, 5, 30), o: 1, h: 2, l: 0.5, c: null, v: 10 },
+            { o: 1, h: 2, l: 0.5, c: 1.5, v: 10 },
+            { t: Date.UTC(2026, 6, 1), o: 1, h: 2, l: 0.5, c: 1.6, v: 10 },
+          ],
+        },
+      }));
+      const provider = adapter(fetch);
+
+      const { bars, unreadable } = await provider.getDailyHistory('AAPL', '1M');
+      assert.equal(unreadable, 2);
+      assert.deepEqual(bars.map((bar) => bar.close), [1.5, 1.6]);
+      assert.deepEqual(await provider.getHistoricalPrices('AAPL', '1M'), bars);
+    });
+
     test('splits: one call for the date range, unreadable rows dropped', async () => {
       const { fetch, calls } = fakeFetch(() => ({
         body: {
