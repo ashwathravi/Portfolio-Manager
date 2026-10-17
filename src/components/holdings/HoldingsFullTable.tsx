@@ -41,7 +41,8 @@ export interface HoldingsTableRow {
     avgCost: number;
     last: number;
     marketValue: number;
-    todayPct: number;
+    /** Today's move; null when there is none from today's session. */
+    todayPct: number | null;
     totalReturnPct: number;
     allocationPct: number; // 0..100
     account: string;
@@ -161,7 +162,7 @@ function HoldingRow({
     row: HoldingsTableRow;
     ariaRowIndex?: number;
 }) {
-    const todayNeg = row.todayPct < 0;
+    const todayClass = row.todayPct === null ? "pm-num-muted" : row.todayPct < 0 ? "pm-num-neg" : "pm-num-pos";
 
     return (
         <tr aria-rowindex={ariaRowIndex}>
@@ -185,8 +186,8 @@ function HoldingRow({
             <td className="num">{fmtCurrency2(row.avgCost)}</td>
             <td className="num">{fmtCurrency2(row.last)}</td>
             <td className="num">{fmtCurrency0(row.marketValue)}</td>
-            <td className={`num ${todayNeg ? "pm-num-neg" : "pm-num-pos"}`}>
-                {fmtSignedPct(row.todayPct)}
+            <td className={`num ${todayClass}`} data-testid="holding-today">
+                {row.todayPct === null ? "—" : fmtSignedPct(row.todayPct)}
             </td>
             <td className={`num ${row.totalReturnPct < 0 ? "pm-num-neg" : "pm-num-pos"}`}>
                 {fmtSignedPct(row.totalReturnPct)}

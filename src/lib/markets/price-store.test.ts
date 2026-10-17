@@ -4,13 +4,18 @@ import assert from "node:assert/strict";
 import {
     buildBarsQuery,
     buildLatestClosesQuery,
+    buildRecentClosesQuery,
     buildSymbolsNeedingHistoryQuery,
+    buildTrackedAmongQuery,
+    buildTrackedCountQuery,
     buildTrackSecuritiesQuery,
+    REQUESTED_TRACKING_LOCK,
     buildUpsertBarsQuery,
     dedupeBars,
     isValidBar,
     normalizeSymbols,
     selectTrackedBars,
+    trackRequestedSecurities,
     type PriceBarInput,
 } from "./price-store";
 
@@ -115,6 +120,14 @@ describe("price store queries", () => {
         assert.deepEqual(params, ["AAPL", "2026-09-30"]);
     });
 
+    test("recent closes rank each symbol's bars newest first and keep the top few", () => {
+        const { sql, params } = buildRecentClosesQuery(["AAPL", "MSFT"], 2).toSQL();
+        assert.match(sql, /row_number\(\) over \(partition by "symbol" order by "date" desc\) as "rank"/i);
+        assert.match(sql, /"rank" <= \$\d+/);
+        assert.match(sql, /order by "ranked"\."symbol" asc, "ranked"\."date" desc/i);
+        assert.deepEqual(params, ["AAPL", "MSFT", 2]);
+    });
+
     test("bar ranges are inclusive and in date order", () => {
         const { sql, params } = buildBarsQuery("AAPL", "2026-01-01", "2026-06-30").toSQL();
         assert.match(sql, /"price_bars"\."date" >= \$\d+ and "price_bars"\."date" <= \$\d+/i);
@@ -128,5 +141,102 @@ describe("price store queries", () => {
         assert.match(sql, /"securities"\."active" = \$\d+/i);
         assert.match(sql, /order by "securities"\."created_at" asc, "securities"\."symbol" asc limit \$\d+/i);
         assert.deepEqual(params, [true, 5]);
+    });
+});
+
+describe("trackRequestedSecurities", () => {
+    /** Just enough of the database for a locked transaction: tracked lookup, count, insert. */
+    function fakeDatabase(tracked: number, existing: string[] = []) {
+        const inserted: string[][] = [];
+        const steps: string[] = [];
+        const tx = {
+            execute: async (query: unknown) => {
+                steps.push(query === REQUESTED_TRACKING_LOCK ? "lock" : "other");
+            },
+            select: () => ({
+                // Awaited as is: the count. With .where(): the tracked lookup.
+                from: () => ({
+                    then: (resolve: (rows: unknown) => void) => {
+                        steps.push("count");
+                        resolve([{ count: tracked }]);
+                    },
+                    where: async () => {
+                        steps.push("existing");
+                        return existing.map((symbol) => ({ symbol }));
+                    },
+                }),
+            }),
+            insert: () => ({
+                values: (rows: Array<{ symbol: string }>) => ({
+                    onConflictDoNothing: () => ({
+                        returning: async () => {
+                            steps.push("insert");
+                            inserted.push(rows.map((row) => row.symbol));
+                            return rows.map(({ symbol }) => ({ symbol }));
+                        },
+                    }),
+                }),
+            }),
+        };
+        const database = {
+            transaction: async <T>(run: (transaction: typeof tx) => Promise<T>) => {
+                steps.push("begin");
+                const result = await run(tx);
+                steps.push("commit");
+                return result;
+            },
+        };
+        return { database: database as never, inserted, steps };
+    }
+
+    test("counts and inserts in one transaction, after taking the reservation lock", async () => {
+        const { database, steps } = fakeDatabase(10);
+        await trackRequestedSecurities(["AAPL"], 100, database);
+        assert.deepEqual(steps, ["begin", "lock", "existing", "count", "insert", "commit"]);
+        assert.match(REQUESTED_TRACKING_LOCK.toQuery({ escapeName: (n: string) => n, escapeParam: () => "?", escapeString: (v: string) => `'${v}'` } as never).sql, /^select pg_advisory_xact_lock\(hashtext\('atlas:requested-tracking'\)\)$/);
+    });
+
+    test("tracks requested symbols while the store is under its limit", async () => {
+        const { database, inserted } = fakeDatabase(10);
+        assert.deepEqual(await trackRequestedSecurities(["aapl", "MSFT"], 100, database), { added: ["AAPL", "MSFT"], refused: [] });
+        assert.deepEqual(inserted, [["AAPL", "MSFT"]]);
+    });
+
+    test("tracks only as many as fit, and none at the limit", async () => {
+        const nearly = fakeDatabase(98);
+        assert.deepEqual(await trackRequestedSecurities(["A", "B", "C"], 100, nearly.database), { added: ["A", "B"], refused: ["C"] });
+
+        const full = fakeDatabase(100);
+        assert.deepEqual(await trackRequestedSecurities(["A"], 100, full.database), { added: [], refused: ["A"] });
+        assert.deepEqual(full.inserted, []);
+
+        const over = fakeDatabase(150);
+        assert.deepEqual(await trackRequestedSecurities(["A"], 100, over.database), { added: [], refused: ["A"] });
+    });
+
+    test("regression: symbols tracked already take no room", async () => {
+        // One slot left; BTC-USD is tracked (but unpriced), NEW is not.
+        const { database, inserted } = fakeDatabase(1_999, ["BTC-USD"]);
+        assert.deepEqual(await trackRequestedSecurities(["BTC-USD", "NEW"], 2_000, database), { added: ["NEW"], refused: [] });
+        assert.deepEqual(inserted, [["NEW"]]);
+
+        const allTracked = fakeDatabase(2_000, ["BTC-USD"]);
+        assert.deepEqual(await trackRequestedSecurities(["BTC-USD"], 2_000, allTracked.database), { added: [], refused: [] });
+        assert.deepEqual(allTracked.steps, ["begin", "lock", "existing", "commit"]);
+    });
+
+    test("never counts or writes for nothing trackable", async () => {
+        const untouchable = new Proxy({}, { get: () => () => assert.fail("the database was used") }) as never;
+        assert.deepEqual(await trackRequestedSecurities(["", "AAPL260116C00250000"], 100, untouchable), { added: [], refused: [] });
+    });
+
+    test("the limit counts every tracked security", () => {
+        assert.equal(buildTrackedCountQuery().toSQL().sql, 'select count(*) from "securities"');
+    });
+
+    test("finds which requested symbols are tracked already", () => {
+        const { sql, params } = buildTrackedAmongQuery(["BTC-USD", "NEW"]).toSQL();
+        assert.equal(sql, 'select "symbol" from "securities" where "securities"."symbol" in ($1, $2)');
+        assert.deepEqual(params, ["BTC-USD", "NEW"]);
     });
 });

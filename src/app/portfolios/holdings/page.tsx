@@ -1,7 +1,7 @@
 import { Suspense } from "react";
-import { marketDataEngine } from "@/lib/api/market-data";
 import { requirePageUserId } from "@/lib/auth/request-user";
 import { isDatabaseConfigured } from "@/db/connection-options";
+import { loadQuotes } from "@/lib/services/market-data-service";
 import { buildUserHoldingsQuery, buildUserPortfolioOptionsQuery } from "@/lib/portfolio-repository";
 import { HoldingsPageClient, type HoldingsSeed } from "@/components/holdings/HoldingsPageClient";
 import { PageHeaderSync } from "@/components/layout/TopBar";
@@ -63,18 +63,9 @@ async function HoldingsContent() {
         );
     }
 
-    // Warm the quote cache so the initial paint has correct prices.
-    let liveQuotes: Record<string, { price: number; change: number; changePercent: number }> = {};
-    try {
-        const symbols = Array.from(
-            new Set(dbHoldings.map((h) => h.symbol).filter(Boolean)),
-        );
-        if (symbols.length > 0) {
-            liveQuotes = await marketDataEngine.getQuotes(symbols);
-        }
-    } catch (e) {
-        console.warn("Failed to warm quote cache for holdings page", e);
-    }
+    // Warm the quote cache so the initial paint has correct prices; without
+    // market data the stored prices stand.
+    const liveQuotes = await loadQuotes(dbHoldings.map((h) => h.symbol));
 
     // Server component: holding age is intentionally request-time derived.
     // eslint-disable-next-line react-hooks/purity

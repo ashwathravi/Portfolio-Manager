@@ -47,7 +47,7 @@ Playwright starts two web servers: the main one on port 3000, and a "database do
 
 The Playwright config (`playwright.config.ts`) starts its own servers (`npm run dev` on 3000, the database-down server on 3100) and never reuses a running one: if either port is busy, the run fails. Stop your dev server first.
 
-**E2E never touches real services.** A server Playwright starts gets `DATABASE_URL=""` unless the shell exports one, and empty Upstash variables, so neither `.env.local`'s database nor the shared Redis is used.
+**E2E never touches real services.** A server Playwright starts gets `DATABASE_URL=""` unless the shell exports one, empty Upstash variables and an empty `POLYGON_API_KEY`, so neither `.env.local`'s database, the shared Redis nor the market-data provider is used.
 
 ### Local database
 
@@ -95,7 +95,7 @@ Every page in the application must have a corresponding E2E spec. The current ma
 | Route | E2E Spec File | Key assertions |
 |-------|--------------|----------------|
 | `/` (Today) | `dashboard.spec.ts` | Single "Today" header with greeting/market state, money-first hero (or connect-account empty state), ranked "Needs your attention", policy strip + disclosure, example section labelled and hideable, no fabricated deltas |
-| `/portfolios/holdings` | `holdings.spec.ts` | Portfolio title + Holdings tab, one heading, table or single empty state, LEAPS ledger only with holdings and tagged Sample, sparklines never invented, Import CSV (preview, issues, exact payload, errors; API 400/cross-tenant 404/unchanged in DB mode), page gutter |
+| `/portfolios/holdings` | `holdings.spec.ts` | Portfolio title + Holdings tab, one heading, table or single empty state, LEAPS ledger only with holdings and tagged Sample, sparklines never invented, Import CSV (preview, issues, exact payload, errors; API 400/cross-tenant 404/unchanged in DB mode), Today P&L counts only today's session, page gutter |
 | `/portfolios/accounts` | `accounts.spec.ts` | Accounts tab, real accounts or empty state (never seeded balances) |
 | `/portfolios/activity` | `activity.spec.ts` | Activity tab, real transactions or empty state, side filters |
 | `/portfolios/detail/[symbol]` | `position-detail.spec.ts` | Symbol title, draft-order prefill link, thesis link, Add to watchlist toggle, not-held state is not a dead end |
@@ -112,7 +112,7 @@ Every page in the application must have a corresponding E2E spec. The current ma
 | 404 | `not-found.spec.ts` | Search button opens the palette, link back to Today |
 | Sidebar + IA | `navigation.spec.ts` | Exactly eight sidebar destinations (Help is a Settings tab), section tabs, legacy redirects, identity footer |
 | Database outage | `outage.spec.ts` | Runs against the second web server (port 3100, database configured but unreachable): `/api/health/ready` is 503 `unavailable`; Today, Holdings and Accounts show the outage notice inside their page container, never an empty state |
-| Cross-cutting | `smoke.spec.ts` | Fonts loaded, hydration clean in another timezone, no horizontal overflow at 390px |
+| Cross-cutting | `smoke.spec.ts` | Fonts loaded, hydration clean in another timezone, no horizontal overflow at 390px, market-data routes answer 503 `MARKET_DATA_NOT_CONFIGURED` without a provider key, quotes answer from the price store (404 `QUOTE_UNAVAILABLE` for an unpriced symbol), valuation lists unpriced holdings |
 
 ### Adding E2E tests for a new page
 

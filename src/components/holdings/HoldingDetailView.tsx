@@ -1,6 +1,9 @@
 'use client';
 
 import Link from 'next/link';
+import { useEasternDate } from '@/lib/hooks/useEasternDate';
+import { isTodaysQuote } from '@/lib/markets/quote-session';
+import type { Quote } from '@/types/market-data';
 import { useThesisStore } from '@/lib/research/useThesisStore';
 import { useWatchlist } from '@/lib/research/useWatchlist';
 import { findThesisByTicker } from '@/lib/research/thesis';
@@ -19,8 +22,6 @@ export interface HoldingDetail {
     symbol: string;
     name: string;
     price: number;
-    change: number;
-    changePercent: number;
     totalShares: number;
     totalEquity: number;
     avgCost: number;
@@ -30,11 +31,8 @@ export interface HoldingDetail {
     accounts: AccountPosition[];
 }
 
-export interface SymbolQuote {
-    price: number;
-    change: number;
-    changePercent: number;
-}
+/** The latest quote, with the session it is from. */
+export type SymbolQuote = Pick<Quote, 'price' | 'change' | 'changePercent' | 'timestamp' | 'isRealtime'>;
 
 /**
  * Position detail (/portfolios/detail/[symbol]).
@@ -57,8 +55,10 @@ export function HoldingDetailView({
     const watchlist = useWatchlist();
     const watched = watchlist.isWatched(symbol);
     const thesis = findThesisByTicker(theses, symbol);
+    const todayEt = useEasternDate();
     const price = holding?.price ?? quote?.price ?? null;
-    const change = holding?.changePercent ?? quote?.changePercent ?? null;
+    // Only a move from today's session is "today"; an earlier close's isn't.
+    const change = quote && isTodaysQuote(quote, todayEt) ? quote.changePercent : null;
 
     return (
         <div className="pm-page" data-testid="position-detail">
