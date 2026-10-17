@@ -5,9 +5,12 @@ import { MarketDataNotConfiguredError, QuoteUnavailableError } from "@/lib/provi
 import type { MarketDataProvider } from "@/types/market-data";
 
 import type { LatestClose } from "./price-store";
-import { quoteFromCloses, sessionCloseTime, StoredQuoteProvider, type QuoteStore } from "./stored-quote-provider";
+import { quoteFromCloses, sessionCloseTime, StoredQuoteProvider, TRACKING_RETRY_MS, type QuoteStore } from "./stored-quote-provider";
 
-function fakeStore(closes: Record<string, LatestClose[]>, options: { configured?: boolean; trackFails?: boolean } = {}) {
+function fakeStore(
+    closes: Record<string, LatestClose[]>,
+    options: { configured?: boolean; trackFails?: boolean; refuse?: (symbol: string) => boolean } = {},
+) {
     const tracked: string[][] = [];
     const reads: string[][] = [];
     const store: QuoteStore = {
@@ -19,6 +22,7 @@ function fakeStore(closes: Record<string, LatestClose[]>, options: { configured?
         track: async (symbols) => {
             tracked.push(symbols);
             if (options.trackFails) throw new Error("database down");
+            return { refused: symbols.filter((symbol) => options.refuse?.(symbol) ?? false) };
         },
     };
     return { store, tracked, reads };
@@ -92,6 +96,20 @@ describe("StoredQuoteProvider", () => {
         await provider.getBatchQuotes(["MSFT"]);
         await provider.getBatchQuotes(["MSFT"]);
         assert.deepEqual(tracked, [["MSFT"], ["MSFT"]]);
+    });
+
+    test("symbols refused for lack of room aren't remembered, and are asked for again later", async () => {
+        // The store is full for NEW; MSFT was taken.
+        let now = 0;
+        const { store, tracked } = fakeStore({}, { refuse: (symbol) => symbol === "NEW" });
+        const provider = new StoredQuoteProvider(reference, store, () => now);
+
+        await provider.getBatchQuotes(["MSFT", "NEW"]);
+        await provider.getBatchQuotes(["MSFT", "NEW"]); // full: no ask until the retry time
+        now = TRACKING_RETRY_MS;
+        await provider.getBatchQuotes(["MSFT", "NEW"]);
+
+        assert.deepEqual(tracked, [["MSFT", "NEW"], ["NEW"]]);
     });
 
     test("still answers when tracking fails", async () => {

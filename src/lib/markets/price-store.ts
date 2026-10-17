@@ -193,6 +193,11 @@ export function buildSymbolsNeedingHistoryQuery(limit: number, database: Databas
         .limit(limit);
 }
 
+/** Which of these symbols are tracked already. */
+export function buildTrackedAmongQuery(symbols: string[], database: Pick<Database, "select"> = db) {
+    return database.select({ symbol: securities.symbol }).from(securities).where(inArray(securities.symbol, symbols));
+}
+
 export function buildTrackedCountQuery(database: Pick<Database, "select"> = db) {
     return database.select({ count: count() }).from(securities);
 }
@@ -217,30 +222,34 @@ export const REQUESTED_TRACKING_LOCK = sql`select pg_advisory_xact_lock(hashtext
 
 /**
  * Starts tracking symbols a quote lookup asked for, only while the table has
- * room under `limit`; returns the ones added. The count and the insert run
- * in one transaction under an advisory lock, so concurrent instances can't
- * each see room and together pass the limit. Symbols past the limit stay
- * unpriced until room frees up.
+ * room under `limit`. Symbols tracked already take no room. Returns the
+ * symbols added and those refused for lack of room, which stay unpriced
+ * until room frees up. The count and the insert run in one transaction
+ * under an advisory lock, so concurrent instances can't each see room and
+ * together pass the limit.
  */
 export async function trackRequestedSecurities(
     symbols: Iterable<string>,
     limit: number = REQUESTED_TRACKING_LIMIT,
     database: Database = db,
-): Promise<string[]> {
+): Promise<{ added: string[]; refused: string[] }> {
     const normalized = normalizeSymbols(symbols);
-    if (!normalized.length) return [];
+    if (!normalized.length) return { added: [], refused: [] };
     return database.transaction(async (tx) => {
         await tx.execute(REQUESTED_TRACKING_LOCK);
+        const existing = new Set((await buildTrackedAmongQuery(normalized, tx)).map((row) => row.symbol));
+        const fresh = normalized.filter((symbol) => !existing.has(symbol));
+        if (!fresh.length) return { added: [], refused: [] };
+
         const [row] = await buildTrackedCountQuery(tx);
-        const room = limit - Number(row?.count ?? 0);
-        if (room < normalized.length) {
-            console.warn(
-                `Price store is at its limit of ${limit} securities: not tracking ${normalized.length - Math.max(room, 0)} requested symbol(s).`,
-            );
+        const room = Math.max(0, limit - Number(row?.count ?? 0));
+        const refused = fresh.slice(room);
+        if (refused.length > 0) {
+            console.warn(`Price store is at its limit of ${limit} securities: not tracking ${refused.length} requested symbol(s).`);
         }
-        if (room <= 0) return [];
-        const inserted = await buildTrackSecuritiesQuery(normalized.slice(0, room), tx);
-        return inserted.map((added) => added.symbol);
+        if (room === 0) return { added: [], refused };
+        const inserted = await buildTrackSecuritiesQuery(fresh.slice(0, room), tx);
+        return { added: inserted.map((added) => added.symbol), refused };
     });
 }
 

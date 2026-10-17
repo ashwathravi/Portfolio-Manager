@@ -22,14 +22,19 @@ import { getRecentCloses, normalizeSymbols, trackRequestedSecurities, type Lates
 const NYSE_CLOSE_MINUTES = 16 * 60;
 /** How many tracked symbols an instance remembers before starting over. */
 const TRACKED_MEMORY_LIMIT = 2_000;
+/** With the store full, how long before this instance asks to track anything again. */
+export const TRACKING_RETRY_MS = 10 * 60 * 1000;
 
 /** The price store operations quotes need; injectable for tests. */
 export interface QuoteStore {
   configured(): boolean;
   /** The latest two closes per symbol, newest first. */
   recentCloses(symbols: string[]): Promise<Map<string, LatestClose[]>>;
-  /** Start tracking symbols so the nightly ingest prices them (bounded by the store's limit). */
-  track(symbols: string[]): Promise<unknown>;
+  /**
+   * Start tracking symbols so the nightly ingest prices them, bounded by the
+   * store's limit; says which were refused for lack of room.
+   */
+  track(symbols: string[]): Promise<{ refused: readonly string[] }>;
 }
 
 const DATABASE_QUOTE_STORE: QuoteStore = {
@@ -76,10 +81,13 @@ export class StoredQuoteProvider implements MarketDataProvider {
    * the stock-only ingest never prices), so without this every poll writes.
    */
   private readonly tracked = new Set<string>();
+  /** When the store last refused symbols for lack of room, no asks before this. */
+  private retryTrackingAt = 0;
 
   constructor(
     private readonly reference: MarketDataProvider,
     private readonly store: QuoteStore = DATABASE_QUOTE_STORE,
+    private readonly now: () => number = () => Date.now(),
   ) {}
 
   async getBatchQuotes(symbols: string[]): Promise<Quote[]> {
@@ -97,11 +105,15 @@ export class StoredQuoteProvider implements MarketDataProvider {
     }
 
     const untracked = missing.filter((symbol) => !this.tracked.has(symbol));
-    if (untracked.length > 0) {
+    if (untracked.length > 0 && this.now() >= this.retryTrackingAt) {
       try {
-        await this.store.track(untracked);
+        const { refused } = await this.store.track(untracked);
+        const notTracked = new Set(refused);
         if (this.tracked.size + untracked.length > TRACKED_MEMORY_LIMIT) this.tracked.clear();
-        for (const symbol of untracked) this.tracked.add(symbol);
+        for (const symbol of untracked) if (!notTracked.has(symbol)) this.tracked.add(symbol);
+        // Refused symbols aren't remembered: they are asked for again once
+        // room may have freed up, not on every refresh until then.
+        if (notTracked.size > 0) this.retryTrackingAt = this.now() + TRACKING_RETRY_MS;
       } catch (err) {
         // Prices still come back; the symbols are tracked on a later read.
         const reason = err instanceof Error ? err.message : String(err);
