@@ -1,6 +1,7 @@
 
 import {
     boolean,
+    date,
     doublePrecision,
     index,
     integer,
@@ -433,6 +434,54 @@ export const alphaRadarSemanticChunks = pgTable("alpha_radar_semantic_chunks", {
     appRuntimeAccess: appRuntimeAccessPolicy(),
 })).enableRLS();
 
+// ---------------------------------------------------------------------------
+// Market data — the tracked securities and their daily price history
+// ---------------------------------------------------------------------------
+// Only symbols someone holds, watches or benchmarks against are tracked:
+// bars for every US ticker would fill the free database tier within two
+// years. The nightly ingest filters the market-wide daily file to this set.
+export const securities = pgTable("securities", {
+    symbol: text("symbol").primaryKey(),
+    name: text("name"),
+    // Provider security type, e.g. "CS" (common stock) or "ETF".
+    type: text("type"),
+    primaryExchange: text("primary_exchange"),
+    currency: text("currency").default("USD").notNull(),
+    active: boolean("active").default(true).notNull(),
+    sector: text("sector"),
+    industry: text("industry"),
+    referenceUpdatedAt: timestamp("reference_updated_at"),
+    // Null until the history backfill has run; then the earliest date it covers.
+    historyStartDate: date("history_start_date", { mode: "string" }),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, () => ({
+    serverOnlyNoClientAccess: serverOnlyNoClientAccessPolicy(),
+    appRuntimeAccess: appRuntimeAccessPolicy(),
+})).enableRLS();
+
+// Split-adjusted daily bars keyed by Eastern trading date. A split rewrites
+// history, so the ingest refetches a symbol's bars when one is announced.
+export const priceBars = pgTable("price_bars", {
+    symbol: text("symbol")
+        .notNull()
+        .references(() => securities.symbol, { onDelete: "cascade", onUpdate: "cascade" }),
+    date: date("date", { mode: "string" }).notNull(),
+    open: doublePrecision("open").notNull(),
+    high: doublePrecision("high").notNull(),
+    low: doublePrecision("low").notNull(),
+    close: doublePrecision("close").notNull(),
+    volume: doublePrecision("volume").notNull(),
+    // Which provider supplied the bar, e.g. "massive".
+    source: text("source").notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => ({
+    pk: primaryKey({ columns: [table.symbol, table.date] }),
+    dateIdx: index("price_bars_date_idx").on(table.date),
+    serverOnlyNoClientAccess: serverOnlyNoClientAccessPolicy(),
+    appRuntimeAccess: appRuntimeAccessPolicy(),
+})).enableRLS();
+
 export const portfoliosRelations = relations(portfolios, ({ one, many }) => ({
     user: one(authUsers, {
         fields: [portfolios.userId],
@@ -521,6 +570,17 @@ export const alphaRadarSemanticChunksRelations = relations(alphaRadarSemanticChu
     report: one(alphaRadarReports, {
         fields: [alphaRadarSemanticChunks.reportId],
         references: [alphaRadarReports.id],
+    }),
+}));
+
+export const securitiesRelations = relations(securities, ({ many }) => ({
+    priceBars: many(priceBars),
+}));
+
+export const priceBarsRelations = relations(priceBars, ({ one }) => ({
+    security: one(securities, {
+        fields: [priceBars.symbol],
+        references: [securities.symbol],
     }),
 }));
 
