@@ -27,6 +27,7 @@ import {
 import { HoldingsFullTable, type HoldingsTableRow } from "./HoldingsFullTable";
 import { HoldingsSummaryStrip } from "./HoldingsSummaryStrip";
 import { OptionsRiskLedgerCard } from "./OptionsRiskLedgerCard";
+import { isTodaysQuote } from "@/lib/markets/quote-session";
 
 /**
  * Phase 4 (AR-74) Holdings page wrapper.
@@ -85,6 +86,7 @@ export function HoldingsPageClient({
 
     // ---- Enrich with live quote, then derive allocation + today% ----
     const enriched = useMemo(() => {
+        const now = new Date();
         const withQuote = holdings.map((h) => {
             const q = quotes[h.symbol.toUpperCase()];
             const last = Number.isFinite(q?.price) ? q!.price : h.currentPrice;
@@ -92,9 +94,11 @@ export function HoldingsPageClient({
             const costBasis = h.quantity * h.avgCost;
             const totalReturnPct =
                 h.avgCost > 0 ? ((last - h.avgCost) / h.avgCost) * 100 : 0;
-            const todayPct = q ? q.changePercent : 0;
+            // An earlier session's closing quote prices the row but isn't today's move.
+            const todays = q != null && isTodaysQuote(q, now);
+            const todayPct = todays ? q.changePercent : 0;
             const todayChangeAbs =
-                q?.change != null ? q.change * h.quantity : 0;
+                todays && q.change != null ? q.change * h.quantity : 0;
             const sector = h.sector ?? sectorFor(h.symbol);
             const bucketAssignment = resolvePolicyBucketAssignment(h);
             const themeWeights = themeWeightsForSymbol(h.symbol, h.themeWeights);

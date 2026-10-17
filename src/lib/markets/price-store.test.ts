@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
     buildBarsQuery,
     buildLatestClosesQuery,
+    buildRecentClosesQuery,
     buildSymbolsNeedingHistoryQuery,
     buildTrackSecuritiesQuery,
     buildUpsertBarsQuery,
@@ -113,6 +114,14 @@ describe("price store queries", () => {
         const { sql, params } = buildLatestClosesQuery(["AAPL"], "2026-09-30").toSQL();
         assert.match(sql, /"price_bars"\."date" <= \$\d+/);
         assert.deepEqual(params, ["AAPL", "2026-09-30"]);
+    });
+
+    test("recent closes rank each symbol's bars newest first and keep the top few", () => {
+        const { sql, params } = buildRecentClosesQuery(["AAPL", "MSFT"], 2).toSQL();
+        assert.match(sql, /row_number\(\) over \(partition by "symbol" order by "date" desc\) as "rank"/i);
+        assert.match(sql, /"rank" <= \$\d+/);
+        assert.match(sql, /order by "ranked"\."symbol" asc, "ranked"\."date" desc/i);
+        assert.deepEqual(params, ["AAPL", "MSFT", 2]);
     });
 
     test("bar ranges are inclusive and in date order", () => {

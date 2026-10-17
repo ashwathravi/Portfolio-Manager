@@ -137,6 +137,28 @@ export function buildLatestClosesQuery(symbols: string[], onOrBefore?: string, d
         .orderBy(priceBars.symbol, desc(priceBars.date));
 }
 
+/**
+ * The newest `perSymbol` closes for each symbol, newest first: what a quote
+ * needs (the latest close and the one before it).
+ */
+export function buildRecentClosesQuery(symbols: string[], perSymbol: number, database: Database = db) {
+    const ranked = database
+        .select({
+            symbol: priceBars.symbol,
+            date: priceBars.date,
+            close: priceBars.close,
+            rank: sql<number>`row_number() over (partition by ${priceBars.symbol} order by ${priceBars.date} desc)`.as("rank"),
+        })
+        .from(priceBars)
+        .where(inArray(priceBars.symbol, symbols))
+        .as("ranked");
+    return database
+        .select({ symbol: ranked.symbol, date: ranked.date, close: ranked.close })
+        .from(ranked)
+        .where(lte(ranked.rank, perSymbol))
+        .orderBy(asc(ranked.symbol), desc(ranked.date));
+}
+
 export function buildBarsQuery(symbol: string, from: string, to: string, database: Database = db) {
     return database
         .select({
@@ -218,6 +240,23 @@ export async function getLatestCloses(
     if (!normalized.length) return new Map();
     const rows = await buildLatestClosesQuery(normalized, onOrBefore, database);
     return new Map(rows.map((row) => [row.symbol, { date: row.date, close: row.close }]));
+}
+
+/** The newest closes per symbol (default: the latest two), newest first. */
+export async function getRecentCloses(
+    symbols: Iterable<string>,
+    perSymbol = 2,
+    database: Database = db,
+): Promise<Map<string, LatestClose[]>> {
+    const normalized = normalizeSymbols(symbols);
+    if (!normalized.length) return new Map();
+    const closes = new Map<string, LatestClose[]>();
+    for (const row of await buildRecentClosesQuery(normalized, perSymbol, database)) {
+        const list = closes.get(row.symbol) ?? [];
+        list.push({ date: row.date, close: row.close });
+        closes.set(row.symbol, list);
+    }
+    return closes;
 }
 
 export async function getBars(
