@@ -11,6 +11,7 @@ cd "$repository_root"
 # connected to another database. Refuse rather than test against it, and
 # refuse when the check itself can't tell.
 node scripts/e2e/check-port-free.mjs 3000
+node scripts/e2e/check-port-free.mjs 3100
 
 docker compose up -d --wait db >/dev/null
 docker compose exec -T db psql -U atlas -d postgres --set=ON_ERROR_STOP=1 --quiet \

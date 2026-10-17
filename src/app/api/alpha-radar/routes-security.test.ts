@@ -12,59 +12,55 @@ const USER_ID = "11111111-1111-4111-8111-111111111111";
 describe("Alpha Radar route security", () => {
     afterEach(() => {
         delete process.env.INTERNAL_API_SECRET;
+        delete process.env.AUTH_LOCAL_DEV_BYPASS;
+        delete process.env.AUTH_LOCAL_DEV_USER_ID;
         resetApiSecurityForTests();
     });
 
-    test("rejects refresh requests without API authentication when configured", async () => {
-        process.env.INTERNAL_API_SECRET = "test-secret";
-
+    test("fails closed when sign-in is not configured", async () => {
         const response = await refreshAll(apiRequest("/api/alpha-radar/refresh", {}));
 
-        assert.equal(response.status, 401);
+        assert.equal(response.status, 503);
         assert.deepEqual(await response.json(), {
-            error: "Unauthorized",
-            code: "UNAUTHORIZED",
+            error: "Authentication is not configured.",
+            code: "AUTH_CONFIGURATION_ERROR",
         });
     });
 
-    test("rejects refresh requests without a scoped user id", async () => {
+    test("does not accept the internal secret and a user id header as a session", async () => {
         process.env.INTERNAL_API_SECRET = "test-secret";
 
         const response = await refreshAll(apiRequest("/api/alpha-radar/refresh", {}, {
             "x-api-key": "test-secret",
+            "x-user-id": USER_ID,
         }));
 
-        assert.equal(response.status, 401);
-        assert.deepEqual(await response.json(), {
-            error: "User scope is required.",
-            code: "USER_SCOPE_REQUIRED",
-        });
+        assert.equal(response.status, 503);
     });
 
-    test("authorizes scoped refresh requests before validating payloads", async () => {
-        process.env.INTERNAL_API_SECRET = "test-secret";
+    test("authorizes a signed-in user before validating payloads", async () => {
+        signInAsLocalUser();
 
         const response = await refreshAll(apiRequest("/api/alpha-radar/refresh", {
             filingLimit: -1,
-        }, authorizedHeaders()));
+        }));
 
         assert.equal(response.status, 400);
         assert.equal((await response.json()).code, "INVALID_REFRESH_PAYLOAD");
     });
 
-    test("requires user scope on tracked filer mutations", async () => {
+    test("requires a signed-in user for tracked filer mutations", async () => {
         process.env.INTERNAL_API_SECRET = "test-secret";
+        const forged = { "x-api-key": "test-secret", "x-user-id": USER_ID };
 
-        const createResponse = await createTrackedFiler(apiRequest("/api/alpha-radar/filers", {}, {
-            "x-api-key": "test-secret",
-        }));
+        const createResponse = await createTrackedFiler(apiRequest("/api/alpha-radar/filers", {}, forged));
         const patchResponse = await updateTrackedFiler(
-            apiRequest("/api/alpha-radar/filers/filer-1", {}, { "x-api-key": "test-secret" }),
+            apiRequest("/api/alpha-radar/filers/filer-1", {}, forged),
             { params: Promise.resolve({ filerId: "filer-1" }) },
         );
 
-        assert.equal(createResponse.status, 401);
-        assert.equal(patchResponse.status, 401);
+        assert.equal(createResponse.status, 503);
+        assert.equal(patchResponse.status, 503);
     });
 });
 
@@ -79,9 +75,8 @@ function apiRequest(pathname: string, body: unknown, headers: Record<string, str
     }) as unknown as NextRequest;
 }
 
-function authorizedHeaders(): Record<string, string> {
-    return {
-        "x-api-key": "test-secret",
-        "x-user-id": USER_ID,
-    };
+// Explicit non-production local bypass: the same fixed principal E2E uses.
+function signInAsLocalUser(): void {
+    process.env.AUTH_LOCAL_DEV_BYPASS = "1";
+    process.env.AUTH_LOCAL_DEV_USER_ID = USER_ID;
 }

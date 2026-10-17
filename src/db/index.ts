@@ -3,7 +3,7 @@ import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import * as schema from "./schema";
 import { warnIfUnsafeProductionDatabaseUrl } from "@/lib/security/production-env";
-import { resolveDatabaseSslMode } from "./connection-options";
+import { DATABASE_POOL_OPTIONS, resolveDatabaseSslMode } from "./connection-options";
 
 const connectionString = process.env.DATABASE_URL;
 warnIfUnsafeProductionDatabaseUrl(connectionString);
@@ -18,6 +18,7 @@ const postgresOptions: postgres.Options<Record<string, never>> = {
     prepare: false,
     ssl: resolveDatabaseSslMode(connectionString),
     connect_timeout: 10,
+    ...DATABASE_POOL_OPTIONS,
 };
 
 const client = connectionString
