@@ -49,7 +49,9 @@ export default async function PrivacyPage({ searchParams }: { searchParams: Sear
                             <strong>Your Google account basics.</strong> When you sign in with Google we receive
                             your name, email address, profile picture and Google account ID. We ask only for
                             these, so Atlas Wealth cannot read your Gmail, Drive, contacts or anything else in
-                            your Google account.
+                            your Google account. Google also returns sign-in tokens that we store with your
+                            account record; they only allow reading those same basics and expire within an
+                            hour, and we don&rsquo;t ask Google for long-lived access.
                         </li>
                         <li>
                             <strong>Accounts you link through Plaid.</strong> If you connect a brokerage or bank,
