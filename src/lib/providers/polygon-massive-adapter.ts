@@ -540,24 +540,21 @@ export class PolygonMassiveAdapter implements MarketDataProvider {
     }
 
     const bars = new Map<string, DailyBar>();
+    const price = (value: unknown) => (typeof value === 'number' && Number.isFinite(value) ? value : Number.NaN);
     for (const bar of data.results ?? []) {
-      // Skip malformed rows rather than failing the whole market's file
-      if (
-        !bar ||
-        typeof bar.T !== 'string' ||
-        !bar.T.trim() ||
-        ![bar.o, bar.h, bar.l, bar.c].every(Number.isFinite)
-      ) {
-        continue;
-      }
+      // A row without a ticker is skipped rather than failing the whole
+      // market's file. A ticker with unreadable prices stays in, with NaN
+      // prices: nothing prices it (a close must be positive), and the ingest
+      // counts it as a rejected bar instead of never knowing it was there.
+      if (!bar || typeof bar.T !== 'string' || !bar.T.trim()) continue;
       const symbol = bar.T.trim().toUpperCase();
       bars.set(symbol, {
         symbol,
         date,
-        open: bar.o,
-        high: bar.h,
-        low: bar.l,
-        close: bar.c,
+        open: price(bar.o),
+        high: price(bar.h),
+        low: price(bar.l),
+        close: price(bar.c),
         volume: safeNumber(bar.v),
       });
     }

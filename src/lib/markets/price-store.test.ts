@@ -9,6 +9,7 @@ import {
     buildLatestClosesQuery,
     buildMarkHistoryLoadedQuery,
     buildPruneUnpricedSecuritiesQuery,
+    buildResetUnpricedHistoryQuery,
     buildRecentClosesQuery,
     buildResetHistoryQuery,
     buildSymbolsNeedingHistoryCountQuery,
@@ -165,6 +166,14 @@ describe("price store queries", () => {
         assert.match(sql, /^select count\(\*\) from "securities" where/i);
         assert.match(sql, /"securities"\."history_start_date" is null and "securities"\."active" = \$\d+ and \("securities"\."symbol" in \(\$\d+\) or exists/i);
         assert.deepEqual(params, [true, "AAPL"]);
+    });
+
+    test("re-queuing unpriced histories touches only loaded symbols with no bar at all", () => {
+        const { sql, params } = buildResetUnpricedHistoryQuery(["NEWCO"]).toSQL();
+        assert.match(sql, /^update "securities" set "history_start_date" = \$\d+, "updated_at" = \$\d+ where/);
+        assert.match(sql, /"securities"\."symbol" in \(\$\d+\) and "securities"\."history_start_date" is not null and not exists \(select 1 from "price_bars" where "price_bars"\."symbol" = "securities"\."symbol"\)\) returning "symbol"$/);
+        assert.equal(params[0], null);
+        assert.equal(params[2], "NEWCO");
     });
 
     test("checking for stored bars reads at most one row", () => {

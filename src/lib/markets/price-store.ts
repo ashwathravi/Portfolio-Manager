@@ -243,6 +243,19 @@ export function buildPruneUnpricedSecuritiesQuery(keep: readonly string[], track
         .returning({ symbol: securities.symbol });
 }
 
+/**
+ * Puts back in the queue symbols whose history was marked loaded but which
+ * have no bar at all: an empty backfill (unknown to the history endpoint at
+ * the time). Asked for the symbols a daily file is about to price first.
+ */
+export function buildResetUnpricedHistoryQuery(symbols: string[], database: Database = db) {
+    return database
+        .update(securities)
+        .set({ historyStartDate: null, updatedAt: new Date() })
+        .where(and(inArray(securities.symbol, symbols), isNotNull(securities.historyStartDate), sql`not ${hasBars(database)}`))
+        .returning({ symbol: securities.symbol });
+}
+
 export function buildHasBarsQuery(symbol: string, database: Database = db) {
     return database.select({ symbol: priceBars.symbol }).from(priceBars).where(eq(priceBars.symbol, symbol)).limit(1);
 }
@@ -341,6 +354,13 @@ export async function pruneUnpricedSecurities(
 ): Promise<string[]> {
     const rows = await buildPruneUnpricedSecuritiesQuery(normalizeSymbols(keep), trackedBefore, database);
     return rows.map((row) => row.symbol);
+}
+
+/** Re-queues loaded symbols that have no bar at all; returns those re-queued. */
+export async function resetUnpricedHistories(symbols: Iterable<string>, database: Database = db): Promise<string[]> {
+    const normalized = normalizeSymbols(symbols);
+    if (!normalized.length) return [];
+    return (await buildResetUnpricedHistoryQuery(normalized, database)).map((row) => row.symbol);
 }
 
 /** Whether any bar is stored for the symbol. */

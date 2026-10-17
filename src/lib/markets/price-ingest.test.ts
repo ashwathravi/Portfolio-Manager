@@ -126,7 +126,10 @@ function fakeStore({
     const stored = new Map(bars.map((bar) => [`${bar.symbol}|${bar.date}`, bar]));
     const marks: Array<[string, string]> = [];
     const resets: string[] = [];
-    const barsFor = (symbol: string) => [...stored.values()].some((bar) => bar.symbol === symbol);
+    // A loaded symbol has history older than anything a test stores; it
+    // isn't modelled bar by bar, so it never moves the catch-up bookmark.
+    const olderHistory = new Set(loaded);
+    const barsFor = (symbol: string) => olderHistory.has(symbol) || [...stored.values()].some((bar) => bar.symbol === symbol);
     const queue = (priority: readonly string[]) => {
         const waiting = [...securities].filter(([symbol, start]) => start === null && (priority.includes(symbol) || barsFor(symbol)));
         return [...waiting.filter(([symbol]) => priority.includes(symbol)), ...waiting.filter(([symbol]) => !priority.includes(symbol))]
@@ -177,6 +180,7 @@ function fakeStore({
             if (valid.length === 0) return undefined;
             const historyEnd = valid.map((bar) => bar.date).sort().at(-1)!;
             for (const [key, bar] of stored) if (bar.symbol === symbol && bar.date <= historyEnd) stored.delete(key);
+            olderHistory.delete(symbol);
             for (const bar of valid) stored.set(`${bar.symbol}|${bar.date}`, bar);
             const historyStart = valid.map((bar) => bar.date).sort()[0];
             securities.set(symbol, historyStart);
@@ -184,6 +188,11 @@ function fakeStore({
             return { stored: valid.length, rejected: input.length - own.filter(isValidBar).length, historyStart };
         },
         hasBars: async (symbol) => barsFor(symbol),
+        async resetUnpricedHistories(symbols) {
+            const reset = normalizeSymbols(symbols).filter((symbol) => securities.get(symbol) && !barsFor(symbol));
+            for (const symbol of reset) securities.set(symbol, null);
+            return reset;
+        },
         async resetHistory(symbols) {
             const reset = normalizeSymbols(symbols).filter((symbol) => securities.get(symbol));
             for (const symbol of reset) securities.set(symbol, null);
@@ -780,6 +789,58 @@ describe("ingestDailyPrices", () => {
         assert.deepEqual(storedDates(stored, "SPY"), ["2026-10-15", "2026-10-16"]);
         assert.match((detail.splits as { skipped: string }).skipped, /HTTP 403 Forbidden/);
         assert.doesNotMatch((detail.splits as { skipped: string }).skipped, /apiKey=(?!\*)/);
+    });
+});
+
+describe("ingestDailyPrices › incomplete days", () => {
+    test("regression: a day's invalid bar for a tracked stock re-queues its history, which recovers that day", async () => {
+        const { store, stored } = fakeStore({
+            holdings: ["NVDA"],
+            loaded: [...BENCHMARK_SYMBOLS, "NVDA"],
+            bars: [{ ...dailyBar("SPY", "2026-10-15"), source: "massive" }, { ...dailyBar("NVDA", "2026-10-15", 100), source: "massive" }],
+        });
+        const { adapter, calls } = fakeAdapter({
+            daily: { "2026-10-16": [dailyBar("SPY", "2026-10-16"), { ...dailyBar("NVDA", "2026-10-16", 102), high: 1 }] },
+            history: { NVDA: [ohlc("2026-10-15T04:00:00.000Z", 100), ohlc("2026-10-16T04:00:00.000Z", 102)] },
+        });
+
+        const detail = await ingestDailyPrices({ adapter, store, ...fakeClock() });
+
+        assert.deepEqual(detail.days, [{ date: "2026-10-16", stored: 1, rejected: 1, requeued: ["NVDA"] }]);
+        assert.ok(calls.includes("history NVDA 2Y"));
+        assert.equal(stored.get("NVDA|2026-10-16")?.close, 102);
+    });
+
+    test("regression: a held symbol whose first backfill came back empty is asked again once a daily file prices it", async () => {
+        const { store, stored, securities } = fakeStore({
+            holdings: ["NEWCO"],
+            queued: ["NEWCO"],
+            bars: [{ ...dailyBar("SPY", "2026-10-14"), source: "massive" }],
+        });
+        // Not known to the history endpoint yet: marked loaded at the 15th.
+        const first = fakeAdapter({ daily: { "2026-10-15": [dailyBar("SPY", "2026-10-15")], "2026-10-16": [] }, history: { NEWCO: [] } });
+        await ingestDailyPrices({ adapter: first.adapter, store, ...fakeClock() });
+        assert.equal(securities.get("NEWCO"), "2026-10-15");
+
+        const second = fakeAdapter({
+            daily: { "2026-10-16": [dailyBar("SPY", "2026-10-16"), dailyBar("NEWCO", "2026-10-16", 30)] },
+            history: { NEWCO: [ohlc("2026-10-15T04:00:00.000Z", 29), ohlc("2026-10-16T04:00:00.000Z", 30)] },
+        });
+        const detail = await ingestDailyPrices({ adapter: second.adapter, store, ...fakeClock() });
+
+        assert.deepEqual(detail.days?.[0].requeued, ["NEWCO"]);
+        assert.ok(second.calls.includes("history NEWCO 2Y"));
+        assert.deepEqual(storedDates(stored, "NEWCO"), ["2026-10-15", "2026-10-16"]);
+        assert.equal(securities.get("NEWCO"), "2026-10-15");
+    });
+
+    test("a symbol with stored bars isn't re-queued just for being priced again", async () => {
+        const { store } = fakeStore({ bars: [{ ...dailyBar("SPY", "2026-10-15"), source: "massive" }] });
+        const { adapter } = fakeAdapter({ daily: { "2026-10-16": [dailyBar("SPY", "2026-10-16")] } });
+
+        const detail = await ingestDailyPrices({ adapter, store, ...fakeClock() });
+
+        assert.deepEqual(detail.days, [{ date: "2026-10-16", stored: 1, rejected: 0 }]);
     });
 });
 

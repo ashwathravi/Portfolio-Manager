@@ -287,7 +287,7 @@ describe('PolygonMassiveAdapter', () => {
   });
 
   describe('getDailyBars', () => {
-    test('maps grouped rows to daily bars and skips malformed ones', async () => {
+    test('maps grouped rows to daily bars; a ticker with unreadable prices stays in, unpriced', async () => {
       const { fetch, calls } = fakeFetch(() => ({
         body: {
           status: 'OK',
@@ -305,6 +305,8 @@ describe('PolygonMassiveAdapter', () => {
       assert.deepEqual(calls, [groupedUrl('2026-06-30')]);
       assert.deepEqual([...bars.entries()], [
         ['AAPL', { symbol: 'AAPL', date: '2026-06-30', open: 1, high: 2, low: 0.5, close: 1.5, volume: 100 }],
+        // Kept so the ingest can count it as rejected; never a quote.
+        ['NOPRICE', { symbol: 'NOPRICE', date: '2026-06-30', open: 1, high: 1, low: 1, close: Number.NaN, volume: 1 }],
       ]);
     });
 

@@ -60,6 +60,7 @@ import {
     countSymbolsNeedingHistory,
     getLatestBarDate,
     hasStoredBars,
+    isValidBar,
     listSymbolsNeedingHistory,
     listTrackedSymbols,
     markHistoryLoaded,
@@ -67,6 +68,7 @@ import {
     pruneUnpricedSecurities,
     replaceHistory,
     resetHistory,
+    resetUnpricedHistories,
     selectTrackedBars,
     trackSecurities,
     upsertBars,
@@ -130,6 +132,8 @@ export interface PriceIngestStore {
     resetHistory(symbols: string[]): Promise<string[]>;
     /** Whether any bar is stored for the symbol. */
     hasBars(symbol: string): Promise<boolean>;
+    /** Re-queues loaded symbols with no bar at all (an empty backfill); returns those re-queued. */
+    resetUnpricedHistories(symbols: string[]): Promise<string[]>;
 }
 
 export interface IngestPricesOptions {
@@ -155,8 +159,13 @@ export type PriceIngestDetail = {
     newlyTracked?: string[];
     /** Looked-up symbols dropped for never being priced. */
     pruned?: string[];
-    /** Days stored from the market-wide daily files, oldest first. */
-    days?: Array<{ date: string; stored: number; rejected: number }>;
+    /**
+     * Days stored from the market-wide daily files, oldest first. `requeued`:
+     * symbols whose history goes back in the queue before the day is stored,
+     * because the day's bar for them was invalid, or because it is their
+     * first bar after an empty backfill.
+     */
+    days?: Array<{ date: string; stored: number; rejected: number; requeued?: string[] }>;
     /** Trading days still to store after this run; 0 when up to date. */
     daysBehind?: number;
     /** Histories end on this day; later days come from the daily files. */
@@ -290,6 +299,7 @@ export function createPriceIngestStore(database: Database = db): PriceIngestStor
         replaceHistory: (symbol, bars, through) => replaceHistory(symbol, bars, through, database),
         resetHistory: (symbols) => resetHistory(symbols, database),
         hasBars: (symbol) => hasStoredBars(symbol, database),
+        resetUnpricedHistories: (symbols) => resetUnpricedHistories(symbols, database),
     };
 }
 
@@ -409,7 +419,17 @@ export async function ingestDailyPrices({
             break;
         }
         const bars = selectTrackedBars([...daily.values()].map((bar) => ({ ...bar, source: PRICE_SOURCE })), tracked);
-        days.push({ date, ...(await store.upsertBars(bars)) });
+        // Before the day is stored (it becomes the bookmark, so it is never
+        // read again): a tracked bar it can't store is recovered through the
+        // symbol's history, and a symbol priced for the first time after an
+        // empty backfill has its history asked for again.
+        const rejected = normalizeSymbols(bars.filter((bar) => !isValidBar(bar)).map((bar) => bar.symbol));
+        const priced = bars.filter(isValidBar).map((bar) => bar.symbol);
+        const requeued = [
+            ...(rejected.length > 0 ? await store.resetHistory(rejected) : []),
+            ...(priced.length > 0 ? await store.resetUnpricedHistories(priced) : []),
+        ];
+        days.push({ date, ...(await store.upsertBars(bars)), ...(requeued.length > 0 ? { requeued } : {}) });
     }
     const latestAfter = days.at(-1)?.date ?? latestBefore;
 
@@ -457,7 +477,8 @@ export async function ingestDailyPrices({
                 // Nothing to store (delisted, not a stock, or listed after
                 // historyThrough). The history is marked as starting at
                 // historyThrough, so the symbol leaves the queue and its bars
-                // come from the daily files from then on.
+                // come from the daily files from then on; the first daily
+                // file that prices it puts it back in the queue once more.
                 await store.markHistoryLoaded(symbol, historyThrough);
                 backfilled.push({ symbol, stored: 0, rejected: bars.length, historyStart: historyThrough, empty: true });
                 continue;
