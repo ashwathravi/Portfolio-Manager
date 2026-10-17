@@ -403,6 +403,16 @@ export class PolygonMassiveAdapter implements MarketDataProvider {
   }
 
   async getHistoricalPrices(symbol: string, range: string): Promise<OHLC[]> {
+    return (await this.getDailyHistory(symbol, range)).bars;
+  }
+
+  /**
+   * Daily bars for a range, and how many of the provider's rows couldn't be
+   * read (missing a time or a price) and were left out. Charts only need the
+   * bars; the nightly backfill also needs the count, since a left-out row is
+   * a missing session it must not treat as a complete history.
+   */
+  async getDailyHistory(symbol: string, range: string): Promise<{ bars: OHLC[]; unreadable: number }> {
     this.assertConfigured();
     const sym = validateSymbol(symbol);
     const { from, to } = rangeToDates(range, this.now());
@@ -414,7 +424,8 @@ export class PolygonMassiveAdapter implements MarketDataProvider {
     const data = await this.fetchWithRetry<PolygonAggsResponse>(url);
 
     // Filter out bars with missing essential OHLC fields
-    const validBars = (data.results ?? []).filter(
+    const rows = data.results ?? [];
+    const validBars = rows.filter(
       (bar) =>
         bar &&
         Number.isFinite(bar.t) &&
@@ -424,7 +435,7 @@ export class PolygonMassiveAdapter implements MarketDataProvider {
         Number.isFinite(bar.c),
     );
 
-    return validBars.map((bar) => this.mapAggToOHLC(bar));
+    return { bars: validBars.map((bar) => this.mapAggToOHLC(bar)), unreadable: rows.length - validBars.length };
   }
 
   async getFundamentals(symbol: string): Promise<Fundamentals> {

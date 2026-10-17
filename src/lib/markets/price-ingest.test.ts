@@ -59,6 +59,7 @@ function fakeAdapter({
     configured = true,
     daily = {},
     history = {},
+    unreadable = {},
     splits = [],
     rateLimitedOnce = [],
     onCall,
@@ -66,6 +67,8 @@ function fakeAdapter({
     configured?: boolean;
     daily?: Record<string, DailyBar[] | Error>;
     history?: Record<string, OHLC[] | Error>;
+    /** Provider rows per symbol that couldn't be read and were left out of its history. */
+    unreadable?: Record<string, number>;
     /** Every split the "provider" knows; answers are cut to the asked range. */
     splits?: SplitEvent[] | Error;
     /** Calls (as recorded in `calls`) answered with a 429 the first time only. */
@@ -87,11 +90,11 @@ function fakeAdapter({
             if (value instanceof Error) throw value;
             return new Map((value ?? []).map((bar) => [bar.symbol, bar]));
         },
-        async getHistoricalPrices(symbol, range) {
+        async getDailyHistory(symbol, range) {
             record(`history ${symbol} ${range}`);
             const value = history[symbol];
             if (value instanceof Error) throw value;
-            return value ?? [];
+            return { bars: value ?? [], unreadable: unreadable[symbol] ?? 0 };
         },
         async getSplits(from, to) {
             record(`splits ${from} ${to}`);
@@ -136,12 +139,14 @@ function fakeStore({
     // isn't modelled bar by bar, so it never moves the catch-up bookmark.
     const olderHistory = new Set(loaded);
     const barsFor = (symbol: string) => olderHistory.has(symbol) || [...stored.values()].some((bar) => bar.symbol === symbol);
-    // Never tried first (priority first among them), then least recently tried.
+    // Priority symbols first; within each group never tried first, then least recently tried.
     const queue = (priority: readonly string[]) => {
         const waiting = [...securities].filter(([symbol, start]) => start === null && (priority.includes(symbol) || barsFor(symbol)));
-        const fresh = waiting.filter(([symbol]) => !attempted.has(symbol));
-        const tried = waiting.filter(([symbol]) => attempted.has(symbol)).sort(([a], [b]) => attempted.get(a)! - attempted.get(b)!);
-        return [...fresh.filter(([symbol]) => priority.includes(symbol)), ...fresh.filter(([symbol]) => !priority.includes(symbol)), ...tried]
+        const order = (group: typeof waiting) => [
+            ...group.filter(([symbol]) => !attempted.has(symbol)),
+            ...group.filter(([symbol]) => attempted.has(symbol)).sort(([a], [b]) => attempted.get(a)! - attempted.get(b)!),
+        ];
+        return [...order(waiting.filter(([symbol]) => priority.includes(symbol))), ...order(waiting.filter(([symbol]) => !priority.includes(symbol)))]
             .map(([symbol]) => symbol);
     };
 
@@ -187,26 +192,28 @@ function fakeStore({
         async markHistoryAttempted(symbol, at) {
             attempted.set(symbol, at.getTime());
         },
-        async replaceHistory(symbol, input, through) {
+        async replaceHistory(symbol, input, through, unreadableRows) {
             const own = input.filter((bar) => bar.symbol === symbol && bar.date <= through);
             const valid = dedupeBars(own.filter(isValidBar));
             if (valid.length === 0) return undefined;
             const historyEnd = valid.map((bar) => bar.date).sort().at(-1)!;
             const historyStart = valid.map((bar) => bar.date).sort()[0];
             const rejected = input.length - own.filter(isValidBar).length;
-            // Checked before writing, as in the real store: every stored date from the
-            // history's first day through the cut-off must be in it, or nothing changes.
+            // As in the real store: nothing is written unless every stored date from the
+            // history's first day through the cut-off is in it; loaded only if nothing is missing.
             const covered = new Set(valid.map((bar) => bar.date));
-            const complete = ![...stored.values()].some((bar) =>
+            const uncovered = [...stored.values()].some((bar) =>
                 bar.symbol === symbol && bar.date >= historyStart && bar.date <= through && !covered.has(bar.date));
-            if (!complete) return { stored: 0, rejected, historyStart, complete };
+            if (uncovered) return { stored: 0, rejected, historyStart, complete: false };
             for (const [key, bar] of stored) if (bar.symbol === symbol && bar.date <= historyEnd) stored.delete(key);
             olderHistory.delete(symbol);
             for (const bar of valid) stored.set(`${bar.symbol}|${bar.date}`, bar);
+            const missing = unreadableRows + own.filter((bar) => !isValidBar(bar)).length;
+            if (missing > 0) return { stored: valid.length, rejected, historyStart, complete: false };
             securities.set(symbol, historyStart);
             attempted.delete(symbol);
             marks.push([symbol, historyStart]);
-            return { stored: valid.length, rejected, historyStart, complete };
+            return { stored: valid.length, rejected, historyStart, complete: true };
         },
         hasBars: async (symbol) => barsFor(symbol),
         async resetUnpricedHistories(symbols) {
@@ -489,7 +496,6 @@ describe("ingestDailyPrices", () => {
                     ohlc("2024-10-17T04:00:00.000Z", 230),
                     ohlc("2026-01-05T05:00:00.000Z", 240),
                     ohlc("2026-10-16T04:00:00.000Z", 250),
-                    { ...ohlc("2026-10-15T04:00:00.000Z"), high: 1 }, // inconsistent: rejected
                 ],
             },
         });
@@ -499,8 +505,56 @@ describe("ingestDailyPrices", () => {
         assert.deepEqual(storedDates(stored, "AAPL"), ["2024-10-17", "2026-01-05", "2026-10-16"]);
         assert.deepEqual(marks, [["AAPL", "2024-10-17"]]);
         assert.equal(securities.get("AAPL"), "2024-10-17");
-        assert.deepEqual(detail.backfilled, [{ symbol: "AAPL", stored: 3, rejected: 1, historyStart: "2024-10-17" }]);
+        assert.deepEqual(detail.backfilled, [{ symbol: "AAPL", stored: 3, rejected: 0, historyStart: "2024-10-17" }]);
         assert.equal(detail.backfillQueue, 0);
+    });
+
+    test("regression: a history missing sessions (a rejected or unreadable row) writes what it has but stays queued", async () => {
+        for (const missing of [
+            { history: [{ ...ohlc("2026-10-15T04:00:00.000Z"), high: 1 }], unreadable: 0 }, // inconsistent: rejected
+            { history: [], unreadable: 1 }, // left out by the adapter
+        ]) {
+            const { store, stored, marks, securities, attempted } = fakeStore({ queued: ["AAPL"] });
+            const { adapter } = fakeAdapter({
+                daily: { "2026-10-16": [dailyBar("AAPL", "2026-10-16", 250)] },
+                history: { AAPL: [ohlc("2024-10-17T04:00:00.000Z", 230), ohlc("2026-10-16T04:00:00.000Z", 250), ...missing.history] },
+                unreadable: { AAPL: missing.unreadable },
+            });
+
+            const detail = await ingestDailyPrices({ adapter, store, ...fakeClock() });
+
+            assert.deepEqual(storedDates(stored, "AAPL"), ["2024-10-17", "2026-10-16"], "the readable sessions are kept");
+            assert.deepEqual(marks, [], "not marked loaded: a session is missing");
+            assert.equal(securities.get("AAPL"), null);
+            assert.ok(attempted.has("AAPL"));
+            assert.equal(detail.backfilled?.[0].complete, false);
+            assert.equal(detail.backfillQueue, 1);
+        }
+    });
+
+    test("regression: a held symbol that failed once is retried before never-tried looked-up symbols", async () => {
+        const { store } = fakeStore({
+            holdings: ["HELD"],
+            queued: ["HELD", "LOOK1", "LOOK2"],
+            bars: [
+                { ...dailyBar("SPY", "2026-10-15"), source: "massive" },
+                { ...dailyBar("LOOK1", "2026-10-15"), source: "massive" },
+                { ...dailyBar("LOOK2", "2026-10-15"), source: "massive" },
+            ],
+        });
+        // Each call takes 3 s; a 20 s budget fits the splits call, the daily file and two histories.
+        const clock = fakeClock();
+        const first = fakeAdapter({
+            daily: { "2026-10-16": [dailyBar("SPY", "2026-10-16")] },
+            history: { HELD: new PolygonApiError(502, "Bad Gateway", "https://api.polygon.io/v2/aggs/ticker/HELD?apiKey=***") },
+            onCall: () => clock.advance(3_000),
+        });
+        await ingestDailyPrices({ adapter: first.adapter, store, now: clock.now, sleep: clock.sleep, budgetMs: 20_000 });
+        assert.deepEqual(first.calls.filter((call) => call.startsWith("history")), ["history HELD 2Y", "history LOOK1 2Y"]);
+
+        const second = fakeAdapter({});
+        await ingestDailyPrices({ adapter: second.adapter, store, ...fakeClock("2026-10-17T22:30:00.000Z") });
+        assert.equal(second.calls.filter((call) => call.startsWith("history"))[0], "history HELD 2Y");
     });
 
     test("marks a symbol with no history so the queue moves on", async () => {

@@ -111,7 +111,8 @@ export const UNPRICED_GRACE_MS = 7 * 24 * 60 * 60 * 1000;
 export interface PriceIngestAdapter {
     readonly isConfigured: boolean;
     getDailyBars(date: string): Promise<Map<string, DailyBar>>;
-    getHistoricalPrices(symbol: string, range: string): Promise<OHLC[]>;
+    /** Daily bars, and how many provider rows couldn't be read (see PolygonMassiveAdapter.getDailyHistory). */
+    getDailyHistory(symbol: string, range: string): Promise<{ bars: OHLC[]; unreadable: number }>;
     getSplits(from: string, to: string): Promise<SplitEvent[]>;
 }
 
@@ -137,6 +138,7 @@ export interface PriceIngestStore {
         symbol: string,
         bars: readonly PriceBarInput[],
         through: string,
+        unreadable: number,
     ): Promise<{ stored: number; rejected: number; historyStart: string; complete: boolean } | undefined>;
     /** Records an attempt that left the symbol queued, so retries rotate. */
     markHistoryAttempted(symbol: string, at: Date): Promise<void>;
@@ -324,7 +326,7 @@ export function createPriceIngestStore(database: Database = db): PriceIngestStor
         pruneUnpricedSecurities: (keep, trackedBefore) => pruneUnpricedSecurities(keep, trackedBefore, database),
         markHistoryLoaded: (symbol, startDate) => markHistoryLoaded(symbol, startDate, database),
         markHistoryAttempted: (symbol, at) => markHistoryAttempted(symbol, at, database),
-        replaceHistory: (symbol, bars, through) => replaceHistory(symbol, bars, through, database),
+        replaceHistory: (symbol, bars, through, unreadable) => replaceHistory(symbol, bars, through, { unreadable }, database),
         resetHistory: (symbols) => resetHistory(symbols, database),
         clearSplitHistories: (symbols) => clearSplitHistories(symbols, database),
         adjustHoldingsForSplit: (split) => adjustHoldingsForSplit(split, database),
@@ -513,13 +515,14 @@ export async function ingestDailyPrices({
     } else {
         for (const symbol of await store.listSymbolsNeedingHistory(BACKFILL_BATCH, priority)) {
             let history: OHLC[];
+            let unreadable = 0;
             try {
-                const answer = await paced(() => adapter.getHistoricalPrices(symbol, HISTORY_RANGE));
+                const answer = await paced(() => adapter.getDailyHistory(symbol, HISTORY_RANGE));
                 if ("stopped" in answer) {
                     stopped.backfill = answer.stopped;
                     break;
                 }
-                history = answer.value;
+                ({ bars: history, unreadable } = answer.value);
             } catch (error) {
                 if (error instanceof PolygonApiError && error.status === 404) {
                     history = [];
@@ -531,7 +534,7 @@ export async function ingestDailyPrices({
             }
 
             const bars = historyToBars(symbol, history, historyThrough);
-            const replaced = await store.replaceHistory(symbol, bars, historyThrough);
+            const replaced = await store.replaceHistory(symbol, bars, historyThrough, unreadable);
             if (!replaced && (await store.hasBars(symbol))) {
                 // Stored bars that need replacing (a split, or a symbol first
                 // priced today) but no history yet: it stays queued, so
@@ -554,9 +557,10 @@ export async function ingestDailyPrices({
             if (complete) {
                 backfilled.push({ symbol, ...result });
             } else {
-                // The history ends before bars already stored (it lags the
-                // daily files): those could be on the old scale, so the
-                // symbol stays queued until a history covers them.
+                // The history doesn't cover bars already stored (it lags the
+                // daily files: those could be on the old scale), or it is
+                // missing sessions (unreadable or rejected rows): the symbol
+                // stays queued until a complete history comes back.
                 await store.markHistoryAttempted(symbol, now());
                 backfilled.push({ symbol, ...result, complete: false });
             }

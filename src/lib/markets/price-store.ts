@@ -210,9 +210,10 @@ export function buildResetHistoryQuery(symbols: string[], database: Database = d
 }
 
 /**
- * The backfill queue: symbols never tried first (`priority` ones first among
- * them, then oldest tracked), then retries, least recently tried first. A
- * symbol that keeps failing moves to the back, so it can't block the rest.
+ * The backfill queue: `priority` symbols (held, benchmarks) first; within
+ * each group, symbols never tried first (oldest tracked first), then
+ * retries, least recently tried first. A symbol that keeps failing moves to
+ * the back of its group, so it can't block the rest of it.
  */
 export function buildSymbolsNeedingHistoryQuery(limit: number, priority: readonly string[] = [], database: Database = db) {
     const first = priority.length > 0
@@ -222,7 +223,7 @@ export function buildSymbolsNeedingHistoryQuery(limit: number, priority: readonl
         .select({ symbol: securities.symbol })
         .from(securities)
         .where(needsHistory(priority, database))
-        .orderBy(sql`${securities.historyAttemptedAt} asc nulls first`, ...first, asc(securities.createdAt), asc(securities.symbol))
+        .orderBy(...first, sql`${securities.historyAttemptedAt} asc nulls first`, asc(securities.createdAt), asc(securities.symbol))
         .limit(limit);
 }
 
@@ -457,17 +458,23 @@ export function buildDeleteHistoryQuery(symbol: string, through: string, databas
  * provider's adjusted history is the one to keep. Bars after the history's
  * last day (from the daily files, if the history lags) are left alone.
  *
- * Only a `complete` history is written: every stored date from its first day
- * through `through` must be in it (none after its last day, none missing in
- * between). Otherwise nothing changes and the symbol stays queued for the
- * next run (which normally finds the history caught up), so adjusted bars
- * never go in beside uncovered ones and no stored day is lost. Returns
- * undefined, changing nothing, when no bar is valid.
+ * Nothing is written unless the history covers every stored date from its
+ * first day through `through` (none after its last day, none missing in
+ * between): adjusted bars never go in beside uncovered ones, and no stored
+ * day is lost. The symbol stays queued for the next run, which normally
+ * finds the history caught up.
+ *
+ * The history is marked loaded only when it is also `complete`: no row the
+ * provider sent was `unreadable` and no bar was rejected. A missing session
+ * otherwise would be lost for good; the readable bars are written, and the
+ * symbol stays queued for a clean retry. Returns undefined, changing
+ * nothing, when no bar is valid.
  */
 export async function replaceHistory(
     symbol: string,
     bars: readonly PriceBarInput[],
     through: string,
+    { unreadable = 0 }: { unreadable?: number } = {},
     database: Database = db,
 ): Promise<{ stored: number; rejected: number; historyStart: string; complete: boolean } | undefined> {
     const own = bars.filter((bar) => bar.symbol === symbol && bar.date <= through);
@@ -475,21 +482,29 @@ export async function replaceHistory(
     if (valid.length === 0) return undefined;
     const historyStart = valid.reduce((earliest, bar) => (bar.date < earliest ? bar.date : earliest), valid[0].date);
     const historyEnd = valid.reduce((latest, bar) => (bar.date > latest ? bar.date : latest), valid[0].date);
-    const complete = await database.transaction(async (tx) => {
+    // Sessions the provider sent that can't be stored: left-out rows and rejected bars.
+    const missing = unreadable + own.filter((bar) => !isValidBar(bar)).length;
+    const result = await database.transaction(async (tx) => {
         // Checked before anything is written: a partial rewrite would put
         // adjusted bars beside the uncovered ones, which may be on the old
         // scale. Until a history covers them the stored bars stay as they are.
         const covered = new Set(valid.map((bar) => bar.date));
         const stored = await buildStoredDatesQuery(symbol, historyStart, through, tx);
-        if (stored.some((row) => !covered.has(row.date))) return false;
+        if (stored.some((row) => !covered.has(row.date))) return { written: false, complete: false };
         await buildDeleteHistoryQuery(symbol, historyEnd, tx);
         for (let start = 0; start < valid.length; start += UPSERT_CHUNK_SIZE) {
             await buildUpsertBarsQuery(valid.slice(start, start + UPSERT_CHUNK_SIZE), tx);
         }
+        if (missing > 0) return { written: true, complete: false };
         await buildMarkHistoryLoadedQuery(symbol, historyStart, tx);
-        return true;
+        return { written: true, complete: true };
     });
-    return { stored: complete ? valid.length : 0, rejected: bars.length - own.filter(isValidBar).length, historyStart, complete };
+    return {
+        stored: result.written ? valid.length : 0,
+        rejected: bars.length - own.filter(isValidBar).length,
+        historyStart,
+        complete: result.complete,
+    };
 }
 
 /**
