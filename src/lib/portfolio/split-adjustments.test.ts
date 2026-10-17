@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
     adjustHoldingsForSplit,
     buildAdjustHoldingsForSplitQuery,
+    combineSameDaySplits,
     describeSplitRatio,
     splitTakesEffectAt,
 } from "./split-adjustments";
@@ -11,9 +12,35 @@ import {
 const NVDA = { symbol: "nvda", executionDate: "2026-10-15", splitFrom: 1, splitTo: 10 };
 
 describe("splitTakesEffectAt", () => {
-    test("is the market open on the execution date, Eastern time", () => {
-        assert.equal(splitTakesEffectAt("2026-10-15").toISOString(), "2026-10-15T13:30:00.000Z"); // EDT
-        assert.equal(splitTakesEffectAt("2026-12-01").toISOString(), "2026-12-01T14:30:00.000Z"); // EST
+    test("is the start of the execution date, Eastern time, before any pre-market trading", () => {
+        assert.equal(splitTakesEffectAt("2026-10-15").toISOString(), "2026-10-15T04:00:00.000Z"); // EDT
+        assert.equal(splitTakesEffectAt("2026-12-01").toISOString(), "2026-12-01T05:00:00.000Z"); // EST
+    });
+});
+
+describe("combineSameDaySplits", () => {
+    const day = { symbol: "NVDA", executionDate: "2026-10-15" };
+
+    test("applies every action that day as one ratio", () => {
+        // A 2-for-1 split and a 3-for-2 the same day: 3 new shares for each old one.
+        assert.deepEqual(combineSameDaySplits([
+            { ...day, splitFrom: 1, splitTo: 2, id: "A" },
+            { ...day, splitFrom: 2, splitTo: 3, id: "B" },
+        ]), { ...day, splitFrom: 2, splitTo: 6 });
+    });
+
+    test("counts the same action once when it is listed twice", () => {
+        assert.deepEqual(combineSameDaySplits([
+            { ...day, splitFrom: 1, splitTo: 10, id: "A" },
+            { ...day, splitFrom: 1, splitTo: 10, id: "A" },
+        ]), { ...day, splitFrom: 1, splitTo: 10 });
+        // Without ids, identical ratios are taken to be the same action.
+        assert.deepEqual(combineSameDaySplits([{ ...day, splitFrom: 1, splitTo: 10 }, { ...day, splitFrom: 1, splitTo: 10 }]), { ...day, splitFrom: 1, splitTo: 10 });
+    });
+
+    test("gives up when any action that day has no ratio, rather than applying part of it", () => {
+        assert.equal(combineSameDaySplits([{ ...day, splitFrom: 1, splitTo: 2, id: "A" }, { ...day, id: "B" }]), undefined);
+        assert.equal(combineSameDaySplits([]), undefined);
     });
 });
 
@@ -35,7 +62,7 @@ describe("buildAdjustHoldingsForSplitQuery", () => {
         // quantity × 10 / 1, avg cost × 1 / 10, last price × 1 / 10.
         assert.deepEqual(params.slice(0, 6), ["10", "1", "1", "10", "1", "10"]);
         assert.ok(params.includes("NVDA"), "the symbol is matched in upper case");
-        const effective = "2026-10-15T13:30:00.000Z";
+        const effective = "2026-10-15T04:00:00.000Z";
         assert.equal(params.filter((param) => param === effective).length, 2, "updated_at is set to, and compared with, the moment it took effect");
     });
 });

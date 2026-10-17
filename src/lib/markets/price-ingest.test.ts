@@ -381,10 +381,10 @@ describe("ingestDailyPrices", () => {
 
         const detail = await ingestDailyPrices({ adapter, store, ...fakeClock() });
 
-        assert.equal(calls[0], "daily 2026-10-16");
+        // Splits are asked about on the first run too: one on that session still moves held positions.
+        assert.deepEqual(calls.slice(0, 2), ["splits 2026-10-16 2026-10-16", "daily 2026-10-16"]);
         assert.equal(calls.filter((call) => call.startsWith("daily")).length, 1);
-        // Nothing stored yet, so no history on an old scale to fix.
-        assert.deepEqual(detail.splits, { skipped: "first run" });
+        assert.deepEqual(detail.splits, { from: "2026-10-16", to: "2026-10-16", reset: [] });
         assert.deepEqual(detail.days, [{ date: "2026-10-16", stored: 2, rejected: 0 }]);
         assert.equal(detail.session, "2026-10-16");
         assert.equal(detail.daysBehind, 0);
@@ -549,13 +549,14 @@ describe("ingestDailyPrices", () => {
         const detail = await ingestDailyPrices({ adapter, store, now: clock.now, sleep: clock.sleep, budgetMs: 100_000 });
 
         // Five calls, a 60 s wait for the window, five more; the next window
-        // would open at 130 s, past the 100 s budget.
+        // would open at 130 s, past the 100 s budget. Splits and the daily
+        // file take two of the ten.
         assert.deepEqual(clock.sleeps, [60_000]);
         assert.equal(calls.length, 10);
         assert.equal(detail.calls, 10);
-        assert.equal(detail.backfilled?.length, 9);
+        assert.equal(detail.backfilled?.length, 8);
         assert.equal(detail.stopped?.backfill, "budget");
-        assert.equal(detail.backfillQueue, 11);
+        assert.equal(detail.backfillQueue, 12);
     });
 
     test("with the default budget, never sleeps longer than a window between calls", async () => {
@@ -612,8 +613,8 @@ describe("ingestDailyPrices", () => {
 
         const detail = await ingestDailyPrices({ adapter, store, now: clock.now, sleep: clock.sleep });
 
-        assert.deepEqual(calls.slice(1, 4), ["history AAA 2Y", "history BBB 2Y", "history CCC 2Y"]);
-        assert.ok(calls.slice(3).every((call) => call === "history CCC 2Y"), "only CCC is retried");
+        assert.deepEqual(calls.slice(0, 5), ["splits 2026-10-16 2026-10-16", "daily 2026-10-16", "history AAA 2Y", "history BBB 2Y", "history CCC 2Y"]);
+        assert.ok(calls.slice(4).every((call) => call === "history CCC 2Y"), "only CCC is retried");
         assert.deepEqual(marks.map(([symbol]) => symbol), ["AAA", "BBB"]);
         assert.equal(detail.stopped?.backfill, "rate-limited");
         assert.equal(detail.backfillQueue, 2);
@@ -893,10 +894,11 @@ describe("ingestDailyPrices › held positions after a split", () => {
 
         const detail = await ingestDailyPrices({ adapter, store, ...fakeClock() });
 
+        // Oldest execution date first (then by symbol).
         assert.deepEqual(adjustments, [
             { symbol: "NVDA", executionDate: "2026-10-15", splitFrom: 1, splitTo: 10 },
-            { symbol: "NVDA", executionDate: "2026-10-16", splitFrom: 1, splitTo: 2 },
             { symbol: "AAPL", executionDate: "2026-10-16", splitFrom: 1, splitTo: 4 },
+            { symbol: "NVDA", executionDate: "2026-10-16", splitFrom: 1, splitTo: 2 },
         ]);
         const splits = detail.splits as Extract<typeof detail.splits, { reset: string[] }>;
         assert.deepEqual(splits.adjusted, [
@@ -904,6 +906,41 @@ describe("ingestDailyPrices › held positions after a split", () => {
             { symbol: "NVDA", executionDate: "2026-10-16", ratio: "2-for-1", positions: 2 },
         ]);
         assert.equal(splits.unadjusted, undefined);
+    });
+
+    test("regression: several actions for one stock on one day are applied together, duplicates once", async () => {
+        const { store, adjustments } = fakeStore({
+            holdings: ["NVDA"],
+            loaded: [...BENCHMARK_SYMBOLS, "NVDA"],
+            bars: [{ ...dailyBar("SPY", "2026-10-15"), source: "massive" }],
+        });
+        const { adapter } = fakeAdapter({
+            splits: [
+                { symbol: "NVDA", executionDate: "2026-10-16", splitFrom: 1, splitTo: 2, id: "A" },
+                { symbol: "NVDA", executionDate: "2026-10-16", splitFrom: 2, splitTo: 3, id: "B" },
+                { symbol: "NVDA", executionDate: "2026-10-16", splitFrom: 1, splitTo: 2, id: "A" }, // listed twice
+            ],
+            daily: { "2026-10-16": [dailyBar("SPY", "2026-10-16")] },
+        });
+
+        const detail = await ingestDailyPrices({ adapter, store, ...fakeClock() });
+
+        assert.deepEqual(adjustments, [{ symbol: "NVDA", executionDate: "2026-10-16", splitFrom: 2, splitTo: 6 }]);
+        assert.deepEqual((detail.splits as { adjusted?: unknown[] }).adjusted, [
+            { symbol: "NVDA", executionDate: "2026-10-16", ratio: "6-for-2", positions: 1 },
+        ]);
+    });
+
+    test("regression: a split on the first session moves held positions too", async () => {
+        const { store, adjustments } = fakeStore({ holdings: ["NVDA"], queued: ["NVDA"] });
+        const { adapter } = fakeAdapter({
+            splits: [{ symbol: "NVDA", executionDate: "2026-10-16", splitFrom: 1, splitTo: 10 }],
+            daily: { "2026-10-16": [dailyBar("SPY", "2026-10-16"), dailyBar("NVDA", "2026-10-16", 100)] },
+        });
+
+        await ingestDailyPrices({ adapter, store, ...fakeClock() });
+
+        assert.deepEqual(adjustments, [{ symbol: "NVDA", executionDate: "2026-10-16", splitFrom: 1, splitTo: 10 }]);
     });
 
     test("a held stock that split without a usable ratio is reported, not adjusted", async () => {

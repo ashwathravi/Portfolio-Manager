@@ -10,12 +10,13 @@
  * price) times `splitFrom / splitTo`. Cost basis and market value are
  * unchanged.
  *
- * Only positions last updated before the split took effect (the market open
- * on its execution date) are adjusted, and an adjusted position's
- * updated_at is set to that moment. So a position is never adjusted twice
- * for one split however often the split is seen, a position re-imported
- * after the split (already post-split) is left alone, and a second split
- * of the same stock later still applies.
+ * Only positions last updated before the split took effect (the start of its
+ * execution date, Eastern: the adjustment happens overnight, and even
+ * pre-market trading that day is on the new scale) are adjusted, and an
+ * adjusted position's updated_at is set to that moment. So a position is
+ * never adjusted twice for one split however often the split is seen, a
+ * position re-imported after the split (already post-split) is left alone,
+ * and a second split of the same stock later still applies.
  *
  * Trade history (transactions) is not adjusted.
  */
@@ -28,8 +29,6 @@ import { easternDateTime } from "@/lib/markets/market-hours";
 
 type Database = typeof db;
 
-const MARKET_OPEN_MINUTES = 9 * 60 + 30;
-
 export interface HoldingSplit {
     symbol: string;
     /** Eastern trading date, YYYY-MM-DD. */
@@ -38,9 +37,37 @@ export interface HoldingSplit {
     splitTo: number;
 }
 
-/** When a split takes effect: the market open on its execution date. */
+/**
+ * When a split takes effect: midnight Eastern starting its execution date.
+ * A position imported after that, even pre-market, is already post-split.
+ */
 export function splitTakesEffectAt(executionDate: string): Date {
-    return easternDateTime(executionDate, MARKET_OPEN_MINUTES);
+    return easternDateTime(executionDate, 0);
+}
+
+/**
+ * Several actions for one stock on one execution date (a split and a stock
+ * dividend, say) as one ratio, so a position gets all of them in one
+ * update: the second would otherwise find it already marked as adjusted for
+ * that date. The same action listed twice (same provider id) counts once.
+ * Undefined when any action has no usable ratio.
+ */
+export function combineSameDaySplits(
+    events: ReadonlyArray<{ symbol: string; executionDate: string; splitFrom?: number; splitTo?: number; id?: string }>,
+): HoldingSplit | undefined {
+    if (events.length === 0) return undefined;
+    const seen = new Set<string>();
+    let splitFrom = 1;
+    let splitTo = 1;
+    for (const event of events) {
+        if (event.splitFrom === undefined || event.splitTo === undefined) return undefined;
+        const key = event.id ?? `${event.splitFrom}:${event.splitTo}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        splitFrom *= event.splitFrom;
+        splitTo *= event.splitTo;
+    }
+    return { symbol: events[0].symbol, executionDate: events[0].executionDate, splitFrom, splitTo };
 }
 
 /** "10-for-1", "1-for-20". */

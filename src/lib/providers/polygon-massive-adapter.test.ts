@@ -450,7 +450,7 @@ describe('PolygonMassiveAdapter', () => {
         `${BASE}/stocks/v1/splits?execution_date.gte=2026-10-15&execution_date.lte=2026-10-16&limit=5000&apiKey=${KEY}`,
       ]);
       assert.deepEqual(splits, [
-        { symbol: 'NVDA', executionDate: '2026-10-15', splitFrom: 1, splitTo: 10 },
+        { symbol: 'NVDA', executionDate: '2026-10-15', splitFrom: 1, splitTo: 10, id: 'E1' },
         // No usable ratio: still a split (its history is cleared), but no holdings adjustment.
         { symbol: 'BRK.B', executionDate: '2026-10-16' },
       ]);

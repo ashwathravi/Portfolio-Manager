@@ -47,7 +47,7 @@
 import { db } from "@/db";
 import { holdings } from "@/db/schema";
 import { summarizeError } from "@/lib/jobs/runner";
-import { adjustHoldingsForSplit, describeSplitRatio, type HoldingSplit } from "@/lib/portfolio/split-adjustments";
+import { adjustHoldingsForSplit, combineSameDaySplits, describeSplitRatio, type HoldingSplit } from "@/lib/portfolio/split-adjustments";
 import { getMassiveQuota } from "@/lib/providers/massive-quota";
 import {
     PolygonApiError,
@@ -402,10 +402,9 @@ export async function ingestDailyPrices({
     let splitsSkipped: string | undefined;
     if (window.length === 0) {
         splitsSkipped = "up to date";
-    } else if (latestBefore === null) {
-        // Nothing stored yet, so no history on an old scale.
-        splitsSkipped = "first run";
     } else {
+        // Asked on the first run too: nothing stored is on an old scale yet,
+        // but a split on that first session still moves held positions.
         // Any refusal fails the run before a day is stored (403 included: the
         // endpoint is on every Stocks plan, so a 403 is a key or plan problem
         // to fix, not a reason to store days whose splits went unchecked).
@@ -435,17 +434,22 @@ export async function ingestDailyPrices({
         const heldSet = new Set(normalizeSymbols(held));
         const adjusted: NonNullable<Extract<PriceIngestDetail["splits"], { reset: string[] }>["adjusted"]> = [];
         const unadjusted: string[] = [];
-        const heldSplits = splitEvents
-            .filter((event) => event.executionDate >= from && event.executionDate <= to && heldSet.has(event.symbol))
-            .sort((a, b) => a.executionDate.localeCompare(b.executionDate));
-        for (const event of heldSplits) {
-            if (event.splitFrom === undefined || event.splitTo === undefined) {
-                unadjusted.push(event.symbol);
+        // One update per stock and execution date, with every action that day combined.
+        const byDay = new Map<string, SplitEvent[]>();
+        for (const event of splitEvents) {
+            if (event.executionDate < from || event.executionDate > to || !heldSet.has(event.symbol)) continue;
+            const key = `${event.executionDate}|${event.symbol}`;
+            byDay.set(key, [...(byDay.get(key) ?? []), event]);
+        }
+        for (const key of [...byDay.keys()].sort()) {
+            const events = byDay.get(key)!;
+            const holding = combineSameDaySplits(events);
+            if (!holding) {
+                unadjusted.push(events[0].symbol);
                 continue;
             }
-            const holding = { symbol: event.symbol, executionDate: event.executionDate, splitFrom: event.splitFrom, splitTo: event.splitTo };
             const positions = await store.adjustHoldingsForSplit(holding);
-            if (positions > 0) adjusted.push({ symbol: event.symbol, executionDate: event.executionDate, ratio: describeSplitRatio(holding), positions });
+            if (positions > 0) adjusted.push({ symbol: holding.symbol, executionDate: holding.executionDate, ratio: describeSplitRatio(holding), positions });
         }
         splits = {
             from,

@@ -108,7 +108,7 @@ interface PolygonGroupedBar extends PolygonAggBar {
 /** GET /stocks/v1/splits (replaces the deprecated /v3/reference/splits). */
 interface PolygonSplitsResponse {
   status: string;
-  results?: Array<{ ticker?: string; execution_date?: string; split_from?: unknown; split_to?: unknown }>;
+  results?: Array<{ id?: unknown; ticker?: string; execution_date?: string; split_from?: unknown; split_to?: unknown }>;
   next_url?: string;
 }
 
@@ -162,6 +162,8 @@ export interface SplitEvent {
    */
   splitFrom?: number;
   splitTo?: number;
+  /** The provider's id for the action: the same action listed twice is applied once. */
+  id?: string;
 }
 
 /**
@@ -592,6 +594,7 @@ export class PolygonMassiveAdapter implements MarketDataProvider {
       if (typeof split?.ticker !== 'string' || !split.ticker.trim()) return [];
       if (typeof split.execution_date !== 'string' || !ISO_DATE.test(split.execution_date)) return [];
       const event: SplitEvent = { symbol: split.ticker.trim().toUpperCase(), executionDate: split.execution_date };
+      if (typeof split.id === 'string' && split.id.trim()) event.id = split.id.trim();
       if (positive(split.split_from) && positive(split.split_to)) {
         event.splitFrom = split.split_from as number;
         event.splitTo = split.split_to as number;
