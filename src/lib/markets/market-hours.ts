@@ -6,7 +6,7 @@
  * Regular hours are 9:30 AM – 4:00 PM ET on trading days, with a 1:00 PM
  * close on the three early-close days. Holidays follow NYSE Rule 7.2 and are
  * computed rather than listed, so the calendar never runs out; one-off
- * closures are listed. It covers 2000 onward, and the tests pin it to the
+ * closures are listed. It covers 2018 onward, and the tests pin it to the
  * dates NYSE publishes.
  *
  * Every date here is an Eastern calendar date in `YYYY-MM-DD` form. Clock
@@ -21,23 +21,16 @@ const NYSE_EARLY_CLOSE_MINUTES = 13 * 60; // 1:00 PM ET
 const ET_ZONE = "America/New_York";
 
 /**
- * The calendar covers 2000 onward. Earlier years had different holiday rules
- * (no Martin Luther King, Jr. Day before 1998, for one), so they are refused
- * rather than answered wrongly. Nothing here needs prices that old: the free
- * data tier keeps two years of history.
+ * The calendar covers 2018 onward, the years its rules have been checked
+ * against what NYSE actually did. Earlier years had exceptions the rules
+ * don't capture (a 1:00 PM close on July 5, 2002; a noon opening on
+ * September 11, 2002), so they are refused rather than answered wrongly.
+ * Nothing needs prices that old: the free data tier keeps two years.
  */
-export const FIRST_CALENDAR_YEAR = 2000;
+export const FIRST_CALENDAR_YEAR = 2018;
 
-/** Full-day closures NYSE announced outside Rule 7.2 since 2000. */
+/** Full-day closures NYSE announced outside Rule 7.2 since 2018. */
 const SPECIAL_CLOSURES: Record<string, string> = {
-    "2001-09-11": "September 11 attacks",
-    "2001-09-12": "September 11 attacks",
-    "2001-09-13": "September 11 attacks",
-    "2001-09-14": "September 11 attacks",
-    "2004-06-11": "National Day of Mourning for President Ronald Reagan",
-    "2007-01-02": "National Day of Mourning for President Gerald Ford",
-    "2012-10-29": "Hurricane Sandy",
-    "2012-10-30": "Hurricane Sandy",
     "2018-12-05": "National Day of Mourning for President George H. W. Bush",
     "2025-01-09": "National Day of Mourning for President Jimmy Carter",
 };

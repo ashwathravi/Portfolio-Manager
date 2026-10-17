@@ -216,20 +216,33 @@ describe("NYSE trading calendar", () => {
     });
 
     test("refuses years before the calendar starts instead of guessing", () => {
-        // NYSE first closed for Martin Luther King, Jr. Day in 1998.
-        assert.throws(() => getMarketDay("1997-01-20"), RangeError);
-        assert.throws(() => marketHolidays(1999), RangeError);
-        assert.throws(() => previousTradingDay("2000-01-03"), RangeError);
-        assert.strictEqual(getMarketDay("2000-01-03").isTradingDay, true);
+        // 2002 closed early on July 5 and opened at noon on September 11,
+        // exceptions the rules don't capture.
+        assert.throws(() => getMarketDay("2002-07-05"), RangeError);
+        assert.throws(() => marketHolidays(2017), RangeError);
+        assert.throws(() => previousTradingDay("2018-01-02"), RangeError);
+        assert.strictEqual(getMarketDay("2018-01-02").isTradingDay, true);
     });
 
-    test("knows the one-off closures since 2000", () => {
-        for (const date of ["2001-09-11", "2001-09-14", "2004-06-11", "2007-01-02", "2012-10-29", "2012-10-30", "2018-12-05"]) {
-            assert.strictEqual(getMarketDay(date).isTradingDay, false, date);
-        }
+    test("knows the one-off closures since 2018", () => {
         assert.strictEqual(getMarketDay("2018-12-05").holiday, "National Day of Mourning for President George H. W. Bush");
         assert.strictEqual(previousTradingDay("2018-12-06"), "2018-12-04");
-        assert.strictEqual(nextTradingDay("2001-09-10"), "2001-09-17");
+        assert.strictEqual(getMarketDay("2025-01-09").isTradingDay, false);
+    });
+
+    // Every July 3 and December 24 since 2018, against what NYSE did: early
+    // close Monday to Thursday, the observed holiday on a Friday, nothing on
+    // a weekend.
+    test("July 3 and December 24 follow the modern rule in every covered year", () => {
+        const early = new Set(marketEarlyCloses(2018).concat(...[2019, 2020, 2021, 2022, 2023, 2024, 2025].map(marketEarlyCloses)));
+        for (const date of ["2018-07-03", "2019-07-03", "2023-07-03", "2024-07-03", "2025-07-03", "2018-12-24", "2019-12-24", "2020-12-24", "2024-12-24", "2025-12-24"]) {
+            assert.ok(early.has(date), `${date} should close early`);
+        }
+        assert.strictEqual(getMarketDay("2020-07-03").holiday, "Independence Day");
+        assert.strictEqual(getMarketDay("2021-12-24").holiday, "Christmas Day");
+        for (const date of ["2021-07-02", "2022-07-01", "2022-12-23", "2023-12-22"]) {
+            assert.strictEqual(getMarketDay(date).earlyClose, false, date);
+        }
     });
 
     test("previous and next trading days skip weekends and holidays", () => {
