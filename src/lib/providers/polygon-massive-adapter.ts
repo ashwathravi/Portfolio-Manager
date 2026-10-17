@@ -1,12 +1,26 @@
 /**
- * PolygonMassiveAdapter — MarketDataProvider implementation backed by
- * the Polygon.io (Massive) REST API.
+ * PolygonMassiveAdapter — MarketDataProvider implementation backed by the
+ * Massive (formerly Polygon.io) REST API on the free Basic plan (decision
+ * D4): end-of-day data, two years of history, 5 calls a minute.
+ *
+ * Basic has no snapshot (live quote) endpoints, so a quote is the latest
+ * session's closing price from the market-wide grouped daily bars, with the
+ * change measured against the session before. Two calls price every
+ * symbol, and the bars are cached per date (launch item i30).
  *
  * Environment variables:
- *   POLYGON_API_KEY  — API key appended to every request
+ *   POLYGON_API_KEY  — API key appended to every request. Without one the
+ *                      adapter still constructs, and every request rejects
+ *                      with MarketDataNotConfiguredError before any fetch.
  *   POLYGON_BASE_URL — base URL, defaults to https://api.polygon.io
  */
 
+import {
+  easternDateTime,
+  getMarketDay,
+  lastCompletedSession,
+  previousTradingDay,
+} from '@/lib/markets/market-hours';
 import type {
   Fundamentals,
   MarketDataProvider,
@@ -14,6 +28,8 @@ import type {
   Quote,
   SymbolResult,
 } from '@/types/market-data';
+
+import { MarketDataNotConfiguredError } from './errors';
 
 // ---------------------------------------------------------------------------
 // Custom error classes
@@ -65,44 +81,6 @@ export class PolygonTimeoutError extends Error {
 // Polygon-specific response shapes (private — never exported)
 // ---------------------------------------------------------------------------
 
-interface PolygonSnapshotTicker {
-  ticker: string;
-  todaysChange: number;
-  todaysChangePerc: number;
-  updated: number; // nanosecond unix timestamp
-  day?: {
-    c: number; // close
-    h: number;
-    l: number;
-    o: number;
-    v: number;
-    vw: number;
-  };
-  lastTrade?: {
-    p: number;
-    t: number; // nanosecond unix timestamp
-  };
-  prevDay?: {
-    c: number;
-    h: number;
-    l: number;
-    o: number;
-    v: number;
-    vw: number;
-  };
-}
-
-interface PolygonSnapshotSingleResponse {
-  status: string;
-  request_id: string;
-  ticker?: PolygonSnapshotTicker;
-}
-
-interface PolygonSnapshotMultiResponse {
-  status: string;
-  tickers?: PolygonSnapshotTicker[];
-}
-
 interface PolygonAggBar {
   t: number; // millisecond unix timestamp
   o: number;
@@ -116,6 +94,17 @@ interface PolygonAggsResponse {
   status: string;
   resultsCount?: number;
   results?: PolygonAggBar[];
+}
+
+/** A grouped daily bar: an aggregate bar plus the ticker it belongs to. */
+interface PolygonGroupedBar extends PolygonAggBar {
+  T: string;
+}
+
+interface PolygonGroupedResponse {
+  status: string;
+  resultsCount?: number;
+  results?: PolygonGroupedBar[];
 }
 
 interface PolygonTickerDetail {
@@ -148,23 +137,62 @@ interface PolygonTickerSearchResponse {
 }
 
 // ---------------------------------------------------------------------------
+// Public shapes
+// ---------------------------------------------------------------------------
+
+/**
+ * One symbol's bar for one session. Matches the price store's
+ * `PriceBarInput` apart from `source`, so the nightly ingest (i32) can
+ * store these as they are.
+ */
+export interface DailyBar {
+  symbol: string;
+  /** Eastern trading date, YYYY-MM-DD. */
+  date: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+}
+
+// ---------------------------------------------------------------------------
 // Configuration
 // ---------------------------------------------------------------------------
 
-interface PolygonAdapterConfig {
+export interface PolygonAdapterConfig {
   /** Request timeout in milliseconds. Default: 10 000 */
   timeoutMs?: number;
   /** Maximum retries on 429 rate-limit. Default: 3 */
   maxRetries?: number;
   /** Initial backoff delay in ms for rate-limit retries. Default: 1 000 */
   initialBackoffMs?: number;
+  /** Clock that picks the latest session and ages cached bars. Default: the system clock */
+  now?: () => Date;
+  /** fetch implementation. Default: `globalThis.fetch`, looked up per request */
+  fetch?: typeof globalThis.fetch;
 }
 
-const DEFAULT_CONFIG: Required<PolygonAdapterConfig> = {
+type RetryConfig = Required<Pick<PolygonAdapterConfig, 'timeoutMs' | 'maxRetries' | 'initialBackoffMs'>>;
+
+const DEFAULT_CONFIG: RetryConfig = {
   timeoutMs: 10_000,
   maxRetries: 3,
   initialBackoffMs: 1_000,
 };
+
+/**
+ * A published day's bars change only when a split restates the adjusted
+ * prices, so even a full day is refetched hourly. An empty day usually
+ * means it isn't published yet; it is asked for again after 10 minutes.
+ */
+const DAILY_BARS_TTL_MS = 60 * 60_000;
+const EMPTY_DAILY_BARS_TTL_MS = 10 * 60_000;
+/** Quotes read two or three days. A day's file holds every US stock (a few MB). */
+const MAX_CACHED_DAYS = 4;
+
+const NYSE_CLOSE_MINUTES = 16 * 60;
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 // ---------------------------------------------------------------------------
 // Range helpers
@@ -174,8 +202,7 @@ const DEFAULT_CONFIG: Required<PolygonAdapterConfig> = {
  * Translate a human-readable range key into { from, to } date strings
  * (YYYY-MM-DD) suitable for the Polygon aggregates endpoint.
  */
-function rangeToDates(range: string): { from: string; to: string } {
-  const now = new Date();
+function rangeToDates(range: string, now: Date): { from: string; to: string } {
   const to = formatDate(now);
 
   const map: Record<string, number> = {
@@ -224,21 +251,20 @@ function safeNumber(value: unknown, fallback: number = 0): number {
   return Number.isFinite(n) ? n : fallback;
 }
 
-/** Safely convert a nanosecond or millisecond timestamp to an ISO string. */
-function safeTimestamp(ns: unknown, divisor: number = 1): string {
-  const raw = Number(ns);
+/** Safely convert a millisecond timestamp to an ISO string. */
+function safeTimestamp(ms: unknown): string {
+  const raw = Number(ms);
   if (!Number.isFinite(raw) || raw <= 0) {
     return new Date().toISOString();
   }
-  const ms = divisor > 1 ? Math.floor(raw / divisor) : raw;
-  const d = new Date(ms);
+  const d = new Date(raw);
   // Guard against "Invalid Date"
   return isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
 }
 
-/** Redact API key from a URL for safe logging. */
+/** Redact the API key from a URL (or any message quoting one) for safe logging. */
 function redactUrl(url: string, apiKey: string): string {
-  return url.replace(apiKey, '***');
+  return apiKey ? url.split(apiKey).join('***') : url;
 }
 
 /** Validate that a symbol string is non-empty after trimming. */
@@ -250,29 +276,63 @@ function validateSymbol(symbol: string): string {
   return trimmed;
 }
 
+/** The latest session with published bars, the session before it, and when it closed. */
+interface ClosingSessions {
+  date: string;
+  closedAt: string;
+  bars: Map<string, DailyBar>;
+  previous: Map<string, DailyBar>;
+}
+
+/**
+ * A symbol's closing quote, or undefined when the session has no positive
+ * close for it: an unpriced symbol is left out, never valued at zero.
+ */
+function closingQuote(symbol: string, sessions: ClosingSessions): Quote | undefined {
+  const bar = sessions.bars.get(symbol);
+  if (!bar || !(bar.close > 0)) return undefined;
+
+  // Without an earlier close (the symbol's first session) there is no
+  // change to measure, so it reads as unchanged.
+  const previousClose = sessions.previous.get(symbol)?.close ?? 0;
+  const change = previousClose > 0 ? bar.close - previousClose : 0;
+  return {
+    symbol,
+    price: bar.close,
+    change,
+    changePercent: previousClose > 0 ? (change / previousClose) * 100 : 0,
+    timestamp: sessions.closedAt,
+    isRealtime: false,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Adapter
 // ---------------------------------------------------------------------------
 
 export class PolygonMassiveAdapter implements MarketDataProvider {
+  /** False without an API key; every request then rejects with MarketDataNotConfiguredError. */
+  readonly isConfigured: boolean;
   private readonly baseUrl: string;
   private readonly apiKey: string;
-  private readonly config: Required<PolygonAdapterConfig>;
+  private readonly config: RetryConfig;
+  private readonly now: () => Date;
+  private readonly fetchImpl: typeof globalThis.fetch | undefined;
+  /** Grouped daily bars by date. Concurrent callers share the pending request. */
+  private readonly dailyBarsCache = new Map<string, { bars: Promise<Map<string, DailyBar>>; expiresAt: number }>();
 
   constructor(
     apiKey: string = process.env.POLYGON_API_KEY ?? '',
-    baseUrl: string = process.env.POLYGON_BASE_URL ?? 'https://api.polygon.io',
+    baseUrl: string = process.env.POLYGON_BASE_URL || 'https://api.polygon.io',
     config: PolygonAdapterConfig = {},
   ) {
-    if (!apiKey) {
-      throw new Error(
-        'PolygonMassiveAdapter: POLYGON_API_KEY is required. ' +
-          'Pass it to the constructor or set the environment variable.',
-      );
-    }
-    this.apiKey = apiKey;
+    this.apiKey = apiKey.trim();
+    this.isConfigured = this.apiKey.length > 0;
     this.baseUrl = baseUrl.replace(/\/+$/, ''); // strip trailing slashes
-    this.config = { ...DEFAULT_CONFIG, ...config };
+    const { now, fetch, ...retry } = config;
+    this.config = { ...DEFAULT_CONFIG, ...retry };
+    this.now = now ?? (() => new Date());
+    this.fetchImpl = fetch;
   }
 
   // -----------------------------------------------------------------------
@@ -280,25 +340,24 @@ export class PolygonMassiveAdapter implements MarketDataProvider {
   // -----------------------------------------------------------------------
 
   async getQuote(symbol: string): Promise<Quote> {
-    const sym = validateSymbol(symbol);
-    const url =
-      `${this.baseUrl}/v2/snapshot/locale/us/markets/stocks/tickers/` +
-      `${encodeURIComponent(sym.toUpperCase())}?apiKey=${this.apiKey}`;
+    this.assertConfigured();
+    const sym = validateSymbol(symbol).toUpperCase();
+    const sessions = await this.latestSessions();
+    const quote = closingQuote(sym, sessions);
 
-    const data = await this.fetchWithRetry<PolygonSnapshotSingleResponse>(url);
-
-    if (!data.ticker) {
+    if (!quote) {
       throw new PolygonApiError(
         404,
-        `No snapshot data returned for symbol "${sym}"`,
-        redactUrl(url, this.apiKey),
+        `No closing price for symbol "${sym}"`,
+        redactUrl(this.groupedDailyUrl(sessions.date), this.apiKey),
       );
     }
 
-    return this.mapSnapshotToQuote(data.ticker);
+    return quote;
   }
 
   async getBatchQuotes(symbols: string[]): Promise<Quote[]> {
+    this.assertConfigured();
     if (symbols.length === 0) return [];
 
     // Validate and deduplicate
@@ -306,24 +365,14 @@ export class PolygonMassiveAdapter implements MarketDataProvider {
       ...new Set(symbols.map((s) => validateSymbol(s).toUpperCase())),
     ];
 
-    const tickers = uniqueSymbols.join(',');
-    const url =
-      `${this.baseUrl}/v2/snapshot/locale/us/markets/stocks/tickers` +
-      `?tickers=${encodeURIComponent(tickers)}&apiKey=${this.apiKey}`;
-
-    const data = await this.fetchWithRetry<PolygonSnapshotMultiResponse>(url);
-
-    // Filter out any malformed ticker entries that lack a ticker identifier
-    const validTickers = (data.tickers ?? []).filter(
-      (t) => t && typeof t.ticker === 'string' && t.ticker.length > 0,
-    );
-
-    return validTickers.map((t) => this.mapSnapshotToQuote(t));
+    const sessions = await this.latestSessions();
+    return uniqueSymbols.flatMap((s) => closingQuote(s, sessions) ?? []);
   }
 
   async getHistoricalPrices(symbol: string, range: string): Promise<OHLC[]> {
+    this.assertConfigured();
     const sym = validateSymbol(symbol);
-    const { from, to } = rangeToDates(range);
+    const { from, to } = rangeToDates(range, this.now());
     const url =
       `${this.baseUrl}/v2/aggs/ticker/` +
       `${encodeURIComponent(sym.toUpperCase())}/range/1/day/${from}/${to}` +
@@ -346,6 +395,7 @@ export class PolygonMassiveAdapter implements MarketDataProvider {
   }
 
   async getFundamentals(symbol: string): Promise<Fundamentals> {
+    this.assertConfigured();
     const sym = validateSymbol(symbol);
     const url =
       `${this.baseUrl}/v3/reference/tickers/` +
@@ -362,6 +412,7 @@ export class PolygonMassiveAdapter implements MarketDataProvider {
   }
 
   async searchSymbol(query: string): Promise<SymbolResult[]> {
+    this.assertConfigured();
     const trimmed = query.trim();
     if (!trimmed) return [];
 
@@ -385,28 +436,123 @@ export class PolygonMassiveAdapter implements MarketDataProvider {
   }
 
   // -----------------------------------------------------------------------
-  // Private helpers — mapping Polygon shapes -> provider-agnostic models
+  // Grouped daily bars — the free plan's source of closing prices
   // -----------------------------------------------------------------------
 
-  private mapSnapshotToQuote(t: PolygonSnapshotTicker): Quote {
-    // Prefer last-trade price -> day close -> prevDay close -> 0
-    const price =
-      t.lastTrade?.p ?? t.day?.c ?? t.prevDay?.c ?? 0;
+  /**
+   * Every US stock's split-adjusted bar for one session, keyed by symbol:
+   * one call covers the whole market. Results are cached per date and
+   * concurrent requests share one call. A day with no bars (not published
+   * yet, or not a trading day) comes back as an empty map. Quotes read it
+   * here; the nightly ingest (i32) reuses it.
+   */
+  async getDailyBars(date: string): Promise<Map<string, DailyBar>> {
+    this.assertConfigured();
+    if (!ISO_DATE.test(date)) {
+      throw new Error(`PolygonMassiveAdapter: Expected a date as YYYY-MM-DD, got "${date}".`);
+    }
 
-    // `updated` and `lastTrade.t` are nanosecond-precision; convert to ms
-    const timestamp = t.lastTrade?.t
-      ? safeTimestamp(t.lastTrade.t, 1_000_000)
-      : safeTimestamp(t.updated, 1_000_000);
+    const cached = this.dailyBarsCache.get(date);
+    if (cached && cached.expiresAt > this.now().getTime()) return cached.bars;
 
-    return {
-      symbol: t.ticker,
-      price: safeNumber(price),
-      change: safeNumber(t.todaysChange),
-      changePercent: safeNumber(t.todaysChangePerc),
-      timestamp,
-      isRealtime: true,
-    };
+    // Re-inserted so the map stays in fetch order and the oldest day goes first.
+    const entry = { bars: this.fetchDailyBars(date), expiresAt: Number.POSITIVE_INFINITY };
+    this.dailyBarsCache.delete(date);
+    this.dailyBarsCache.set(date, entry);
+    for (const key of this.dailyBarsCache.keys()) {
+      if (this.dailyBarsCache.size <= MAX_CACHED_DAYS) break;
+      this.dailyBarsCache.delete(key);
+    }
+
+    try {
+      const bars = await entry.bars;
+      entry.expiresAt =
+        this.now().getTime() + (bars.size > 0 ? DAILY_BARS_TTL_MS : EMPTY_DAILY_BARS_TTL_MS);
+      return bars;
+    } catch (err) {
+      // Failures are not cached: the next caller asks again.
+      if (this.dailyBarsCache.get(date) === entry) this.dailyBarsCache.delete(date);
+      throw err;
+    }
   }
+
+  /**
+   * The last completed session and the one before it. When the last
+   * session's bars aren't published yet, the session before stands in, so
+   * quotes show the latest closing prices that exist.
+   */
+  private async latestSessions(): Promise<ClosingSessions> {
+    let date = lastCompletedSession(this.now());
+    let previousDate = previousTradingDay(date);
+    let [bars, previous] = await Promise.all([
+      this.getDailyBars(date),
+      this.getDailyBars(previousDate),
+    ]);
+
+    if (bars.size === 0) {
+      date = previousDate;
+      bars = previous;
+      previousDate = previousTradingDay(date);
+      previous = await this.getDailyBars(previousDate);
+    }
+
+    const closeMinutes = getMarketDay(date).closeMinutes ?? NYSE_CLOSE_MINUTES;
+    return { date, closedAt: easternDateTime(date, closeMinutes).toISOString(), bars, previous };
+  }
+
+  private async fetchDailyBars(date: string): Promise<Map<string, DailyBar>> {
+    let data: PolygonGroupedResponse;
+    try {
+      data = await this.fetchWithRetry<PolygonGroupedResponse>(this.groupedDailyUrl(date));
+    } catch (err) {
+      // Basic withholds the latest session until Massive publishes it at the
+      // end of the day, answering 403 meanwhile: the same as not out yet. An
+      // older day refused is a real plan or key problem and is thrown.
+      if (err instanceof PolygonApiError && err.status === 403 && date >= lastCompletedSession(this.now())) {
+        return new Map();
+      }
+      throw err;
+    }
+
+    const bars = new Map<string, DailyBar>();
+    for (const bar of data.results ?? []) {
+      // Skip malformed rows rather than failing the whole market's file
+      if (
+        !bar ||
+        typeof bar.T !== 'string' ||
+        !bar.T.trim() ||
+        ![bar.o, bar.h, bar.l, bar.c].every(Number.isFinite)
+      ) {
+        continue;
+      }
+      const symbol = bar.T.trim().toUpperCase();
+      bars.set(symbol, {
+        symbol,
+        date,
+        open: bar.o,
+        high: bar.h,
+        low: bar.l,
+        close: bar.c,
+        volume: safeNumber(bar.v),
+      });
+    }
+    return bars;
+  }
+
+  private groupedDailyUrl(date: string): string {
+    return (
+      `${this.baseUrl}/v2/aggs/grouped/locale/us/market/stocks/${date}` +
+      `?adjusted=true&apiKey=${this.apiKey}`
+    );
+  }
+
+  private assertConfigured(): void {
+    if (!this.isConfigured) throw new MarketDataNotConfiguredError('POLYGON_API_KEY');
+  }
+
+  // -----------------------------------------------------------------------
+  // Private helpers — mapping Polygon shapes -> provider-agnostic models
+  // -----------------------------------------------------------------------
 
   private mapAggToOHLC(bar: PolygonAggBar): OHLC {
     return {
@@ -490,9 +636,13 @@ export class PolygonMassiveAdapter implements MarketDataProvider {
       this.config.timeoutMs,
     );
 
+    // No Next.js data cache: a grouped daily file is several MB, and the
+    // adapter keeps its own per-date cache.
+    const init: RequestInit = { signal: controller.signal, cache: 'no-store' };
+
     let res: Response;
     try {
-      res = await globalThis.fetch(url, { signal: controller.signal });
+      res = await (this.fetchImpl ? this.fetchImpl(url, init) : globalThis.fetch(url, init));
     } catch (err) {
       clearTimeout(timeoutId);
 
@@ -507,9 +657,10 @@ export class PolygonMassiveAdapter implements MarketDataProvider {
         );
       }
 
-      // Network error (DNS failure, connection refused, etc.)
+      // Network error (DNS failure, connection refused, etc.). The cause's
+      // message can quote the URL, so it is redacted too.
       throw new Error(
-        `PolygonMassiveAdapter: Network error — ${err instanceof Error ? err.message : String(err)} — ${redactUrl(url, this.apiKey)}`,
+        `PolygonMassiveAdapter: Network error — ${redactUrl(err instanceof Error ? err.message : String(err), this.apiKey)} — ${redactUrl(url, this.apiKey)}`,
       );
     } finally {
       clearTimeout(timeoutId);

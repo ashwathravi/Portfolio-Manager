@@ -16,11 +16,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { requireSessionApiUserScope } from '@/lib/api/session-security';
-import { apiError, internalServerError, providerRateLimitError } from '@/lib/api/security';
+import { apiError } from '@/lib/api/security';
+import { marketDataErrorResponse } from '@/lib/api/market-data/route-errors';
 import { buildOwnedPortfolioQuery } from '@/lib/portfolio-repository';
 import { getMarketDataService } from '@/lib/services/market-data-service';
 import { PortfolioAccessError } from '@/lib/services/portfolio-valuation-engine';
-import { PolygonRateLimitError } from '@/lib/providers/polygon-massive-adapter';
 
 export async function GET(
   request: NextRequest,
@@ -36,10 +36,9 @@ export async function GET(
   if (!auth.ok) return auth.response;
 
   try {
-    // Verify ownership before constructing the provider-backed service. The
-    // default market-data adapter validates its configuration eagerly, so an
-    // unauthorized portfolio must be rejected before provider setup can turn
-    // the tenant-safe 404 into an unrelated configuration error.
+    // Verify ownership before asking for prices, so another user's
+    // portfolio is always the tenant-safe 404, never a market-data error
+    // (such as the 503 when no provider key is configured).
     const [ownedPortfolio] = await buildOwnedPortfolioQuery(auth.context.userId, id);
     if (!ownedPortfolio) {
       throw new PortfolioAccessError();
@@ -59,10 +58,6 @@ export async function GET(
       return apiError('Portfolio not found', 'PORTFOLIO_NOT_FOUND', 404);
     }
 
-    if (err instanceof PolygonRateLimitError) {
-      return providerRateLimitError(err.retryAfterMs / 1000);
-    }
-
-    return internalServerError(err, 'Unable to value portfolio.', 'PORTFOLIO_VALUE_FAILED');
+    return marketDataErrorResponse(err, 'Unable to value portfolio.', 'PORTFOLIO_VALUE_FAILED');
   }
 }

@@ -2,9 +2,13 @@
  * MarketDataService — single orchestration layer between controllers and
  * market-data providers.
  *
- * Controllers never call providers directly; they go through this service.
- * The underlying provider is swappable via constructor injection (defaults to
- * PolygonMassiveAdapter).
+ * Controllers and server pages never call providers directly; they go
+ * through this service, so the whole app reads one source of prices
+ * (launch item i30). The underlying provider is swappable via constructor
+ * injection (defaults to a cached PolygonMassiveAdapter). Construction never
+ * throws: without POLYGON_API_KEY every request rejects with
+ * MarketDataNotConfiguredError, which pages answer with stored prices
+ * ({@link loadQuotes}) and routes with a 503.
  *
  * Portfolio valuation is delegated to PortfolioValuationEngine (AR-49).
  *
@@ -15,6 +19,7 @@ import {
   CachedMarketDataProvider,
   InMemoryCache,
 } from '@/lib/cache';
+import { MarketDataNotConfiguredError } from '@/lib/providers/errors';
 import { PolygonMassiveAdapter } from '@/lib/providers/polygon-massive-adapter';
 import type {
   Fundamentals,
@@ -64,6 +69,21 @@ export class MarketDataService {
     return this.provider.getBatchQuotes(symbols);
   }
 
+  /**
+   * Quotes keyed by uppercase symbol. Blank symbols are dropped, and a
+   * symbol the provider has no price for is simply absent.
+   */
+  async getQuotes(symbols: Iterable<string>): Promise<Record<string, Quote>> {
+    const unique = [...new Set([...symbols].map((s) => s.trim().toUpperCase()).filter(Boolean))];
+    if (unique.length === 0) return {};
+
+    const quotes: Record<string, Quote> = {};
+    for (const quote of await this.provider.getBatchQuotes(unique)) {
+      quotes[quote.symbol.toUpperCase()] = quote;
+    }
+    return quotes;
+  }
+
   getHistoricalPrices(symbol: string, range: string): Promise<OHLC[]> {
     return this.provider.getHistoricalPrices(symbol, range);
   }
@@ -109,4 +129,31 @@ export function getMarketDataService(): MarketDataService {
     _instance = new MarketDataService();
   }
   return _instance;
+}
+
+// ---------------------------------------------------------------------------
+// Page helper
+// ---------------------------------------------------------------------------
+
+/**
+ * Quotes for a server page's first paint, keyed by uppercase symbol. Never
+ * throws: on any failure it returns `{}` and the page falls back to the
+ * prices it stored. No key configured is the normal local and E2E state, so
+ * it logs nothing; anything else gets one line, without a stack trace.
+ */
+export async function loadQuotes(
+  symbols: Iterable<string>,
+  service?: MarketDataService,
+): Promise<Record<string, Quote>> {
+  const list = [...symbols];
+  if (list.length === 0) return {};
+  try {
+    return await (service ?? getMarketDataService()).getQuotes(list);
+  } catch (err) {
+    if (!(err instanceof MarketDataNotConfiguredError)) {
+      const reason = err instanceof Error ? err.message : String(err);
+      console.warn(`Market data unavailable, showing stored prices: ${reason}`);
+    }
+    return {};
+  }
 }

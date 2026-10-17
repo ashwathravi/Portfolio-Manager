@@ -1,6 +1,6 @@
 import { Suspense } from 'react';
-import { marketDataEngine } from '@/lib/api/market-data';
 import { requirePageUserId } from '@/lib/auth/request-user';
+import { loadQuotes } from '@/lib/services/market-data-service';
 import { buildUserHoldingPositionsQuery } from '@/lib/portfolio-repository';
 import { HoldingDetailView, type HoldingDetail, type AccountPosition } from '@/components/holdings/HoldingDetailView';
 import { PageHeaderSync } from '@/components/layout/TopBar';
@@ -28,22 +28,10 @@ async function HoldingDetailContent({ symbol }: { symbol: string }) {
         console.warn('Holding detail DB fetch failed:', error);
     }
 
-    // Try live quote; fall back to the last-known snapshot from the DB.
-    let livePrice: number | undefined;
-    let liveChange = 0;
-    let liveChangePercent = 0;
-    try {
-        const quotes = await marketDataEngine.getQuotes([upper]);
-        if (quotes[upper]) {
-            livePrice = quotes[upper].price;
-            liveChange = quotes[upper].change ?? 0;
-            liveChangePercent = quotes[upper].changePercent ?? 0;
-        }
-    } catch (e) {
-        console.warn(`Failed to fetch live quote for ${upper}:`, e);
-    }
-
-    const quote = livePrice === undefined ? null : { price: livePrice, change: liveChange, changePercent: liveChangePercent };
+    // Try the latest quote; fall back to the last-known snapshot from the DB.
+    const live = (await loadQuotes([upper]))[upper];
+    const livePrice = live?.price;
+    const quote = live ? { price: live.price, change: live.change, changePercent: live.changePercent } : null;
     const header = (
         <PageHeaderSync
             title={upper}
@@ -94,8 +82,8 @@ async function HoldingDetailContent({ symbol }: { symbol: string }) {
         symbol: upper,
         name: firstRow.name,
         price: currentPrice,
-        change: liveChange,
-        changePercent: liveChangePercent,
+        change: live?.change ?? 0,
+        changePercent: live?.changePercent ?? 0,
         totalShares,
         totalEquity,
         avgCost: blendedAvgCost,
