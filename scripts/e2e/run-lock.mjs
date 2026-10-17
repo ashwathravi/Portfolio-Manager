@@ -1,8 +1,8 @@
 // Runs a command while holding the local E2E run lock, so runs from different
 // checkouts (git worktrees, other clones) take turns. They all share the
-// atlas-wealth-db container, its atlas_wealth_e2e database and ports 3000 and
-// 3100: without the lock, a second run's DROP DATABASE ... WITH (FORCE) kills
-// the first one mid-run.
+// atlas-wealth-db container, its atlas_wealth_e2e database and ports 3000,
+// 3100 and 3200: without the lock, a second run's DROP DATABASE ... WITH
+// (FORCE) kills the first one mid-run.
 //
 // The lock is two Postgres session advisory locks in that container, which the
 // server releases when the connection holding one closes. The command runs in

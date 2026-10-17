@@ -4,8 +4,8 @@
 # e.g. `npm run test:e2e:local -- tests/e2e/holdings.spec.ts`.
 #
 # Every checkout, git worktrees included, shares that container, its
-# atlas_wealth_e2e database and ports 3000 and 3100, so runs take turns: this
-# one waits up to E2E_LOCK_WAIT_SECONDS (default 1800) for another to finish.
+# atlas_wealth_e2e database and ports 3000, 3100 and 3200, so runs take turns:
+# this one waits up to E2E_LOCK_WAIT_SECONDS (default 1800) for another to finish.
 set -euo pipefail
 
 repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
