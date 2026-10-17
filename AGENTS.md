@@ -103,7 +103,7 @@ Every page in the application must have a corresponding E2E spec. The current ma
 | `/research` | `research.spec.ts` | One header, one-row tabs, delete in overflow menu, Sample-tagged recent seed theses, saved watchlist (add/refuse duplicates/edit/remove, survives reload), watchlist and journal detail panes, labelled illustrative price strip, Alpha Radar workflows |
 | `/research/thesis/[ticker]` | `thesis.spec.ts` | Memo layout, explained thesis check (no opaque health score), links to position and draft order, not-found state |
 | `/strategies` | `strategies.spec.ts` | "Strategies" title, compact switcher, Duplicate works, stale-backtest flag, legacy `/strategies/[id]` redirects |
-| `/performance`, `/performance/attribution`, `/performance/behaviour` | `performance.spec.ts` | Returns: three cards, one heading, Sample notice, CSV export. Attribution: plain-language verdict, BHB bars, full table with sector/asset-class switch. Behaviour: one continuous trading calendar, mood, P&L density, reviews archive |
+| `/performance`, `/performance/attribution`, `/performance/behaviour` | `performance.spec.ts` | Returns: three cards, one heading, Sample notice, CSV export (same months as the charts after a month rollover). Attribution: plain-language verdict, BHB bars, full table with sector/asset-class switch. Behaviour: one continuous trading calendar, mood, P&L density, reviews archive |
 | `/ask` + ⌘K | `ask.spec.ts` | Command palette (top-bar search + ⌘K), page/ticker/question routing, Ask overlay and page history |
 | `/settings` | `settings.spec.ts` | One column + section rail, legacy `?tab=` links scroll to sections, honest sign-in card, no seeded accounts, example-data toggle |
 | `/help` (Settings › Help) | `help.spec.ts` | Getting started (5 steps), glossary, Alpha Radar notes, single h1 |
@@ -112,7 +112,7 @@ Every page in the application must have a corresponding E2E spec. The current ma
 | 404 | `not-found.spec.ts` | Search button opens the palette, link back to Today |
 | Sidebar + IA | `navigation.spec.ts` | Exactly eight sidebar destinations (Help is a Settings tab), section tabs, legacy redirects, identity footer |
 | Database outage | `outage.spec.ts` | Runs against the second web server (port 3100, database configured but unreachable): `/api/health/ready` is 503 `unavailable`; Today, Holdings and Accounts show the outage notice inside their page container, never an empty state |
-| Cross-cutting | `smoke.spec.ts` | Fonts loaded, hydration clean in another timezone, no horizontal overflow at 390px, market-data routes answer 503 `MARKET_DATA_NOT_CONFIGURED` without a provider key, quotes answer from the price store (404 `QUOTE_UNAVAILABLE` for an unpriced symbol), valuation lists unpriced holdings |
+| Cross-cutting | `smoke.spec.ts` | Fonts loaded, hydration clean in another timezone and with the browser on the next UTC day, no horizontal overflow at 390px, market-data routes answer 503 `MARKET_DATA_NOT_CONFIGURED` without a provider key, quotes answer from the price store (404 `QUOTE_UNAVAILABLE` for an unpriced symbol), valuation lists unpriced holdings |
 
 ### Adding E2E tests for a new page
 

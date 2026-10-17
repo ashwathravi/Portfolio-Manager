@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { SEED_JOURNAL } from "@/lib/journal/seed";
+import { getSeedJournal } from "@/lib/journal/seed";
 import { SampleDataNotice } from "@/components/data-display/SampleDataNotice";
 import { SampleEmptyState } from "@/components/data-display/SampleEmptyState";
 import { SampleGate } from "@/components/data-display/SampleGate";
@@ -34,6 +34,7 @@ export function BehaviourPageClient() {
         );
     }
 
+    const trades = getSeedJournal();
     return (
         <div className="pm-perf-stack">
             <SampleGate
@@ -47,10 +48,10 @@ export function BehaviourPageClient() {
                 <SampleDataNotice>
                     Closed trades below come from the example journal until your trade history is connected.
                 </SampleDataNotice>
-                <TradingCalendarCard trades={SEED_JOURNAL} isSample />
-                <MoodBreakdownCard trades={SEED_JOURNAL} />
-                <PnlDensityCard trades={SEED_JOURNAL} />
-                <ReviewsArchiveCard entries={SEED_JOURNAL} />
+                <TradingCalendarCard trades={trades} isSample />
+                <MoodBreakdownCard trades={trades} />
+                <PnlDensityCard trades={trades} />
+                <ReviewsArchiveCard entries={trades} />
             </SampleGate>
         </div>
     );

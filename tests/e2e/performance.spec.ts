@@ -1,3 +1,4 @@
+import { readFile } from 'node:fs/promises';
 import { test, expect } from '@playwright/test';
 
 /**
@@ -51,6 +52,28 @@ test.describe('Performance › Returns', () => {
         await expect(button).toBeEnabled();
         const [download] = await Promise.all([page.waitForEvent('download'), button.click()]);
         expect(download.suggestedFilename()).toBe('atlas-monthly-returns.csv');
+    });
+
+    test('regression: Export CSV keeps the charted months after a UTC month rollover', async ({ page }) => {
+        // The export re-read the clock on click, so a page left open past the
+        // end of a UTC month downloaded a different window than the charts.
+        const loadedAt = new Date();
+        await page.clock.install({ time: loadedAt });
+        await page.goto('/performance');
+        const button = page.getByRole('button', { name: 'Export CSV' });
+        const exportedLastMonth = async () => {
+            const [download] = await Promise.all([page.waitForEvent('download', { timeout: 2_000 }), button.click()]);
+            const csv = await readFile(await download.path(), 'utf8');
+            return csv.trim().split('\n').at(-1)?.split(',')[0];
+        };
+        // The series ends at the last complete month before the page loaded.
+        const expected = new Date(Date.UTC(loadedAt.getUTCFullYear(), loadedAt.getUTCMonth() - 1, 1)).toISOString().slice(0, 7);
+
+        // Retry until hydration attaches the click handler.
+        await expect(async () => expect(await exportedLastMonth()).toBe(expected)).toPass({ timeout: 15_000 });
+
+        await page.clock.setSystemTime(Date.UTC(loadedAt.getUTCFullYear(), loadedAt.getUTCMonth() + 1, 1, 0, 1));
+        expect(await exportedLastMonth()).toBe(expected);
     });
 });
 

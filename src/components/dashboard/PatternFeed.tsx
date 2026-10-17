@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { RefreshCw, Sparkles, ChevronDown, ChevronUp } from "lucide-react";
-import { SEED_JOURNAL } from "@/lib/journal/seed";
+import type { JournalEntry } from "@/types/trade";
+import { getSeedJournal } from "@/lib/journal/seed";
 import { SEED_SECTOR_BY_TICKER } from "@/lib/adherence/seed";
 import {
     DEFAULT_NAV,
@@ -43,13 +44,13 @@ const MAX_COLLAPSED = 6;
 
 export interface PatternFeedProps {
     /** Override the journal source — keeps the component pure for tests. */
-    entries?: typeof SEED_JOURNAL;
+    entries?: JournalEntry[];
     /** Approximate NAV — drives the %-of-NAV detectors. */
     nav?: number;
 }
 
 export function PatternFeed({
-    entries = SEED_JOURNAL,
+    entries = getSeedJournal(),
     nav = DEFAULT_NAV,
 }: PatternFeedProps) {
     const [patterns, setPatterns] = useState<Pattern[]>([]);

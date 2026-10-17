@@ -416,5 +416,19 @@ export function rebaseSeedTheses(theses: readonly Thesis[], now: number, leadDay
     }));
 }
 
-/** Default data used to seed the research workspace on first load. */
-export const DEFAULT_THESES: Thesis[] = rebaseSeedTheses(SEED_THESES_AUTHORED, Date.now());
+let defaultThesesCache: { day: number; theses: Thesis[] } | null = null;
+
+/**
+ * Example theses that seed the research workspace on first load, rebased
+ * to the UTC day of `now`. Memoised per UTC day, so callers get the same
+ * array all day; a long-running server process picks up the new day after
+ * midnight instead of rendering the day it loaded this module, which made
+ * the server render and hydration disagree.
+ */
+export function getDefaultTheses(now: number = Date.now()): Thesis[] {
+    const day = Math.floor(now / DAY_MS);
+    if (defaultThesesCache?.day !== day) {
+        defaultThesesCache = { day, theses: rebaseSeedTheses(SEED_THESES_AUTHORED, now) };
+    }
+    return defaultThesesCache.theses;
+}
