@@ -32,6 +32,7 @@ import type {
   SymbolResult,
 } from '@/types/market-data';
 
+import type { ProviderQuota } from './massive-quota';
 import { MarketDataNotConfiguredError } from './errors';
 
 // ---------------------------------------------------------------------------
@@ -188,6 +189,11 @@ export interface PolygonAdapterConfig {
   now?: () => Date;
   /** fetch implementation. Default: `globalThis.fetch`, looked up per request */
   fetch?: typeof globalThis.fetch;
+  /**
+   * The call budget shared with every other Massive caller (see
+   * massive-quota.ts), taken before each request. Default: none.
+   */
+  quota?: ProviderQuota;
 }
 
 type RetryConfig = Required<Pick<PolygonAdapterConfig, 'timeoutMs' | 'maxRetries' | 'initialBackoffMs'>>;
@@ -335,6 +341,7 @@ export class PolygonMassiveAdapter implements MarketDataProvider {
   private readonly config: RetryConfig;
   private readonly now: () => Date;
   private readonly fetchImpl: typeof globalThis.fetch | undefined;
+  private readonly quota: ProviderQuota | undefined;
   /** Grouped daily bars by date. Concurrent callers share the pending request. */
   private readonly dailyBarsCache = new Map<string, { bars: Promise<Map<string, DailyBar>>; expiresAt: number }>();
 
@@ -346,10 +353,11 @@ export class PolygonMassiveAdapter implements MarketDataProvider {
     this.apiKey = apiKey.trim();
     this.isConfigured = this.apiKey.length > 0;
     this.baseUrl = baseUrl.replace(/\/+$/, ''); // strip trailing slashes
-    const { now, fetch, ...retry } = config;
+    const { now, fetch, quota, ...retry } = config;
     this.config = { ...DEFAULT_CONFIG, ...retry };
     this.now = now ?? (() => new Date());
     this.fetchImpl = fetch;
+    this.quota = quota;
   }
 
   // -----------------------------------------------------------------------
@@ -645,6 +653,12 @@ export class PolygonMassiveAdapter implements MarketDataProvider {
     let lastError: Error | undefined;
 
     for (let attempt = 0; attempt <= this.config.maxRetries; attempt++) {
+      if (this.quota) {
+        const decision = await this.quota.reserve();
+        // The shared budget is spent: no request is made, and waiting here
+        // would only hold the caller. A route answers 429; the ingest waits.
+        if (!decision.allowed) throw new PolygonRateLimitError(decision.retryAfterMs, redactUrl(url, this.apiKey));
+      }
       try {
         return await this.fetchOnce<T>(url);
       } catch (err) {

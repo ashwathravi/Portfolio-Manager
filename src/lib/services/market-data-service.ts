@@ -24,6 +24,7 @@ import {
 } from '@/lib/cache';
 import { MarketDataNotConfiguredError } from '@/lib/providers/errors';
 import { PolygonMassiveAdapter } from '@/lib/providers/polygon-massive-adapter';
+import { getMassiveQuota } from '@/lib/providers/massive-quota';
 import { StoredQuoteProvider } from '@/lib/markets/stored-quote-provider';
 import type {
   Fundamentals,
@@ -56,8 +57,9 @@ export class MarketDataService {
       provider ??
       new CachedMarketDataProvider(
         // Quotes come from the price store; Massive serves history,
-        // fundamentals and search.
-        new StoredQuoteProvider(new PolygonMassiveAdapter()),
+        // fundamentals and search, within the budget it shares with the
+        // nightly ingest.
+        new StoredQuoteProvider(new PolygonMassiveAdapter(undefined, undefined, { quota: getMassiveQuota() })),
         new InMemoryCache({ sweepIntervalMs: 60_000 }),
       );
     this.valuationEngine = new PortfolioValuationEngine(this.provider);

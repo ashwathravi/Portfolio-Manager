@@ -350,6 +350,30 @@ describe('PolygonMassiveAdapter', () => {
       assert.equal(attempts, 2);
     });
 
+    test('a spent shared quota answers 429 without a request, and is not retried', async () => {
+      const { fetch, calls } = fakeFetch(() => ({ body: grouped(bar('AAPL', 1)) }));
+      let reserved = 0;
+      const quota = { reserve: async () => (reserved++, { allowed: false as const, retryAfterMs: 30_000 }) };
+
+      await assert.rejects(adapter(fetch, { quota, maxRetries: 3 }).getDailyBars('2026-07-02'), (err: unknown) => {
+        assert.ok(err instanceof PolygonRateLimitError);
+        assert.equal(err.retryAfterMs, 30_000);
+        assert.ok(!err.message.includes(KEY));
+        return true;
+      });
+      assert.deepEqual([calls.length, reserved], [0, 1]);
+    });
+
+    test('every HTTP attempt takes a token from the shared quota', async () => {
+      let attempts = 0;
+      const { fetch } = fakeFetch(() => (++attempts === 1 ? { status: 429, body: {} } : { body: grouped(bar('AAPL', 1)) }));
+      let reserved = 0;
+      const quota = { reserve: async () => (reserved++, { allowed: true as const }) };
+
+      await adapter(fetch, { quota, maxRetries: 1, initialBackoffMs: 1 }).getDailyBars('2026-07-02');
+      assert.deepEqual([attempts, reserved], [2, 2]);
+    });
+
     test('the API key never appears in an error message', async () => {
       const keyless = (err: unknown) => {
         assert.ok(err instanceof Error);

@@ -28,8 +28,12 @@
  * The free Basic plan allows 5 calls a minute, so calls go through a pacer:
  * at most 5 in any 65-second window (a one-call-every-13-seconds pace once
  * the first five are spent), and none that couldn't finish within the budget.
- * The adapter makes no retries of its own, so every request is paced. A
- * rate-limit answer ends the run's provider calls without failing the job.
+ * The adapter makes no retries of its own, so every request is paced, and
+ * each request also takes a token from the Massive budget shared with the
+ * app's own history, fundamentals and search requests (massive-quota.ts). A
+ * rate-limit answer (that budget spent, or Massive's own 429) is waited out
+ * and the call made again; only a wait that would overrun the time budget
+ * ends the run's provider calls, without failing the job.
  *
  * The newest date in price_bars is the catch-up's bookmark, so it must only
  * ever be a day whose market-wide file was stored. A backfill therefore keeps
@@ -40,6 +44,7 @@
 import { db } from "@/db";
 import { holdings } from "@/db/schema";
 import { summarizeError } from "@/lib/jobs/runner";
+import { getMassiveQuota } from "@/lib/providers/massive-quota";
 import {
     PolygonApiError,
     PolygonMassiveAdapter,
@@ -87,6 +92,8 @@ export const CALLS_PER_WINDOW = 5;
 export const CALL_WINDOW_MS = 65_000;
 /** Time left for a call to finish once started: the adapter's request timeout. */
 export const CALL_ALLOWANCE_MS = 10_000;
+/** The least wait after a rate limit: a 429 without Retry-After says nothing useful. */
+export const RATE_LIMIT_WAIT_MS = 15_000;
 /** More symbols than one run's budget can fetch, so the budget is what stops it. */
 const BACKFILL_BATCH = 50;
 /** How long a looked-up symbol may go without a bar before it stops being tracked. */
@@ -248,6 +255,12 @@ export function createCallPacer({
             calls.push(now().getTime());
             return true;
         },
+        /** Waits `ms` if a call could still start and finish after it. */
+        async wait(ms: number): Promise<boolean> {
+            if (now().getTime() + ms + allowanceMs > deadline) return false;
+            await sleep(ms);
+            return true;
+        },
     };
 }
 
@@ -292,7 +305,11 @@ const defaultSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(r
  * instead of being retried (and slept on) inside one.
  */
 export function createIngestAdapter(config: Omit<PolygonAdapterConfig, "maxRetries"> = {}, apiKey?: string) {
-    return new PolygonMassiveAdapter(apiKey, undefined, { ...config, maxRetries: 0 });
+    return new PolygonMassiveAdapter(apiKey, undefined, {
+        quota: getMassiveQuota(apiKey ?? process.env.POLYGON_API_KEY ?? ""),
+        ...config,
+        maxRetries: 0,
+    });
 }
 
 /**
@@ -313,6 +330,22 @@ export async function ingestDailyPrices({
     }
 
     const pacer = createCallPacer({ now, sleep, deadline: now().getTime() + budgetMs });
+    /**
+     * One provider call through the pacer. A rate limit is waited out (at
+     * least RATE_LIMIT_WAIT_MS) and the call made again, while the budget
+     * lasts; other errors are the caller's.
+     */
+    const paced = async <T>(request: () => Promise<T>): Promise<{ value: T } | { stopped: IngestStopReason }> => {
+        for (;;) {
+            if (!(await pacer.acquire())) return { stopped: "budget" };
+            try {
+                return { value: await request() };
+            } catch (error) {
+                if (!(error instanceof PolygonRateLimitError)) throw error;
+                if (!(await pacer.wait(Math.max(error.retryAfterMs, RATE_LIMIT_WAIT_MS)))) return { stopped: "rate-limited" };
+            }
+        }
+    };
     const session = lastCompletedSession(now());
     const stopped: NonNullable<PriceIngestDetail["stopped"]> = {};
 
@@ -332,15 +365,13 @@ export async function ingestDailyPrices({
     } else if (latestBefore === null) {
         // Nothing stored yet, so no history on an old scale.
         splitsSkipped = "first run";
-    } else if (!(await pacer.acquire())) {
-        stopped.catchUp = "budget";
     } else {
         try {
-            splitEvents = await adapter.getSplits(window[0], window.at(-1)!);
+            const answer = await paced(() => adapter.getSplits(window[0], window.at(-1)!));
+            if ("stopped" in answer) stopped.catchUp = answer.stopped;
+            else splitEvents = answer.value;
         } catch (error) {
-            if (error instanceof PolygonRateLimitError) {
-                stopped.catchUp = "rate-limited";
-            } else if (error instanceof PolygonApiError && error.status === 403) {
+            if (error instanceof PolygonApiError && error.status === 403) {
                 // Not on this plan. Prices still matter more than the check.
                 splitsSkipped = summarizeError(error);
             } else {
@@ -367,20 +398,12 @@ export async function ingestDailyPrices({
 
     const days: NonNullable<PriceIngestDetail["days"]> = [];
     for (const date of stopped.catchUp ? [] : window) {
-        if (!(await pacer.acquire())) {
-            stopped.catchUp = "budget";
+        const answer = await paced(() => adapter.getDailyBars(date));
+        if ("stopped" in answer) {
+            stopped.catchUp = answer.stopped;
             break;
         }
-        let daily: Map<string, DailyBar>;
-        try {
-            daily = await adapter.getDailyBars(date);
-        } catch (error) {
-            if (error instanceof PolygonRateLimitError) {
-                stopped.catchUp = "rate-limited";
-                break;
-            }
-            throw error;
-        }
+        const daily: Map<string, DailyBar> = answer.value;
         if (daily.size === 0) {
             stopped.catchUp = "not-published";
             break;
@@ -404,18 +427,15 @@ export async function ingestDailyPrices({
         stopped.backfill = stopped.catchUp;
     } else {
         for (const symbol of await store.listSymbolsNeedingHistory(BACKFILL_BATCH, priority)) {
-            if (!(await pacer.acquire())) {
-                stopped.backfill = "budget";
-                break;
-            }
             let history: OHLC[];
             try {
-                history = await adapter.getHistoricalPrices(symbol, HISTORY_RANGE);
-            } catch (error) {
-                if (error instanceof PolygonRateLimitError) {
-                    stopped.backfill = "rate-limited";
+                const answer = await paced(() => adapter.getHistoricalPrices(symbol, HISTORY_RANGE));
+                if ("stopped" in answer) {
+                    stopped.backfill = answer.stopped;
                     break;
                 }
+                history = answer.value;
+            } catch (error) {
                 if (error instanceof PolygonApiError && error.status === 404) {
                     history = [];
                 } else {

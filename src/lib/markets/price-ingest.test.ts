@@ -59,6 +59,7 @@ function fakeAdapter({
     daily = {},
     history = {},
     splits = [],
+    rateLimitedOnce = [],
     onCall,
 }: {
     configured?: boolean;
@@ -66,28 +67,33 @@ function fakeAdapter({
     history?: Record<string, OHLC[] | Error>;
     /** Every split the "provider" knows; answers are cut to the asked range. */
     splits?: SplitEvent[] | Error;
+    /** Calls (as recorded in `calls`) answered with a 429 the first time only. */
+    rateLimitedOnce?: string[];
     onCall?: () => void;
 } = {}) {
     const calls: string[] = [];
+    const limited = new Set(rateLimitedOnce);
+    const record = (call: string) => {
+        calls.push(call);
+        onCall?.();
+        if (limited.delete(call)) throw new PolygonRateLimitError(1_000, `https://api.polygon.io/${call}`);
+    };
     const adapter: PriceIngestAdapter = {
         isConfigured: configured,
         async getDailyBars(date) {
-            calls.push(`daily ${date}`);
-            onCall?.();
+            record(`daily ${date}`);
             const value = daily[date];
             if (value instanceof Error) throw value;
             return new Map((value ?? []).map((bar) => [bar.symbol, bar]));
         },
         async getHistoricalPrices(symbol, range) {
-            calls.push(`history ${symbol} ${range}`);
-            onCall?.();
+            record(`history ${symbol} ${range}`);
             const value = history[symbol];
             if (value instanceof Error) throw value;
             return value ?? [];
         },
         async getSplits(from, to) {
-            calls.push(`splits ${from} ${to}`);
-            onCall?.();
+            record(`splits ${from} ${to}`);
             if (splits instanceof Error) throw splits;
             return splits.filter((split) => split.executionDate >= from && split.executionDate <= to);
         },
@@ -486,22 +492,51 @@ describe("ingestDailyPrices", () => {
         assert.ok((detail.calls ?? 0) >= 15, `only ${detail.calls} calls`);
     });
 
-    test("a rate limit during the backfill stops it for this run without failing", async () => {
+    test("a rate limit is waited out and the call made again", async () => {
+        const { store, marks } = fakeStore({
+            holdings: ["AAA", "BBB"],
+            queued: ["AAA", "BBB"],
+            bars: [{ ...dailyBar("SPY", "2026-10-15"), source: "massive" }],
+        });
+        const clock = fakeClock();
+        const { adapter, calls } = fakeAdapter({
+            daily: { "2026-10-16": [dailyBar("SPY", "2026-10-16")] },
+            rateLimitedOnce: ["splits 2026-10-16 2026-10-16", "daily 2026-10-16", "history BBB 2Y"],
+        });
+
+        const detail = await ingestDailyPrices({ adapter, store, now: clock.now, sleep: clock.sleep });
+
+        assert.deepEqual(calls, [
+            "splits 2026-10-16 2026-10-16", "splits 2026-10-16 2026-10-16",
+            "daily 2026-10-16", "daily 2026-10-16",
+            "history AAA 2Y", "history BBB 2Y", "history BBB 2Y",
+        ]);
+        // Retry-After said 1 s; the wait is at least 15 s (a 429 alone says little).
+        assert.equal(clock.sleeps.filter((ms) => ms === 15_000).length, 3);
+        assert.deepEqual(detail.days?.map((day) => day.date), ["2026-10-16"]);
+        assert.deepEqual(marks.map(([symbol]) => symbol), ["AAA", "BBB"]);
+        assert.deepEqual(detail.stopped, {});
+    });
+
+    test("a rate limit that outlasts the budget stops the backfill for this run without failing", async () => {
         const { store, marks } = fakeStore({ holdings: ["AAA", "BBB", "CCC", "DDD"], queued: ["AAA", "BBB", "CCC", "DDD"] });
+        const clock = fakeClock();
         const { adapter, calls } = fakeAdapter({
             daily: { "2026-10-16": [dailyBar("SPY", "2026-10-16")] },
             history: { CCC: new PolygonRateLimitError(1_000, "https://api.polygon.io/v2/aggs/ticker/CCC") },
         });
 
-        const detail = await ingestDailyPrices({ adapter, store, ...fakeClock() });
+        const detail = await ingestDailyPrices({ adapter, store, now: clock.now, sleep: clock.sleep });
 
-        assert.deepEqual(calls.slice(1), ["history AAA 2Y", "history BBB 2Y", "history CCC 2Y"]);
+        assert.deepEqual(calls.slice(1, 4), ["history AAA 2Y", "history BBB 2Y", "history CCC 2Y"]);
+        assert.ok(calls.slice(3).every((call) => call === "history CCC 2Y"), "only CCC is retried");
         assert.deepEqual(marks.map(([symbol]) => symbol), ["AAA", "BBB"]);
         assert.equal(detail.stopped?.backfill, "rate-limited");
         assert.equal(detail.backfillQueue, 2);
+        assert.ok(clock.now().getTime() - Date.parse(FRIDAY_EVENING) <= 240_000, "stayed within the budget");
     });
 
-    test("a rate limit during the catch-up ends the run's calls without failing", async () => {
+    test("a rate limit that outlasts the budget during the catch-up ends the run's calls without failing", async () => {
         const { store } = fakeStore({ holdings: ["AAA"], queued: ["AAA"], bars: [{ ...dailyBar("SPY", "2026-10-14"), source: "massive" }] });
         const { adapter, calls } = fakeAdapter({
             daily: {
@@ -512,7 +547,8 @@ describe("ingestDailyPrices", () => {
 
         const detail = await ingestDailyPrices({ adapter, store, ...fakeClock() });
 
-        assert.deepEqual(calls, ["splits 2026-10-15 2026-10-16", "daily 2026-10-15", "daily 2026-10-16"]);
+        assert.deepEqual(calls.slice(0, 3), ["splits 2026-10-15 2026-10-16", "daily 2026-10-15", "daily 2026-10-16"]);
+        assert.ok(calls.slice(2).every((call) => call === "daily 2026-10-16"));
         assert.deepEqual(detail.stopped, { catchUp: "rate-limited", backfill: "rate-limited" });
         assert.equal(detail.daysBehind, 1);
         assert.equal(detail.backfillQueue, 1);
@@ -714,16 +750,16 @@ describe("ingestDailyPrices", () => {
         assert.deepEqual(storedDates(stored, "SPY"), ["2026-10-15", "2026-10-16"]);
     });
 
-    test("a rate-limited split check ends the run's calls and stores nothing", async () => {
+    test("a split check rate-limited past the budget ends the run's calls and stores nothing", async () => {
         const { store, stored } = fakeStore({ holdings: ["AAA"], queued: ["AAA"], bars: [{ ...dailyBar("SPY", "2026-10-15"), source: "massive" }] });
         const { adapter, calls } = fakeAdapter({
             daily: { "2026-10-16": [dailyBar("SPY", "2026-10-16")] },
-            splits: new PolygonRateLimitError(1_000, "https://api.polygon.io/v3/reference/splits?apiKey=***"),
+            splits: new PolygonRateLimitError(1_000, "https://api.polygon.io/stocks/v1/splits?apiKey=***"),
         });
 
         const detail = await ingestDailyPrices({ adapter, store, ...fakeClock() });
 
-        assert.deepEqual(calls, ["splits 2026-10-16 2026-10-16"]);
+        assert.ok(calls.length > 1 && calls.every((call) => call === "splits 2026-10-16 2026-10-16"));
         assert.deepEqual(detail.stopped, { catchUp: "rate-limited", backfill: "rate-limited" });
         assert.deepEqual(detail.days, []);
         assert.deepEqual(detail.splits, { skipped: "rate-limited" });
