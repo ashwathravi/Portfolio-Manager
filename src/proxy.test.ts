@@ -81,6 +81,43 @@ describe("API proxy security", () => {
         assert.equal((await proxy(apiRequest({}, "/api/market-data/quote"))).status, 401);
     });
 
+    test("lets cron routes through without a session, for the route to check CRON_SECRET", async () => {
+        setNodeEnv("production");
+        configureAuth();
+
+        // Delegated: the proxy answers next(), and the route does its own auth.
+        assert.equal((await proxy(apiRequest({}, "/api/cron/daily"))).status, 200);
+        // Every other API path still needs a session.
+        assert.equal((await proxy(apiRequest({}, "/api/market-data/quote"))).status, 401);
+        assert.equal((await proxy(apiRequest({}, "/api/cron"))).status, 401);
+        assert.equal((await proxy(apiRequest({}, "/api/cronjobs/daily"))).status, 401);
+    });
+
+    test("runs cron routes even when production sign-in is misconfigured", async () => {
+        setNodeEnv("production");
+        process.env.AUTH_SECRET = "partial-only";
+
+        assert.equal((await proxy(apiRequest({}, "/api/cron/daily"))).status, 200);
+        assert.equal((await proxy(apiRequest())).status, 503);
+        assert.equal((await proxy(pageRequest("/settings"))).status, 503);
+    });
+
+    test("limits repeated cron calls per IP without blocking the daily one", async () => {
+        setNodeEnv("production");
+        configureAuth();
+        mock.timers.enable({ apis: ["Date"], now: 0 });
+
+        const headers = { "x-forwarded-for": "203.0.113.50" };
+        for (let i = 0; i < 10; i++) {
+            assert.equal((await proxy(apiRequest(headers, "/api/cron/daily"))).status, 200);
+        }
+        assert.equal((await proxy(apiRequest(headers, "/api/cron/daily"))).status, 429);
+        assert.equal((await proxy(apiRequest({ "x-forwarded-for": "203.0.113.51" }, "/api/cron/daily"))).status, 200);
+
+        mock.timers.tick(60_000);
+        assert.equal((await proxy(apiRequest(headers, "/api/cron/daily"))).status, 200);
+    });
+
     test("keeps the privacy policy public when production auth is unavailable", async () => {
         setNodeEnv("production");
 

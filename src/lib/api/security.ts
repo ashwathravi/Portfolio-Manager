@@ -163,6 +163,15 @@ function rulesFor(route: string): { ip: RateLimitRule; user: RateLimitRule } {
         };
     }
 
+    if (route.startsWith("/api/cron/")) {
+        // Vercel Cron calls once a day; anything more is someone guessing
+        // the secret.
+        return {
+            ip: { limit: 10, windowSeconds: 60 },
+            user: { limit: 10, windowSeconds: 60 },
+        };
+    }
+
     if (route.includes("/market-data/search") || route.includes("/alpha-radar/memory/search")) {
         return {
             ip: { limit: 30, windowSeconds: 60 },
