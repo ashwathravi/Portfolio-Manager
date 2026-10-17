@@ -47,6 +47,7 @@
 import { db } from "@/db";
 import { holdings } from "@/db/schema";
 import { summarizeError } from "@/lib/jobs/runner";
+import { adjustHoldingsForSplit, describeSplitRatio, type HoldingSplit } from "@/lib/portfolio/split-adjustments";
 import { getMassiveQuota } from "@/lib/providers/massive-quota";
 import {
     PolygonApiError,
@@ -143,6 +144,8 @@ export interface PriceIngestStore {
     resetHistory(symbols: string[]): Promise<string[]>;
     /** Stocks that split: deletes their (old-scale) bars and re-queues them; returns those cleared. */
     clearSplitHistories(symbols: string[]): Promise<string[]>;
+    /** Moves held positions to the post-split share count; returns how many were adjusted. */
+    adjustHoldingsForSplit(split: HoldingSplit): Promise<number>;
     /** Whether any bar is stored for the symbol. */
     hasBars(symbol: string): Promise<boolean>;
     /** Re-queues loaded symbols with no bar at all (an empty backfill); returns those re-queued. */
@@ -191,9 +194,19 @@ export type PriceIngestDetail = {
     /**
      * The split check for this run's catch-up days: the tracked stocks that
      * split on them, put back in the history queue (`reset`) before any day
-     * was stored, or why there was no check.
+     * was stored, or why there was no check. `adjusted`: held positions moved
+     * to the post-split share count; `unadjusted`: held stocks that split
+     * without a usable ratio from the provider (left for the user to re-import).
      */
-    splits?: { from: string; to: string; reset: string[] } | { skipped: string };
+    splits?:
+        | {
+            from: string;
+            to: string;
+            reset: string[];
+            adjusted?: Array<{ symbol: string; executionDate: string; ratio: string; positions: number }>;
+            unadjusted?: string[];
+        }
+        | { skipped: string };
     stopped?: { catchUp?: IngestStopReason; backfill?: IngestStopReason };
     /** Provider calls made. */
     calls?: number;
@@ -314,6 +327,7 @@ export function createPriceIngestStore(database: Database = db): PriceIngestStor
         replaceHistory: (symbol, bars, through) => replaceHistory(symbol, bars, through, database),
         resetHistory: (symbols) => resetHistory(symbols, database),
         clearSplitHistories: (symbols) => clearSplitHistories(symbols, database),
+        adjustHoldingsForSplit: (split) => adjustHoldingsForSplit(split, database),
         hasBars: (symbol) => hasStoredBars(symbol, database),
         resetUnpricedHistories: (symbols) => resetUnpricedHistories(symbols, database),
     };
@@ -420,7 +434,32 @@ export async function ingestDailyPrices({
         const split = normalizeSymbols(
             splitEvents.filter((event) => event.executionDate >= from && event.executionDate <= to).map((event) => event.symbol),
         ).filter((symbol) => tracked.has(symbol));
-        splits = { from, to, reset: split.length > 0 ? await store.clearSplitHistories(split) : [] };
+        const reset = split.length > 0 ? await store.clearSplitHistories(split) : [];
+
+        // Held positions move to the post-split share count, oldest split first
+        // (see split-adjustments.ts: each split applies once per position).
+        const heldSet = new Set(normalizeSymbols(held));
+        const adjusted: NonNullable<Extract<PriceIngestDetail["splits"], { reset: string[] }>["adjusted"]> = [];
+        const unadjusted: string[] = [];
+        const heldSplits = splitEvents
+            .filter((event) => event.executionDate >= from && event.executionDate <= to && heldSet.has(event.symbol))
+            .sort((a, b) => a.executionDate.localeCompare(b.executionDate));
+        for (const event of heldSplits) {
+            if (event.splitFrom === undefined || event.splitTo === undefined) {
+                unadjusted.push(event.symbol);
+                continue;
+            }
+            const holding = { symbol: event.symbol, executionDate: event.executionDate, splitFrom: event.splitFrom, splitTo: event.splitTo };
+            const positions = await store.adjustHoldingsForSplit(holding);
+            if (positions > 0) adjusted.push({ symbol: event.symbol, executionDate: event.executionDate, ratio: describeSplitRatio(holding), positions });
+        }
+        splits = {
+            from,
+            to,
+            reset,
+            ...(adjusted.length > 0 ? { adjusted } : {}),
+            ...(unadjusted.length > 0 ? { unadjusted } : {}),
+        };
     } else {
         splits = { skipped: splitsSkipped ?? stopped.catchUp ?? "no new days" };
     }

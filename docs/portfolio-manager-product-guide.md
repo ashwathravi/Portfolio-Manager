@@ -525,6 +525,10 @@ Quotes and the other market-data routes need different settings:
 
 Also check network access to Massive. Pages degrade to dashes, not errors, when a quote is unavailable.
 
+### A Position Looks Wrong After a Stock Split
+
+Prices are split-adjusted. When a stock you hold splits, the nightly price job moves imported positions to the new share count: quantity times the ratio, average cost divided by it, so cost basis and value don't change. It adjusts only positions imported before the split took effect, and each one only once. If the provider gave no ratio for a split, the position is left as imported and the job's run log lists it as `unadjusted`: re-import that account's positions.
+
 ### Plaid Link Fails
 
 Check:

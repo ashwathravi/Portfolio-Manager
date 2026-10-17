@@ -7,6 +7,7 @@ import {
     type DailyBar,
     type SplitEvent,
 } from "@/lib/providers/polygon-massive-adapter";
+import type { HoldingSplit } from "@/lib/portfolio/split-adjustments";
 import type { OHLC } from "@/types/market-data";
 
 import {
@@ -108,6 +109,7 @@ function fakeStore({
     queued = [],
     bars = [],
     trackedAt = {},
+    positions = {},
 }: {
     holdings?: string[];
     /** Tracked symbols whose history is already loaded. */
@@ -117,6 +119,8 @@ function fakeStore({
     bars?: PriceBarInput[];
     /** When a symbol started being tracked; default the morning of the run. */
     trackedAt?: Record<string, string>;
+    /** Positions a split adjustment finds per symbol (default 1). */
+    positions?: Record<string, number>;
 } = {}) {
     const securities = new Map<string, string | null>([
         ...loaded.map((symbol) => [symbol, "2024-10-16"] as const),
@@ -127,6 +131,7 @@ function fakeStore({
     const marks: Array<[string, string]> = [];
     const resets: string[] = [];
     const attempted = new Map<string, number>();
+    const adjustments: HoldingSplit[] = [];
     // A loaded symbol has history older than anything a test stores; it
     // isn't modelled bar by bar, so it never moves the catch-up bookmark.
     const olderHistory = new Set(loaded);
@@ -212,6 +217,10 @@ function fakeStore({
             }
             return reset;
         },
+        async adjustHoldingsForSplit(split) {
+            adjustments.push(split);
+            return positions[split.symbol] ?? 1;
+        },
         async clearSplitHistories(symbols) {
             const cleared = normalizeSymbols(symbols).filter((symbol) => securities.has(symbol));
             for (const [key, bar] of stored) if (cleared.includes(bar.symbol)) stored.delete(key);
@@ -233,7 +242,7 @@ function fakeStore({
             return reset;
         },
     };
-    return { store, securities, stored, marks, resets, attempted };
+    return { store, securities, stored, marks, resets, attempted, adjustments };
 }
 
 function storedDates(stored: Map<string, PriceBarInput>, symbol: string): string[] {
@@ -702,7 +711,8 @@ describe("ingestDailyPrices", () => {
             "history MSFT 2Y",
         ]);
         // Both tracked stocks that split are cleared and re-queued (MSFT had nothing stored yet).
-        assert.deepEqual(detail.splits, { from: "2026-10-15", to: "2026-10-16", reset: ["NVDA", "MSFT"] });
+        // No ratios in these events, so the held positions are reported, not adjusted.
+        assert.deepEqual(detail.splits, { from: "2026-10-15", to: "2026-10-16", reset: ["NVDA", "MSFT"], unadjusted: ["NVDA", "MSFT"] });
         assert.deepEqual(resets, ["NVDA", "MSFT"]);
         // Only the adjusted history is left: the old-scale bars are gone, the 14th is rescaled.
         assert.deepEqual(storedDates(stored, "NVDA"), ["2024-10-17", "2026-10-14", "2026-10-15", "2026-10-16"]);
@@ -731,7 +741,7 @@ describe("ingestDailyPrices", () => {
 
         const first = await ingestDailyPrices({ adapter: unpublished.adapter, store, ...fakeClock() });
 
-        assert.deepEqual(first.splits, { from: "2026-10-15", to: "2026-10-16", reset: ["NVDA"] });
+        assert.deepEqual(first.splits, { from: "2026-10-15", to: "2026-10-16", reset: ["NVDA"], unadjusted: ["NVDA"] });
         assert.ok(unpublished.calls.includes("history NVDA 2Y"));
         assert.equal(stored.get("NVDA|2026-10-15")?.close, 101);
 
@@ -744,7 +754,7 @@ describe("ingestDailyPrices", () => {
         const second = await ingestDailyPrices({ adapter: published.adapter, store, ...fakeClock() });
 
         assert.equal(published.calls[0], "splits 2026-10-16 2026-10-16");
-        assert.deepEqual(second.splits, { from: "2026-10-16", to: "2026-10-16", reset: ["NVDA"] });
+        assert.deepEqual(second.splits, { from: "2026-10-16", to: "2026-10-16", reset: ["NVDA"], unadjusted: ["NVDA"] });
         assert.deepEqual(resets, ["NVDA", "NVDA"]);
         assert.deepEqual(storedDates(stored, "NVDA").map((date) => stored.get(`NVDA|${date}`)?.close), [100, 101, 102]);
     });
@@ -857,6 +867,58 @@ describe("ingestDailyPrices", () => {
         assert.deepEqual(storedDates(stored, "SPY"), ["2026-10-15", "2026-10-16"]);
         assert.match((detail.splits as { skipped: string }).skipped, /HTTP 403 Forbidden/);
         assert.doesNotMatch((detail.splits as { skipped: string }).skipped, /apiKey=(?!\*)/);
+    });
+});
+
+describe("ingestDailyPrices › held positions after a split", () => {
+    test("held stocks that split have their positions adjusted, oldest split first; others are left alone", async () => {
+        const { store, adjustments } = fakeStore({
+            holdings: ["NVDA", "AAPL"],
+            loaded: [...BENCHMARK_SYMBOLS, "NVDA", "AAPL", "TSLA"],
+            bars: [{ ...dailyBar("SPY", "2026-10-14"), source: "massive" }],
+            positions: { NVDA: 2, AAPL: 0 },
+        });
+        const { adapter } = fakeAdapter({
+            splits: [
+                { symbol: "NVDA", executionDate: "2026-10-16", splitFrom: 1, splitTo: 2 },
+                { symbol: "NVDA", executionDate: "2026-10-15", splitFrom: 1, splitTo: 10 },
+                { symbol: "TSLA", executionDate: "2026-10-15", splitFrom: 1, splitTo: 3 }, // tracked, not held
+                { symbol: "AAPL", executionDate: "2026-10-16", splitFrom: 1, splitTo: 4 }, // held, positions already adjusted
+            ],
+            daily: { "2026-10-15": [dailyBar("SPY", "2026-10-15")], "2026-10-16": [dailyBar("SPY", "2026-10-16")] },
+        });
+
+        const detail = await ingestDailyPrices({ adapter, store, ...fakeClock() });
+
+        assert.deepEqual(adjustments, [
+            { symbol: "NVDA", executionDate: "2026-10-15", splitFrom: 1, splitTo: 10 },
+            { symbol: "NVDA", executionDate: "2026-10-16", splitFrom: 1, splitTo: 2 },
+            { symbol: "AAPL", executionDate: "2026-10-16", splitFrom: 1, splitTo: 4 },
+        ]);
+        const splits = detail.splits as Extract<typeof detail.splits, { reset: string[] }>;
+        assert.deepEqual(splits.adjusted, [
+            { symbol: "NVDA", executionDate: "2026-10-15", ratio: "10-for-1", positions: 2 },
+            { symbol: "NVDA", executionDate: "2026-10-16", ratio: "2-for-1", positions: 2 },
+        ]);
+        assert.equal(splits.unadjusted, undefined);
+    });
+
+    test("a held stock that split without a usable ratio is reported, not adjusted", async () => {
+        const { store, adjustments } = fakeStore({
+            holdings: ["BRK.B"],
+            loaded: [...BENCHMARK_SYMBOLS, "BRK.B"],
+            bars: [{ ...dailyBar("SPY", "2026-10-15"), source: "massive" }],
+        });
+        const { adapter } = fakeAdapter({
+            splits: [{ symbol: "BRK.B", executionDate: "2026-10-16" }],
+            daily: { "2026-10-16": [dailyBar("SPY", "2026-10-16")] },
+        });
+
+        const detail = await ingestDailyPrices({ adapter, store, ...fakeClock() });
+
+        assert.deepEqual(adjustments, []);
+        assert.deepEqual((detail.splits as { unadjusted?: string[] }).unadjusted, ["BRK.B"]);
+        assert.deepEqual((detail.splits as { reset: string[] }).reset, ["BRK.B"]);
     });
 });
 
