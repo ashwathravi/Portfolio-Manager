@@ -16,7 +16,7 @@
     "keychain:store": "bash ./scripts/keychain-store-database-url.sh",
     "keychain:sync-github": "bash ./scripts/sync-keychain-to-github.sh",
     "lint": "eslint",
-    "test": "find src -name '*.test.ts' -print0 | xargs -0 node --import tsx --test",
+    "test": "find src scripts -name '*.test.ts' -print0 | xargs -0 node --import tsx --test",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:local": "bash ./scripts/e2e/run-local.sh"

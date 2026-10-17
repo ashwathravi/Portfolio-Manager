@@ -1,4 +1,5 @@
 import "./load-env";
+import { readFileSync } from "node:fs";
 import postgres from "postgres";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
@@ -29,6 +30,9 @@ async function main() {
 
     const owner = postgres(migrationUrl, { max: 1, onnotice: () => {} });
     try {
+        // The extension and the Supabase roles that migration 0008 names.
+        await owner.unsafe(readFileSync("scripts/db/init-local.sql", "utf8")).simple();
+
         console.log("⏳ Applying migrations…");
         await migrate(drizzle(owner), { migrationsFolder: "drizzle" });
 

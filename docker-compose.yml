@@ -1,6 +1,17 @@
+# Without a name, Compose names the project after the directory, so a git
+# worktree under .claude/worktrees/ would try to create a second
+# atlas-wealth-db container and fail on the fixed container_name. Every
+# checkout shares this project, its container and its volume.
+name: portfolio-manager
+
 services:
   # Local Postgres for development and E2E. Never point local dev at the
   # Supabase project: that database is production.
+  #
+  # Nothing here may depend on the checkout's path (no bind mounts): Compose
+  # recreates the container when the resolved config changes, so a path-
+  # dependent setting would restart Postgres under every other checkout.
+  # db:setup and scripts/e2e/prepare-database.ts apply scripts/db/init-local.sql.
   db:
     image: postgres:17-alpine
     container_name: atlas-wealth-db
@@ -13,7 +24,6 @@ services:
       - "127.0.0.1:54329:5432"
     volumes:
       - atlas-wealth-db:/var/lib/postgresql/data
-      - ./scripts/db/init-local.sql:/docker-entrypoint-initdb.d/00-init-local.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U atlas -d atlas_wealth"]
       interval: 2s
