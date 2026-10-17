@@ -392,18 +392,12 @@ export async function ingestDailyPrices({
         // Nothing stored yet, so no history on an old scale.
         splitsSkipped = "first run";
     } else {
-        try {
-            const answer = await paced(() => adapter.getSplits(window[0], window.at(-1)!));
-            if ("stopped" in answer) stopped.catchUp = answer.stopped;
-            else splitEvents = answer.value;
-        } catch (error) {
-            if (error instanceof PolygonApiError && error.status === 403) {
-                // Not on this plan. Prices still matter more than the check.
-                splitsSkipped = summarizeError(error);
-            } else {
-                throw error;
-            }
-        }
+        // Any refusal fails the run before a day is stored (403 included: the
+        // endpoint is on every Stocks plan, so a 403 is a key or plan problem
+        // to fix, not a reason to store days whose splits went unchecked).
+        const answer = await paced(() => adapter.getSplits(window[0], window.at(-1)!));
+        if ("stopped" in answer) stopped.catchUp = answer.stopped;
+        else splitEvents = answer.value;
     }
 
     // Clear every tracked stock that split in the window before storing any

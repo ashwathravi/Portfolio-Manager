@@ -844,19 +844,22 @@ describe("ingestDailyPrices", () => {
         assert.deepEqual(storedDates(stored, "SPY"), ["2026-10-15"]);
     });
 
-    test("splits not on the plan (403) don't hold up prices", async () => {
+    test("regression: a 403 from the split check fails the run and stores nothing", async () => {
+        // The splits endpoint is on every Stocks plan: a 403 is a key or plan
+        // problem, and storing the day would leave its splits unchecked forever.
         const { store, stored } = fakeStore({ bars: [{ ...dailyBar("SPY", "2026-10-15"), source: "massive" }] });
         const { adapter, calls } = fakeAdapter({
             daily: { "2026-10-16": [dailyBar("SPY", "2026-10-16")] },
-            splits: new PolygonApiError(403, "Forbidden", "https://api.polygon.io/v3/reference/splits?apiKey=***"),
+            splits: new PolygonApiError(403, "Forbidden", "https://api.polygon.io/stocks/v1/splits?apiKey=***"),
         });
 
-        const detail = await ingestDailyPrices({ adapter, store, ...fakeClock() });
-
-        assert.deepEqual(calls, ["splits 2026-10-16 2026-10-16", "daily 2026-10-16"]);
-        assert.deepEqual(storedDates(stored, "SPY"), ["2026-10-15", "2026-10-16"]);
-        assert.match((detail.splits as { skipped: string }).skipped, /HTTP 403 Forbidden/);
-        assert.doesNotMatch((detail.splits as { skipped: string }).skipped, /apiKey=(?!\*)/);
+        await assert.rejects(ingestDailyPrices({ adapter, store, ...fakeClock() }), (error: unknown) => {
+            assert.ok(error instanceof PolygonApiError);
+            assert.equal(error.status, 403);
+            return true;
+        });
+        assert.deepEqual(calls, ["splits 2026-10-16 2026-10-16"]);
+        assert.deepEqual(storedDates(stored, "SPY"), ["2026-10-15"]);
     });
 });
 
