@@ -19,6 +19,8 @@ import { easternDateTime, getMarketDay } from './market-hours';
 import { getRecentCloses, normalizeSymbols, trackSecurities, type LatestClose } from './price-store';
 
 const NYSE_CLOSE_MINUTES = 16 * 60;
+/** How many tracked symbols an instance remembers before starting over. */
+const TRACKED_MEMORY_LIMIT = 2_000;
 
 /** The price store operations quotes need; injectable for tests. */
 export interface QuoteStore {
@@ -63,6 +65,13 @@ export function quoteFromCloses(symbol: string, closes: readonly LatestClose[]):
 }
 
 export class StoredQuoteProvider implements MarketDataProvider {
+  /**
+   * Symbols this instance has already asked the store to track. Unpriced
+   * symbols are asked for on every refresh (the sidebar polls BTC-USD, which
+   * the stock-only ingest never prices), so without this every poll writes.
+   */
+  private readonly tracked = new Set<string>();
+
   constructor(
     private readonly reference: MarketDataProvider,
     private readonly store: QuoteStore = DATABASE_QUOTE_STORE,
@@ -82,13 +91,16 @@ export class StoredQuoteProvider implements MarketDataProvider {
       else missing.push(symbol);
     }
 
-    if (missing.length > 0) {
+    const untracked = missing.filter((symbol) => !this.tracked.has(symbol));
+    if (untracked.length > 0) {
       try {
-        await this.store.track(missing);
+        await this.store.track(untracked);
+        if (this.tracked.size + untracked.length > TRACKED_MEMORY_LIMIT) this.tracked.clear();
+        for (const symbol of untracked) this.tracked.add(symbol);
       } catch (err) {
         // Prices still come back; the symbols are tracked on a later read.
         const reason = err instanceof Error ? err.message : String(err);
-        console.warn(`Could not start tracking ${missing.length} symbol(s) for pricing: ${reason}`);
+        console.warn(`Could not start tracking ${untracked.length} symbol(s) for pricing: ${reason}`);
       }
     }
     return quotes;

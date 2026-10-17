@@ -13,6 +13,15 @@ test.describe('Position detail', () => {
         await expect(page.getByTestId('position-detail')).toBeVisible();
     });
 
+    test('regression: without a price from today\'s session, nothing is labelled "today"', async ({ page }) => {
+        // E2E stores no closes, so the price is the holding's own; there is
+        // no move to report. It used to read "+0.00% today", and an earlier
+        // session's change was shown as today's.
+        await gotoAppPage(page, '/portfolios/detail/NVDA');
+        await expect(page.getByTestId('position-price')).toBeVisible();
+        await expect(page.getByTestId('position-price')).not.toContainText('today');
+    });
+
     test('offers a draft order prefilled with the symbol', async ({ page }) => {
         await gotoAppPage(page, '/portfolios/detail/NVDA');
         await expect(page.getByRole('link', { name: 'Draft order' })).toHaveAttribute('href', '/execution?symbol=NVDA');

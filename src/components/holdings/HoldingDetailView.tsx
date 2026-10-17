@@ -19,8 +19,9 @@ export interface HoldingDetail {
     symbol: string;
     name: string;
     price: number;
-    change: number;
-    changePercent: number;
+    /** Today's move; null when the latest price is an earlier session's close. */
+    change: number | null;
+    changePercent: number | null;
     totalShares: number;
     totalEquity: number;
     avgCost: number;
@@ -32,8 +33,8 @@ export interface HoldingDetail {
 
 export interface SymbolQuote {
     price: number;
-    change: number;
-    changePercent: number;
+    change: number | null;
+    changePercent: number | null;
 }
 
 /**

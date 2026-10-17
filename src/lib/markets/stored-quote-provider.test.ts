@@ -72,6 +72,23 @@ describe("StoredQuoteProvider", () => {
         assert.deepEqual(tracked, [["MSFT"]]);
     });
 
+    test("asks the store to track an unpriced symbol once, not on every poll", async () => {
+        const { store, tracked } = fakeStore({});
+        const provider = new StoredQuoteProvider(reference, store);
+        await provider.getBatchQuotes(["BTC-USD", "MSFT"]);
+        await provider.getBatchQuotes(["BTC-USD", "MSFT", "SPY"]);
+        await provider.getBatchQuotes(["BTC-USD"]);
+        assert.deepEqual(tracked, [["BTC-USD", "MSFT"], ["SPY"]]);
+    });
+
+    test("tries tracking again after a failed attempt", async () => {
+        const { store, tracked } = fakeStore({}, { trackFails: true });
+        const provider = new StoredQuoteProvider(reference, store);
+        await provider.getBatchQuotes(["MSFT"]);
+        await provider.getBatchQuotes(["MSFT"]);
+        assert.deepEqual(tracked, [["MSFT"], ["MSFT"]]);
+    });
+
     test("still answers when tracking fails", async () => {
         const { store } = fakeStore({ AAPL: [{ date: "2026-10-16", close: 252 }] }, { trackFails: true });
         const quotes = await new StoredQuoteProvider(reference, store).getBatchQuotes(["AAPL", "MSFT"]);
