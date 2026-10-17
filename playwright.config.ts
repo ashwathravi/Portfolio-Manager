@@ -136,6 +136,7 @@ export default defineConfig({
                 AUTH_LOCAL_DEV_BYPASS: '1',
                 AUTH_LOCAL_DEV_USER_ID: E2E_USER_ID,
                 ...noSharedRedis,
+                ...noMarketData,
             },
             url: 'http://localhost:3200/api/health',
             // Never reuse a running server: it may be connected to a real
