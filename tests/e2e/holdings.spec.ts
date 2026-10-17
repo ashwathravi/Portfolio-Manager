@@ -154,7 +154,10 @@ test.describe('Holdings › Import CSV', () => {
         await expect(page.getByTestId('import-preview')).toContainText('Line 3: Unterminated quoted field');
         await expect(page.getByRole('button', { name: 'Import 1 position', exact: true })).toBeDisabled();
         expect(requests).toBe(0);
-        await page.getByLabel('CSV file').setInputFiles({ name: 'fixed.csv', mimeType: 'text/csv', buffer: Buffer.from('Symbol,Description,Quantity,Average Cost\nAAPL,"Apple\nInc",10,100') });
+        // Fixed in place and chosen again under the same name: the input was
+        // cleared after the first read, so the browser fires change again.
+        await expect(page.getByLabel('CSV file')).toHaveValue('');
+        await page.getByLabel('CSV file').setInputFiles({ name: 'positions.csv', mimeType: 'text/csv', buffer: Buffer.from('Symbol,Description,Quantity,Average Cost\nAAPL,"Apple\nInc",10,100') });
         await expect(page.getByTestId('import-preview').getByRole('alert')).toHaveCount(0);
         await expect(page.getByRole('button', { name: 'Import 1 position', exact: true })).toBeEnabled();
         expect(requests).toBe(0);

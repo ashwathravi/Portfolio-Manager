@@ -145,12 +145,15 @@ function isCashRow(cells: string[], col: { symbol: number; name: number; quantit
 }
 
 /**
- * A broker footer or note: one non-empty cell that can't be a ticker, e.g.
- * "Date downloaded 10/13/2026". A lone ticker is not a note; it is a broken row.
+ * A broker footer or note: a record with one non-empty cell, either outside
+ * the symbol column ("Total" under Account Number) or in it but not a ticker
+ * ("Date downloaded 10/13/2026"). A lone ticker is a broken row, not a note.
  */
-function isNoteRow(cells: string[]): boolean {
-    const filled = cells.filter((cell) => cell);
-    return filled.length === 1 && !normalizeTicker(filled[0].replace(/\*+$/, ''));
+function isNoteRow(cells: string[], symbolColumn: number): boolean {
+    const filled = cells.flatMap((cell, index) => (cell ? [index] : []));
+    if (filled.length !== 1) return false;
+    if (filled[0] !== symbolColumn) return true;
+    return !normalizeTicker(cells[symbolColumn].replace(/\*+$/, ''));
 }
 
 /**
@@ -244,7 +247,7 @@ export function parseHoldingsCsv(text: string): ParseResult {
             continue;
         }
         const rawSymbol = (record.cells[col.symbol] ?? '').trim();
-        if (record.cells.every((cell) => !cell) || SUMMARY_SYMBOL.test(rawSymbol) || isNoteRow(record.cells)) {
+        if (record.cells.every((cell) => !cell) || SUMMARY_SYMBOL.test(rawSymbol) || isNoteRow(record.cells, col.symbol)) {
             skipped++;
             continue;
         }

@@ -125,7 +125,13 @@ export function ImportHoldingsDialog({
                                 type="file"
                                 accept=".csv,text/csv"
                                 aria-label="CSV file"
-                                onChange={(e) => void onFile(e.target.files?.[0])}
+                                onChange={(e) => {
+                                    const file = e.target.files?.[0];
+                                    // Clear the selection so choosing the same, corrected
+                                    // file again still fires change and re-parses it.
+                                    e.target.value = '';
+                                    void onFile(file);
+                                }}
                             />
                         </label>
 

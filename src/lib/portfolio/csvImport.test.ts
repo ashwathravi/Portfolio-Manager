@@ -155,6 +155,19 @@ describe('parseHoldingsCsv', () => {
         assert.strictEqual(r.skipped, 1);
     });
 
+    test('skips one-word footers outside the symbol column, even ticker-like ones', () => {
+        const csv = [
+            'Account Number,Account Name,Symbol,Description,Quantity,Average Cost Basis',
+            'Z12345678,Individual,AAPL,APPLE INC,10,$150.00',
+            'Total',
+            'Disclaimer',
+        ].join('\n');
+        const r = parseHoldingsCsv(csv);
+        assert.deepStrictEqual(r.issues, []);
+        assert.deepStrictEqual(r.rows.map((x) => x.symbol), ['AAPL']);
+        assert.strictEqual(r.skipped, 2);
+    });
+
     test('a free-text note in the symbol column is skipped; a lone ticker is still an issue', () => {
         const r = parseHoldingsCsv('Symbol,Description,Quantity,Average Cost\nAAPL,Apple,10,100\nDate downloaded 10/13/2026\nMSFT');
         assert.deepStrictEqual(r.rows.map((x) => x.symbol), ['AAPL']);
