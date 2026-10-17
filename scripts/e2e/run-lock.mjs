@@ -4,15 +4,16 @@
 // 3100: without the lock, a second run's DROP DATABASE ... WITH (FORCE) kills
 // the first one mid-run.
 //
-// The lock is a Postgres session advisory lock in that container, which the
-// server releases when the connection holding it closes. A helper process
-// (this script with --hold) holds that connection, and the command runs in a
-// session of its own. The lock and the run end together:
-//   - the helper releases the lock only once every process in the run's
-//     session has exited;
-//   - if this wrapper dies, even by SIGKILL, the helper stops the run
-//     (SIGTERM) and keeps the lock until it is gone;
-//   - if the helper or its connection dies, this wrapper stops the run.
+// The lock is two Postgres session advisory locks in that container, which the
+// server releases when the connection holding one closes. The command runs in
+// a session of its own, and two processes each hold one lock until every
+// process in that session has exited:
+//   - the turn lock, held by a helper process (this script with --hold);
+//   - the running lock, held by this wrapper.
+// A run starts only once it holds both, so if either process dies, the other
+// keeps the next run out while this one stops. If the wrapper dies, even by
+// SIGKILL, the helper stops the run (SIGTERM); if the helper or a connection
+// dies, the wrapper does.
 //
 //   E2E_LOCK_DATABASE_URL=postgres://… node scripts/e2e/run-lock.mjs <command> [args…]
 //
@@ -24,10 +25,11 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import postgres from "postgres";
 
-// Any pair works, as long as every checkout uses the same one. pg_locks shows
-// them as classid and objid.
+// pg_advisory_lock(LOCK_CLASS, object). Any numbers work, as long as every
+// checkout uses the same ones; pg_locks shows them as classid and objid.
 const LOCK_CLASS = 5432;
-const LOCK_OBJECT = 3000;
+const TURN_LOCK = 3000;
+const RUNNING_LOCK = 3001;
 const LOCK_POLL_MS = 2000;
 const RUN_POLL_MS = 250;
 const EXIT_LOCK_TIMEOUT = 75; // EX_TEMPFAIL: try again later
@@ -61,74 +63,105 @@ function signalProcessGroup(id, signal) {
     }
 }
 
-// The helper. Tells the wrapper {locked: true} once it holds the lock, learns
-// the run's session id from {run: id}, and treats the IPC channel closing as
-// the wrapper being gone.
+/** One connection for holding a lock: never recycled, and `onLost` runs if it closes before `end()`. */
+function connect(onLost) {
+    // Shown to a run that is waiting, so it can say which checkout it waits
+    // for. Postgres truncates application_name to 63 bytes.
+    const wrapperPid = holding ? process.ppid : process.pid;
+    const name = `e2e-local ${path.basename(process.cwd())} pid ${wrapperPid}`.slice(0, 63);
+    let ending = false;
+    const sql = postgres(databaseUrl, {
+        max: 1,
+        idle_timeout: null,
+        max_lifetime: null,
+        connection: { application_name: name },
+        onnotice: () => {},
+        onclose: () => {
+            if (!ending) {
+                onLost();
+            }
+        },
+    });
+    const end = async () => {
+        ending = true;
+        await sql.end({ timeout: 5 });
+    };
+    return { sql, end };
+}
+
+async function tryLock(sql, lock) {
+    const [{ locked }] = await sql`SELECT pg_try_advisory_lock(${LOCK_CLASS}, ${lock}) AS locked`;
+    return locked;
+}
+
+// pg_locks covers the whole server, but advisory locks are per database.
+async function holderOf(sql, lock) {
+    const rows = await sql`
+        SELECT activity.application_name
+        FROM pg_locks AS lock
+        JOIN pg_stat_activity AS activity ON activity.pid = lock.pid
+        WHERE lock.locktype = 'advisory' AND lock.granted
+          AND lock.database = (SELECT oid FROM pg_database WHERE datname = current_database())
+          AND lock.classid = ${LOCK_CLASS} AND lock.objid = ${lock} AND lock.objsubid = 2
+    `;
+    return rows[0]?.application_name || "another checkout";
+}
+
+/** Polls for `lock` until it is taken (true), the deadline passes or `abandoned()` (false). */
+async function waitForLock(sql, lock, deadline, waiting, abandoned) {
+    let announced = false;
+    for (;;) {
+        if (abandoned()) {
+            return false;
+        }
+        if (await tryLock(sql, lock)) {
+            return true;
+        }
+        if (Date.now() >= deadline) {
+            console.error(`Gave up after ${waitSeconds}s: ${await holderOf(sql, lock)} still holds the E2E lock.`);
+            process.exitCode = EXIT_LOCK_TIMEOUT;
+            return false;
+        }
+        if (!announced) {
+            console.error(`${waiting} (${await holderOf(sql, lock)})…`);
+            announced = true;
+        }
+        await sleep(Math.min(LOCK_POLL_MS, deadline - Date.now()));
+    }
+}
+
+// The helper. Takes the turn lock, waits for the running lock to be free (a
+// run whose helper died keeps it until that run has stopped), frees it again
+// for the wrapper, and tells the wrapper {locked: true}. Learns the run's
+// session id from {run: id}, and treats the IPC channel closing as the wrapper
+// being gone.
 async function holdLock() {
     let run;
     let wrapperGone = false;
-    let locked = false;
-    let releasing = false;
+    let holdingTurn = false;
     process.on("message", (message) => {
         run = message.run;
     });
     process.on("disconnect", () => {
         wrapperGone = true;
     });
-
-    // Shown to a run that is waiting, so it can say which checkout it waits
-    // for. Postgres truncates application_name to 63 bytes.
-    const holderName = `e2e-local ${path.basename(process.cwd())} pid ${process.ppid}`.slice(0, 63);
-    const sql = postgres(databaseUrl, {
-        max: 1,
-        // The lock lasts as long as this one connection, so never recycle it.
-        idle_timeout: null,
-        max_lifetime: null,
-        connection: { application_name: holderName },
-        onnotice: () => {},
-        onclose: () => {
-            if (locked && !releasing) {
-                console.error("Lost the connection holding the E2E lock.");
-                process.exit(1);
-            }
-        },
+    const { sql, end } = connect(() => {
+        if (holdingTurn) {
+            console.error("Lost the connection holding the E2E lock.");
+            process.exit(1);
+        }
     });
-
-    // pg_locks covers the whole server, but advisory locks are per database.
-    const currentHolder = async () => {
-        const rows = await sql`
-            SELECT activity.application_name
-            FROM pg_locks AS lock
-            JOIN pg_stat_activity AS activity ON activity.pid = lock.pid
-            WHERE lock.locktype = 'advisory' AND lock.granted
-              AND lock.database = (SELECT oid FROM pg_database WHERE datname = current_database())
-              AND lock.classid = ${LOCK_CLASS} AND lock.objid = ${LOCK_OBJECT} AND lock.objsubid = 2
-        `;
-        return rows[0]?.application_name || "another checkout";
-    };
 
     try {
         const deadline = Date.now() + waitSeconds * 1000;
-        let announced = false;
-        for (;;) {
-            if (wrapperGone) {
-                return;
-            }
-            [{ locked }] = await sql`SELECT pg_try_advisory_lock(${LOCK_CLASS}, ${LOCK_OBJECT}) AS locked`;
-            if (locked) {
-                break;
-            }
-            if (Date.now() >= deadline) {
-                console.error(`Gave up after ${waitSeconds}s: ${await currentHolder()} still holds the E2E lock.`);
-                process.exitCode = EXIT_LOCK_TIMEOUT;
-                return;
-            }
-            if (!announced) {
-                console.error(`Waiting for another local E2E run to finish (${await currentHolder()})…`);
-                announced = true;
-            }
-            await sleep(Math.min(LOCK_POLL_MS, deadline - Date.now()));
+        const abandoned = () => wrapperGone;
+        holdingTurn = await waitForLock(sql, TURN_LOCK, deadline, "Waiting for another local E2E run to finish", abandoned);
+        if (!holdingTurn
+            || !(await waitForLock(sql, RUNNING_LOCK, deadline, "Waiting for the previous E2E run to stop", abandoned))) {
+            return;
         }
+        // Safe to let go: nobody else can take it without the turn lock first.
+        await sql`SELECT pg_advisory_unlock(${LOCK_CLASS}, ${RUNNING_LOCK})`;
 
         if (process.connected) {
             process.send({ locked: true });
@@ -145,30 +178,64 @@ async function holdLock() {
         console.error(`Could not take the E2E lock: ${error.message}`);
         process.exitCode = 1;
     } finally {
-        releasing = true;
-        await sql.end({ timeout: 5 });
+        await end();
     }
 }
 
-// The wrapper: starts the helper, runs the command once it holds the lock,
-// and passes signals and the exit status through.
+// The wrapper: starts the helper, takes the running lock once the helper has
+// the turn, runs the command, and passes signals and the exit status through.
 async function runWithLock() {
     // Detached: Ctrl-C must not reach the helper before the run has stopped.
     const helper = fork(fileURLToPath(import.meta.url), ["--hold"], { detached: true });
     helper.on("error", () => {}); // IPC to a helper that just died; its exit is handled below
     const helperExited = new Promise((resolve) => helper.once("exit", (code) => resolve(code ?? 1)));
-    const locked = await Promise.race([
+    const helperLocked = await Promise.race([
         new Promise((resolve) => helper.once("message", (message) => resolve(message.locked === true))),
         helperExited.then(() => false),
     ]);
-    if (!locked) {
+    if (!helperLocked) {
         return helperExited;
     }
 
-    // A session of its own, so the helper can watch and stop the whole run.
-    const child = spawn(command, commandArgs, { detached: true, stdio: ["ignore", "inherit", "inherit"] });
+    let child;
     let finished = false;
     let lockLost = false;
+    const loseLock = () => {
+        if (!finished && !lockLost) {
+            console.error("Lost the E2E lock; stopping this run.");
+            lockLost = true;
+            if (child?.pid !== undefined) {
+                signalProcessGroup(child.pid, "SIGTERM");
+            }
+        }
+    };
+    const releaseHelper = async () => {
+        if (helper.connected) {
+            helper.disconnect();
+        }
+        await helperExited;
+    };
+
+    // Held until the run's processes have all exited, so a run whose helper
+    // dies still keeps the next one out until it has stopped.
+    const running = connect(loseLock);
+    try {
+        if (!(await tryLock(running.sql, RUNNING_LOCK))) {
+            throw new Error("another run took it first");
+        }
+        if (lockLost) {
+            throw new Error("its connection closed");
+        }
+    } catch (error) {
+        console.error(`Could not take the E2E lock: ${error.message}`);
+        finished = true;
+        await releaseHelper();
+        await running.end();
+        return 1;
+    }
+
+    // A session of its own, so the helper can watch and stop the whole run.
+    child = spawn(command, commandArgs, { detached: true, stdio: ["ignore", "inherit", "inherit"] });
     const status = new Promise((resolve) => {
         child.once("error", (error) => {
             console.error(`Could not start ${command}: ${error.message}`);
@@ -183,22 +250,19 @@ async function runWithLock() {
         for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
             process.on(signal, () => signalProcessGroup(child.pid, signal));
         }
-        helperExited.then(() => {
-            if (!finished) {
-                console.error("Lost the E2E lock; stopping this run.");
-                lockLost = true;
-                signalProcessGroup(child.pid, "SIGTERM");
-            }
-        });
     }
+    helperExited.then(loseLock);
 
     const exitStatus = await status;
-    finished = true;
-    // The helper releases the lock once the run's processes are all gone.
-    if (helper.connected) {
-        helper.disconnect();
+    if (lockLost && child.pid !== undefined) {
+        while (processGroupAlive(child.pid)) {
+            await sleep(RUN_POLL_MS);
+        }
     }
-    await helperExited;
+    finished = true;
+    // The helper releases the turn once the run's processes are all gone.
+    await releaseHelper();
+    await running.end();
     return lockLost ? 1 : exitStatus;
 }
 

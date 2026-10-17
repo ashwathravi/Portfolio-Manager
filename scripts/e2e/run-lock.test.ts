@@ -116,17 +116,21 @@ describe('run-lock.mjs', { skip: !DATABASE_URL && 'SCRIPTS_TEST_DATABASE_URL is 
         assert.deepStrictEqual(lines(log), ['killed-start', 'killed-term', 'killed-exited', 'next-ran']);
     });
 
-    test('a run whose helper dies, releasing the lock, is stopped and exits 1', async () => {
+    test('a run whose helper dies is stopped, exits 1, and keeps the next run out until it has stopped', async () => {
         const log = newLog('helper');
         const run = startRun(slowToStop('run'), log);
         await waitFor(() => lines(log).includes('run-start'), 'the run to start');
         const helper = spawnSync('pgrep', ['-P', String(run.pid), '-f', '--', 'run-lock.mjs --hold'], { encoding: 'utf8' });
         assert.match(helper.stdout, /^\d+\n$/);
         process.kill(Number(helper.stdout), 'SIGKILL');
+        // The helper's turn lock is gone with it; the run takes a second to stop.
+        const next = startRun('echo next-ran >> "$LOG"', log, { E2E_LOCK_WAIT_SECONDS: '10' });
 
         assert.strictEqual(await run.exited, 1);
         assert.match(run.stderr(), /Lost the E2E lock; stopping this run/);
-        assert.deepStrictEqual(lines(log), ['run-start', 'run-term', 'run-exited']);
+        assert.strictEqual(await next.exited, 0);
+        assert.match(next.stderr(), new RegExp(`Waiting for the previous E2E run to stop \\(e2e-local \\S+ pid ${run.pid}\\)`));
+        assert.deepStrictEqual(lines(log), ['run-start', 'run-term', 'run-exited', 'next-ran']);
     });
 
     test('names the holder in its own database, not a session holding the same key in another', async () => {
