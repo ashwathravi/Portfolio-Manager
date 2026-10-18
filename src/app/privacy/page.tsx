@@ -123,8 +123,9 @@ export default async function PrivacyPage({ searchParams }: { searchParams: Sear
                         <li>
                             <strong>Sentry</strong> receives a report when something in the app breaks: the error,
                             where in the app it happened (including the pages visited just before), the request ID,
-                            and your browser and device type. Reports never include your name, email, IP address,
-                            cookies, what you typed or your account details.
+                            and your browser and device type. Reports never include your name, email, cookies, what
+                            you typed or your account details. Your browser sends its reports to Sentry directly, so
+                            Sentry sees your IP address the way any website you connect to does.
                         </li>
                         <li>
                             <strong>Market data providers and SEC EDGAR</strong> supply prices and filings. We

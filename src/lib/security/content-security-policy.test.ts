@@ -33,10 +33,15 @@ describe("buildContentSecurityPolicy — Sentry", () => {
             sentryDsn: "https://abc123@o4501234.ingest.us.sentry.io/4509876",
         });
 
-        const connect = sourcesFor(policy, "connect-src");
-        assert.ok(connect.includes("https://o4501234.ingest.us.sentry.io"));
-        assert.ok(!connect.some((source) => source.includes("abc123")));
-        assert.ok(!connect.some((source) => source.includes("*")));
+        // The exact list: the ingest origin is added once, without the key or a wildcard.
+        assert.deepEqual(sourcesFor(policy, "connect-src"), [
+            "'self'",
+            "https://cdn.plaid.com",
+            "https://sandbox.plaid.com",
+            "https://development.plaid.com",
+            "https://production.plaid.com",
+            "https://o4501234.ingest.us.sentry.io",
+        ]);
     });
 
     test("adds nothing without a usable DSN", () => {

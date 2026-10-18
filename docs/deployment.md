@@ -62,6 +62,7 @@ Sentry (Vercel Marketplace, Developer plan) receives errors from production and 
 - **Browser**: `src/instrumentation-client.ts` starts the SDK; `error.tsx` and `global-error.tsx` report what they catch, except server errors, which were already reported with their full stack trace.
 - **What it sends**: the error, its stack trace, the route, the release (commit) and the request ID. Cookies, headers other than `user-agent`, `accept`, `content-type` and the request ID, request and response bodies, query strings, database query parameters, local variables and user details are turned off, and every string is checked for secret values before an event leaves the app (`src/lib/observability/sentry-options.ts`). No performance tracing and no session replay.
 - **Source maps**: uploaded by Vercel's build with `SENTRY_AUTH_TOKEN`, then deleted from the build, so they are never served.
+- **IP addresses**: the SDK never adds one to a report, but browsers send reports to Sentry directly, and Sentry can record the connection's address unless the project's **Prevent Storing of IP Addresses** setting (Project Settings → Security & Privacy) is on. Turn it on; the privacy policy only says Sentry *sees* the address.
 - **CSP**: `connect-src` allows the DSN's ingest host only.
 - **Request IDs**: API log events (`logApiEvent`) carry `requestId`, the same `x-vercel-id` that Vercel's runtime logs and Sentry show, so a report and its log lines can be matched.
 

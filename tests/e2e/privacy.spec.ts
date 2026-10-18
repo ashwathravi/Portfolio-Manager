@@ -37,7 +37,8 @@ test.describe('Privacy policy', () => {
     for (const service of ['Plaid', 'Google', 'Vercel', 'Upstash', 'Supabase', 'Sentry']) {
       await expect(sharing.getByText(service, { exact: true })).toBeVisible();
     }
-    await expect(sharing.getByText(/Reports never include your name, email, IP address/)).toBeVisible();
+    await expect(sharing.getByText(/Reports never include your name, email, cookies/)).toBeVisible();
+    await expect(sharing.getByText(/Sentry sees your IP address/)).toBeVisible();
   });
 
   test('links to the Plaid end user policy and a contact address', async ({ page }) => {
