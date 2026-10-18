@@ -7,6 +7,7 @@ import {
     scrubSentryEvent,
     sentryIngestOrigin,
     serverSentryOptions,
+    stripUrlQueries,
     usableSentryDsn,
 } from "./sentry-options";
 
@@ -72,6 +73,32 @@ describe("serverSentryOptions and browserSentryOptions", () => {
             assert.equal(options.dataCollection, SENTRY_DATA_COLLECTION);
             assert.equal(typeof options.beforeSend, "function");
         }
+    });
+});
+
+describe("stripUrlQueries", () => {
+    test("cuts the query from absolute and root-relative URLs, keeping the fragment and the rest", () => {
+        assert.equal(stripUrlQueries("GET https://host.test/a?x=1&y=2 failed"), "GET https://host.test/a failed");
+        assert.equal(stripUrlQueries("/api/search?q=AAPL#top and /b?c=d"), "/api/search#top and /b");
+        assert.equal(stripUrlQueries('fetch("https://host.test/a?x=1")'), 'fetch("https://host.test/a")');
+    });
+
+    test("leaves text without URL queries alone", () => {
+        assert.equal(stripUrlQueries("https://host.test/a"), "https://host.test/a");
+        assert.equal(stripUrlQueries("Is the provider down? Retry later."), "Is the provider down? Retry later.");
+    });
+});
+
+describe("browser integrations", () => {
+    test("leave out BrowserSession, which would report every page load", () => {
+        const options = browserSentryOptions({ NEXT_PUBLIC_SENTRY_DSN: DSN });
+        assert.equal(typeof options.integrations, "function");
+        const integrations = options.integrations as (defaults: Array<{ name: string }>) => Array<{ name: string }>;
+
+        assert.deepEqual(
+            integrations([{ name: "Breadcrumbs" }, { name: "BrowserSession" }, { name: "GlobalHandlers" }]).map((i) => i.name),
+            ["Breadcrumbs", "GlobalHandlers"],
+        );
     });
 });
 
@@ -145,7 +172,38 @@ describe("scrubSentryEvent", () => {
         assert.ok(!serialized.includes("auth-secret-value-xyz"));
         assert.ok(!serialized.includes("live123"));
         assert.ok(!serialized.includes("u:p@"));
-        assert.equal(event.exception?.values?.[0].value, "GET https://api.example.com/v2?apiKey=***");
+        assert.equal(event.exception?.values?.[0].value, "GET https://api.example.com/v2");
+    });
+
+    test("cuts what the user typed out of a provider error's URL", () => {
+        const event = scrubSentryEvent({
+            type: undefined,
+            exception: { values: [{
+                type: "PolygonApiError",
+                value: "PolygonMassiveAdapter: HTTP 502 Bad Gateway — https://api.polygon.io/v3/reference/tickers?search=my+private+query&apiKey=live123",
+            }] },
+            breadcrumbs: [{ category: "fetch", data: { url: "/api/market-data/search?q=my+private+query" } }],
+        } as ScrubbableEvent, {});
+
+        const serialized = JSON.stringify(event);
+        assert.ok(!serialized.includes("my+private+query"));
+        assert.equal(
+            event.exception?.values?.[0].value,
+            "PolygonMassiveAdapter: HTTP 502 Bad Gateway — https://api.polygon.io/v3/reference/tickers",
+        );
+        assert.equal(event.breadcrumbs?.[0].data?.url, "/api/market-data/search");
+    });
+
+    test("leaves code locations as built, so source maps still resolve", () => {
+        const chunk = "app:///_next/static/chunks/main.js?dpl=dpl_123";
+        const event = scrubSentryEvent({
+            type: undefined,
+            exception: { values: [{ type: "Error", value: "boom", stacktrace: { frames: [{ abs_path: chunk }] } }] },
+            debug_meta: { images: [{ type: "sourcemap", code_file: chunk, debug_id: "abc" }] },
+        } as ScrubbableEvent, {});
+
+        assert.equal(event.exception?.values?.[0].stacktrace?.frames?.[0].abs_path, chunk);
+        assert.deepEqual(event.debug_meta?.images?.[0], { type: "sourcemap", code_file: chunk, debug_id: "abc" });
     });
 
     test("serverSentryOptions scrubs with the server's secrets", async () => {

@@ -47,6 +47,11 @@ export const SENTRY_DATA_COLLECTION = {
 
 const SENSITIVE_HEADER = /authorization|cookie|token|secret|api[-_]?key/i;
 const MAX_SCRUB_DEPTH = 12;
+// The query of an absolute or root-relative URL, up to whitespace, a quote or
+// a fragment: "https://host/path?search=AAPL" keeps "https://host/path".
+const URL_QUERY = /((?:https?:\/\/|\/)[^\s?#"'<>]*)\?[^\s#"'<>]*/g;
+// Code locations: their URLs must stay as built for source maps to resolve.
+const CODE_LOCATION_KEYS = new Set(["stacktrace", "debug_meta"]);
 
 /**
  * The DSN, or undefined when it is missing or not a Sentry DSN (an https URL
@@ -99,6 +104,8 @@ export function serverSentryOptions(env: SentryEnv & Partial<Record<string, stri
 export function browserSentryOptions(env: SentryEnv): BrowserOptions {
     return {
         ...sharedOptions(env),
+        // Errors only: BrowserSession would report every page load.
+        integrations: (defaults) => defaults.filter((integration) => integration.name !== "BrowserSession"),
         beforeSend: (event) => scrubSentryEvent(event, {}),
     };
 }
@@ -107,9 +114,11 @@ export function browserSentryOptions(env: SentryEnv): BrowserOptions {
  * The last check before an event leaves the app: drops cookies, bodies,
  * query strings, sensitive headers and user details other than the ID, and
  * masks secret values anywhere in the event (see {@link redactSecrets}).
+ * URL queries are cut from every message too: a provider's error quotes its
+ * request URL, and that can hold what the user typed into ticker search.
  */
 export function scrubSentryEvent<T extends SentryEvent>(event: T, env: Partial<Record<string, string>>): T {
-    const scrubbed = redactStrings(event, env, 0) as T;
+    const scrubbed = redactStrings(event, env, 0, true) as T;
 
     if (scrubbed.request) {
         delete scrubbed.request.cookies;
@@ -129,11 +138,27 @@ export function scrubSentryEvent<T extends SentryEvent>(event: T, env: Partial<R
     return scrubbed;
 }
 
-function redactStrings(value: unknown, env: Partial<Record<string, string>>, depth: number): unknown {
-    if (typeof value === "string") return redactSecrets(value, env);
+/** Removes the query from every absolute or root-relative URL in `text`. */
+export function stripUrlQueries(text: string): string {
+    return text.replace(URL_QUERY, "$1");
+}
+
+function redactStrings(
+    value: unknown,
+    env: Partial<Record<string, string>>,
+    depth: number,
+    stripQueries: boolean,
+): unknown {
+    if (typeof value === "string") {
+        const redacted = redactSecrets(value, env);
+        return stripQueries ? stripUrlQueries(redacted) : redacted;
+    }
     if (depth >= MAX_SCRUB_DEPTH || value === null || typeof value !== "object") return value;
-    if (Array.isArray(value)) return value.map((item) => redactStrings(item, env, depth + 1));
+    if (Array.isArray(value)) return value.map((item) => redactStrings(item, env, depth + 1, stripQueries));
     return Object.fromEntries(
-        Object.entries(value).map(([key, item]) => [key, redactStrings(item, env, depth + 1)]),
+        Object.entries(value).map(([key, item]) => [
+            key,
+            redactStrings(item, env, depth + 1, stripQueries && !CODE_LOCATION_KEYS.has(key)),
+        ]),
     );
 }
