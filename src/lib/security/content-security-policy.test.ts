@@ -12,7 +12,13 @@ describe("buildContentSecurityPolicy", () => {
     test("runs only scripts carrying this request's nonce, and what they load", () => {
         const policy = production();
 
-        assert.deepEqual(sourcesFor(policy, "script-src"), ["'self'", `'nonce-${NONCE}'`, "'strict-dynamic'"]);
+        assert.deepEqual(sourcesFor(policy, "script-src"), [
+            "'self'",
+            `'nonce-${NONCE}'`,
+            "'strict-dynamic'",
+            // Only for browsers without 'strict-dynamic', which load Plaid Link from it.
+            "https://cdn.plaid.com",
+        ]);
         assert.match(policy, /default-src 'self'/);
         assert.match(policy, /frame-src https:\/\/cdn\.plaid\.com/);
         assert.match(policy, /object-src 'none'/);
@@ -38,31 +44,41 @@ describe("buildContentSecurityPolicy", () => {
     });
 
     test("allows the Plaid API host of the configured environment only", () => {
-        assert.deepEqual(sourcesFor(production({ plaidEnv: "sandbox" }), "connect-src"), [
-            "'self'",
-            "https://cdn.plaid.com",
-            "https://sandbox.plaid.com",
-        ]);
-        assert.deepEqual(sourcesFor(production({ plaidEnv: "production" }), "connect-src"), [
-            "'self'",
-            "https://cdn.plaid.com",
-            "https://production.plaid.com",
-        ]);
-        // Unset or unknown (including the retired "development") means sandbox.
-        for (const plaidEnv of [undefined, "", "development"]) {
-            assert.ok(sourcesFor(production({ plaidEnv }), "connect-src").includes("https://sandbox.plaid.com"));
+        for (const [plaidEnv, host] of [
+            ["sandbox", "https://sandbox.plaid.com"],
+            ["development", "https://development.plaid.com"],
+            ["production", "https://production.plaid.com"],
+            // Unset or unknown means sandbox, as resolvePlaidEnvironment decides.
+            [undefined, "https://sandbox.plaid.com"],
+            ["", "https://sandbox.plaid.com"],
+            ["staging", "https://sandbox.plaid.com"],
+        ] as const) {
+            assert.deepEqual(
+                sourcesFor(production({ plaidEnv }), "connect-src"),
+                ["'self'", "https://cdn.plaid.com", host],
+                `PLAID_ENV=${String(plaidEnv)}`,
+            );
         }
     });
 
     test("adds development-only allowances outside production", () => {
-        const policy = buildContentSecurityPolicy({ nonce: NONCE, nodeEnv: "development" });
+        const policy = buildContentSecurityPolicy({ nonce: NONCE, nodeEnv: "development", sentryDsn: undefined, plaidEnv: undefined });
 
-        assert.ok(sourcesFor(policy, "script-src").includes("'unsafe-eval'"));
-        assert.ok(sourcesFor(policy, "script-src").includes(`'nonce-${NONCE}'`));
-        assert.ok(!sourcesFor(policy, "script-src").includes("'unsafe-inline'"));
-        assert.ok(sourcesFor(policy, "connect-src").includes("ws:"));
-        assert.ok(sourcesFor(policy, "connect-src").includes("http://localhost:*"));
-        assert.ok(sourcesFor(policy, "connect-src").includes("http://127.0.0.1:*"));
+        assert.deepEqual(sourcesFor(policy, "script-src"), [
+            "'self'",
+            `'nonce-${NONCE}'`,
+            "'strict-dynamic'",
+            "https://cdn.plaid.com",
+            "'unsafe-eval'",
+        ]);
+        assert.deepEqual(sourcesFor(policy, "connect-src"), [
+            "'self'",
+            "https://cdn.plaid.com",
+            "https://sandbox.plaid.com",
+            "ws:",
+            "http://localhost:*",
+            "http://127.0.0.1:*",
+        ]);
     });
 });
 

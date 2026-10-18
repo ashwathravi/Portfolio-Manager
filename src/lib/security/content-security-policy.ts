@@ -39,6 +39,9 @@ export function buildContentSecurityPolicy(options: ContentSecurityPolicyOptions
         "'self'",
         `'nonce-${options.nonce}'`,
         "'strict-dynamic'",
+        // Ignored where 'strict-dynamic' works; browsers without it (Safari
+        // before 15.4) still need it to load Plaid Link.
+        "https://cdn.plaid.com",
         // React rebuilds server error stacks with eval in development only.
         ...(isProduction ? [] : ["'unsafe-eval'"]),
     ];
@@ -76,9 +79,13 @@ export function buildContentSecurityPolicy(options: ContentSecurityPolicyOptions
     ].join("; ");
 }
 
-/** The Plaid API host for PLAID_ENV; sandbox unless it says production. */
+/**
+ * The Plaid API host for PLAID_ENV, chosen the way resolvePlaidEnvironment
+ * (src/lib/plaid/link.ts) chooses the environment: sandbox unless it says
+ * production or development.
+ */
 function plaidApiOrigin(plaidEnv: string | undefined): string {
-    const environment = plaidEnv?.trim() === "production" ? "production" : "sandbox";
+    const environment = plaidEnv === "production" || plaidEnv === "development" ? plaidEnv : "sandbox";
     return `https://${environment}.plaid.com`;
 }
 
