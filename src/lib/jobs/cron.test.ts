@@ -160,6 +160,19 @@ describe("createCronHandler", () => {
         assert.equal(logs.length, 2);
         assert.ok(logs.every((line) => !line.includes(SECRET)));
     });
+
+    test("log lines carry Vercel's request ID", async (t) => {
+        const logs: string[] = [];
+        t.mock.method(console, "info", (line: string) => { logs.push(line); });
+        const request = new Request("https://atlas.test/api/cron/daily", {
+            headers: { authorization: `Bearer ${SECRET}`, "x-vercel-id": "pdx1::abcde-1760745600000-0123456789ab" },
+        });
+
+        await handler([{ name: "prices", run: async () => ({}) }])(request);
+
+        assert.equal(logs.length, 1);
+        assert.equal(JSON.parse(logs[0]).requestId, "pdx1::abcde-1760745600000-0123456789ab");
+    });
 });
 
 describe("cron run lock", () => {

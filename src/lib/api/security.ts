@@ -9,6 +9,7 @@ import {
     setRateLimitStoreForTests,
     type RateLimitRule,
 } from "@/lib/api/rate-limit";
+import { reportError } from "@/lib/observability/report-error";
 
 export interface ApiAuthContext {
     userId: string | null;
@@ -88,6 +89,7 @@ export function internalServerError(
     code = "INTERNAL_SERVER_ERROR",
 ): NextResponse {
     console.error(userMessage, error);
+    reportError(error, { tags: { code } });
     return apiError(userMessage, code, 500);
 }
 

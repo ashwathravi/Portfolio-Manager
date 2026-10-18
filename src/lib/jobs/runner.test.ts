@@ -1,5 +1,7 @@
-import { describe, test } from "node:test";
+import { afterEach, describe, test } from "node:test";
 import assert from "node:assert/strict";
+
+import { setErrorReporterForTests } from "@/lib/observability/report-error";
 
 import {
     buildFinishJobRunQuery,
@@ -112,6 +114,49 @@ describe("runJob", () => {
         assert.equal(outcome.status, "succeeded");
         assert.deepEqual(outcome.detail, { stored: 3 });
         assert.deepEqual(errors, ["Could not record the end of job run run-1 (prices): connection lost"]);
+    });
+});
+
+describe("runJob error reports", () => {
+    afterEach(() => setErrorReporterForTests(null));
+
+    function recordReports() {
+        const reports: Array<{ error: unknown; context: unknown }> = [];
+        setErrorReporterForTests({
+            capture: (error, context) => { reports.push({ error, context }); },
+            afterResponse: () => {},
+        });
+        return reports;
+    }
+
+    test("a failing job is reported, tagged with its name", async () => {
+        const reports = recordReports();
+        const error = new Error("quote provider down");
+
+        await runJob("prices", async () => { throw error; }, { store: memoryStore().store, now: tickingClock() });
+
+        assert.deepEqual(reports, [{ error, context: { tags: { job: "prices" } } }]);
+    });
+
+    test("a run that can't be recorded is reported", async () => {
+        const reports = recordReports();
+        const error = new Error("connect ECONNREFUSED 127.0.0.1:5432");
+        const store: JobRunStore = {
+            start: async () => { throw error; },
+            finish: async () => {},
+        };
+
+        await runJob("prices", async () => ({}), { store, now: tickingClock() });
+
+        assert.deepEqual(reports, [{ error, context: { tags: { job: "prices" } } }]);
+    });
+
+    test("a job that succeeds reports nothing", async () => {
+        const reports = recordReports();
+
+        await runJob("prices", async () => ({ stored: 1 }), { store: memoryStore().store, now: tickingClock() });
+
+        assert.deepEqual(reports, []);
     });
 });
 

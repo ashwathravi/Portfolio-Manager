@@ -264,17 +264,16 @@ jobs:
           DATABASE_MIGRATION_URL: ${{ secrets.DATABASE_MIGRATION_URL }}
         run: node --import tsx scripts/migrate.ts
 
-      - name: Build for Vercel
+      # Vercel builds the commit itself: Sensitive variables (the Sentry DSN
+      # and upload token among them) only exist inside Vercel's own builds
+      # and functions, so a build here would get "[SENSITIVE]" placeholders.
+      - name: Build and deploy to production
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: |
-          npx --yes "$VERCEL_CLI" pull --yes --environment=production --token="$VERCEL_TOKEN"
-          npx --yes "$VERCEL_CLI" build --prod --token="$VERCEL_TOKEN"
-
-      - name: Deploy to production
-        env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-        run: npx --yes "$VERCEL_CLI" deploy --prebuilt --prod --token="$VERCEL_TOKEN"
+          npx --yes "$VERCEL_CLI" deploy --prod --yes --logs --token="$VERCEL_TOKEN" \
+            --build-env SENTRY_RELEASE="$GITHUB_SHA" \
+            --env SENTRY_RELEASE="$GITHUB_SHA"
 
       - name: Check production readiness
         env:

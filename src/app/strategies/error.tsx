@@ -2,6 +2,7 @@
 
 import { useEffect } from 'react';
 import { ErrorState } from '@/components/ui/error-state';
+import { reportBoundaryError } from '@/lib/observability/report-boundary-error';
 
 export default function StrategiesError({
     error,
@@ -12,6 +13,7 @@ export default function StrategiesError({
 }) {
     useEffect(() => {
         console.error('[strategies error]', error);
+        reportBoundaryError(error, 'strategies');
     }, [error]);
 
     return (

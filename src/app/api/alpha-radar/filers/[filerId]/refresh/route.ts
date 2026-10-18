@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { apiError, internalServerError, logApiEvent } from '@/lib/api/security';
+import { requestIdFrom } from '@/lib/observability/request-id';
 import { requireSessionApiUserScope } from '@/lib/api/session-security';
 import { getAlphaRadarRefreshService } from '@/lib/alpha-radar';
 import { alphaRadarRefreshRequestSchema } from '@/lib/validators/alpha-radar';
@@ -20,6 +21,7 @@ export async function POST(
         }
         logApiEvent('alpha_radar_filer_refresh_requested', {
             route: '/api/alpha-radar/filers/[filerId]/refresh',
+            requestId: requestIdFrom(request.headers),
             force: parsed.data.force === true,
             filingLimit: parsed.data.filingLimit,
             userScoped: true,
@@ -33,6 +35,7 @@ export async function POST(
         const status = result.errors.length > 0 ? 207 : 200;
         logApiEvent('alpha_radar_filer_refresh_completed', {
             route: '/api/alpha-radar/filers/[filerId]/refresh',
+            requestId: requestIdFrom(request.headers),
             status,
             totalFilers: result.totalFilers,
             errorCount: result.errors.length,

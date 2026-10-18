@@ -47,6 +47,13 @@ const noCronSecret = {
     CRON_SECRET: '',
 };
 
+// No Sentry DSN, so the SDK never starts and a test run's errors never reach
+// the production project (and no build uploads source maps).
+const noSentry = {
+    NEXT_PUBLIC_SENTRY_DSN: '',
+    SENTRY_AUTH_TOKEN: '',
+};
+
 export default defineConfig({
     testDir: './tests/e2e',
     fullyParallel: true,
@@ -96,6 +103,7 @@ export default defineConfig({
                 ...noSharedRedis,
                 ...noMarketData,
                 ...noCronSecret,
+                ...noSentry,
             },
             url: 'http://localhost:3000',
             // Never reuse a running server: it may be connected to a real
@@ -121,6 +129,7 @@ export default defineConfig({
                 ...noSharedRedis,
                 ...noMarketData,
                 ...noCronSecret,
+                ...noSentry,
             },
             url: 'http://localhost:3100/api/health',
             // Never reuse a running server: it may be connected to a real
@@ -146,6 +155,7 @@ export default defineConfig({
                 ...noSharedRedis,
                 ...noMarketData,
                 ...noCronSecret,
+                ...noSentry,
             },
             url: 'http://localhost:3200/api/health',
             // Never reuse a running server: it may be connected to a real

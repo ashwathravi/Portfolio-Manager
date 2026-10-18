@@ -4,15 +4,18 @@
  *
  * {@link runJob} inserts a "running" row, runs the job, then finishes the row
  * as "succeeded" with the detail the job returned or "failed" with a short
- * error message. It never throws, so a caller running several jobs in a row
- * keeps going when one fails. The cron route (`/api/cron/daily`) is the only
- * caller in production; the jobs it runs are listed in `./daily-jobs`.
+ * error message, and reports a failure to Sentry. It never throws, so a
+ * caller running several jobs in a row keeps going when one fails. The cron
+ * route (`/api/cron/daily`) is the only caller in production; the jobs it
+ * runs are listed in `./daily-jobs`.
  */
 
 import { eq } from "drizzle-orm";
 
 import { db } from "@/db";
 import { jobRuns, type JobRunStatus } from "@/db/schema";
+import { reportError } from "@/lib/observability/report-error";
+import { redactSecrets } from "@/lib/security/redact-secrets";
 
 type Database = typeof db;
 
@@ -53,22 +56,6 @@ export interface RunJobDeps {
 }
 
 const MAX_ERROR_LENGTH = 300;
-
-// Environment variables whose values must never reach the run log or a
-// response, even if a library quotes one in an error message.
-const SECRET_SETTINGS = [
-    "AUTH_GOOGLE_SECRET",
-    "AUTH_SECRET",
-    "CRON_SECRET",
-    "DATABASE_MIGRATION_URL",
-    "DATABASE_URL",
-    "INTERNAL_API_SECRET",
-    "KV_REST_API_TOKEN",
-    "PLAID_SECRET",
-    "PLAID_TOKEN_ENCRYPTION_KEY",
-    "POLYGON_API_KEY",
-    "UPSTASH_REDIS_REST_TOKEN",
-] as const;
 
 // ---------------------------------------------------------------------------
 // Query builders (compiled in tests; executed by the store below)
@@ -139,6 +126,7 @@ export async function runJob(
     try {
         runId = await store.start(name, startedAt);
     } catch (error) {
+        reportError(error, { tags: { job: name } });
         return outcome("failed", null, { error: `Could not record the run: ${summarizeError(error)}` });
     }
 
@@ -146,6 +134,7 @@ export async function runJob(
     try {
         result = outcome("succeeded", runId, { detail: await fn() });
     } catch (error) {
+        reportError(error, { tags: { job: name } });
         result = outcome("failed", runId, { error: summarizeError(error) });
     }
 
@@ -180,16 +169,7 @@ export async function runJobs(jobs: readonly ScheduledJob[], deps: RunJobDeps = 
  */
 export function summarizeError(error: unknown, env: Partial<Record<string, string>> = process.env): string {
     const raw = error instanceof Error ? error.message || error.name : String(error);
-    let message = raw.split("\n")[0].trim() || "Unknown error";
-
-    for (const setting of SECRET_SETTINGS) {
-        const value = env[setting]?.trim();
-        // Short values would mask ordinary words; real secrets are long.
-        if (value && value.length >= 8) message = message.split(value).join("***");
-    }
-    message = message
-        .replace(/(\/\/)[^/\s:@]+:[^/\s@]+@/g, "$1***@")
-        .replace(/(api_?key=)[^&\s]+/gi, "$1***");
+    const message = redactSecrets(raw.split("\n")[0].trim() || "Unknown error", env);
 
     return message.length > MAX_ERROR_LENGTH ? `${message.slice(0, MAX_ERROR_LENGTH - 1)}…` : message;
 }

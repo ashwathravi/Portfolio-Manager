@@ -32,6 +32,14 @@ test.describe('Privacy policy', () => {
     }
   });
 
+  test('names every service that receives data, including error reports', async ({ page }) => {
+    const sharing = page.getByRole('region', { name: 'Who we share it with' });
+    for (const service of ['Plaid', 'Google', 'Vercel', 'Upstash', 'Supabase', 'Sentry']) {
+      await expect(sharing.getByText(service, { exact: true })).toBeVisible();
+    }
+    await expect(sharing.getByText(/Reports never include your name, email, IP address/)).toBeVisible();
+  });
+
   test('links to the Plaid end user policy and a contact address', async ({ page }) => {
     await expect(page.getByRole('link', { name: 'Plaid End User Privacy Policy' }))
       .toHaveAttribute('href', 'https://plaid.com/legal/#end-user-privacy-policy');

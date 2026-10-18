@@ -26,6 +26,27 @@ describe("buildContentSecurityPolicy", () => {
     });
 });
 
+describe("buildContentSecurityPolicy — Sentry", () => {
+    test("lets the browser reach the DSN's ingest host and nothing else of Sentry's", () => {
+        const policy = buildContentSecurityPolicy({
+            nodeEnv: "production",
+            sentryDsn: "https://abc123@o4501234.ingest.us.sentry.io/4509876",
+        });
+
+        const connect = sourcesFor(policy, "connect-src");
+        assert.ok(connect.includes("https://o4501234.ingest.us.sentry.io"));
+        assert.ok(!connect.some((source) => source.includes("abc123")));
+        assert.ok(!connect.some((source) => source.includes("*")));
+    });
+
+    test("adds nothing without a usable DSN", () => {
+        for (const sentryDsn of [undefined, "", "[SENSITIVE]"]) {
+            const policy = buildContentSecurityPolicy({ nodeEnv: "production", sentryDsn });
+            assert.ok(!policy.includes("sentry"), `added for ${String(sentryDsn)}`);
+        }
+    });
+});
+
 function sourcesFor(policy: string, name: string): string[] {
     const directive = policy.split("; ").find((part) => part.startsWith(`${name} `));
     return directive?.split(" ").slice(1) ?? [];

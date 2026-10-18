@@ -2,6 +2,7 @@
 
 import { useEffect } from 'react';
 import { ErrorState } from '@/components/ui/error-state';
+import { reportBoundaryError } from '@/lib/observability/report-boundary-error';
 
 export default function PortfoliosError({
     error,
@@ -12,6 +13,7 @@ export default function PortfoliosError({
 }) {
     useEffect(() => {
         console.error('[portfolios error]', error);
+        reportBoundaryError(error, 'portfolios');
     }, [error]);
 
     return (

@@ -12,7 +12,7 @@ export const metadata: Metadata = {
 // the page is public (see isPublicRoute in src/proxy.ts) and renders without
 // the app chrome (src/components/layout/AppFrame.tsx).
 const CONTACT_EMAIL = "ashwath.ravi@gmail.com";
-const LAST_UPDATED = "October 16, 2026";
+const LAST_UPDATED = "October 18, 2026";
 const PLAID_PRIVACY_URL = "https://plaid.com/legal/#end-user-privacy-policy";
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
@@ -120,6 +120,12 @@ export default async function PrivacyPage({ searchParams }: { searchParams: Sear
                             the page called, and expire within minutes.
                         </li>
                         <li><strong>Supabase</strong> hosts the database.</li>
+                        <li>
+                            <strong>Sentry</strong> receives a report when something in the app breaks: the error,
+                            where in the app it happened (including the pages visited just before), the request ID,
+                            and your browser and device type. Reports never include your name, email, IP address,
+                            cookies, what you typed or your account details.
+                        </li>
                         <li>
                             <strong>Market data providers and SEC EDGAR</strong> supply prices and filings. We
                             send them ticker symbols, filer IDs and the words you type into ticker search, never

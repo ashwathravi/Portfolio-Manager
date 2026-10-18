@@ -12,6 +12,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { usableDatabaseUrl } from "@/db/connection-options";
 import { apiError, logApiEvent } from "@/lib/api/security";
+import { requestIdFrom } from "@/lib/observability/request-id";
 
 import { runJobs, type RunJobDeps, type ScheduledJob } from "./runner";
 
@@ -120,15 +121,16 @@ export function createCronHandler({
     ...deps
 }: CronHandlerOptions) {
     return async function GET(request: Request): Promise<NextResponse> {
+        const requestId = requestIdFrom(request.headers);
         const auth = authorizeCronRequest(request, secret());
         if (!auth.ok) {
-            logApiEvent("cron_refused", { route, status: auth.response.status });
+            logApiEvent("cron_refused", { route, status: auth.response.status, requestId });
             return auth.response;
         }
 
         const run = await lock.exclusive(`atlas:cron:${route}`, () => runJobs(jobs, deps));
         if (!run.ran) {
-            logApiEvent("cron_skipped", { route, reason: "already running" });
+            logApiEvent("cron_skipped", { route, reason: "already running", requestId });
             return apiError("A run of these jobs is already in progress.", "CRON_RUNNING", 409);
         }
         const outcomes = run.value;
@@ -139,6 +141,7 @@ export function createCronHandler({
                 status: outcome.status,
                 durationMs: outcome.durationMs,
                 error: outcome.error,
+                requestId,
             });
         }
 
