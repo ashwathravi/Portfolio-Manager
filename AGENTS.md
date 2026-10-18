@@ -47,6 +47,8 @@ Every checkout, git worktrees under `.claude/worktrees/` included, shares one co
 
 Playwright starts three web servers: the main one on port 3000; a "database down" one on port 3100 (a `DATABASE_URL` nothing answers); and an "unusable database URL" one on port 3200 (`DATABASE_URL="[SENSITIVE]"`, Vercel's placeholder). The last two have their own build directories via `NEXT_DIST_DIR`, use local auth bypass, and serve only `outage.spec.ts`.
 
+With database sessions (CI and `test:e2e:local`) the main server is a **production build**, as Vercel serves it: `next build` into `.next/e2e-production`, then `next start`, with the fixture users as the invite list. That adds a few minutes before the first test; `E2E_DEV_SERVER=1` runs `next dev` instead while debugging. Without a database (`npm run test:e2e`) every server is `next dev`, because the local auth bypass is refused in production, and so are the two outage servers.
+
 The Playwright config (`playwright.config.ts`) starts its own servers (on 3000, 3100 and 3200) and never reuses a running one: if any of those ports is busy, the run fails. Stop your dev server first.
 
 **E2E never touches real services.** A server Playwright starts gets `DATABASE_URL=""` unless the shell exports one, empty Upstash variables, an empty `POLYGON_API_KEY` and no Sentry DSN, so neither `.env.local`'s database, the shared Redis, the market-data provider nor Sentry is used.
@@ -211,7 +213,7 @@ The GitHub Actions workflow (`.github/workflows/docker-build.yml`) runs these jo
 
 1. **`build`** — Builds the Docker image (never pushes).
 2. **`lint-and-test`** — Audits production dependencies (`npm audit --omit=dev --audit-level=high`), lints (`npm run lint`), runs unit tests (`npm test`), and builds Next.js (`npm run build`).
-3. **`e2e-tests`** — Installs Playwright browsers, prepares a Postgres service with `scripts/e2e/prepare-database.ts`, runs the tests of the scripts that need a database against it, starts the dev server connected as a member of `app_runtime`, and runs all E2E tests. Only runs after `lint-and-test` passes. Uploads the Playwright HTML report as a build artifact.
+3. **`e2e-tests`** — Installs Playwright browsers, prepares a Postgres service with `scripts/e2e/prepare-database.ts`, runs the tests of the scripts that need a database against it, builds and starts the app in production mode connected as a member of `app_runtime`, and runs all E2E tests. Only runs after `lint-and-test` passes. Uploads the Playwright HTML report as a build artifact.
 4. **`publish-image`** — On `master` only, after the three checks pass: pushes the image to GHCR.
 5. **`deploy-production`** — On `master` only, after the three checks pass: applies migrations, has Vercel build and deploy the commit (Sensitive variables such as the Sentry DSN only exist in Vercel's own builds), and checks `/api/health/ready`. See `docs/deployment.md`, including the rule that migrations must work with the code already running.
 

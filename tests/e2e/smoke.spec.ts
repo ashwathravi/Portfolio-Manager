@@ -75,6 +75,11 @@ test('regression: fonts are self-hosted, with the Latin files preloaded and ever
     expect(googleRequests).toEqual([]);
 });
 
+// A hydration failure as `next dev` reports it, or as a production build
+// does: React's minified errors #418 (server HTML didn't match), #423
+// (recovered by rendering on the client) and #425 (text mismatch).
+const HYDRATION_ERROR = /Hydration|did not match|Minified React error #(418|423|425)\b|react\.dev\/errors\/(418|423|425)\b/i;
+
 test.describe('Hydration across viewer timezones', () => {
     // Regression: dates and times formatted in the server's timezone made
     // Behaviour, Research, and Trade fail hydration for viewers elsewhere.
@@ -84,10 +89,10 @@ test.describe('Hydration across viewer timezones', () => {
         test(`${path} hydrates without mismatches`, async ({ page }) => {
             const errors: string[] = [];
             page.on('pageerror', (e) => errors.push(String(e)));
-            page.on('console', (m) => { if (m.type() === 'error' && /Hydration|did not match/i.test(m.text())) errors.push(m.text()); });
+            page.on('console', (m) => { if (m.type() === 'error' && HYDRATION_ERROR.test(m.text())) errors.push(m.text()); });
             await page.goto(path);
             await page.waitForTimeout(1500);
-            expect(errors.filter((e) => /Hydration|did not match/i.test(e))).toEqual([]);
+            expect(errors.filter((e) => HYDRATION_ERROR.test(e))).toEqual([]);
         });
     }
 });
@@ -102,10 +107,10 @@ test.describe('Hydration across a UTC day boundary', () => {
             await page.clock.install({ time: Date.now() + 86_400_000 });
             const errors: string[] = [];
             page.on('pageerror', (e) => errors.push(String(e)));
-            page.on('console', (m) => { if (m.type() === 'error' && /Hydration|did not match/i.test(m.text())) errors.push(m.text()); });
+            page.on('console', (m) => { if (m.type() === 'error' && HYDRATION_ERROR.test(m.text())) errors.push(m.text()); });
             await page.goto(path);
             await page.waitForTimeout(1500);
-            expect(errors.filter((e) => /Hydration|did not match/i.test(e))).toEqual([]);
+            expect(errors.filter((e) => HYDRATION_ERROR.test(e))).toEqual([]);
         });
     }
 });
