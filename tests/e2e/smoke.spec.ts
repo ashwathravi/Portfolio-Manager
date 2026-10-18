@@ -76,9 +76,10 @@ test('regression: fonts are self-hosted, with the Latin files preloaded and ever
 });
 
 // A hydration failure as `next dev` reports it, or as a production build
-// does: React's minified errors #418 (server HTML didn't match), #423
-// (recovered by rendering on the client) and #425 (text mismatch).
-const HYDRATION_ERROR = /Hydration|did not match|Minified React error #(418|423|425)\b|react\.dev\/errors\/(418|423|425)\b/i;
+// does: React's minified errors #418 (server HTML didn't match), #421 and
+// #422 (a Suspense boundary fell back to client rendering), #423 (the whole
+// root did) and #425 (text mismatch).
+const HYDRATION_ERROR = /Hydration|did not match|Minified React error #(418|421|422|423|425)\b|react\.dev\/errors\/(418|421|422|423|425)\b/i;
 
 test.describe('Hydration across viewer timezones', () => {
     // Regression: dates and times formatted in the server's timezone made
