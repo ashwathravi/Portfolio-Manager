@@ -2,6 +2,7 @@
 
 import { useEffect } from 'react';
 import { ErrorState } from '@/components/ui/error-state';
+import { reportBoundaryError } from '@/lib/observability/report-boundary-error';
 
 export default function ResearchError({
     error,
@@ -12,6 +13,7 @@ export default function ResearchError({
 }) {
     useEffect(() => {
         console.error('[research error]', error);
+        reportBoundaryError(error, 'research');
     }, [error]);
 
     return (

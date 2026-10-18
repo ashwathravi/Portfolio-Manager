@@ -26,6 +26,32 @@ describe("buildContentSecurityPolicy", () => {
     });
 });
 
+describe("buildContentSecurityPolicy — Sentry", () => {
+    test("lets the browser reach the DSN's ingest host and nothing else of Sentry's", () => {
+        const policy = buildContentSecurityPolicy({
+            nodeEnv: "production",
+            sentryDsn: "https://abc123@o4501234.ingest.us.sentry.io/4509876",
+        });
+
+        // The exact list: the ingest origin is added once, without the key or a wildcard.
+        assert.deepEqual(sourcesFor(policy, "connect-src"), [
+            "'self'",
+            "https://cdn.plaid.com",
+            "https://sandbox.plaid.com",
+            "https://development.plaid.com",
+            "https://production.plaid.com",
+            "https://o4501234.ingest.us.sentry.io",
+        ]);
+    });
+
+    test("adds nothing without a usable DSN", () => {
+        for (const sentryDsn of [undefined, "", "[SENSITIVE]"]) {
+            const policy = buildContentSecurityPolicy({ nodeEnv: "production", sentryDsn });
+            assert.ok(!policy.includes("sentry"), `added for ${String(sentryDsn)}`);
+        }
+    });
+});
+
 function sourcesFor(policy: string, name: string): string[] {
     const directive = policy.split("; ").find((part) => part.startsWith(`${name} `));
     return directive?.split(" ").slice(1) ?? [];

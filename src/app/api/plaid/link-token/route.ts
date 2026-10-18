@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { internalServerError, logApiEvent } from "@/lib/api/security";
+import { requestIdFrom } from "@/lib/observability/request-id";
 import { requireSessionApiUserScope } from "@/lib/api/session-security";
 import { createPlaidLinkToken, resolvePlaidEnvironment } from "@/lib/plaid/link";
 
@@ -13,6 +14,7 @@ export async function POST(request: Request) {
         const environment = resolvePlaidEnvironment(process.env.PLAID_ENV);
         logApiEvent("plaid_link_token_requested", {
             route: "/api/plaid/link-token",
+            requestId: requestIdFrom(request.headers),
             environment,
             userScoped: true,
         });
@@ -30,6 +32,7 @@ export async function POST(request: Request) {
 
         logApiEvent("plaid_link_token_created", {
             route: "/api/plaid/link-token",
+            requestId: requestIdFrom(request.headers),
             environment,
             userScoped: true,
         });

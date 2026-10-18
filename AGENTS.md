@@ -49,7 +49,7 @@ Playwright starts three web servers: the main one on port 3000; a "database down
 
 The Playwright config (`playwright.config.ts`) starts its own servers (on 3000, 3100 and 3200) and never reuses a running one: if any of those ports is busy, the run fails. Stop your dev server first.
 
-**E2E never touches real services.** A server Playwright starts gets `DATABASE_URL=""` unless the shell exports one, empty Upstash variables and an empty `POLYGON_API_KEY`, so neither `.env.local`'s database, the shared Redis nor the market-data provider is used.
+**E2E never touches real services.** A server Playwright starts gets `DATABASE_URL=""` unless the shell exports one, empty Upstash variables, an empty `POLYGON_API_KEY` and no Sentry DSN, so neither `.env.local`'s database, the shared Redis, the market-data provider nor Sentry is used.
 
 ### Local database
 
@@ -109,6 +109,7 @@ Every page in the application must have a corresponding E2E spec. The current ma
 | `/ask` + ⌘K | `ask.spec.ts` | Command palette (top-bar search + ⌘K), page/ticker/question routing, Ask overlay and page history |
 | `/settings` | `settings.spec.ts` | One column + section rail, legacy `?tab=` links scroll to sections, honest sign-in card, no seeded accounts, example-data toggle |
 | `/help` (Settings › Help) | `help.spec.ts` | Getting started (5 steps), glossary, Alpha Radar notes, single h1 |
+| `/privacy` | `privacy.spec.ts` | Public without app chrome, every section, every service that receives data (Sentry included), Plaid policy link, off-site callbacks dropped |
 | `/login` | `login.spec.ts` | Google sign-in without app chrome, shared brand mark, no raw setup text, link to the privacy policy that keeps the sign-in callback |
 | `/privacy` | `privacy.spec.ts` | Public when signed out, no app chrome, single h1, all policy sections, Plaid end user policy and contact links, scrolls to the end, off-site callbacks dropped, no overflow at 390px |
 | 404 | `not-found.spec.ts` | Search button opens the palette, link back to Today |
@@ -212,7 +213,7 @@ The GitHub Actions workflow (`.github/workflows/docker-build.yml`) runs these jo
 2. **`lint-and-test`** — Audits production dependencies (`npm audit --omit=dev --audit-level=high`), lints (`npm run lint`), runs unit tests (`npm test`), and builds Next.js (`npm run build`).
 3. **`e2e-tests`** — Installs Playwright browsers, prepares a Postgres service with `scripts/e2e/prepare-database.ts`, runs the tests of the scripts that need a database against it, starts the dev server connected as a member of `app_runtime`, and runs all E2E tests. Only runs after `lint-and-test` passes. Uploads the Playwright HTML report as a build artifact.
 4. **`publish-image`** — On `master` only, after the three checks pass: pushes the image to GHCR.
-5. **`deploy-production`** — On `master` only, after the three checks pass: applies migrations, deploys to Vercel, and checks `/api/health/ready`. See `docs/deployment.md`, including the rule that migrations must work with the code already running.
+5. **`deploy-production`** — On `master` only, after the three checks pass: applies migrations, has Vercel build and deploy the commit (Sensitive variables such as the Sentry DSN only exist in Vercel's own builds), and checks `/api/health/ready`. See `docs/deployment.md`, including the rule that migrations must work with the code already running.
 
 `.github/workflows/codeql.yml` runs CodeQL on pull requests, on `master`, and weekly. `.github/dependabot.yml` opens weekly grouped updates for npm and GitHub Actions.
 

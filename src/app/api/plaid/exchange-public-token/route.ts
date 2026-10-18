@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { apiError, internalServerError, logApiEvent } from "@/lib/api/security";
+import { requestIdFrom } from "@/lib/observability/request-id";
 import { requireSessionApiUserScope } from "@/lib/api/session-security";
 import {
     exchangePlaidPublicToken,
@@ -29,6 +30,7 @@ export async function POST(request: Request) {
             : [];
         logApiEvent("plaid_public_token_exchange_requested", {
             route: "/api/plaid/exchange-public-token",
+            requestId: requestIdFrom(request.headers),
             userScoped: true,
         });
         const exchange = await exchangePlaidPublicToken({
@@ -49,6 +51,7 @@ export async function POST(request: Request) {
 
         logApiEvent("plaid_public_token_exchanged", {
             route: "/api/plaid/exchange-public-token",
+            requestId: requestIdFrom(request.headers),
             accountCount: exchange.accounts.length,
             tokenStored: tokenStorage.stored,
             storageMode: tokenStorage.mode,

@@ -1,9 +1,13 @@
 import { afterEach, describe, test, mock } from "node:test";
 import assert from "node:assert/strict";
 
+import { setErrorReporterForTests } from "@/lib/observability/report-error";
+
 import {
     applyApiSecurity,
     authenticateApiRequest,
+    internalServerError,
+    logApiEvent,
     rateLimitApiRequest,
     resetApiSecurityForTests,
 } from "./security";
@@ -93,5 +97,43 @@ describe("API security helpers", () => {
         assert.ok(unauthorized);
         assert.equal(unauthorized.status, 401);
         assert.equal(await applyApiSecurity(request({ "x-api-key": "test-secret" })), undefined);
+    });
+});
+
+describe("internalServerError", () => {
+    afterEach(() => setErrorReporterForTests(null));
+
+    test("reports the error to Sentry, tagged with the code, and answers a generic 500", async (t) => {
+        t.mock.method(console, "error", () => {});
+        const reports: Array<{ error: unknown; context: unknown }> = [];
+        const flushes: unknown[] = [];
+        setErrorReporterForTests({
+            capture: (error, context) => { reports.push({ error, context }); },
+            afterResponse: (task) => { flushes.push(task); },
+        });
+        const error = new Error("relation \"holdings\" does not exist");
+
+        const response = internalServerError(error, "Unable to import holdings.", "PORTFOLIO_IMPORT_FAILED");
+
+        assert.equal(response.status, 500);
+        assert.deepEqual(await response.json(), { error: "Unable to import holdings.", code: "PORTFOLIO_IMPORT_FAILED" });
+        assert.deepEqual(reports, [{ error, context: { tags: { code: "PORTFOLIO_IMPORT_FAILED" } } }]);
+        assert.equal(flushes.length, 1);
+    });
+});
+
+describe("logApiEvent", () => {
+    test("writes one JSON line and leaves out undefined fields", (t) => {
+        const lines: string[] = [];
+        t.mock.method(console, "info", (line: string) => { lines.push(line); });
+
+        logApiEvent("portfolio_csv_imported", { route: "/api/portfolio/import", requestId: "pdx1::abc", rows: 3, error: undefined });
+
+        assert.equal(lines.length, 1);
+        const entry = JSON.parse(lines[0]);
+        assert.equal(entry.event, "portfolio_csv_imported");
+        assert.equal(entry.requestId, "pdx1::abc");
+        assert.equal(entry.rows, 3);
+        assert.ok(!("error" in entry));
     });
 });

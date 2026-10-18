@@ -12,6 +12,7 @@ import { NextResponse } from 'next/server';
 
 import { readJsonBody } from '@/lib/api/body';
 import { apiError, internalServerError, logApiEvent } from '@/lib/api/security';
+import { requestIdFrom } from '@/lib/observability/request-id';
 import { requireSessionApiUserScope } from '@/lib/api/session-security';
 import { ImportAccessError, importHoldings } from '@/lib/portfolio/importHoldings';
 import { portfolioImportSchema } from '@/lib/validators/portfolio-import';
@@ -40,6 +41,7 @@ export async function POST(request: Request) {
         const result = await importHoldings(auth.context.userId, parsed.data);
         logApiEvent('portfolio_csv_imported', {
             route: '/api/portfolio/import',
+            requestId: requestIdFrom(request.headers),
             rows: parsed.data.rows.length,
             inserted: result.insert,
             updated: result.update,

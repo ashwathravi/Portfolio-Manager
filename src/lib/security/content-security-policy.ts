@@ -1,10 +1,18 @@
+// Relative: next.config.ts loads this module, and the @/ alias isn't set up there.
+import { sentryIngestOrigin } from "../observability/sentry-options";
+
 export interface ContentSecurityPolicyOptions {
     nodeEnv?: string;
+    /** Allows the browser to send error reports to this DSN's ingest host. */
+    sentryDsn?: string;
 }
 
 export function buildContentSecurityPolicy(options: ContentSecurityPolicyOptions = {}): string {
     const nodeEnv = options.nodeEnv ?? process.env.NODE_ENV;
     const isProduction = nodeEnv === "production";
+    const sentryOrigin = sentryIngestOrigin(
+        "sentryDsn" in options ? options.sentryDsn : process.env.NEXT_PUBLIC_SENTRY_DSN,
+    );
 
     const scriptSrc = [
         "'self'",
@@ -24,6 +32,7 @@ export function buildContentSecurityPolicy(options: ContentSecurityPolicyOptions
         "https://sandbox.plaid.com",
         "https://development.plaid.com",
         "https://production.plaid.com",
+        ...(sentryOrigin ? [sentryOrigin] : []),
         ...(isProduction ? [] : ["ws:", "http://localhost:*", "http://127.0.0.1:*"]),
     ];
 

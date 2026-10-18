@@ -9,9 +9,10 @@ Production runs on Vercel (project `atlas-wealth`, https://atlas-wealth-lovat.ve
    - **`publish-image`** pushes the Docker image to GHCR (the portable fallback).
    - **`deploy-production`** (GitHub environment `production`):
      1. applies database migrations with `scripts/migrate.ts`, as the table owner;
-     2. builds with the Vercel CLI using the Production environment variables;
-     3. deploys the build to production;
-     4. polls `/api/health/ready` until the app reports it can reach its database.
+     2. uploads the commit with `vercel deploy --prod`; Vercel builds it with the Production environment variables and deploys it (CI passes the commit as `SENTRY_RELEASE`);
+     3. polls `/api/health/ready` until the app reports it can reach its database.
+
+Vercel runs the build, not CI: Sensitive variables (the Sentry DSN and its source-map upload token among them) only exist inside Vercel's own builds and functions. `vercel pull` hands them over as `[SENSITIVE]` placeholders, so a build on the CI runner would ship without error monitoring.
 
 Vercel's own Git integration does not deploy `master` (`vercel.json` turns it off), so every production deploy has passed CI and has its migrations applied first.
 
@@ -53,6 +54,18 @@ To run the jobs by hand, use **Run** next to the job in the Vercel dashboard (Se
 
 The route sets `maxDuration = 300`, the most Hobby allows, which needs Fluid compute (on by default for new projects).
 
+## Error monitoring
+
+Sentry (Vercel Marketplace, Developer plan) receives errors from production and previews; it starts only where `NEXT_PUBLIC_SENTRY_DSN` is set, so local runs and E2E send nothing.
+
+- **Server**: `src/instrumentation.ts` starts the SDK and reports every error thrown while rendering or in a route handler, tagged with the request ID (`x-vercel-id`). Errors the app handles itself are reported too: a route answering 500 through `internalServerError` (tagged with its error code) and a failed scheduled job (tagged with the job name).
+- **Browser**: `src/instrumentation-client.ts` starts the SDK; `error.tsx` and `global-error.tsx` report what they catch, except server errors, which were already reported with their full stack trace.
+- **What it sends**: the error, its stack trace, the route, the release (commit) and the request ID. Cookies, headers other than `user-agent`, `accept`, `content-type` and the request ID, request and response bodies, query strings, database query parameters, local variables and user details are turned off, and before an event leaves the app every string is checked for secret values and has URL queries cut (a provider's error message quotes its request URL, which can hold a search the user typed; stack frames keep theirs for source maps) (`src/lib/observability/sentry-options.ts`). No performance tracing, session tracking or session replay.
+- **Source maps**: uploaded by Vercel's build with `SENTRY_AUTH_TOKEN`, then deleted from the build, so they are never served.
+- **IP addresses**: the SDK never adds one to a report, but browsers send reports to Sentry directly, and Sentry can record the connection's address unless the project's **Prevent Storing of IP Addresses** setting (Project Settings → Security & Privacy) is on. Turn it on; the privacy policy only says Sentry *sees* the address.
+- **CSP**: `connect-src` allows the DSN's ingest host only.
+- **Request IDs**: API log events (`logApiEvent`) carry `requestId`, the same `x-vercel-id` that Vercel's runtime logs and Sentry show, so a report and its log lines can be matched.
+
 ## One-time setup
 
 Already done: the `production` GitHub environment (deployments from `master` only), and the repository variables `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID` and `PRODUCTION_URL`.
@@ -84,6 +97,7 @@ Set these for **Production only**, never Preview: a preview runs branch code, an
 | `CRON_SECRET` | A generated value (`openssl rand -hex 32`). Vercel sends it to the cron route; without it no scheduled job runs. Never print or paste it. |
 | `POLYGON_API_KEY` | The Massive Basic key the nightly price ingest uses. |
 | `PLAID_*`, `PLAID_TOKEN_ENCRYPTION_KEY` | When account linking goes live. |
+| `NEXT_PUBLIC_SENTRY_DSN`, `SENTRY_ORG`, `SENTRY_PROJECT`, `SENTRY_AUTH_TOKEN` | Set by the Sentry integration (Production and Preview). Don't edit them by hand. |
 
 ```bash
 vercel env add AUTH_ALLOWED_EMAILS production

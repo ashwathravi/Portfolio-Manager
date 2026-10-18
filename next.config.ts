@@ -1,6 +1,8 @@
 import type { NextConfig } from "next";
+import { withSentryConfig } from "@sentry/nextjs/config";
 import { buildContentSecurityPolicy } from "./src/lib/security/content-security-policy";
 import { LEGACY_REDIRECTS } from "./src/lib/navigation";
+import { sentryBuildOptions } from "./src/lib/observability/sentry-build";
 
 const nextConfig: NextConfig = {
   // Only set by the E2E "database down" server, which runs next to the main
@@ -60,4 +62,4 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default nextConfig;
+export default withSentryConfig(nextConfig, sentryBuildOptions());
