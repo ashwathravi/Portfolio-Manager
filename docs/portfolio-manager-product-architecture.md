@@ -374,7 +374,6 @@ Expected public env values are limited and should use `NEXT_PUBLIC_` intentional
 - Plaid token vault falls back to memory-only mode when no encryption key is configured.
 - There is no first-class app authentication/authorization layer shown in the current local app.
 - Plaid and Alpha Radar API routes are local-first and need auth/rate limits before network-visible deployment.
-- CSP still allows inline and eval script behavior for current frontend dependencies; tighten with nonces/hashes and explicit Plaid directives before public release.
 - CI actions are tag-pinned rather than SHA-pinned.
 - CI depends on lint/build passing; repo-wide lint currently has existing debt.
 

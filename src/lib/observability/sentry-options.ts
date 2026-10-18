@@ -16,8 +16,7 @@
 
 import type { BrowserOptions, NodeOptions } from "@sentry/nextjs";
 
-// Relative: next.config.ts loads this module, and the @/ alias isn't set up there.
-import { redactSecrets } from "../security/redact-secrets";
+import { redactSecrets } from "@/lib/security/redact-secrets";
 
 type SentryEvent = Parameters<NonNullable<NodeOptions["beforeSend"]>>[0];
 type DataCollection = NonNullable<NodeOptions["dataCollection"]>;

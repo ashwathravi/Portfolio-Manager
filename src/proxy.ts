@@ -10,8 +10,12 @@ import {
     isAuthConfigured,
 } from "@/lib/auth/access";
 import { isSchwabIntegrationEnabled } from "@/lib/api/schwab/feature";
+import { buildContentSecurityPolicy, createNonce } from "@/lib/security/content-security-policy";
 
 type VerifiedRequest = NextRequest & { auth?: Session | null };
+
+/** Lets the request through to the app. */
+type Continue = () => NextResponse;
 
 const PUBLIC_ASSET_PATHS = new Set([
     "/favicon.ico",
@@ -22,12 +26,23 @@ const PUBLIC_ASSET_PATHS = new Set([
     "/window.svg",
 ]);
 
-const verifiedAuthProxy = auth((request: NextAuthRequest, event: NextFetchEvent) => {
-    void event;
-    return handleVerifiedRequest(request);
-});
-
+/**
+ * Every request gets a Content-Security-Policy with a fresh script nonce. The
+ * request carries a copy to the app, where Next.js reads the nonce and puts it
+ * on the scripts it renders; the response carries the policy to the browser.
+ */
 export async function proxy(request: NextRequest, event?: NextFetchEvent): Promise<Response> {
+    const policy = buildContentSecurityPolicy({ nonce: createNonce() });
+    const requestHeaders = new Headers(request.headers);
+    requestHeaders.set("content-security-policy", policy);
+    const next: Continue = () => NextResponse.next({ request: { headers: requestHeaders } });
+
+    const response = await routeRequest(request, event, next);
+    response.headers.set("Content-Security-Policy", policy);
+    return response;
+}
+
+async function routeRequest(request: NextRequest, event: NextFetchEvent | undefined, next: Continue): Promise<Response> {
     const pathname = request.nextUrl.pathname;
     // Disabled Schwab routes are not found for everyone, signed in or not.
     if (isSchwabRoute(pathname) && !isSchwabIntegrationEnabled()) {
@@ -36,36 +51,45 @@ export async function proxy(request: NextRequest, event?: NextFetchEvent): Promi
     if (isAuthJsRoute(pathname)) {
         // Public, but limited per IP: sign-in and callbacks are what an
         // attacker would hammer.
-        return (await rateLimitApiRequest(request)) ?? NextResponse.next();
+        return (await rateLimitApiRequest(request)) ?? next();
     }
     if (isCronRoute(pathname)) {
         // No session: Vercel Cron calls these, and each route checks the
         // CRON_SECRET bearer token itself (src/lib/jobs/cron.ts), even when
         // sign-in is misconfigured. Limited per IP against token guessing.
-        return (await rateLimitApiRequest(request)) ?? NextResponse.next();
+        return (await rateLimitApiRequest(request)) ?? next();
     }
-    if (isPublicRoute(pathname)) return NextResponse.next();
+    if (isPublicRoute(pathname)) return next();
 
     const mode = authRuntimeMode();
     if (mode === "invalid") {
         if (pathname.startsWith("/api/") && process.env.INTERNAL_API_SECRET?.trim()) {
-            return applyRequestSecurity(request, null);
+            return applyRequestSecurity(request, null, next);
         }
         return authConfigurationError();
     }
     if (mode === "local-bypass") {
-        return applyRequestSecurity(request, getLocalDevUserId());
+        return applyRequestSecurity(request, getLocalDevUserId(), next);
     }
     if (isSessionBackedApiRoute(pathname, request.method)) {
-        return NextResponse.next();
+        return next();
     }
 
+    // Auth.js rebuilds the response it gets back, keeping its headers, so
+    // the request headers forwarded by next() survive.
+    const verifiedAuthProxy = auth((verified: NextAuthRequest, verifiedEvent: NextFetchEvent) => {
+        void verifiedEvent;
+        return handleVerifiedRequest(verified, next);
+    });
     const response = await verifiedAuthProxy(request, event as NextFetchEvent);
-    return response ?? NextResponse.next();
+    return response ?? next();
 }
 
-export function handleVerifiedRequest(request: VerifiedRequest): Promise<NextResponse> {
-    return applyRequestSecurity(request, request.auth?.user?.id?.trim() || null);
+export function handleVerifiedRequest(
+    request: VerifiedRequest,
+    next: Continue = () => NextResponse.next(),
+): Promise<NextResponse> {
+    return applyRequestSecurity(request, request.auth?.user?.id?.trim() || null, next);
 }
 
 export const config = {
@@ -75,29 +99,29 @@ export const config = {
     ],
 };
 
-async function applyRequestSecurity(request: NextRequest, userId: string | null): Promise<NextResponse> {
+async function applyRequestSecurity(request: NextRequest, userId: string | null, next: Continue): Promise<NextResponse> {
     const pathname = request.nextUrl.pathname;
-    if (!pathname.startsWith("/api/")) return applyPageAuth(request, userId);
+    if (!pathname.startsWith("/api/")) return applyPageAuth(request, userId, next);
 
     if (isSessionBackedApiRoute(pathname, request.method)) {
-        return NextResponse.next();
+        return next();
     }
 
     if (userId) {
         // A signed-in request is limited per user only: one check per call.
         return (await rateLimitApiRequest(request, { userId, authRequired: true }, { skipIp: true }))
-            ?? NextResponse.next();
+            ?? next();
     }
 
     if (isAuthConfigured() && !process.env.INTERNAL_API_SECRET?.trim()) {
         return apiError("Unauthorized", "UNAUTHORIZED", 401);
     }
 
-    return (await applyApiSecurity(request)) ?? NextResponse.next();
+    return (await applyApiSecurity(request)) ?? next();
 }
 
-function applyPageAuth(request: NextRequest, userId: string | null): NextResponse {
-    if (userId) return NextResponse.next();
+function applyPageAuth(request: NextRequest, userId: string | null, next: Continue): NextResponse {
+    if (userId) return next();
 
     const loginUrl = new URL("/login", request.url);
     loginUrl.searchParams.set(

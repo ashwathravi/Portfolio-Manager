@@ -1,6 +1,5 @@
 import type { NextConfig } from "next";
 import { withSentryConfig } from "@sentry/nextjs/config";
-import { buildContentSecurityPolicy } from "./src/lib/security/content-security-policy";
 import { LEGACY_REDIRECTS } from "./src/lib/navigation";
 import { sentryBuildOptions } from "./src/lib/observability/sentry-build";
 
@@ -51,11 +50,9 @@ const nextConfig: NextConfig = {
           {
             key: 'X-Permitted-Cross-Domain-Policies',
             value: 'none'
-          },
-          {
-            key: 'Content-Security-Policy',
-            value: buildContentSecurityPolicy()
           }
+          // Content-Security-Policy is set per request by src/proxy.ts,
+          // with a fresh script nonce each time.
         ],
       },
     ];
