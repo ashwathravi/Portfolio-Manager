@@ -3,8 +3,20 @@ import assert from "node:assert/strict";
 
 import {
     buildBarsQuery,
+    buildDeleteBarsQuery,
+    buildDeleteHistoryQuery,
+    buildHasBarsQuery,
+    buildLatestBarDateQuery,
     buildLatestClosesQuery,
+    buildMarkHistoryAttemptedQuery,
+    buildMarkHistoryLoadedQuery,
+    buildPruneUnpricedSecuritiesQuery,
+    buildResetUnpricedHistoryQuery,
     buildRecentClosesQuery,
+    buildRequeueHistoryQuery,
+    buildResetHistoryQuery,
+    buildSymbolsNeedingHistoryCountQuery,
+    buildStoredDatesQuery,
     buildSymbolsNeedingHistoryQuery,
     buildTrackedAmongQuery,
     buildTrackedCountQuery,
@@ -14,6 +26,7 @@ import {
     dedupeBars,
     isValidBar,
     normalizeSymbols,
+    replaceHistory,
     selectTrackedBars,
     trackRequestedSecurities,
     type PriceBarInput,
@@ -135,12 +148,116 @@ describe("price store queries", () => {
         assert.deepEqual(params, ["AAPL", "2026-01-01", "2026-06-30"]);
     });
 
-    test("the backfill queue takes active symbols without history, oldest first", () => {
+    test("the backfill queue takes active symbols without history that a daily file priced, oldest first", () => {
         const { sql, params } = buildSymbolsNeedingHistoryQuery(5).toSQL();
         assert.match(sql, /"securities"\."history_start_date" is null/i);
         assert.match(sql, /"securities"\."active" = \$\d+/i);
-        assert.match(sql, /order by "securities"\."created_at" asc, "securities"\."symbol" asc limit \$\d+/i);
+        assert.match(sql, /and exists \(select 1 from "price_bars" where "price_bars"\."symbol" = "securities"\."symbol"\)/i);
+        // Never tried first; no positional "order by 0" (Postgres rejects it) without priority symbols.
+        assert.match(sql, /order by "securities"\."history_attempted_at" asc nulls first, "securities"\."created_at" asc, "securities"\."symbol" asc limit \$\d+$/i);
         assert.deepEqual(params, [true, 5]);
+    });
+
+    test("the backfill queue takes priority symbols at once, and first", () => {
+        const { sql, params } = buildSymbolsNeedingHistoryQuery(5, ["AAPL", "SPY"]).toSQL();
+        assert.match(sql, /\("securities"\."symbol" in \(\$\d+, \$\d+\) or exists \(select 1 from "price_bars"/i);
+        // Priority first; within each group, never tried first, then the least recently tried.
+        assert.match(sql, /order by case when "securities"\."symbol" in \(\$\d+, \$\d+\) then 0 else 1 end, "securities"\."history_attempted_at" asc nulls first, "securities"\."created_at" asc/i);
+        assert.deepEqual(params, [true, "AAPL", "SPY", "AAPL", "SPY", 5]);
+    });
+
+    test("the backfill queue count uses the same filter as the queue", () => {
+        const { sql, params } = buildSymbolsNeedingHistoryCountQuery(["AAPL"]).toSQL();
+        assert.match(sql, /^select count\(\*\) from "securities" where/i);
+        assert.match(sql, /"securities"\."history_start_date" is null and "securities"\."active" = \$\d+ and \("securities"\."symbol" in \(\$\d+\) or exists/i);
+        assert.deepEqual(params, [true, "AAPL"]);
+    });
+
+    test("re-queuing unpriced histories touches only loaded symbols with no bar at all", () => {
+        const { sql, params } = buildResetUnpricedHistoryQuery(["NEWCO"]).toSQL();
+        assert.match(sql, /^update "securities" set "history_start_date" = \$\d+, "history_attempted_at" = \$\d+, "updated_at" = \$\d+ where/);
+        assert.match(sql, /"securities"\."symbol" in \(\$\d+\) and "securities"\."history_start_date" is not null and not exists \(select 1 from "price_bars" where "price_bars"\."symbol" = "securities"\."symbol"\)\) returning "symbol"$/);
+        assert.deepEqual(params.slice(0, 2), [null, null]);
+        assert.equal(params[3], "NEWCO");
+    });
+
+    test("a replace reads every stored date from the history's first day through the cut-off", () => {
+        const { sql, params } = buildStoredDatesQuery("NVDA", "2024-10-17", "2026-10-16").toSQL();
+        assert.equal(sql, 'select "date" from "price_bars" where ("price_bars"."symbol" = $1 and "price_bars"."date" >= $2 and "price_bars"."date" <= $3)');
+        assert.deepEqual(params, ["NVDA", "2024-10-17", "2026-10-16"]);
+    });
+
+    test("clearing a split deletes all of a stock's bars and re-queues it, loaded or not", () => {
+        const remove = buildDeleteBarsQuery(["NVDA"]).toSQL();
+        assert.equal(remove.sql, 'delete from "price_bars" where "price_bars"."symbol" in ($1)');
+        assert.deepEqual(remove.params, ["NVDA"]);
+        const requeue = buildRequeueHistoryQuery(["NVDA"]).toSQL();
+        assert.match(requeue.sql, /^update "securities" set "history_start_date" = \$1, "history_attempted_at" = \$2, "updated_at" = \$3 where "securities"\."symbol" in \(\$4\) returning "symbol"$/);
+        assert.deepEqual(requeue.params.slice(0, 2), [null, null]);
+    });
+
+    test("an attempt is recorded, and loading or resetting clears it", () => {
+        const at = new Date("2026-10-16T22:31:00Z");
+        const attempt = buildMarkHistoryAttemptedQuery("NVDA", at).toSQL();
+        assert.equal(attempt.sql, 'update "securities" set "history_attempted_at" = $1, "updated_at" = $2 where "securities"."symbol" = $3');
+        assert.deepEqual(attempt.params, [at.toISOString(), at.toISOString(), "NVDA"]);
+        for (const { sql } of [buildMarkHistoryLoadedQuery("NVDA", "2024-10-17").toSQL(), buildResetHistoryQuery(["NVDA"]).toSQL(), buildResetUnpricedHistoryQuery(["NVDA"]).toSQL()]) {
+            assert.match(sql, /"history_attempted_at" = \$\d+/);
+        }
+    });
+
+    test("checking for stored bars reads at most one row", () => {
+        const { sql, params } = buildHasBarsQuery("NVDA").toSQL();
+        assert.equal(sql, 'select "symbol" from "price_bars" where "price_bars"."symbol" = $1 limit $2');
+        assert.deepEqual(params, ["NVDA", 1]);
+    });
+
+    test("pruning drops only old, never-priced securities outside the keep list", () => {
+        const before = new Date("2026-10-09T22:30:00Z");
+        const { sql, params } = buildPruneUnpricedSecuritiesQuery(["AAPL"], before).toSQL();
+        assert.equal(sql, 'delete from "securities" where ("securities"."created_at" < $1 and "securities"."history_start_date" is null and "securities"."symbol" not in ($2) and not exists (select 1 from "price_bars" where "price_bars"."symbol" = "securities"."symbol")) returning "symbol"');
+        assert.deepEqual(params, ["2026-10-09T22:30:00.000Z", "AAPL"]);
+        assert.doesNotMatch(buildPruneUnpricedSecuritiesQuery([], before).toSQL().sql, /not in/);
+    });
+
+    test("the latest stored date is the maximum bar date across all symbols", () => {
+        const { sql, params } = buildLatestBarDateQuery().toSQL();
+        assert.equal(sql, 'select max("date") from "price_bars"');
+        assert.deepEqual(params, []);
+    });
+
+    test("a history reset re-queues only symbols whose history was loaded", () => {
+        const { sql, params } = buildResetHistoryQuery(["NVDA", "AAPL"]).toSQL();
+        assert.match(sql, /^update "securities" set "history_start_date" = \$\d+, "history_attempted_at" = \$\d+, "updated_at" = \$\d+/i);
+        assert.match(sql, /"securities"\."symbol" in \(\$\d+, \$\d+\) and "securities"\."history_start_date" is not null/i);
+        assert.match(sql, /returning "symbol"$/i);
+        assert.deepEqual(params.slice(0, 2), [null, null], "a reset is a fresh start for retries too");
+        assert.deepEqual(params.slice(3), ["NVDA", "AAPL"]);
+    });
+
+    test("marking history loaded records where it starts", () => {
+        const { sql, params } = buildMarkHistoryLoadedQuery("NVDA", "2024-10-17").toSQL();
+        assert.match(sql, /^update "securities" set "history_start_date" = \$\d+, "history_attempted_at" = \$\d+, "updated_at" = \$\d+ where "securities"\."symbol" = \$\d+$/i);
+        assert.deepEqual(params.slice(0, 2), ["2024-10-17", null]);
+        assert.equal(params[3], "NVDA");
+    });
+
+    test("a history replace deletes one symbol's bars up to the day given, never later ones", () => {
+        const { sql, params } = buildDeleteHistoryQuery("NVDA", "2026-10-16").toSQL();
+        assert.equal(sql, 'delete from "price_bars" where ("price_bars"."symbol" = $1 and "price_bars"."date" <= $2)');
+        assert.deepEqual(params, ["NVDA", "2026-10-16"]);
+    });
+});
+
+describe("replaceHistory", () => {
+    const untouchable = new Proxy({}, { get: () => () => assert.fail("the database was used") }) as never;
+
+    test("with no valid bar, changes nothing and says so", async () => {
+        const inconsistent = { ...BAR, symbol: "NVDA", high: 1 };
+        assert.equal(await replaceHistory("NVDA", [], "2026-10-16", untouchable), undefined);
+        assert.equal(await replaceHistory("NVDA", [inconsistent], "2026-10-16", untouchable), undefined);
+        // Another symbol's bars, and bars after the cut-off, are never this history.
+        assert.equal(await replaceHistory("NVDA", [BAR, { ...BAR, symbol: "NVDA", date: "2026-10-19" }], "2026-10-16", untouchable), undefined);
     });
 });
 

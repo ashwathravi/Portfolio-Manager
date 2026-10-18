@@ -287,7 +287,7 @@ describe('PolygonMassiveAdapter', () => {
   });
 
   describe('getDailyBars', () => {
-    test('maps grouped rows to daily bars and skips malformed ones', async () => {
+    test('maps grouped rows to daily bars; a ticker with unreadable prices stays in, unpriced', async () => {
       const { fetch, calls } = fakeFetch(() => ({
         body: {
           status: 'OK',
@@ -305,6 +305,8 @@ describe('PolygonMassiveAdapter', () => {
       assert.deepEqual(calls, [groupedUrl('2026-06-30')]);
       assert.deepEqual([...bars.entries()], [
         ['AAPL', { symbol: 'AAPL', date: '2026-06-30', open: 1, high: 2, low: 0.5, close: 1.5, volume: 100 }],
+        // Kept so the ingest can count it as rejected; never a quote.
+        ['NOPRICE', { symbol: 'NOPRICE', date: '2026-06-30', open: 1, high: 1, low: 1, close: Number.NaN, volume: 1 }],
       ]);
     });
 
@@ -348,6 +350,30 @@ describe('PolygonMassiveAdapter', () => {
       const bars = await adapter(fetch, { maxRetries: 1, initialBackoffMs: 1 }).getDailyBars('2026-07-02');
       assert.equal(bars.get('AAPL')?.close, 1);
       assert.equal(attempts, 2);
+    });
+
+    test('a spent shared quota answers 429 without a request, and is not retried', async () => {
+      const { fetch, calls } = fakeFetch(() => ({ body: grouped(bar('AAPL', 1)) }));
+      let reserved = 0;
+      const quota = { reserve: async () => (reserved++, { allowed: false as const, retryAfterMs: 30_000 }) };
+
+      await assert.rejects(adapter(fetch, { quota, maxRetries: 3 }).getDailyBars('2026-07-02'), (err: unknown) => {
+        assert.ok(err instanceof PolygonRateLimitError);
+        assert.equal(err.retryAfterMs, 30_000);
+        assert.ok(!err.message.includes(KEY));
+        return true;
+      });
+      assert.deepEqual([calls.length, reserved], [0, 1]);
+    });
+
+    test('every HTTP attempt takes a token from the shared quota', async () => {
+      let attempts = 0;
+      const { fetch } = fakeFetch(() => (++attempts === 1 ? { status: 429, body: {} } : { body: grouped(bar('AAPL', 1)) }));
+      let reserved = 0;
+      const quota = { reserve: async () => (reserved++, { allowed: true as const }) };
+
+      await adapter(fetch, { quota, maxRetries: 1, initialBackoffMs: 1 }).getDailyBars('2026-07-02');
+      assert.deepEqual([attempts, reserved], [2, 2]);
     });
 
     test('the API key never appears in an error message', async () => {
@@ -402,6 +428,76 @@ describe('PolygonMassiveAdapter', () => {
       assert.deepEqual(history, [{ timestamp: '2026-06-30T00:00:00.000Z', open: 1, high: 2, low: 0.5, close: 1.5, volume: 10 }]);
       assert.equal(fundamentals.name, 'Apple Inc.');
       assert.deepEqual(results.map((r) => r.symbol), ['AAPL']);
+    });
+
+    test('daily history counts the rows it had to leave out; charts get the same bars', async () => {
+      const { fetch } = fakeFetch(() => ({
+        body: {
+          status: 'OK',
+          results: [
+            { t: Date.UTC(2026, 5, 29), o: 1, h: 2, l: 0.5, c: 1.5, v: 10 },
+            { t: Date.UTC(2026, 5, 30), o: 1, h: 2, l: 0.5, c: null, v: 10 },
+            { o: 1, h: 2, l: 0.5, c: 1.5, v: 10 },
+            { t: Date.UTC(2026, 6, 1), o: 1, h: 2, l: 0.5, c: 1.6, v: 10 },
+          ],
+        },
+      }));
+      const provider = adapter(fetch);
+
+      const { bars, unreadable } = await provider.getDailyHistory('AAPL', '1M');
+      assert.equal(unreadable, 2);
+      assert.deepEqual(bars.map((bar) => bar.close), [1.5, 1.6]);
+      assert.deepEqual(await provider.getHistoricalPrices('AAPL', '1M'), bars);
+    });
+
+    test('splits: one call for the date range, unreadable rows dropped', async () => {
+      const { fetch, calls } = fakeFetch(() => ({
+        body: {
+          status: 'OK',
+          results: [
+            { ticker: 'NVDA', execution_date: '2026-10-15', split_from: 1, split_to: 10, adjustment_type: 'forward_split', historical_adjustment_factor: 0.1, id: 'E1' },
+            { ticker: ' brk.b ', execution_date: '2026-10-16', split_from: 0, split_to: 'two' },
+            { ticker: '', execution_date: '2026-10-16' },
+            { ticker: 'XYZ', execution_date: 'soon' },
+            { execution_date: '2026-10-16' },
+          ],
+        },
+      }));
+
+      const splits = await adapter(fetch).getSplits('2026-10-15', '2026-10-16');
+
+      assert.deepEqual(calls, [
+        `${BASE}/stocks/v1/splits?execution_date.gte=2026-10-15&execution_date.lte=2026-10-16&limit=5000&apiKey=${KEY}`,
+      ]);
+      assert.deepEqual(splits, [
+        { symbol: 'NVDA', executionDate: '2026-10-15', splitFrom: 1, splitTo: 10, id: 'E1' },
+        // No usable ratio: still a split (its history is cleared), but no holdings adjustment.
+        { symbol: 'BRK.B', executionDate: '2026-10-16' },
+      ]);
+    });
+
+    test('splits: can be narrowed to some tickers', async () => {
+      const { fetch, calls } = fakeFetch(() => ({ body: { status: 'OK', results: [] } }));
+      await adapter(fetch).getSplits('2026-09-01', '2026-10-16', ['BRK.B', 'NVDA']);
+      assert.deepEqual(calls, [
+        `${BASE}/stocks/v1/splits?execution_date.gte=2026-09-01&execution_date.lte=2026-10-16&ticker.any_of=BRK.B,NVDA&limit=5000&apiKey=${KEY}`,
+      ]);
+    });
+
+    test('splits: a missing results list is no splits; bad dates are refused before any call', async () => {
+      const { fetch, calls } = fakeFetch(() => ({ body: { status: 'OK' } }));
+      assert.deepEqual(await adapter(fetch).getSplits('2026-10-15', '2026-10-15'), []);
+      await assert.rejects(adapter(fetch).getSplits('2026-10-15', '16 Oct'), /YYYY-MM-DD/);
+      assert.equal(calls.length, 1);
+    });
+
+    test('splits: an HTTP error keeps its status', async () => {
+      const { fetch } = fakeFetch(() => ({ status: 403, body: { status: 'NOT_AUTHORIZED' } }));
+      await assert.rejects(adapter(fetch).getSplits('2026-10-15', '2026-10-16'), (err: unknown) => {
+        assert.ok(err instanceof PolygonApiError);
+        assert.equal(err.status, 403);
+        return true;
+      });
     });
   });
 });
