@@ -456,7 +456,7 @@ describe('PolygonMassiveAdapter', () => {
           status: 'OK',
           results: [
             { ticker: 'NVDA', execution_date: '2026-10-15', split_from: 1, split_to: 10, adjustment_type: 'forward_split', historical_adjustment_factor: 0.1, id: 'E1' },
-            { ticker: ' brk.b ', execution_date: '2026-10-16' },
+            { ticker: ' brk.b ', execution_date: '2026-10-16', split_from: 0, split_to: 'two' },
             { ticker: '', execution_date: '2026-10-16' },
             { ticker: 'XYZ', execution_date: 'soon' },
             { execution_date: '2026-10-16' },
@@ -470,8 +470,17 @@ describe('PolygonMassiveAdapter', () => {
         `${BASE}/stocks/v1/splits?execution_date.gte=2026-10-15&execution_date.lte=2026-10-16&limit=5000&apiKey=${KEY}`,
       ]);
       assert.deepEqual(splits, [
-        { symbol: 'NVDA', executionDate: '2026-10-15' },
+        { symbol: 'NVDA', executionDate: '2026-10-15', splitFrom: 1, splitTo: 10, id: 'E1' },
+        // No usable ratio: still a split (its history is cleared), but no holdings adjustment.
         { symbol: 'BRK.B', executionDate: '2026-10-16' },
+      ]);
+    });
+
+    test('splits: can be narrowed to some tickers', async () => {
+      const { fetch, calls } = fakeFetch(() => ({ body: { status: 'OK', results: [] } }));
+      await adapter(fetch).getSplits('2026-09-01', '2026-10-16', ['BRK.B', 'NVDA']);
+      assert.deepEqual(calls, [
+        `${BASE}/stocks/v1/splits?execution_date.gte=2026-09-01&execution_date.lte=2026-10-16&ticker.any_of=BRK.B,NVDA&limit=5000&apiKey=${KEY}`,
       ]);
     });
 

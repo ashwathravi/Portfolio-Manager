@@ -108,7 +108,7 @@ interface PolygonGroupedBar extends PolygonAggBar {
 /** GET /stocks/v1/splits (replaces the deprecated /v3/reference/splits). */
 interface PolygonSplitsResponse {
   status: string;
-  results?: Array<{ ticker?: string; execution_date?: string }>;
+  results?: Array<{ id?: unknown; ticker?: string; execution_date?: string; split_from?: unknown; split_to?: unknown }>;
   next_url?: string;
 }
 
@@ -156,6 +156,14 @@ export interface SplitEvent {
   symbol: string;
   /** Eastern trading date, YYYY-MM-DD. */
   executionDate: string;
+  /**
+   * The ratio: `splitFrom` old shares became `splitTo` new ones (10-for-1:
+   * from 1, to 10). Absent when the provider's numbers aren't positive.
+   */
+  splitFrom?: number;
+  splitTo?: number;
+  /** The provider's id for the action: the same action listed twice is applied once. */
+  id?: string;
 }
 
 /**
@@ -577,7 +585,7 @@ export class PolygonMassiveAdapter implements MarketDataProvider {
    * split-adjusted history changes scale on the execution date, so the
    * nightly ingest refetches those symbols' history.
    */
-  async getSplits(from: string, to: string): Promise<SplitEvent[]> {
+  async getSplits(from: string, to: string, tickers?: readonly string[]): Promise<SplitEvent[]> {
     this.assertConfigured();
     if (!ISO_DATE.test(from) || !ISO_DATE.test(to)) {
       throw new Error(`PolygonMassiveAdapter: Expected dates as YYYY-MM-DD, got "${from}" and "${to}".`);
@@ -585,18 +593,28 @@ export class PolygonMassiveAdapter implements MarketDataProvider {
     // Every adjustment type (forward and reverse splits, stock dividends)
     // rescales adjusted bars. 5000 is the page maximum: far more than a few
     // days of US splits, so one page is the whole answer.
+    // With tickers, only those stocks' actions (the holdings reconciliation
+    // looks back further than a few days, so it narrows the answer).
+    const only = tickers?.length ? `&ticker.any_of=${tickers.map((ticker) => encodeURIComponent(ticker)).join(',')}` : '';
     const url =
       `${this.baseUrl}/stocks/v1/splits` +
-      `?execution_date.gte=${from}&execution_date.lte=${to}&limit=5000&apiKey=${this.apiKey}`;
+      `?execution_date.gte=${from}&execution_date.lte=${to}${only}&limit=5000&apiKey=${this.apiKey}`;
     const data = await this.fetchWithRetry<PolygonSplitsResponse>(url);
     if (data.next_url) {
       console.warn(`PolygonMassiveAdapter: more than one page of splits between ${from} and ${to}; using the first.`);
     }
-    return (data.results ?? []).flatMap((split) =>
-      typeof split?.ticker === 'string' && split.ticker.trim() && typeof split.execution_date === 'string' && ISO_DATE.test(split.execution_date)
-        ? [{ symbol: split.ticker.trim().toUpperCase(), executionDate: split.execution_date }]
-        : [],
-    );
+    const positive = (value: unknown) => typeof value === 'number' && Number.isFinite(value) && value > 0;
+    return (data.results ?? []).flatMap((split) => {
+      if (typeof split?.ticker !== 'string' || !split.ticker.trim()) return [];
+      if (typeof split.execution_date !== 'string' || !ISO_DATE.test(split.execution_date)) return [];
+      const event: SplitEvent = { symbol: split.ticker.trim().toUpperCase(), executionDate: split.execution_date };
+      if (typeof split.id === 'string' && split.id.trim()) event.id = split.id.trim();
+      if (positive(split.split_from) && positive(split.split_to)) {
+        event.splitFrom = split.split_from as number;
+        event.splitTo = split.split_to as number;
+      }
+      return [event];
+    });
   }
 
   private groupedDailyUrl(date: string): string {
