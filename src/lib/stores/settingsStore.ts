@@ -787,35 +787,52 @@ export function normalizeSettings(settings: Partial<PersistedSettings>): Partial
     const defaults = defaultPersistedSettings();
     const normalized: Record<string, unknown> = {};
     for (const slice of PERSISTED_SETTINGS_SLICES) {
-        if (slice in settings) normalized[slice] = coerceToShape(settings[slice], defaults[slice]);
+        if (slice in settings) normalized[slice] = coerceToShape(settings[slice], defaults[slice], slice);
     }
     return normalized as Partial<PersistedSettings>;
 }
+
+/**
+ * What the items of each list are, for lists that are empty by default (the
+ * others show it with their first default item).
+ */
+const EMPTY_DEFAULT_LIST_ITEMS: Readonly<Record<string, 'string' | 'object'>> = {
+    accounts: 'object',
+    'alphaRadarDelivery.tickerFilters': 'string',
+    'alphaRadarDelivery.fundStyleFilters': 'string',
+    'alphaRadarDelivery.trackedFilerIds': 'string',
+    'riskPolicy.cashJobs': 'object',
+};
 
 function kindOf(value: unknown): string {
     if (value === null) return 'null';
     return Array.isArray(value) ? 'array' : typeof value;
 }
 
-function coerceToShape(value: unknown, template: unknown): unknown {
+function coerceToShape(value: unknown, template: unknown, path: string): unknown {
     const kind = kindOf(template);
     // A default of null or undefined says nothing about the shape.
     if (kind === 'null' || kind === 'undefined') return value;
     if (kindOf(value) !== kind) return structuredClone(template);
     if (kind === 'array') {
         const sample = (template as unknown[])[0];
-        if (sample === undefined) return value;
+        if (sample === undefined) {
+            const itemKind = EMPTY_DEFAULT_LIST_ITEMS[path];
+            // An unlisted list still never holds null or undefined.
+            return (value as unknown[]).filter((item) =>
+                itemKind ? kindOf(item) === itemKind : item !== null && item !== undefined);
+        }
         const sampleKind = kindOf(sample);
         return (value as unknown[])
             .filter((item) => kindOf(item) === sampleKind)
-            .map((item) => coerceToShape(item, sample));
+            .map((item) => coerceToShape(item, sample, `${path}[]`));
     }
     if (kind === 'object') {
         const source = value as Record<string, unknown>;
         const shape = template as Record<string, unknown>;
         const coerced: Record<string, unknown> = { ...source };
         for (const key of Object.keys(shape)) {
-            coerced[key] = key in source ? coerceToShape(source[key], shape[key]) : structuredClone(shape[key]);
+            coerced[key] = key in source ? coerceToShape(source[key], shape[key], `${path}.${key}`) : structuredClone(shape[key]);
         }
         return coerced;
     }

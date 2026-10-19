@@ -339,8 +339,8 @@ export function syncSettings(
     // A newer app version wrote the stored settings (this one was rolled
     // back): show them, but never save over them with an older shape.
     let readOnly = server.status === "ok" && isNewerThanThisApp(server.document);
-    const canSave = server.status === "ok";
     let applyingServerSettings = false;
+    let pusher: SettingsPusher | null = null;
 
     const takeServerSettings = (current: StoredSettingsDocument) => {
         applyingServerSettings = true;
@@ -353,11 +353,11 @@ export function syncSettings(
         if (isNewerThanThisApp(current)) readOnly = true;
     };
 
-    const pusher = canSave
-        ? createSettingsPusher({
+    const startSaving = (baseUpdatedAt: string | null) => {
+        pusher = createSettingsPusher({
             send,
             delayMs,
-            baseUpdatedAt: plan.baseUpdatedAt,
+            baseUpdatedAt,
             onSaved: (document, updatedAt, latest) => {
                 // A newer edit waiting is still pending, now on this version.
                 if (latest) writeBrowserCopy(storage, document, { pending: false, baseUpdatedAt: updatedAt });
@@ -369,16 +369,20 @@ export function syncSettings(
                 notices.onReplaced?.();
             },
             onFailed: () => notices.onSaveFailed?.(),
-        })
-        : null;
-    activePusher = pusher;
+        });
+        activePusher = pusher;
+        return pusher;
+    };
 
-    if (plan.document && canSave && !readOnly) {
-        // The copy now matches what the store started with, at the current
-        // version; it stays pending until the server saves it.
-        writeBrowserCopy(storage, currentSettingsDocument(), { pending: plan.push, baseUpdatedAt: plan.baseUpdatedAt });
+    if (server.status === "ok") {
+        const started = startSaving(plan.baseUpdatedAt);
+        if (plan.document && !readOnly) {
+            // The copy now matches what the store started with, at the
+            // current version; it stays pending until the server saves it.
+            writeBrowserCopy(storage, currentSettingsDocument(), { pending: plan.push, baseUpdatedAt: plan.baseUpdatedAt });
+        }
+        if (plan.push && !readOnly) started.schedule(currentSettingsDocument());
     }
-    if (plan.push && !readOnly) pusher?.schedule(currentSettingsDocument());
 
     const unsubscribe = useSettingsStore.subscribe((next, previous) => {
         if (applyingServerSettings || !persistedSlicesChanged(next, previous)) return;
@@ -391,7 +395,18 @@ export function syncSettings(
 
     return {
         rebase(snapshot) {
-            if (!pusher || snapshot.status !== "ok" || !snapshot.document) return;
+            if (snapshot.status !== "ok") return;
+            if (!pusher) {
+                // The database is back: start saving, deciding between the
+                // copy here and the server's as a page load would.
+                const restart = planSettingsStart(snapshot, readBrowserCopy(storage));
+                if (snapshot.document && !restart.push) takeServerSettings(snapshot.document);
+                if (isNewerThanThisApp(snapshot.document)) readOnly = true;
+                const started = startSaving(restart.baseUpdatedAt);
+                if (restart.push && !readOnly) started.schedule(currentSettingsDocument());
+                return;
+            }
+            if (!snapshot.document) return;
             const current = snapshot.document;
             if (current.updatedAt === pusher.base()) return;
             // A save waiting or on its way settles it: the server takes it,

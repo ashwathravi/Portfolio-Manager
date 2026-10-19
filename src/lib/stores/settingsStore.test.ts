@@ -883,6 +883,21 @@ describe('settingsStore', () => {
             assert.ok(!('riskPolicy' in normalized));
         });
 
+        test('regression: drops items of the wrong kind from lists that are empty by default', async () => {
+            const { normalizeSettings, defaultPersistedSettings } = await import('./settingsStore');
+            const defaults = defaultPersistedSettings();
+
+            const normalized = normalizeSettings({
+                accounts: [null, { id: 'plaid-1' }, 'x'] as never,
+                alphaRadarDelivery: { ...defaults.alphaRadarDelivery, tickerFilters: ['AAPL', null, 7] } as never,
+                riskPolicy: { ...defaults.riskPolicy, cashJobs: [undefined, { id: 'job-1' }] } as never,
+            });
+
+            assert.deepStrictEqual(normalized.accounts, [{ id: 'plaid-1' }]);
+            assert.deepStrictEqual(normalized.alphaRadarDelivery?.tickerFilters, ['AAPL']);
+            assert.deepStrictEqual(normalized.riskPolicy?.cashJobs, [{ id: 'job-1' }]);
+        });
+
         test('drops list items of the wrong kind', async () => {
             const { normalizeSettings, defaultPersistedSettings } = await import('./settingsStore');
             const defaults = defaultPersistedSettings();

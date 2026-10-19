@@ -43,6 +43,12 @@ describe('settingsDocumentSchema', () => {
         assert.equal(accepts(body({ security: {} })), false);
     });
 
+    test('regression: list items are objects, so an account like null is refused', () => {
+        assert.equal(accepts(body({ accounts: [null] })), false);
+        assert.equal(accepts(body({ tags: ['x'] })), false);
+        assert.equal(accepts(body({ accounts: [{ id: 'plaid-1' }] })), true);
+    });
+
     test('lists stay lists and every other slice is an object', () => {
         assert.equal(accepts(body({ tags: {} })), false);
         assert.equal(accepts(body({ profile: [] })), false);

@@ -546,4 +546,50 @@ describe("syncSettings", () => {
         assert.equal(sends, 0);
         sync.stop();
     });
+
+    test("regression: starts saving when a refreshed layout says the database is back", async () => {
+        const storage = new FakeStorage();
+        const sent: Array<{ name: string; base: string | null }> = [];
+        const sync = syncSettings(UNAVAILABLE, { document: null, push: false, baseUpdatedAt: null }, {
+            storage,
+            send: async (document, { baseUpdatedAt }) => {
+                sent.push({ name: nameOf(document), base: baseUpdatedAt });
+                return saved(T1);
+            },
+            page: null,
+            delayMs: 0,
+        });
+
+        useSettingsStore.getState().updateProfile({ fullName: "Edited during the outage" });
+        mock.timers.tick(0);
+        await settle();
+        assert.deepEqual(sent, []);
+
+        sync.rebase(SERVER_NONE);
+        mock.timers.tick(0);
+        await settle();
+        assert.deepEqual(sent, [{ name: "Edited during the outage", base: null }]);
+
+        useSettingsStore.getState().updateProfile({ fullName: "And after" });
+        mock.timers.tick(0);
+        await settle();
+        assert.deepEqual(sent[1], { name: "And after", base: T1 });
+        sync.stop();
+    });
+
+    test("when the database is back with newer settings and nothing here is unsaved, takes them", () => {
+        const storage = new FakeStorage();
+        writeBrowserCopy(storage, doc("Old copy"), { pending: false, baseUpdatedAt: T0 });
+        const sync = syncSettings(UNAVAILABLE, { document: doc("Old copy"), push: false, baseUpdatedAt: T0 }, {
+            storage,
+            send: async () => saved(),
+            page: null,
+        });
+
+        sync.rebase(serverWith(stored("Newer on the server", T1)));
+
+        assert.equal(useSettingsStore.getState().profile.fullName, "Newer on the server");
+        assert.equal(readBrowserCopy(storage)?.baseUpdatedAt, T1);
+        sync.stop();
+    });
 });

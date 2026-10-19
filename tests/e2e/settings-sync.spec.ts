@@ -7,6 +7,8 @@ import { signInAsFreshUser } from './helpers/users';
 
 const databaseAuthEnabled = Boolean(process.env.CI || process.env.E2E_DATABASE_AUTH === '1');
 const DARK = /(^|\s)dark(\s|$)/;
+// As in smoke.spec.ts: how next dev and a production build report it.
+const HYDRATION_ERROR = /Hydration|did not match|Minified React error #(418|421|422|423|425)\b|react\.dev\/errors\/(418|421|422|423|425)\b/i;
 
 async function chooseDarkTheme(page: Page) {
     await gotoAppPage(page, '/settings?tab=appearance');
@@ -118,6 +120,38 @@ test.describe('Settings sync', () => {
         await gotoAppPage(otherPage, '/');
         await expect(otherPage.locator('html')).not.toHaveClass(DARK);
         await other.close();
+    });
+
+    test('pages hydrate cleanly with saved settings that differ from the defaults', async ({ page }) => {
+        // The server renders the defaults; the browser starts from these.
+        const save = await page.request.put('/api/settings', {
+            data: {
+                version: 15,
+                settings: {
+                    profile: { fullName: 'Grace Hopper' },
+                    appearance: { theme: 'dark', density: 'compact' },
+                    demo: { showSampleData: false },
+                },
+                baseUpdatedAt: null,
+            },
+        });
+        expect(save.ok()).toBe(true);
+
+        for (const path of ['/', '/settings', '/research', '/execution', '/performance']) {
+            const errors: string[] = [];
+            page.on('pageerror', (error) => errors.push(String(error)));
+            page.on('console', (message) => {
+                if (message.type() === 'error' && HYDRATION_ERROR.test(message.text())) errors.push(message.text());
+            });
+            await gotoAppPage(page, path);
+            await page.waitForTimeout(1000);
+            expect(errors.filter((error) => HYDRATION_ERROR.test(error)), path).toEqual([]);
+            page.removeAllListeners('pageerror');
+            page.removeAllListeners('console');
+        }
+        // And the saved settings are the ones showing.
+        await expect(page.locator('html')).toHaveClass(DARK);
+        await expect(page.getByText('Grace Hopper').first()).toBeVisible();
     });
 
     test('PUT /api/settings refuses what it should not store', async ({ page, playwright }) => {

@@ -16,7 +16,8 @@ import {
  * never stores what it can't read back.
  */
 const objectSlice = z.record(z.string(), z.unknown());
-const listSlice = z.array(z.unknown());
+// Accounts and tags are lists of objects.
+const listSlice = z.array(z.record(z.string(), z.unknown()), { message: 'accounts and tags must be lists of objects' });
 
 const sliceShape = Object.fromEntries(
     PERSISTED_SETTINGS_SLICES.map((slice) => [slice, (LIST_SETTINGS_SLICES.has(slice) ? listSlice : objectSlice).optional()]),
