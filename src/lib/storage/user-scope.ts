@@ -43,12 +43,33 @@ export function readUserValue(storage: ReadableStorage | null | undefined, base:
 
         const legacy = storage.getItem(base);
         if (legacy === null) return null;
-        storage.setItem(key, legacy);
-        storage.removeItem(base);
+        moveValue(storage, base, key, legacy);
+        // Even if it couldn't move, the user's data is what they get.
         return legacy;
     } catch {
         // Storage can throw in strict privacy modes; treat it as empty.
         return null;
+    }
+}
+
+/**
+ * Copies `value` from `from` to `to`, then removes `from`. Without room for
+ * two copies (a nearly full quota) it removes first and puts the value back
+ * if the write still fails, so the value is never lost.
+ */
+function moveValue(storage: ReadableStorage, from: string, to: string, value: string): void {
+    try {
+        storage.setItem(to, value);
+        storage.removeItem(from);
+        return;
+    } catch {
+        // Fall through: no room for both copies.
+    }
+    storage.removeItem(from);
+    try {
+        storage.setItem(to, value);
+    } catch {
+        storage.setItem(from, value);
     }
 }
 
