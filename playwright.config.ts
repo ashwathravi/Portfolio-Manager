@@ -8,13 +8,24 @@ const webServerEnv = Object.fromEntries(
 export const E2E_USER_ID = '00000000-0000-4000-8000-00000000a001';
 export const E2E_SESSION_TOKEN = 'e2e-session-user-a';
 const databaseAuthEnabled = Boolean(process.env.CI || process.env.E2E_DATABASE_AUTH === '1');
-const authServerEnv = databaseAuthEnabled
+// With database sessions (CI and test:e2e:local) the main server runs a
+// production build, as Vercel serves it: `next build`, then `next start`.
+// E2E_DEV_SERVER=1 uses `next dev` instead, for debugging. Without a database
+// the app signs in through the local bypass, which production refuses, so
+// that mode and the two outage servers always run `next dev`.
+const productionBuild = databaseAuthEnabled && process.env.E2E_DEV_SERVER !== '1';
+const PRODUCTION_DIST_DIR = '.next/e2e-production';
+const authServerEnv: Record<string, string> = databaseAuthEnabled
     ? {
         AUTH_SECRET: process.env.E2E_AUTH_SECRET ?? 'e2e-only-auth-secret-change-outside-tests',
         AUTH_GOOGLE_ID: 'e2e-google-client-id',
         AUTH_GOOGLE_SECRET: 'e2e-google-client-secret',
         AUTH_LOCAL_DEV_BYPASS: '0',
         AUTH_LOCAL_DEV_USER_ID: '',
+        // Production refuses sign-in without an invite list: the fixture users.
+        AUTH_ALLOWED_EMAILS: 'e2e-a@example.test,e2e-b@example.test',
+        // Off Vercel, production Auth.js only trusts a host it is told about.
+        AUTH_URL: 'http://localhost:3000',
     }
     : {
         AUTH_SECRET: '',
@@ -92,10 +103,13 @@ export default defineConfig({
     ],
     webServer: [
         {
-            command: 'npm run dev',
+            command: productionBuild ? 'npm run build && npm run start' : 'npm run dev',
             env: {
                 ...webServerEnv,
                 ...authServerEnv,
+                // The production build gets its own directory: building
+                // cleans it, and the outage servers' dev builds sit next to it.
+                ...(productionBuild ? { NEXT_DIST_DIR: PRODUCTION_DIST_DIR } : {}),
                 // Only use a database the test run was explicitly given (CI exports
                 // one). An empty value stops Next from loading a developer's real
                 // DATABASE_URL out of .env.local into the test server.
@@ -109,7 +123,8 @@ export default defineConfig({
             // Never reuse a running server: it may be connected to a real
             // database or the shared Redis. A busy port fails the run instead.
             reuseExistingServer: false,
-            timeout: 120_000,
+            // A production build takes a few minutes before the server starts.
+            timeout: productionBuild ? 600_000 : 120_000,
         },
         {
             // "Database down" server for tests/e2e/outage.spec.ts: a database is

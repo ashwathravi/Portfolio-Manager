@@ -39,7 +39,9 @@
     ".next/e2e-outage/types/**/*.ts",
     ".next/e2e-outage/dev/types/**/*.ts",
     ".next/e2e-placeholder/types/**/*.ts",
-    ".next/e2e-placeholder/dev/types/**/*.ts"
+    ".next/e2e-placeholder/dev/types/**/*.ts",
+    ".next/e2e-production/types/**/*.ts",
+    ".next/e2e-production/dev/types/**/*.ts"
   ],
   "exclude": [
     "node_modules",
