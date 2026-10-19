@@ -11,8 +11,9 @@ import {
  * A settings document as PUT /api/settings receives it. Only the persisted
  * slices, each an object (or a list, for accounts and tags); what's inside a
  * slice is the store's business, and the store's migration normalizes it on
- * read. Documents from a newer store version than this server knows are
- * refused, so an old server never stores what it can't read back.
+ * read (src/lib/stores/settingsStore.ts normalizeSettings). Documents from a
+ * newer store version than this server knows are refused, so an old server
+ * never stores what it can't read back.
  */
 const objectSlice = z.record(z.string(), z.unknown());
 const listSlice = z.array(z.unknown());
@@ -28,4 +29,6 @@ export const settingsDocumentSchema = z.object({
         .min(1, 'version must be at least 1')
         .max(SETTINGS_VERSION, `version must be at most ${SETTINGS_VERSION}`),
     settings: z.object(sliceShape).strict(),
+    // The stored version the document was made on; null for a user's first save.
+    baseUpdatedAt: z.union([z.iso.datetime({ message: 'baseUpdatedAt must be an ISO date-time' }), z.null()]),
 }).strict();

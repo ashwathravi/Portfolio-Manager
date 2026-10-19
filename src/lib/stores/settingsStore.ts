@@ -770,6 +770,58 @@ export function persistedSettings(state: SettingsState): PersistedSettings {
     };
 }
 
+/** The persisted slices as a fresh install has them. */
+export function defaultPersistedSettings(): PersistedSettings {
+    return structuredClone(persistedSettings(useSettingsStore.getInitialState()));
+}
+
+/**
+ * Makes stored settings safe to load, whatever they hold: every field the
+ * defaults have keeps its kind (object, list, string, number, boolean), so a
+ * missing or mistyped field, or an empty slice, falls back to the default
+ * instead of crashing the page that reads it. List items of the wrong kind
+ * are dropped. Fields the defaults don't have (optional ones, keys a user
+ * added) are kept as they are.
+ */
+export function normalizeSettings(settings: Partial<PersistedSettings>): Partial<PersistedSettings> {
+    const defaults = defaultPersistedSettings();
+    const normalized: Record<string, unknown> = {};
+    for (const slice of PERSISTED_SETTINGS_SLICES) {
+        if (slice in settings) normalized[slice] = coerceToShape(settings[slice], defaults[slice]);
+    }
+    return normalized as Partial<PersistedSettings>;
+}
+
+function kindOf(value: unknown): string {
+    if (value === null) return 'null';
+    return Array.isArray(value) ? 'array' : typeof value;
+}
+
+function coerceToShape(value: unknown, template: unknown): unknown {
+    const kind = kindOf(template);
+    // A default of null or undefined says nothing about the shape.
+    if (kind === 'null' || kind === 'undefined') return value;
+    if (kindOf(value) !== kind) return structuredClone(template);
+    if (kind === 'array') {
+        const sample = (template as unknown[])[0];
+        if (sample === undefined) return value;
+        const sampleKind = kindOf(sample);
+        return (value as unknown[])
+            .filter((item) => kindOf(item) === sampleKind)
+            .map((item) => coerceToShape(item, sample));
+    }
+    if (kind === 'object') {
+        const source = value as Record<string, unknown>;
+        const shape = template as Record<string, unknown>;
+        const coerced: Record<string, unknown> = { ...source };
+        for (const key of Object.keys(shape)) {
+            coerced[key] = key in source ? coerceToShape(source[key], shape[key]) : structuredClone(shape[key]);
+        }
+        return coerced;
+    }
+    return value;
+}
+
 /** Brings a stored document written at `version` up to {@link SETTINGS_VERSION}. */
 export function migrateSettings(persistedState: unknown, version: number): Partial<PersistedSettings> {
     const s = (persistedState ?? {}) as Partial<SettingsState>;

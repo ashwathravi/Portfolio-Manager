@@ -76,8 +76,13 @@ export interface SettingsDocument {
     settings: Partial<Record<PersistedSettingsSlice, unknown>>;
 }
 
+/** A document as stored, with the version stamp saves are checked against. */
+export interface StoredSettingsDocument extends SettingsDocument {
+    updatedAt: string;
+}
+
 /** What the root layout hands the browser about the stored document. */
 export type ServerSettingsSnapshot =
-    | { status: "ok"; document: (SettingsDocument & { updatedAt: string }) | null }
+    | { status: "ok"; document: StoredSettingsDocument | null }
     // No usable database, or reading it failed: the browser copy is all there is.
     | { status: "unavailable" };

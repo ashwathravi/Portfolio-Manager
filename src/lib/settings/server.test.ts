@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 import type { db } from "@/db";
 
-import { buildLoadUserSettingsQuery, buildSaveUserSettingsQuery, serverSettingsFor } from "./server";
+import { buildLoadUserSettingsQuery, buildSaveUserSettingsQuery, saveUserSettings, serverSettingsFor } from "./server";
 
 const USER = "00000000-0000-4000-8000-00000000a001";
 const NOW = new Date("2026-10-19T08:00:00.000Z");
@@ -25,16 +25,23 @@ describe("user settings queries", () => {
         assert.deepEqual(params, [USER, 1]);
     });
 
-    test("save replaces the user's document in one statement", () => {
+    test("save replaces the user's document only if it was made on the stored version", () => {
         const document = { version: 15, settings: { demo: { showSampleData: false } } };
-        const { sql, params } = buildSaveUserSettingsQuery(USER, document, NOW).toSQL();
+        const base = "2026-10-19T07:00:00.000Z";
+        const { sql, params } = buildSaveUserSettingsQuery(USER, document, base, NOW).toSQL();
 
         assert.match(sql, /insert into "user_settings" \("user_id", "version", "settings", "updated_at"\)/i);
-        assert.match(sql, /on conflict \("user_id"\) do update set "version" = \$\d+, "settings" = \$\d+, "updated_at" = \$\d+/i);
+        assert.match(sql, /on conflict \("user_id"\) do update set "version" = \$\d+, "settings" = \$\d+, "updated_at" = \$\d+ where "user_settings"\."updated_at" = \$\d+/i);
         assert.match(sql, /returning "updated_at"/i);
         assert.ok(params.includes(USER));
         assert.ok(params.includes(JSON.stringify(document.settings)));
         assert.ok(params.includes(NOW.toISOString()));
+        assert.ok(params.includes(base));
+    });
+
+    test("a first save never replaces a document someone already stored", () => {
+        const { sql } = buildSaveUserSettingsQuery(USER, { version: 15, settings: {} }, null, NOW).toSQL();
+        assert.match(sql, /do update set .* where false/i);
     });
 });
 
@@ -66,5 +73,34 @@ describe("serverSettingsFor", () => {
         const database = fakeDatabase({ error: new Error("connect ECONNREFUSED 127.0.0.1:9") });
 
         assert.deepEqual(await serverSettingsFor(USER, { env: CONFIGURED, database }), { status: "unavailable" });
+    });
+});
+
+describe("saveUserSettings", () => {
+    /** A database whose upsert returns `saved` rows, and whose read returns `current`. */
+    function savingDatabase(saved: unknown[], current: unknown[] = []) {
+        const returning = async () => saved;
+        const limit = async () => current;
+        return {
+            insert: () => ({ values: () => ({ onConflictDoUpdate: () => ({ returning }) }) }),
+            select: () => ({ from: () => ({ where: () => ({ limit }) }) }),
+        } as unknown as typeof db;
+    }
+
+    test("reports the new version stamp when the save lands", async () => {
+        const result = await saveUserSettings(USER, { version: 15, settings: {} }, null, { database: savingDatabase([{ updatedAt: NOW }]) });
+        assert.deepEqual(result, { status: "saved", updatedAt: NOW.toISOString() });
+    });
+
+    test("hands back what's stored now when someone saved first", async () => {
+        const later = new Date("2026-10-19T09:00:00.000Z");
+        const database = savingDatabase([], [{ version: 15, settings: { demo: { showSampleData: false } }, updatedAt: later }]);
+
+        const result = await saveUserSettings(USER, { version: 15, settings: {} }, NOW.toISOString(), { database });
+
+        assert.deepEqual(result, {
+            status: "conflict",
+            current: { version: 15, settings: { demo: { showSampleData: false } }, updatedAt: later.toISOString() },
+        });
     });
 });

@@ -3,11 +3,12 @@
  *
  * Saves the signed-in user's settings document (launch item i37): the
  * persisted slices of the settings store, at the store's schema version. The
- * whole document replaces the stored one; the browser sends it after every
- * change (src/lib/settings/sync.ts).
+ * whole document replaces the stored one, but only if it was made on the
+ * stored version (`baseUpdatedAt`); otherwise the answer is 409 with what's
+ * stored now, which the browser takes instead (src/lib/settings/sync.ts).
  *
- * Body:     { version: number, settings: { [slice]: object | list } }
- * Response: { data: { updatedAt } }
+ * Body:     { version: number, settings: { [slice]: object | list }, baseUpdatedAt: string | null }
+ * Response: { data: { updatedAt } }, or 409 { error, code: SETTINGS_CONFLICT, data: { document } }
  */
 
 import { NextResponse } from 'next/server';
@@ -20,8 +21,8 @@ import { settingsDocumentSchema } from '@/lib/validators/user-settings';
 
 export const dynamic = 'force-dynamic';
 
-/** Keepalive requests (sent as a page closes) can't exceed 64 KiB. */
-const MAX_BODY_BYTES = 64 * 1024;
+/** Generous: lists and notes in the risk policy can grow. */
+const MAX_BODY_BYTES = 512 * 1024;
 
 export async function PUT(request: Request) {
     const auth = await requireSessionApiUserScope(request);
@@ -39,8 +40,15 @@ export async function PUT(request: Request) {
     }
 
     try {
-        const saved = await saveUserSettings(auth.context.userId, parsed.data);
-        return NextResponse.json({ data: saved }, { headers: { 'Cache-Control': 'no-store' } });
+        const { baseUpdatedAt, ...document } = parsed.data;
+        const result = await saveUserSettings(auth.context.userId, document, baseUpdatedAt);
+        if (result.status === 'conflict') {
+            return NextResponse.json(
+                { error: 'Settings changed since this copy was made.', code: 'SETTINGS_CONFLICT', data: { document: result.current } },
+                { status: 409, headers: { 'Cache-Control': 'no-store' } },
+            );
+        }
+        return NextResponse.json({ data: { updatedAt: result.updatedAt } }, { headers: { 'Cache-Control': 'no-store' } });
     } catch (err) {
         return internalServerError(err, 'Unable to save settings.', 'SETTINGS_SAVE_FAILED');
     }

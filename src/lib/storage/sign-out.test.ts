@@ -37,23 +37,18 @@ describe("clearBrowserDataOnSignOut", () => {
         assert.deepEqual([...CLEARED_ON_SIGN_OUT], ["pm-ask-v1"]);
     });
 
-    test("removes settings the server has saved; they come back from there", () => {
-        const storage = new FakeStorage();
-        storage.setItem(userStorageKey(SETTINGS_STORAGE_KEY, "user-a"), JSON.stringify({ state: {}, version: 15, pending: false }));
-
-        clearBrowserDataOnSignOut(storage, "user-a");
-
-        assert.equal(storage.getItem(userStorageKey(SETTINGS_STORAGE_KEY, "user-a")), null);
-    });
-
-    test("keeps settings the server hasn't saved, or never had", () => {
-        for (const copy of [{ state: {}, version: 15, pending: true }, { state: {}, version: 15 }]) {
+    test("removes the settings copy, saved or not; the server's comes back at the next sign-in", () => {
+        for (const copy of [
+            { state: {}, version: 15, pending: false },
+            { state: {}, version: 15, pending: true },
+            { state: {}, version: 15 },
+        ]) {
             const storage = new FakeStorage();
             storage.setItem(userStorageKey(SETTINGS_STORAGE_KEY, "user-a"), JSON.stringify(copy));
 
             clearBrowserDataOnSignOut(storage, "user-a");
 
-            assert.notEqual(storage.getItem(userStorageKey(SETTINGS_STORAGE_KEY, "user-a")), null, JSON.stringify(copy));
+            assert.equal(storage.getItem(userStorageKey(SETTINGS_STORAGE_KEY, "user-a")), null, JSON.stringify(copy));
         }
     });
 

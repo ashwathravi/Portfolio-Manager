@@ -79,6 +79,34 @@ test.describe('Settings sync', () => {
         await elsewhere.context().close();
     });
 
+    test('regression: a stale tab takes the newer settings instead of reverting them', async ({ browser, context, page }) => {
+        // Opened before the other browser saved, so its copy is stale.
+        const stale = await anotherBrowser(browser, context);
+        await gotoAppPage(stale, '/settings?tab=appearance');
+
+        const saved = savedSettings(page);
+        await chooseDarkTheme(page);
+        await saved;
+
+        // A change in the stale tab is refused (409), and the tab shows the
+        // saved settings instead of sending its old ones back.
+        const refused = stale.waitForResponse((response) => response.url().endsWith('/api/settings') && response.status() === 409);
+        await clickUntil(
+            stale.getByRole('radiogroup', { name: 'Interface density' }).getByRole('radio', { name: 'Compact', exact: true }),
+            async () => {
+                await expect(stale.getByRole('radiogroup', { name: 'Interface density' }).getByRole('radio', { name: 'Compact', exact: true }))
+                    .toHaveAttribute('aria-checked', 'true', { timeout: 1000 });
+            },
+        );
+        await refused;
+        await expect(stale.locator('html')).toHaveClass(DARK);
+        await expect(stale.getByText('Your settings were changed in another tab or device.')).toBeVisible();
+
+        await gotoAppPage(page, '/');
+        await expect(page.locator('html')).toHaveClass(DARK);
+        await stale.context().close();
+    });
+
     test("one account's settings don't reach another", async ({ browser, page }) => {
         const saved = savedSettings(page);
         await chooseDarkTheme(page);
@@ -96,12 +124,12 @@ test.describe('Settings sync', () => {
         await gotoAppPage(page, '/');
 
         const apiKeys = await page.request.put('/api/settings', {
-            data: { version: 15, settings: { apiKeys: { polygon: 'pk-should-not-store' } } },
+            data: { version: 15, settings: { apiKeys: { polygon: 'pk-should-not-store' } }, baseUpdatedAt: null },
         });
         expect(apiKeys.status()).toBe(400);
         expect((await apiKeys.json()).code).toBe('INVALID_SETTINGS');
 
-        const future = await page.request.put('/api/settings', { data: { version: 999, settings: {} } });
+        const future = await page.request.put('/api/settings', { data: { version: 999, settings: {}, baseUpdatedAt: null } });
         expect(future.status()).toBe(400);
 
         // A request context of its own: the page's background requests keep
@@ -110,7 +138,7 @@ test.describe('Settings sync', () => {
             baseURL: 'http://localhost:3000',
             storageState: { cookies: [], origins: [] },
         });
-        const signedOut = await anonymous.put('/api/settings', { data: { version: 15, settings: {} } });
+        const signedOut = await anonymous.put('/api/settings', { data: { version: 15, settings: {}, baseUpdatedAt: null } });
         expect(signedOut.status()).toBe(401);
         await anonymous.dispose();
     });

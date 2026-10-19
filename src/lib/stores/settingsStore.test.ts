@@ -855,4 +855,44 @@ describe('settingsStore', () => {
             assert.deepStrictEqual(migrateSettings({ demo }, SETTINGS_VERSION), { demo });
         });
     });
+
+    describe('normalizeSettings', () => {
+        test('fills an empty or mistyped slice from the defaults', async () => {
+            const { normalizeSettings, defaultPersistedSettings } = await import('./settingsStore');
+            const defaults = defaultPersistedSettings();
+
+            const normalized = normalizeSettings({
+                riskPolicy: {} as never,
+                guardrails: { approvalThresholdUsd: 'lots' } as never,
+            });
+
+            assert.deepStrictEqual(normalized.riskPolicy, defaults.riskPolicy);
+            assert.strictEqual(normalized.guardrails?.approvalThresholdUsd, defaults.guardrails.approvalThresholdUsd);
+        });
+
+        test('keeps valid values, unknown fields and lists the defaults leave empty', async () => {
+            const { normalizeSettings, defaultPersistedSettings } = await import('./settingsStore');
+            const defaults = defaultPersistedSettings();
+            const profile = { ...defaults.profile, fullName: 'Jane Smith', nickname: 'JS' };
+            const accounts = [{ id: 'plaid-1', name: 'Brokerage' }];
+
+            const normalized = normalizeSettings({ profile, accounts } as never);
+
+            assert.deepStrictEqual(normalized.profile, profile);
+            assert.deepStrictEqual(normalized.accounts, accounts);
+            assert.ok(!('riskPolicy' in normalized));
+        });
+
+        test('drops list items of the wrong kind', async () => {
+            const { normalizeSettings, defaultPersistedSettings } = await import('./settingsStore');
+            const defaults = defaultPersistedSettings();
+            const [first] = defaults.riskPolicy.bucketPolicies;
+
+            const normalized = normalizeSettings({
+                riskPolicy: { ...defaults.riskPolicy, bucketPolicies: [first, 42, 'x'] } as never,
+            });
+
+            assert.deepStrictEqual(normalized.riskPolicy?.bucketPolicies, [first]);
+        });
+    });
 });
