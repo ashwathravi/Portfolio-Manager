@@ -233,9 +233,6 @@ export function createSettingsPusher({
             })
             .finally(() => {
                 if (inFlight === request) inFlight = null;
-                // Anything that came in meanwhile goes next, even if the page
-                // spent the wait in the back-forward cache.
-                if (waiting && !timer) timer = setTimeout(() => void flush(), delayMs);
             });
         inFlight = request;
         return request;
@@ -369,7 +366,7 @@ export function syncSettings(
 ): SettingsSyncHandle {
     // A newer app version wrote the stored settings (this one was rolled
     // back): show them, but never save over them with an older shape.
-    let readOnly = server.status === "ok" && isNewerThanThisApp(server.document);
+    let readOnly = isNewerThanThisApp(plan.document) || (server.status === "ok" && isNewerThanThisApp(server.document));
     let applyingServerSettings = false;
     let pusher: SettingsPusher | null = null;
     let halted = false;
@@ -382,8 +379,13 @@ export function syncSettings(
         } finally {
             applyingServerSettings = false;
         }
-        writeBrowserCopy(storage, currentSettingsDocument(), { pending: false, baseUpdatedAt: current.updatedAt });
-        if (isNewerThanThisApp(current)) readOnly = true;
+        if (isNewerThanThisApp(current)) {
+            // Kept as the newer app wrote it, so this copy stays read-only too.
+            writeBrowserCopy(storage, current, { pending: false, baseUpdatedAt: current.updatedAt });
+            readOnly = true;
+        } else {
+            writeBrowserCopy(storage, currentSettingsDocument(), { pending: false, baseUpdatedAt: current.updatedAt });
+        }
     };
 
     const startSaving = (baseUpdatedAt: string | null) => {

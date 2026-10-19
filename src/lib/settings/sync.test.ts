@@ -696,4 +696,77 @@ describe("createSettingsPusher, with a save on its way as the page closes", () =
 
         assert.deepEqual(sent, ["A", "B"]);
     });
+
+    test("regression: a failed save waits for the next change instead of retrying on its own", async () => {
+        let sends = 0;
+        const pusher = createSettingsPusher({
+            send: async () => {
+                sends += 1;
+                throw new Error("503");
+            },
+            baseUpdatedAt: T0,
+            onSaved: () => {},
+            onConflict: () => {},
+            delayMs: 100,
+        });
+
+        pusher.schedule(doc("A"));
+        mock.timers.tick(100);
+        await settle();
+        mock.timers.tick(60_000);
+        await settle();
+
+        assert.equal(sends, 1);
+        pusher.schedule(doc("B"));
+        mock.timers.tick(100);
+        await settle();
+        assert.equal(sends, 2);
+    });
+});
+
+describe("syncSettings, with settings from a newer version of the app", () => {
+    beforeEach(() => mock.timers.enable({ apis: ["setTimeout"] }));
+    afterEach(() => mock.timers.reset());
+
+    test("regression: keeps the newer document as it is in the browser copy, and stays read-only on it", async () => {
+        const storage = new FakeStorage();
+        const future: StoredSettingsDocument = { ...stored("From a newer app", T1), version: SETTINGS_VERSION + 1 };
+        const sync = syncSettings(serverWith(stored("Start", T0)), { document: null, push: false, baseUpdatedAt: T0 }, {
+            storage,
+            send: async () => ({ status: "conflict", current: future }),
+            page: null,
+            delayMs: 0,
+        });
+
+        useSettingsStore.getState().setTheme("dark");
+        mock.timers.tick(0);
+        await settle();
+        sync.stop();
+
+        const copy = readBrowserCopy(storage);
+        assert.equal(copy?.document.version, SETTINGS_VERSION + 1);
+        assert.equal(copy?.pending, false);
+
+        // A reload during an outage starts from that copy: still read-only.
+        let sends = 0;
+        const plan = planSettingsStart(UNAVAILABLE, copy);
+        const reloaded = syncSettings(UNAVAILABLE, plan, {
+            storage,
+            send: async () => {
+                sends += 1;
+                return saved();
+            },
+            page: null,
+        });
+        useSettingsStore.getState().setDensity("compact");
+        reloaded.rebase(serverWith(future));
+        useSettingsStore.getState().setDensity("comfortable");
+        mock.timers.tick(5000);
+        await settle();
+
+        assert.equal(sends, 0);
+        assert.equal(readBrowserCopy(storage)?.document.version, SETTINGS_VERSION + 1);
+        assert.equal(readBrowserCopy(storage)?.pending, false);
+        reloaded.stop();
+    });
 });
