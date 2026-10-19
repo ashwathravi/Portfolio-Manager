@@ -20,6 +20,16 @@ class FakeStorage {
     removeItem(key: string) { this.store.delete(key); }
 }
 
+/** Storage that refuses writes past `capacity` characters of keys and values, as a full quota does. */
+class QuotaStorage extends FakeStorage {
+    constructor(private readonly capacity: number) { super(); }
+    override setItem(key: string, value: string) {
+        const used = [...this.store.entries()].filter(([k]) => k !== key).reduce((sum, [k, v]) => sum + k.length + v.length, 0);
+        if (used + key.length + value.length > this.capacity) throw new Error("QuotaExceededError");
+        super.setItem(key, value);
+    }
+}
+
 function documentWithScope(scope: string | null) {
     return { documentElement: { getAttribute: (name: string) => (name === STORAGE_SCOPE_ATTRIBUTE ? scope : null) } } as unknown as Document;
 }
@@ -77,6 +87,26 @@ describe("readUserValue and writeUserValue", () => {
         writeUserValue(storage, "pm-ask-v1", "mine", "user-a");
 
         assert.equal(readUserValue(storage, "pm-ask-v1", "user-a"), "mine");
+    });
+
+    test("regression: move a shared value even when there's no room for two copies", () => {
+        // Room for the value under its longer, per-user key, but not twice.
+        const storage = new QuotaStorage("atlas:research:theses:user-a".length + 20);
+        storage.setItem("atlas:research:theses", "x".repeat(20));
+
+        assert.equal(readUserValue(storage, "atlas:research:theses", "user-a"), "x".repeat(20));
+        assert.equal(storage.getItem("atlas:research:theses:user-a"), "x".repeat(20));
+        assert.equal(storage.getItem("atlas:research:theses"), null);
+    });
+
+    test("keep the shared value where it is when it can't be moved at all", () => {
+        // Only room for the value under its shorter, shared key.
+        const storage = new QuotaStorage("pm-ask-v1".length + 20);
+        storage.setItem("pm-ask-v1", "x".repeat(20));
+
+        // The user still gets their data, and nothing was lost.
+        assert.equal(readUserValue(storage, "pm-ask-v1", "user-a"), "x".repeat(20));
+        assert.equal(storage.getItem("pm-ask-v1"), "x".repeat(20));
     });
 
     test("treat missing or failing storage as empty", () => {
