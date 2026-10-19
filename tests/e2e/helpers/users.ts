@@ -63,6 +63,9 @@ export async function signInAsFreshUser(context: BrowserContext): Promise<string
             WHERE p.user_id = ${FIXTURE_USER_ID}`;
     });
 
+    // Leave open pages first: every signed-in response sets the session
+    // cookie again, so a request still on its way would bring user A back.
+    for (const open of context.pages()) await open.goto('about:blank');
     await context.clearCookies();
     await context.addCookies([{
         name: 'authjs.session-token',

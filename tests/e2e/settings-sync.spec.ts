@@ -92,7 +92,7 @@ test.describe('Settings sync', () => {
         await other.close();
     });
 
-    test('PUT /api/settings refuses what it should not store', async ({ context, page }) => {
+    test('PUT /api/settings refuses what it should not store', async ({ page, playwright }) => {
         await gotoAppPage(page, '/');
 
         const apiKeys = await page.request.put('/api/settings', {
@@ -104,8 +104,14 @@ test.describe('Settings sync', () => {
         const future = await page.request.put('/api/settings', { data: { version: 999, settings: {} } });
         expect(future.status()).toBe(400);
 
-        await context.clearCookies();
-        const signedOut = await page.request.put('/api/settings', { data: { version: 15, settings: {} } });
+        // A request context of its own: the page's background requests keep
+        // setting the session cookie on the shared one.
+        const anonymous = await playwright.request.newContext({
+            baseURL: 'http://localhost:3000',
+            storageState: { cookies: [], origins: [] },
+        });
+        const signedOut = await anonymous.put('/api/settings', { data: { version: 15, settings: {} } });
         expect(signedOut.status()).toBe(401);
+        await anonymous.dispose();
     });
 });
