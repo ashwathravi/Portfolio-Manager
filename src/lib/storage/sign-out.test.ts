@@ -61,6 +61,20 @@ describe("clearBrowserDataOnSignOut", () => {
         assert.equal(storage.getItem("pm-ask-v1"), null);
     });
 
+    test("regression: removes shared values that couldn't move to the user, so the next account can't claim them", () => {
+        const storage = new FakeStorage();
+        // Under keys that used to be shared, left behind (a full quota).
+        storage.setItem("atlas:research:theses", "theses from before");
+        storage.setItem("pm-weekly-reviews-v1", "notes from before");
+
+        clearBrowserDataOnSignOut(storage, "user-a");
+
+        assert.equal(storage.getItem("atlas:research:theses"), null);
+        assert.equal(storage.getItem("pm-weekly-reviews-v1"), null);
+        // With room now, they went to the user signing out first.
+        assert.equal(storage.getItem(userStorageKey("atlas:research:theses", "user-a")), "theses from before");
+    });
+
     test("does nothing without storage", () => {
         assert.doesNotThrow(() => clearBrowserDataOnSignOut(null, "user-a"));
     });
