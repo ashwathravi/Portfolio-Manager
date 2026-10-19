@@ -380,3 +380,87 @@ describe("API proxy security", () => {
         assert.equal(response.status, 429);
     });
 });
+
+describe("proxy Content-Security-Policy", () => {
+    afterEach(() => {
+        delete process.env.AUTH_SECRET;
+        delete process.env.AUTH_GOOGLE_ID;
+        delete process.env.AUTH_GOOGLE_SECRET;
+        delete process.env.AUTH_ALLOWED_EMAILS;
+        delete process.env.AUTH_LOCAL_DEV_BYPASS;
+        delete process.env.AUTH_LOCAL_DEV_USER_ID;
+        setNodeEnv(ORIGINAL_NODE_ENV);
+        resetApiSecurityForTests();
+    });
+
+    function nonceOf(policy: string | null): string | undefined {
+        return policy?.match(/'nonce-([^']+)'/)?.[1];
+    }
+
+    function localBypass() {
+        setNodeEnv("test");
+        process.env.AUTH_LOCAL_DEV_BYPASS = "1";
+        process.env.AUTH_LOCAL_DEV_USER_ID = USER_ID;
+    }
+
+    test("hands the app the same policy the browser gets, so rendered scripts carry its nonce", async () => {
+        localBypass();
+
+        const response = await proxy(pageRequest("/settings"));
+        const policy = response.headers.get("content-security-policy");
+
+        assert.equal(response.status, 200);
+        assert.ok(nonceOf(policy), "no nonce in the policy");
+        assert.ok(response.headers.get("x-middleware-override-headers")?.split(",").includes("content-security-policy"));
+        assert.equal(response.headers.get("x-middleware-request-content-security-policy"), policy);
+    });
+
+    test("uses a new nonce for every request", async () => {
+        localBypass();
+
+        const first = nonceOf((await proxy(pageRequest("/settings"))).headers.get("content-security-policy"));
+        const second = nonceOf((await proxy(pageRequest("/settings"))).headers.get("content-security-policy"));
+
+        assert.ok(first && second);
+        assert.notEqual(first, second);
+    });
+
+    test("forwards the policy on public pages too", async () => {
+        configureAuth();
+
+        const response = await proxy(pageRequest("/login"));
+
+        assert.ok(nonceOf(response.headers.get("x-middleware-request-content-security-policy")));
+    });
+
+    test("keeps the request's own headers when forwarding the policy", async () => {
+        localBypass();
+
+        const response = await proxy(apiRequest({ accept: "text/html", "x-vercel-id": "pdx1::abc" }, "/settings"));
+        const forwarded = response.headers.get("x-middleware-override-headers")?.split(",") ?? [];
+
+        assert.ok(forwarded.includes("x-vercel-id"));
+        assert.equal(response.headers.get("x-middleware-request-x-vercel-id"), "pdx1::abc");
+    });
+
+    test("sets the policy on redirects and errors as well", async () => {
+        configureAuth();
+        const login = await proxy(pageRequest("/settings"));
+        const notFound = await proxy(apiRequest({}, "/api/schwab/order"));
+
+        assert.equal(login.status, 307);
+        assert.ok(nonceOf(login.headers.get("content-security-policy")));
+        assert.equal(notFound.status, 404);
+        assert.ok(nonceOf(notFound.headers.get("content-security-policy")));
+    });
+
+    test("regression: scripts no longer run from 'unsafe-inline'", async () => {
+        localBypass();
+
+        const policy = (await proxy(pageRequest("/settings"))).headers.get("content-security-policy") ?? "";
+        const scriptSrc = policy.split("; ").find((part) => part.startsWith("script-src ")) ?? "";
+
+        assert.ok(scriptSrc.includes("'strict-dynamic'"));
+        assert.ok(!scriptSrc.includes("'unsafe-inline'"));
+    });
+});
