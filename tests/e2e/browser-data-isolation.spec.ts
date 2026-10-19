@@ -75,6 +75,28 @@ test.describe('Browser data per user', () => {
         expect(await storedAskHistory(page)).not.toBeNull();
     });
 
+    test("regression: shared history goes to the account signed in now, even if it never opens Ask", async ({ context, page }) => {
+        await page.addInitScript(() => {
+            if (window.sessionStorage.getItem('__pm_test_legacy_ask')) return;
+            window.sessionStorage.setItem('__pm_test_legacy_ask', '1');
+            window.localStorage.setItem('pm-ask-v1', JSON.stringify({
+                history: [{ id: 'legacy-1', role: 'user', content: "User A's question", ts: Date.now() }],
+                dayBucket: '2026-01-01',
+                dayCount: 1,
+            }));
+        });
+
+        // User A only looks at Today.
+        await gotoAppPage(page, '/');
+        await expect.poll(() => page.evaluate(() => window.localStorage.getItem('pm-ask-v1'))).toBeNull();
+        expect(await storedAskHistory(page)).not.toBeNull();
+
+        await switchToUserB(context);
+        await page.goto('/ask');
+        await expect(page.getByTestId('ask-suggestion').first()).toBeVisible();
+        await expect(page.getByTestId('ask-msg-user')).toHaveCount(0);
+    });
+
     test('signing out removes the Ask transcript from this browser', async ({ page }) => {
         await askAQuestion(page);
         expect(await storedAskHistory(page)).not.toBeNull();

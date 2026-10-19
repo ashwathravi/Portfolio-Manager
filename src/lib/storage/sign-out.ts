@@ -16,5 +16,13 @@ export function clearBrowserDataOnSignOut(
     storage: Pick<Storage, "getItem" | "setItem" | "removeItem"> | null = browserLocalStorage(),
     scope: string = currentStorageScope(),
 ): void {
-    for (const base of CLEARED_ON_SIGN_OUT) removeUserValue(storage, base, scope);
+    for (const base of CLEARED_ON_SIGN_OUT) {
+        removeUserValue(storage, base, scope);
+        // And a copy saved before keys were per user, if one is still here.
+        try {
+            storage?.removeItem(base);
+        } catch {
+            // Nothing to remove.
+        }
+    }
 }

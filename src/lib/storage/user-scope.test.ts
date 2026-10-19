@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
     STORAGE_SCOPE_ATTRIBUTE,
+    adoptSharedValues,
     currentStorageScope,
     readUserValue,
     removeUserValue,
@@ -100,6 +101,44 @@ describe("readUserValue and writeUserValue", () => {
 
         assert.equal(storage.getItem("pm-ask-v1:user-a"), null);
         assert.equal(storage.getItem("pm-ask-v1:user-b"), "b");
+    });
+});
+
+describe("adoptSharedValues", () => {
+    test("regression: hands every shared value to the signed-in user at once, not just the one opened", () => {
+        const storage = new FakeStorage();
+        storage.setItem("pm-ask-v1", "a's questions");
+        storage.setItem("atlas:research:theses", "a's theses");
+
+        adoptSharedValues(storage, ["pm-ask-v1", "atlas:research:theses", "pm-pattern-snoozed"], "user-a");
+
+        assert.equal(storage.getItem("pm-ask-v1:user-a"), "a's questions");
+        assert.equal(storage.getItem("atlas:research:theses:user-a"), "a's theses");
+        assert.equal(storage.getItem("pm-pattern-snoozed:user-a"), null);
+        // Nothing is left for the next account to pick up.
+        assert.equal(readUserValue(storage, "pm-ask-v1", "user-b"), null);
+        assert.equal(readUserValue(storage, "atlas:research:theses", "user-b"), null);
+    });
+
+    test("removes a shared value the user already has a copy of", () => {
+        const storage = new FakeStorage();
+        writeUserValue(storage, "pm-ask-v1", "mine", "user-a");
+        storage.setItem("pm-ask-v1", "left behind");
+
+        adoptSharedValues(storage, ["pm-ask-v1"], "user-a");
+
+        assert.equal(storage.getItem("pm-ask-v1:user-a"), "mine");
+        assert.equal(storage.getItem("pm-ask-v1"), null);
+    });
+
+    test("leaves shared values alone without a signed-in user", () => {
+        const storage = new FakeStorage();
+        storage.setItem("pm-ask-v1", "someone's");
+
+        adoptSharedValues(storage, ["pm-ask-v1"], "anonymous");
+        adoptSharedValues(null, ["pm-ask-v1"], "user-a");
+
+        assert.equal(storage.getItem("pm-ask-v1"), "someone's");
     });
 });
 

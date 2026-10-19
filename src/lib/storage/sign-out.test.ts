@@ -35,6 +35,15 @@ describe("clearBrowserDataOnSignOut", () => {
         assert.deepEqual([...CLEARED_ON_SIGN_OUT], ["pm-ask-v1"]);
     });
 
+    test("removes an Ask transcript still under the shared key", () => {
+        const storage = new FakeStorage();
+        storage.setItem("pm-ask-v1", "questions from before keys were per user");
+
+        clearBrowserDataOnSignOut(storage, "user-a");
+
+        assert.equal(storage.getItem("pm-ask-v1"), null);
+    });
+
     test("does nothing without storage", () => {
         assert.doesNotThrow(() => clearBrowserDataOnSignOut(null, "user-a"));
     });
