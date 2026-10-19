@@ -10,6 +10,9 @@ const USER_B_ID = '00000000-0000-4000-8000-00000000a002';
 const USER_B_SESSION_TOKEN = 'e2e-session-user-b';
 
 async function switchToUserB(context: BrowserContext) {
+    // Leave the page first: every signed-in response sets the session cookie
+    // again, so a request still on its way would bring user A back.
+    for (const open of context.pages()) await open.goto('about:blank');
     await context.clearCookies();
     await context.addCookies([{
         name: 'authjs.session-token',
