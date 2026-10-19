@@ -161,6 +161,17 @@ describe("adoptSharedValues", () => {
         assert.equal(storage.getItem("pm-ask-v1"), null);
     });
 
+    test("regression: keeps a shared value that couldn't move for lack of space", () => {
+        // Only room for the value under its shorter, shared key.
+        const storage = new QuotaStorage("pm-ask-v1".length + 20);
+        storage.setItem("pm-ask-v1", "x".repeat(20));
+
+        adoptSharedValues(storage, ["pm-ask-v1"], "user-a");
+
+        assert.equal(storage.getItem("pm-ask-v1"), "x".repeat(20));
+        assert.equal(readUserValue(storage, "pm-ask-v1", "user-a"), "x".repeat(20));
+    });
+
     test("leaves shared values alone without a signed-in user", () => {
         const storage = new FakeStorage();
         storage.setItem("pm-ask-v1", "someone's");
