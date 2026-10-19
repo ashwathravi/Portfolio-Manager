@@ -52,6 +52,28 @@ export function readUserValue(storage: ReadableStorage | null | undefined, base:
     }
 }
 
+/**
+ * Moves every value still under a shared key in `bases` to this signed-in
+ * user, and removes shared values this user already has a copy of. Run on
+ * each page load, so nothing saved before keys were per user is left for
+ * whichever account opens that feature next.
+ */
+export function adoptSharedValues(
+    storage: ReadableStorage | null | undefined,
+    bases: readonly string[],
+    scope: string = currentStorageScope(),
+): void {
+    if (!storage || scope === ANONYMOUS_SCOPE) return;
+    for (const base of bases) {
+        readUserValue(storage, base, scope);
+        try {
+            storage.removeItem(base);
+        } catch {
+            // Nothing to remove.
+        }
+    }
+}
+
 export function writeUserValue(storage: ReadableStorage | null | undefined, base: string, value: string, scope: string = currentStorageScope()): void {
     if (!storage) return;
     try {
