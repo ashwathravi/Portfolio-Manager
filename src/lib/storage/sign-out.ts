@@ -18,11 +18,10 @@ export function clearBrowserDataOnSignOut(
     storage: Pick<Storage, "getItem" | "setItem" | "removeItem"> | null = browserLocalStorage(),
     scope: string = currentStorageScope(),
 ): void {
-    for (const base of CLEARED_ON_SIGN_OUT) removeUserValue(storage, base, scope);
-
     // Anything still under a key that used to be shared couldn't move to
     // this user for lack of space. One more try; whatever still can't move
-    // goes, so the next account to sign in here can't pick it up.
+    // goes, so the next account to sign in here can't pick it up. First, so
+    // what moves is cleared below like the rest of this user's data.
     adoptFormerlySharedData(storage, scope);
     for (const base of FORMERLY_SHARED_KEYS) {
         try {
@@ -31,4 +30,6 @@ export function clearBrowserDataOnSignOut(
             // Nothing to remove.
         }
     }
+
+    for (const base of CLEARED_ON_SIGN_OUT) removeUserValue(storage, base, scope);
 }
