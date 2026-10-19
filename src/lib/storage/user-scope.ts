@@ -75,7 +75,8 @@ function moveValue(storage: ReadableStorage, from: string, to: string, value: st
 
 /**
  * Moves every value still under a shared key in `bases` to this signed-in
- * user, and removes shared values this user already has a copy of. Run on
+ * user, and removes shared values this user already has a copy of (a value
+ * that can't move for lack of space stays under its shared key). Run on
  * each page load, so nothing saved before keys were per user is left for
  * whichever account opens that feature next.
  */
@@ -88,7 +89,9 @@ export function adoptSharedValues(
     for (const base of bases) {
         readUserValue(storage, base, scope);
         try {
-            storage.removeItem(base);
+            // Only once this user has a copy: a value that couldn't move
+            // (a full quota) stays where it is.
+            if (storage.getItem(userStorageKey(base, scope)) !== null) storage.removeItem(base);
         } catch {
             // Nothing to remove.
         }
