@@ -75,6 +75,16 @@ describe("clearBrowserDataOnSignOut", () => {
         assert.equal(storage.getItem(userStorageKey("atlas:research:theses", "user-a")), "theses from before");
     });
 
+    test("regression: an Ask transcript that only moves to the user at sign-out is cleared too", () => {
+        const storage = new FakeStorage();
+        storage.setItem("pm-ask-v1", "questions from before keys were per user");
+
+        clearBrowserDataOnSignOut(storage, "user-a");
+
+        assert.equal(storage.getItem("pm-ask-v1"), null);
+        assert.equal(storage.getItem(userStorageKey("pm-ask-v1", "user-a")), null);
+    });
+
     test("does nothing without storage", () => {
         assert.doesNotThrow(() => clearBrowserDataOnSignOut(null, "user-a"));
     });
