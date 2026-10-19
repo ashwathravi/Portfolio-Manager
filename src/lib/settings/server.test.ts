@@ -25,13 +25,13 @@ describe("user settings queries", () => {
         assert.deepEqual(params, [USER, 1]);
     });
 
-    test("save replaces the user's document only if it was made on the stored version", () => {
+    test("save replaces the user's document only if it was made on the stored version, at its version or later", () => {
         const document = { version: 15, settings: { demo: { showSampleData: false } } };
         const base = "2026-10-19T07:00:00.000Z";
         const { sql, params } = buildSaveUserSettingsQuery(USER, document, base, NOW).toSQL();
 
         assert.match(sql, /insert into "user_settings" \("user_id", "version", "settings", "updated_at"\)/i);
-        assert.match(sql, /on conflict \("user_id"\) do update set "version" = \$\d+, "settings" = \$\d+, "updated_at" = \$\d+ where "user_settings"\."updated_at" = \$\d+/i);
+        assert.match(sql, /on conflict \("user_id"\) do update set "version" = \$\d+, "settings" = \$\d+, "updated_at" = \$\d+ where \("user_settings"\."updated_at" = \$\d+ and "user_settings"\."version" <= \$\d+\)/i);
         assert.match(sql, /returning "updated_at"/i);
         assert.ok(params.includes(USER));
         assert.ok(params.includes(JSON.stringify(document.settings)));

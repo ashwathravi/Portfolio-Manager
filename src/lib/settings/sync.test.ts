@@ -258,23 +258,28 @@ describe("createSettingsPusher", () => {
         assert.deepEqual(bases, [T0, T1]);
     });
 
-    test("doesn't mark a save as the latest when something newer is waiting", async () => {
-        const savedNames: string[] = [];
+    test("says a save isn't the latest when something newer is waiting", async () => {
+        const saves: Array<{ name: string; latest: boolean }> = [];
         let release: () => void = () => {};
         const send: SendSettings = (document) => nameOf(document) === "one"
             ? new Promise<SaveResult>((resolve) => { release = () => resolve(saved()); })
             : Promise.resolve(saved("2026-10-19T10:00:00.000Z"));
-        const pusher = createSettingsPusher({ send, baseUpdatedAt: null, onSaved: (d) => savedNames.push(nameOf(d)), onConflict: () => {} });
+        const pusher = createSettingsPusher({
+            send,
+            baseUpdatedAt: null,
+            onSaved: (document, _updatedAt, latest) => saves.push({ name: nameOf(document), latest }),
+            onConflict: () => {},
+        });
 
         pusher.schedule(doc("one"));
         const first = pusher.flush();
         pusher.schedule(doc("two"));
         release();
         await first;
-        assert.deepEqual(savedNames, []);
+        assert.deepEqual(saves, [{ name: "one", latest: false }]);
 
         await pusher.flush();
-        assert.deepEqual(savedNames, ["two"]);
+        assert.deepEqual(saves, [{ name: "one", latest: false }, { name: "two", latest: true }]);
     });
 
     test("sends what's waiting with keepalive when the page closes, if it fits", () => {
@@ -300,6 +305,32 @@ describe("createSettingsPusher", () => {
     });
 });
 
+describe("createSettingsPusher, as the page closes", () => {
+    test("handles the answer to a keepalive save, so the next save is made on its version", async () => {
+        const bases: Array<string | null> = [];
+        const savedFlags: boolean[] = [];
+        const pusher = createSettingsPusher({
+            send: async (_document, { baseUpdatedAt }) => {
+                bases.push(baseUpdatedAt);
+                return saved(bases.length === 1 ? T1 : "2026-10-19T10:00:00.000Z");
+            },
+            baseUpdatedAt: T0,
+            onSaved: (_document, _updatedAt, latest) => savedFlags.push(latest),
+            onConflict: () => {},
+        });
+
+        pusher.schedule(doc("before leaving"));
+        pusher.flushOnExit();
+        await settle();
+        // Back from the back-forward cache: another edit.
+        pusher.schedule(doc("after coming back"));
+        await pusher.flush();
+
+        assert.deepEqual(bases, [T0, T1]);
+        assert.deepEqual(savedFlags, [true, true]);
+    });
+});
+
 describe("syncSettings", () => {
     beforeEach(() => mock.timers.enable({ apis: ["setTimeout"] }));
     afterEach(() => mock.timers.reset());
@@ -307,7 +338,7 @@ describe("syncSettings", () => {
     test("saves each change to the browser copy at once and to the server after", async () => {
         const storage = new FakeStorage();
         const sent: SettingsDocument[] = [];
-        const stop = syncSettings(SERVER_NONE, { document: null, push: false, baseUpdatedAt: null }, {
+        const sync = syncSettings(SERVER_NONE, { document: null, push: false, baseUpdatedAt: null }, {
             storage,
             send: async (document) => {
                 sent.push(document);
@@ -327,14 +358,14 @@ describe("syncSettings", () => {
         assert.equal((sent[0].settings.appearance as { theme: string }).theme, "dark");
         assert.equal(readBrowserCopy(storage)?.pending, false);
         assert.equal(readBrowserCopy(storage)?.baseUpdatedAt, T1);
-        stop();
+        sync.stop();
     });
 
     test("takes the server's settings when another device saved first", async () => {
         const storage = new FakeStorage();
         const replaced: string[] = [];
         let sends = 0;
-        const stop = syncSettings(serverWith(stored("Mine", T0)), { document: null, push: false, baseUpdatedAt: T0 }, {
+        const sync = syncSettings(serverWith(stored("Mine", T0)), { document: null, push: false, baseUpdatedAt: T0 }, {
             storage,
             send: async () => {
                 sends += 1;
@@ -357,14 +388,14 @@ describe("syncSettings", () => {
         mock.timers.tick(1000);
         await settle();
         assert.equal(sends, 1);
-        stop();
+        sync.stop();
     });
 
     test("sends a started copy the server lacks, and stops listening when cleaned up", async () => {
         const storage = new FakeStorage();
         const sent: SettingsDocument[] = [];
         applySettingsDocument(doc("Imported"));
-        const stop = syncSettings(SERVER_NONE, { document: doc("Imported"), push: true, baseUpdatedAt: null }, {
+        const sync = syncSettings(SERVER_NONE, { document: doc("Imported"), push: true, baseUpdatedAt: null }, {
             storage,
             send: async (document) => {
                 sent.push(document);
@@ -379,7 +410,7 @@ describe("syncSettings", () => {
         assert.equal(sent.length, 1);
         assert.equal(nameOf(sent[0]), "Imported");
 
-        stop();
+        sync.stop();
         useSettingsStore.getState().setTheme("dark");
         mock.timers.tick(1000);
         assert.equal(sent.length, 1);
@@ -387,7 +418,7 @@ describe("syncSettings", () => {
 
     test("sends a change that is still waiting when it stops", async () => {
         const sent: SettingsDocument[] = [];
-        const stop = syncSettings(SERVER_NONE, { document: null, push: false, baseUpdatedAt: null }, {
+        const sync = syncSettings(SERVER_NONE, { document: null, push: false, baseUpdatedAt: null }, {
             storage: new FakeStorage(),
             send: async (document) => {
                 sent.push(document);
@@ -398,7 +429,7 @@ describe("syncSettings", () => {
         });
 
         useSettingsStore.getState().setTheme("dark");
-        stop();
+        sync.stop();
         await settle();
 
         assert.equal(sent.length, 1);
@@ -407,7 +438,7 @@ describe("syncSettings", () => {
     test("without the server, keeps changes in the browser copy only", () => {
         const storage = new FakeStorage();
         let sends = 0;
-        const stop = syncSettings(UNAVAILABLE, { document: null, push: false, baseUpdatedAt: null }, {
+        const sync = syncSettings(UNAVAILABLE, { document: null, push: false, baseUpdatedAt: null }, {
             storage,
             send: async () => {
                 sends += 1;
@@ -421,6 +452,98 @@ describe("syncSettings", () => {
 
         assert.equal(sends, 0);
         assert.equal((readBrowserCopy(storage)?.document.settings.appearance as { density: string }).density, "compact");
-        stop();
+        sync.stop();
+    });
+
+    test("regression: a save that lands while a newer edit waits moves that edit onto the new version", async () => {
+        const storage = new FakeStorage();
+        let release: () => void = () => {};
+        let calls = 0;
+        const sync = syncSettings(serverWith(stored("Start", T0)), { document: null, push: false, baseUpdatedAt: T0 }, {
+            storage,
+            send: () => {
+                calls += 1;
+                return calls === 1
+                    ? new Promise<SaveResult>((resolve) => { release = () => resolve(saved(T1)); })
+                    : new Promise<SaveResult>(() => {});
+            },
+            page: null,
+            delayMs: 0,
+        });
+
+        useSettingsStore.getState().updateProfile({ fullName: "A" });
+        mock.timers.tick(0);
+        await settle();
+        useSettingsStore.getState().updateProfile({ fullName: "B" });
+        release();
+        await settle();
+
+        const copy = readBrowserCopy(storage);
+        assert.equal(copy && nameOf(copy.document), "B");
+        assert.equal(copy?.pending, true);
+        // B was made on A's version, so a reload sends B instead of dropping it.
+        assert.equal(copy?.baseUpdatedAt, T1);
+        sync.stop();
+    });
+
+    test("regression: a refreshed layout after its own save doesn't make the next edit conflict", async () => {
+        const storage = new FakeStorage();
+        const bases: Array<string | null> = [];
+        const sync = syncSettings(serverWith(stored("Start", T0)), { document: null, push: false, baseUpdatedAt: T0 }, {
+            storage,
+            send: async (_document, { baseUpdatedAt }) => {
+                bases.push(baseUpdatedAt);
+                return saved(bases.length === 1 ? T1 : "2026-10-19T10:00:00.000Z");
+            },
+            page: null,
+            delayMs: 0,
+        });
+
+        useSettingsStore.getState().setTheme("dark");
+        mock.timers.tick(0);
+        await settle();
+        // router.refresh(): the layout hands over the snapshot of that save.
+        sync.rebase(serverWith({ ...currentSettingsDocument(), updatedAt: T1 }));
+        useSettingsStore.getState().setDensity("compact");
+        mock.timers.tick(0);
+        await settle();
+
+        assert.deepEqual(bases, [T0, T1]);
+        assert.equal(useSettingsStore.getState().appearance.density, "compact");
+        sync.stop();
+    });
+
+    test("a refreshed layout with newer settings from elsewhere replaces these when nothing is waiting", () => {
+        const sync = syncSettings(serverWith(stored("Start", T0)), { document: null, push: false, baseUpdatedAt: T0 }, {
+            storage: new FakeStorage(),
+            send: async () => saved(),
+            page: null,
+        });
+
+        sync.rebase(serverWith(stored("From another device", T1)));
+
+        assert.equal(useSettingsStore.getState().profile.fullName, "From another device");
+        sync.stop();
+    });
+
+    test("regression: never saves over settings from a newer version of the app", () => {
+        const storage = new FakeStorage();
+        let sends = 0;
+        const future: StoredSettingsDocument = { ...stored("From a newer app", T0), version: SETTINGS_VERSION + 1 };
+        const sync = syncSettings(serverWith(future), { document: future, push: false, baseUpdatedAt: T0 }, {
+            storage,
+            send: async () => {
+                sends += 1;
+                return saved();
+            },
+            page: null,
+            delayMs: 0,
+        });
+
+        useSettingsStore.getState().setTheme("dark");
+        mock.timers.tick(1000);
+
+        assert.equal(sends, 0);
+        sync.stop();
     });
 });

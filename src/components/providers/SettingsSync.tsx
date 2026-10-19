@@ -1,10 +1,10 @@
 'use client';
 
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { toast } from 'sonner';
 
 import type { ServerSettingsSnapshot } from '@/lib/settings/document';
-import { startSettings, syncSettings, type SyncNotices } from '@/lib/settings/sync';
+import { startSettings, syncSettings, type SettingsSyncHandle, type SyncNotices } from '@/lib/settings/sync';
 
 const NOTICES: SyncNotices = {
     onReplaced: () => toast.info('Your settings were changed in another tab or device. Showing the latest.'),
@@ -18,9 +18,25 @@ const NOTICES: SyncNotices = {
  * browser copy and the server in step after that (src/lib/settings/sync.ts).
  * It sits above every component that reads settings, the ThemeProvider
  * included, and fills the store during its first render, before they read.
+ * One sync runs for the life of the page; a re-rendered layout
+ * (router.refresh()) hands it the newer server snapshot.
  */
 export function SettingsSync({ server, children }: { server: ServerSettingsSnapshot; children: ReactNode }) {
-    const [plan] = useState(() => startSettings(server));
-    useEffect(() => syncSettings(server, plan, { notices: NOTICES }), [server, plan]);
+    const [start] = useState(() => ({ server, plan: startSettings(server) }));
+    const sync = useRef<SettingsSyncHandle | null>(null);
+
+    useEffect(() => {
+        const handle = syncSettings(start.server, start.plan, { notices: NOTICES });
+        sync.current = handle;
+        return () => {
+            handle.stop();
+            sync.current = null;
+        };
+    }, [start]);
+
+    useEffect(() => {
+        if (server !== start.server) sync.current?.rebase(server);
+    }, [server, start]);
+
     return children;
 }

@@ -4,7 +4,7 @@
  * session.
  */
 
-import { eq, sql } from "drizzle-orm";
+import { and, eq, lte, sql } from "drizzle-orm";
 
 import { db } from "@/db";
 import { isDatabaseConfigured } from "@/db/connection-options";
@@ -25,7 +25,9 @@ export function buildLoadUserSettingsQuery(userId: string, database: Database = 
 /**
  * Saves `document` only if it was made on the stored version: the row's
  * `updated_at` must still be `baseUpdatedAt`, or, with no base, there must
- * be no row yet. Returns no row when that check fails.
+ * be no row yet. Nor does it replace a document from a newer version of the
+ * app (after a rollback) with an older shape. Returns no row when a check
+ * fails.
  */
 export function buildSaveUserSettingsQuery(
     userId: string,
@@ -40,7 +42,9 @@ export function buildSaveUserSettingsQuery(
         .onConflictDoUpdate({
             target: userSettings.userId,
             set: { version: document.version, settings: document.settings, updatedAt: now },
-            setWhere: baseUpdatedAt === null ? sql`false` : eq(userSettings.updatedAt, new Date(baseUpdatedAt)),
+            setWhere: baseUpdatedAt === null
+                ? sql`false`
+                : and(eq(userSettings.updatedAt, new Date(baseUpdatedAt)), lte(userSettings.version, document.version)),
         })
         .returning({ updatedAt: userSettings.updatedAt });
 }

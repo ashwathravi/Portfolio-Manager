@@ -169,15 +169,24 @@ export interface SettingsPusher {
     flush(): Promise<void>;
     /** Sends what's waiting with keepalive, for a page that is closing. */
     flushOnExit(): void;
+    /** Whether a document is waiting or on its way. */
+    busy(): boolean;
+    /** The server version the next save will be made on. */
+    base(): string | null;
+    /** Moves to a newer server version the page learned of another way. */
+    rebase(updatedAt: string | null): void;
     dispose(): void;
 }
 
 /**
  * Sends the latest document, one request at a time, each made on the last
- * server version it knows of. `onSaved` runs when a save lands and nothing
- * newer is waiting; `onConflict` when the server has moved on, which drops
- * whatever was waiting (the server's settings win); `onFailed` when a save
- * fails, which keeps it waiting for the next change, flush or page load.
+ * server version it knows of. `onSaved` runs for every save that lands, with
+ * `latest` false when a newer document is already waiting; `onConflict` when
+ * the server has moved on, which drops whatever was waiting (the server's
+ * settings win); `onFailed` when a save fails, which keeps it waiting for the
+ * next change, flush or page load. A save sent as the page closes is handled
+ * the same way once its answer arrives (a page restored from the
+ * back-forward cache gets it then).
  */
 export function createSettingsPusher({
     send,
@@ -189,7 +198,7 @@ export function createSettingsPusher({
 }: {
     send: SendSettings;
     baseUpdatedAt: string | null;
-    onSaved: (document: SettingsDocument, updatedAt: string) => void;
+    onSaved: (document: SettingsDocument, updatedAt: string, latest: boolean) => void;
     onConflict: (current: StoredSettingsDocument | null) => void;
     onFailed?: (error: unknown) => void;
     delayMs?: number;
@@ -204,21 +213,17 @@ export function createSettingsPusher({
         timer = null;
     };
 
-    const flush = async (): Promise<void> => {
-        clearTimer();
-        if (inFlight) await inFlight;
-        const document = waiting;
-        if (!document) return;
-        waiting = null;
-        inFlight = send(document, { baseUpdatedAt: base, keepalive: false })
+    const sendNow = (document: SettingsDocument, keepalive: boolean): Promise<void> => {
+        const request = send(document, { baseUpdatedAt: base, keepalive })
             .then((result) => {
                 if (result.status === "saved") {
                     base = result.updatedAt;
-                    if (!waiting) onSaved(document, result.updatedAt);
+                    onSaved(document, result.updatedAt, waiting === null);
                     return;
                 }
                 base = result.current?.updatedAt ?? null;
                 waiting = null;
+                clearTimer();
                 onConflict(result.current);
             })
             .catch((error: unknown) => {
@@ -227,9 +232,19 @@ export function createSettingsPusher({
                 onFailed(error);
             })
             .finally(() => {
-                inFlight = null;
+                if (inFlight === request) inFlight = null;
             });
-        await inFlight;
+        inFlight = request;
+        return request;
+    };
+
+    const flush = async (): Promise<void> => {
+        clearTimer();
+        while (inFlight) await inFlight;
+        const document = waiting;
+        if (!document) return;
+        waiting = null;
+        await sendNow(document, false);
     };
 
     return {
@@ -241,13 +256,20 @@ export function createSettingsPusher({
         flush,
         flushOnExit() {
             clearTimer();
-            if (!waiting) return;
+            // One request at a time: a save on its way carries on, and the
+            // next load sends whatever is still pending.
+            if (!waiting || inFlight) return;
             // Too big for keepalive: the copy stays pending and the next
             // page load sends it.
             if (new TextEncoder().encode(JSON.stringify(waiting)).length > KEEPALIVE_MAX_BYTES) return;
-            // The page may be gone before an answer arrives; the copy stays
-            // pending, and the next load works out whether it landed.
-            void send(waiting, { baseUpdatedAt: base, keepalive: true }).catch(() => {});
+            const document = waiting;
+            waiting = null;
+            void sendNow(document, true);
+        },
+        busy: () => waiting !== null || inFlight !== null,
+        base: () => base,
+        rebase(updatedAt) {
+            base = updatedAt;
         },
         dispose: clearTimer,
     };
@@ -278,9 +300,24 @@ export interface SyncNotices {
     onSaveFailed?: () => void;
 }
 
+export interface SettingsSyncHandle {
+    /**
+     * Takes in a newer server snapshot (the root layout re-rendered, as
+     * router.refresh() does): the page moves to its version, and to its
+     * settings when nothing here is waiting to be saved.
+     */
+    rebase(server: ServerSettingsSnapshot): void;
+    stop(): void;
+}
+
+/** A document saved by a newer version of the app, which this one can't save over. */
+export function isNewerThanThisApp(document: SettingsDocument | null | undefined): boolean {
+    return (document?.version ?? 0) > SETTINGS_VERSION;
+}
+
 /**
- * Keeps the browser copy and the server in step with the store from now on.
- * Returns the cleanup for an effect.
+ * Keeps the browser copy and the server in step with the store from now on,
+ * for as long as the page lives.
  */
 export function syncSettings(
     server: ServerSettingsSnapshot,
@@ -298,31 +335,37 @@ export function syncSettings(
         delayMs?: number;
         notices?: SyncNotices;
     } = {},
-): () => void {
+): SettingsSyncHandle {
+    // A newer app version wrote the stored settings (this one was rolled
+    // back): show them, but never save over them with an older shape.
+    let readOnly = server.status === "ok" && isNewerThanThisApp(server.document);
     const canSave = server.status === "ok";
     let applyingServerSettings = false;
-    let baseUpdatedAt = plan.baseUpdatedAt;
+
+    const takeServerSettings = (current: StoredSettingsDocument) => {
+        applyingServerSettings = true;
+        try {
+            applySettingsDocument(current);
+        } finally {
+            applyingServerSettings = false;
+        }
+        writeBrowserCopy(storage, currentSettingsDocument(), { pending: false, baseUpdatedAt: current.updatedAt });
+        if (isNewerThanThisApp(current)) readOnly = true;
+    };
 
     const pusher = canSave
         ? createSettingsPusher({
             send,
             delayMs,
-            baseUpdatedAt,
-            onSaved: (document, updatedAt) => {
-                baseUpdatedAt = updatedAt;
-                writeBrowserCopy(storage, document, { pending: false, baseUpdatedAt });
+            baseUpdatedAt: plan.baseUpdatedAt,
+            onSaved: (document, updatedAt, latest) => {
+                // A newer edit waiting is still pending, now on this version.
+                if (latest) writeBrowserCopy(storage, document, { pending: false, baseUpdatedAt: updatedAt });
+                else writeBrowserCopy(storage, currentSettingsDocument(), { pending: true, baseUpdatedAt: updatedAt });
             },
             onConflict: (current) => {
-                baseUpdatedAt = current?.updatedAt ?? null;
-                if (current) {
-                    applyingServerSettings = true;
-                    try {
-                        applySettingsDocument(current);
-                    } finally {
-                        applyingServerSettings = false;
-                    }
-                }
-                writeBrowserCopy(storage, currentSettingsDocument(), { pending: false, baseUpdatedAt });
+                if (current) takeServerSettings(current);
+                else writeBrowserCopy(storage, currentSettingsDocument(), { pending: false, baseUpdatedAt: null });
                 notices.onReplaced?.();
             },
             onFailed: () => notices.onSaveFailed?.(),
@@ -330,27 +373,39 @@ export function syncSettings(
         : null;
     activePusher = pusher;
 
-    if (plan.document && canSave) {
+    if (plan.document && canSave && !readOnly) {
         // The copy now matches what the store started with, at the current
         // version; it stays pending until the server saves it.
-        writeBrowserCopy(storage, currentSettingsDocument(), { pending: plan.push, baseUpdatedAt });
+        writeBrowserCopy(storage, currentSettingsDocument(), { pending: plan.push, baseUpdatedAt: plan.baseUpdatedAt });
     }
-    if (plan.push) pusher?.schedule(currentSettingsDocument());
+    if (plan.push && !readOnly) pusher?.schedule(currentSettingsDocument());
 
     const unsubscribe = useSettingsStore.subscribe((next, previous) => {
         if (applyingServerSettings || !persistedSlicesChanged(next, previous)) return;
         const document = currentSettingsDocument(next);
-        writeBrowserCopy(storage, document, { pending: true, baseUpdatedAt });
-        pusher?.schedule(document);
+        writeBrowserCopy(storage, document, { pending: true, baseUpdatedAt: pusher?.base() ?? plan.baseUpdatedAt });
+        if (!readOnly) pusher?.schedule(document);
     });
     const onPageHide = () => pusher?.flushOnExit();
     page?.addEventListener("pagehide", onPageHide);
 
-    return () => {
-        unsubscribe();
-        page?.removeEventListener("pagehide", onPageHide);
-        // Send anything still waiting rather than drop it with the timer.
-        void pusher?.flush();
-        if (activePusher === pusher) activePusher = null;
+    return {
+        rebase(snapshot) {
+            if (!pusher || snapshot.status !== "ok" || !snapshot.document) return;
+            const current = snapshot.document;
+            if (current.updatedAt === pusher.base()) return;
+            // A save waiting or on its way settles it: the server takes it,
+            // or answers with what it has.
+            if (pusher.busy() || readBrowserCopy(storage)?.pending) return;
+            pusher.rebase(current.updatedAt);
+            takeServerSettings(current);
+        },
+        stop() {
+            unsubscribe();
+            page?.removeEventListener("pagehide", onPageHide);
+            // Send anything still waiting rather than drop it with the timer.
+            void pusher?.flush();
+            if (activePusher === pusher) activePusher = null;
+        },
     };
 }
