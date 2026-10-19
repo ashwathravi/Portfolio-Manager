@@ -822,4 +822,37 @@ describe('settingsStore', () => {
             assert.strictEqual(state.accounts.length, 0);
         });
     });
+
+    // -----------------------------------------------------------------------
+    // Persistence (i37)
+    // -----------------------------------------------------------------------
+
+    describe('persistedSettings', () => {
+        test('holds every persisted slice and nothing session-only', async () => {
+            const { PERSISTED_SETTINGS_SLICES, persistedSettings } = await import('./settingsStore');
+            useSettingsStore.getState().setProviderKey('polygon', 'pk-session-only');
+
+            const persisted = persistedSettings(useSettingsStore.getState());
+
+            assert.deepStrictEqual(Object.keys(persisted).sort(), [...PERSISTED_SETTINGS_SLICES].sort());
+            assert.ok(!JSON.stringify(persisted).includes('pk-session-only'));
+        });
+    });
+
+    describe('migrateSettings', () => {
+        test('brings a v14 document to the current version', async () => {
+            const { migrateSettings } = await import('./settingsStore');
+            const migrated = migrateSettings({ preferences: { defaultLandingPage: '/portfolios' } }, 14);
+
+            assert.strictEqual(migrated.preferences?.defaultLandingPage, '/portfolios/holdings');
+            assert.strictEqual(migrated.demo?.showSampleData, true);
+        });
+
+        test('leaves a current document as it is', async () => {
+            const { migrateSettings, SETTINGS_VERSION } = await import('./settingsStore');
+            const demo = { showSampleData: false };
+
+            assert.deepStrictEqual(migrateSettings({ demo }, SETTINGS_VERSION), { demo });
+        });
+    });
 });

@@ -22,8 +22,10 @@ const authServerEnv: Record<string, string> = databaseAuthEnabled
         AUTH_GOOGLE_SECRET: 'e2e-google-client-secret',
         AUTH_LOCAL_DEV_BYPASS: '0',
         AUTH_LOCAL_DEV_USER_ID: '',
-        // Production refuses sign-in without an invite list: the fixture users.
-        AUTH_ALLOWED_EMAILS: 'e2e-a@example.test,e2e-b@example.test',
+        // Production refuses sign-in without an invite list: the fixture users
+        // and the fresh users some tests create (tests/e2e/helpers/users.ts).
+        AUTH_ALLOWED_EMAILS: '',
+        AUTH_ALLOWED_DOMAINS: 'example.test',
         // Off Vercel, production Auth.js only trusts a host it is told about.
         AUTH_URL: 'http://localhost:3000',
     }

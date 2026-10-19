@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { clickUntil, gotoAppPage, reloadAppPage } from './helpers/app';
+import { signInAsFreshUser } from './helpers/users';
 
 /**
  * Critical user-path E2E tests (AR-33).
@@ -46,7 +47,9 @@ test.describe('Critical user paths', () => {
         await expect(page.getByText(uniqueName, { exact: true }).first()).toBeVisible();
     });
 
-    test('changing market data refresh interval reflects on dashboard live indicator', async ({ page }) => {
+    test('changing market data refresh interval reflects on dashboard live indicator', async ({ context, page }) => {
+        // Settings are kept per user on the server; change a copy of user A's.
+        await signInAsFreshUser(context);
         // Stub the quotes endpoint so the client query resolves successfully regardless
         // of whether API keys are configured in the test environment. When the query
         // errors out, LiveDataIndicator hides the refresh-every label and we'd have
@@ -81,7 +84,9 @@ test.describe('Critical user paths', () => {
         await expect(page.getByText(/every\s*120s/i).first()).toBeVisible({ timeout: 10_000 });
     });
 
-    test('switching theme to dark applies html.dark class and persists', async ({ page }) => {
+    test('switching theme to dark applies html.dark class and persists', async ({ context, page }) => {
+        // Settings are kept per user on the server; change a copy of user A's.
+        await signInAsFreshUser(context);
         await gotoAppPage(page, '/settings?tab=appearance');
 
         // Select the Dark theme option.

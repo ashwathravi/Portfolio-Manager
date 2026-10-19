@@ -13,7 +13,9 @@ import { Toaster } from "@/components/ui/sonner";
 import { AppFrame } from "@/components/layout/AppFrame";
 import { IdentityProvider } from "@/components/providers/IdentityProvider";
 import { RequestTimeProvider } from "@/components/providers/RequestTimeProvider";
+import { SettingsSync } from "@/components/providers/SettingsSync";
 import { resolveViewerIdentity } from "@/lib/auth/viewer";
+import { serverSettingsFor } from "@/lib/settings/server";
 import { storageScopeFor } from "@/lib/storage/user-scope";
 
 export const metadata: Metadata = {
@@ -26,6 +28,8 @@ export const metadata: Metadata = {
  *
  * Provider stack from outside in:
  *   QueryProvider       — TanStack Query for server state
+ *     SettingsSync      — fills the settings store from the user's stored
+ *                          settings before anything reads it (i37)
  *     ThemeProvider     — hydrates `data-theme`/`data-density`/`--pm-accent`
  *       IdentityProvider / RequestTimeProvider — the viewer and the
  *                          request time the server rendered with
@@ -47,6 +51,7 @@ export default async function RootLayout({
   // never baked into a statically prerendered page.
   await connection();
   const identity = await resolveViewerIdentity();
+  const settings = await serverSettingsFor(identity?.id);
   // Shared with the browser so hydration computes date-relative example
   // data from the same instant as this render.
   // eslint-disable-next-line react-hooks/purity
@@ -61,13 +66,15 @@ export default async function RootLayout({
         )}
       >
         <QueryProvider>
-          <ThemeProvider>
-            <IdentityProvider identity={identity}>
-              <RequestTimeProvider now={requestTime}>
-                <AppFrame>{children}</AppFrame>
-              </RequestTimeProvider>
-            </IdentityProvider>
-          </ThemeProvider>
+          <SettingsSync server={settings}>
+            <ThemeProvider>
+              <IdentityProvider identity={identity}>
+                <RequestTimeProvider now={requestTime}>
+                  <AppFrame>{children}</AppFrame>
+                </RequestTimeProvider>
+              </IdentityProvider>
+            </ThemeProvider>
+          </SettingsSync>
         </QueryProvider>
         <Toaster />
       </body>

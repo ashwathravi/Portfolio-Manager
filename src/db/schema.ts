@@ -510,6 +510,28 @@ export const jobRuns = pgTable("job_runs", {
     appRuntimeAccess: appRuntimeAccessPolicy(),
 })).enableRLS();
 
+// ---------------------------------------------------------------------------
+// Settings (launch item i37, decision D6)
+// ---------------------------------------------------------------------------
+
+/**
+ * Each user's settings as one versioned JSON document: the persisted slices
+ * of the settings store (`persistedSettings` in src/lib/stores/settingsStore.ts).
+ * `version` is the store's schema version the document was written at;
+ * readers migrate older documents forward (`migrateSettings`).
+ */
+export const userSettings = pgTable("user_settings", {
+    userId: text("user_id")
+        .primaryKey()
+        .references(() => authUsers.id, { onDelete: "cascade" }),
+    version: integer("version").notNull(),
+    settings: jsonb("settings").$type<Record<string, unknown>>().notNull(),
+    updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),
+}, () => ({
+    serverOnlyNoClientAccess: serverOnlyNoClientAccessPolicy(),
+    appRuntimeAccess: appRuntimeAccessPolicy(),
+})).enableRLS();
+
 export const portfoliosRelations = relations(portfolios, ({ one, many }) => ({
     user: one(authUsers, {
         fields: [portfolios.userId],

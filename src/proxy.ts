@@ -153,6 +153,7 @@ function isSessionBackedApiRoute(pathname: string, method: string): boolean {
     if (pathname === "/api/portfolios/count" && method === "GET") return true;
     if (/^\/api\/portfolio\/[^/]+\/value$/.test(pathname) && method === "GET") return true;
     if (pathname === "/api/portfolio/import" && method === "POST") return true;
+    if (pathname === "/api/settings" && method === "PUT") return true;
     if (pathname === "/api/alpha-radar/refresh" && method === "POST") return true;
     if (pathname === "/api/alpha-radar/filers" && method === "POST") return true;
     if (/^\/api\/alpha-radar\/filers\/[^/]+\/refresh$/.test(pathname) && method === "POST") return true;
