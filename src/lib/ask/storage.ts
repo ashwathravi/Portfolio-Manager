@@ -1,7 +1,8 @@
 /**
  * AR-115 — Ask Ledger localStorage persistence.
  *
- * One blob under `pm-ask-v1` keeps three things in sync:
+ * One blob under `pm-ask-v1`, per signed-in user and cleared on sign-out
+ * (src/lib/auth/sign-out.ts), keeps three things in sync:
  *   - `history` — last 50 assistant/user turns
  *   - `dayBucket` — local YYYY-MM-DD for the day-limit window
  *   - `dayCount` — number of user questions sent today
@@ -11,9 +12,11 @@
  * the server they return sentinel defaults so the module can be
  * imported from both component types without guards at the callsite.
  */
+import { browserLocalStorage, readUserValue, writeUserValue } from '@/lib/storage/user-scope';
+
 import type { AskMessage, AskStoreShape } from './types';
 
-const KEY = 'pm-ask-v1';
+export const ASK_STORAGE_KEY = 'pm-ask-v1';
 /** Hard cap on persisted turns so the blob never grows unbounded. */
 const HISTORY_CAP = 50;
 /** Daily message cap — matches the rate-limit banner copy. */
@@ -33,9 +36,8 @@ function emptyStore(now: Date = new Date()): AskStoreShape {
 
 /** SSR-safe read. Returns an empty store if the key is missing or malformed. */
 export function getStore(now: Date = new Date()): AskStoreShape {
-    if (typeof window === 'undefined') return emptyStore(now);
     try {
-        const raw = window.localStorage.getItem(KEY);
+        const raw = readUserValue(browserLocalStorage(), ASK_STORAGE_KEY);
         if (!raw) return emptyStore(now);
         const parsed = JSON.parse(raw) as Partial<AskStoreShape>;
         // Coerce missing fields — shipping a partial blob from a prior
@@ -50,12 +52,8 @@ export function getStore(now: Date = new Date()): AskStoreShape {
 }
 
 function writeStore(store: AskStoreShape): void {
-    if (typeof window === 'undefined') return;
-    try {
-        window.localStorage.setItem(KEY, JSON.stringify(store));
-    } catch {
-        /* storage full / private mode — silently drop */
-    }
+    // Storage full / private mode: silently dropped.
+    writeUserValue(browserLocalStorage(), ASK_STORAGE_KEY, JSON.stringify(store));
 }
 
 /** Rollover helper. If the stored bucket is stale, returns a fresh

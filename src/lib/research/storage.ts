@@ -1,10 +1,15 @@
+import { currentStorageScope, readUserValue, writeUserValue } from '@/lib/storage/user-scope';
+
 import type { Thesis, ThesisCatalyst, ThesisEvidence } from './thesis';
 
 /**
- * localStorage-backed persistence for theses until the Supabase-backed API
- * lands (AR-8). Separated from the React hook so we can unit-test the
- * reader / writer by passing a fake storage.
+ * localStorage-backed persistence for theses until they move to Postgres
+ * (launch item i38), one copy per signed-in user (i39). Separated from the
+ * React hook so we can unit-test the reader / writer by passing a fake
+ * storage.
  */
+
+type ThesisStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
 
 export const THESIS_STORAGE_KEY = 'atlas:research:theses';
 
@@ -124,20 +129,22 @@ function parseEnvelope(raw: string): Thesis[] | null {
     }
 }
 
-export function loadThesesFromStorage(storage: Pick<Storage, 'getItem'> | null | undefined): Thesis[] | null {
-    if (!storage) return null;
-    const raw = storage.getItem(THESIS_STORAGE_KEY);
+export function loadThesesFromStorage(
+    storage: ThesisStorage | null | undefined,
+    scope: string = currentStorageScope(),
+): Thesis[] | null {
+    const raw = readUserValue(storage, THESIS_STORAGE_KEY, scope);
     if (!raw) return null;
     return parseEnvelope(raw);
 }
 
 export function saveThesesToStorage(
-    storage: Pick<Storage, 'setItem'> | null | undefined,
+    storage: ThesisStorage | null | undefined,
     theses: readonly Thesis[],
+    scope: string = currentStorageScope(),
 ): void {
-    if (!storage) return;
     const envelope: EnvelopeV2 = { version: CURRENT_VERSION, theses: [...theses] };
-    storage.setItem(THESIS_STORAGE_KEY, JSON.stringify(envelope));
+    writeUserValue(storage, THESIS_STORAGE_KEY, JSON.stringify(envelope), scope);
 }
 
 /** Helper to reach the browser localStorage object safely in SSR contexts. */

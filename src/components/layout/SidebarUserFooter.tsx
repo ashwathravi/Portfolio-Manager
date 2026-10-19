@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { signOut } from "next-auth/react";
+import { clearBrowserDataOnSignOut } from "@/lib/storage/sign-out";
 import { MoreVertical, User, Settings, LogOut, Palette } from "lucide-react";
 import {
     DropdownMenu,
@@ -118,6 +119,7 @@ export function SidebarUserFooter() {
                         className="text-destructive focus:text-destructive"
                         onSelect={(event) => {
                             event.preventDefault();
+                            clearBrowserDataOnSignOut();
                             void signOut({ callbackUrl: "/login" });
                         }}
                     >

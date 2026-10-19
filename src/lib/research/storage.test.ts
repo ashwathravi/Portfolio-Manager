@@ -5,7 +5,11 @@ import {
     saveThesesToStorage,
     THESIS_STORAGE_KEY,
 } from './storage.ts';
+import { userStorageKey } from '../storage/user-scope.ts';
 import type { Thesis } from './thesis.ts';
+
+const SCOPE = 'user-a';
+const KEY = userStorageKey(THESIS_STORAGE_KEY, SCOPE);
 
 class FakeStorage {
     private store = new Map<string, string>();
@@ -41,8 +45,8 @@ const sample: Thesis = {
 describe('saveThesesToStorage', () => {
     test('writes a versioned envelope', () => {
         const storage = new FakeStorage();
-        saveThesesToStorage(storage, [sample]);
-        const raw = storage.getItem(THESIS_STORAGE_KEY);
+        saveThesesToStorage(storage, [sample], SCOPE);
+        const raw = storage.getItem(KEY);
         assert.ok(raw);
         const parsed = JSON.parse(raw!);
         assert.strictEqual(parsed.version, 2);
@@ -59,31 +63,31 @@ describe('loadThesesFromStorage', () => {
     beforeEach(() => { storage = new FakeStorage(); });
 
     test('round-trips what was saved', () => {
-        saveThesesToStorage(storage, [sample]);
-        const loaded = loadThesesFromStorage(storage);
+        saveThesesToStorage(storage, [sample], SCOPE);
+        const loaded = loadThesesFromStorage(storage, SCOPE);
         assert.deepStrictEqual(loaded, [sample]);
     });
 
     test('returns null when nothing stored', () => {
-        assert.strictEqual(loadThesesFromStorage(storage), null);
+        assert.strictEqual(loadThesesFromStorage(storage, SCOPE), null);
     });
 
     test('returns null for unknown version (migration trigger)', () => {
-        storage.setItem(THESIS_STORAGE_KEY, JSON.stringify({ version: 999, theses: [sample] }));
-        assert.strictEqual(loadThesesFromStorage(storage), null);
+        storage.setItem(KEY, JSON.stringify({ version: 999, theses: [sample] }));
+        assert.strictEqual(loadThesesFromStorage(storage, SCOPE), null);
     });
 
     test('returns null when payload is malformed JSON', () => {
-        storage.setItem(THESIS_STORAGE_KEY, '{not json');
-        assert.strictEqual(loadThesesFromStorage(storage), null);
+        storage.setItem(KEY, '{not json');
+        assert.strictEqual(loadThesesFromStorage(storage, SCOPE), null);
     });
 
     test('returns null when any stored thesis fails schema check', () => {
         storage.setItem(
-            THESIS_STORAGE_KEY,
+            KEY,
             JSON.stringify({ version: 2, theses: [sample, { broken: true }] }),
         );
-        assert.strictEqual(loadThesesFromStorage(storage), null);
+        assert.strictEqual(loadThesesFromStorage(storage, SCOPE), null);
     });
 
     test('migrates v1 envelopes by filling in defaults for the detail fields', () => {
@@ -106,8 +110,8 @@ describe('loadThesesFromStorage', () => {
                 },
             ],
         };
-        storage.setItem(THESIS_STORAGE_KEY, JSON.stringify(v1));
-        const loaded = loadThesesFromStorage(storage);
+        storage.setItem(KEY, JSON.stringify(v1));
+        const loaded = loadThesesFromStorage(storage, SCOPE);
         assert.strictEqual(loaded?.length, 1);
         const thesis = loaded![0];
         assert.strictEqual(thesis.hypothesis, '');
@@ -121,5 +125,26 @@ describe('loadThesesFromStorage', () => {
 
     test('is a no-op when storage is null (SSR)', () => {
         assert.strictEqual(loadThesesFromStorage(null), null);
+    });
+});
+
+describe('theses storage per user', () => {
+    test('keeps each user\'s copy apart', () => {
+        const storage = new FakeStorage();
+        saveThesesToStorage(storage, [sample], 'user-a');
+
+        assert.strictEqual(loadThesesFromStorage(storage, 'user-b'), null);
+        assert.strictEqual(loadThesesFromStorage(storage, 'user-a')?.length, 1);
+    });
+
+    test('moves a copy saved before keys were per user to the first user who reads it', () => {
+        const storage = new FakeStorage();
+        saveThesesToStorage(storage, [sample], 'user-a');
+        storage.setItem(THESIS_STORAGE_KEY, storage.getItem(KEY)!);
+        storage.removeItem(KEY);
+
+        assert.strictEqual(loadThesesFromStorage(storage, 'user-a')?.length, 1);
+        assert.strictEqual(storage.getItem(THESIS_STORAGE_KEY), null);
+        assert.strictEqual(loadThesesFromStorage(storage, 'user-b'), null);
     });
 });

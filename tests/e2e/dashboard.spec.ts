@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { userKey } from './helpers/storage';
 import { clickUntil, collectConsoleErrors, gotoAppPage, openPolicyChecks, reloadAppPage } from './helpers/app';
 
 /**
@@ -27,13 +28,13 @@ test.describe('Today page', () => {
     test.beforeEach(async ({ page }) => {
         // Clear pattern snooze state so dismissal tests are deterministic
         // across runs.
-        await page.addInitScript(() => {
+        await page.addInitScript((key) => {
             try {
-                window.localStorage.removeItem('pm-pattern-snoozed');
+                window.localStorage.removeItem(key);
             } catch {
                 /* private mode — ignore */
             }
-        });
+        }, userKey('pm-pattern-snoozed'));
         await gotoAppPage(page, '/');
     });
 
@@ -169,13 +170,13 @@ test.describe('Pattern feed (AR-112)', () => {
     test.beforeEach(async ({ page }) => {
         // Ensure each test starts with zero snoozed patterns so the
         // seed journal always surfaces the full set of detector hits.
-        await page.addInitScript(() => {
+        await page.addInitScript((key) => {
             try {
-                window.localStorage.removeItem('pm-pattern-snoozed');
+                window.localStorage.removeItem(key);
             } catch {
                 /* ignore */
             }
-        });
+        }, userKey('pm-pattern-snoozed'));
         await gotoAppPage(page, '/');
     });
 
@@ -238,9 +239,7 @@ test.describe('Pattern feed (AR-112)', () => {
         await expect(feed.getByTestId('pattern-row')).toHaveCount(countBefore - 1);
 
         // Snooze state is written to localStorage under the documented key.
-        const snoozed = await page.evaluate(() =>
-            window.localStorage.getItem('pm-pattern-snoozed'),
-        );
+        const snoozed = await page.evaluate((key) => window.localStorage.getItem(key), userKey('pm-pattern-snoozed'));
         expect(snoozed).not.toBeNull();
         const parsed = JSON.parse(snoozed!);
         expect(Object.keys(parsed).length).toBeGreaterThanOrEqual(1);
@@ -274,17 +273,17 @@ test.describe('Weekly review ritual (AR-114)', () => {
         // Wipe the reviews slice exactly once per test. A naive
         // addInitScript would also fire on every reload — sessionStorage
         // sentinels gate the wipe to the first navigation.
-        await page.addInitScript(() => {
+        await page.addInitScript((key) => {
             try {
                 const done = window.sessionStorage.getItem('__pm_test_wipe_done');
                 if (!done) {
-                    window.localStorage.removeItem('pm-weekly-reviews-v1');
+                    window.localStorage.removeItem(key);
                     window.sessionStorage.setItem('__pm_test_wipe_done', '1');
                 }
             } catch {
                 /* ignore */
             }
-        });
+        }, userKey('pm-weekly-reviews-v1'));
         await gotoAppPage(page, '/');
     });
 
@@ -306,9 +305,7 @@ test.describe('Weekly review ritual (AR-114)', () => {
 
         // Trip a tick for the onBlur handler, then read the key back.
         await expect(async () => {
-            const raw = await page.evaluate(() =>
-                window.localStorage.getItem('pm-weekly-reviews-v1'),
-            );
+            const raw = await page.evaluate((key) => window.localStorage.getItem(key), userKey('pm-weekly-reviews-v1'));
             expect(raw).not.toBeNull();
             const parsed = JSON.parse(raw!);
             const firstEntry = Object.values(parsed)[0] as { reflection?: string };
@@ -322,9 +319,7 @@ test.describe('Weekly review ritual (AR-114)', () => {
         await page.getByTestId('weekly-review-acknowledge').click();
         await expect(card).toBeHidden();
 
-        const raw = await page.evaluate(() =>
-            window.localStorage.getItem('pm-weekly-reviews-v1'),
-        );
+        const raw = await page.evaluate((key) => window.localStorage.getItem(key), userKey('pm-weekly-reviews-v1'));
         expect(raw).not.toBeNull();
         const parsed = JSON.parse(raw!);
         const firstEntry = Object.values(parsed)[0] as { acknowledgedAt?: string };
@@ -337,9 +332,7 @@ test.describe('Weekly review ritual (AR-114)', () => {
         await page.getByTestId('weekly-review-remind').click();
         await expect(card).toBeHidden();
 
-        const raw = await page.evaluate(() =>
-            window.localStorage.getItem('pm-weekly-reviews-v1'),
-        );
+        const raw = await page.evaluate((key) => window.localStorage.getItem(key), userKey('pm-weekly-reviews-v1'));
         expect(raw).not.toBeNull();
         const parsed = JSON.parse(raw!);
         const firstEntry = Object.values(parsed)[0] as { remindAt?: string };

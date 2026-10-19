@@ -1,6 +1,7 @@
 "use client";
 
 import { signOut } from "next-auth/react";
+import { clearBrowserDataOnSignOut } from "@/lib/storage/sign-out";
 import { KeyRound } from "lucide-react";
 import { useViewerIdentity } from "@/components/providers/IdentityProvider";
 
@@ -34,7 +35,10 @@ export function SignInCard() {
                 </p>
                 {identity?.mode === "signed-in" && (
                     <div className="pm-empty-actions">
-                        <button type="button" className="pm-btn pm-btn-ghost" onClick={() => void signOut({ callbackUrl: "/login" })}>
+                        <button type="button" className="pm-btn pm-btn-ghost" onClick={() => {
+                            clearBrowserDataOnSignOut();
+                            void signOut({ callbackUrl: "/login" });
+                        }}>
                             Sign out
                         </button>
                     </div>

@@ -11,16 +11,18 @@
  */
 import type { ReviewState } from './types';
 
-const LS_KEY = 'pm-weekly-reviews-v1';
+import { browserLocalStorage, readUserValue, removeUserValue, writeUserValue } from '@/lib/storage/user-scope';
+
+/** One copy per signed-in user (src/lib/storage/user-scope.ts). */
+export const REVIEWS_STORAGE_KEY = 'pm-weekly-reviews-v1';
 /** 24h — the "Remind me later" snooze window. */
 export const REMIND_LATER_MS = 86_400_000;
 
 type Store = Record<string, ReviewState>;
 
 function load(): Store {
-    if (typeof window === 'undefined') return {};
     try {
-        const raw = window.localStorage.getItem(LS_KEY);
+        const raw = readUserValue(browserLocalStorage(), REVIEWS_STORAGE_KEY);
         if (!raw) return {};
         const parsed = JSON.parse(raw);
         if (parsed && typeof parsed === 'object') return parsed as Store;
@@ -31,12 +33,8 @@ function load(): Store {
 }
 
 function save(store: Store): void {
-    if (typeof window === 'undefined') return;
-    try {
-        window.localStorage.setItem(LS_KEY, JSON.stringify(store));
-    } catch {
-        /* quota / private-mode — silent drop */
-    }
+    // Quota / private mode: dropped silently.
+    writeUserValue(browserLocalStorage(), REVIEWS_STORAGE_KEY, JSON.stringify(store));
 }
 
 /** Read the persisted slice for a single review. Returns an empty
@@ -98,10 +96,5 @@ export function isReviewActive(state: ReviewState, now: number = Date.now()): bo
 
 /** Reset (test helper). Not exported in v1 UI. */
 export function clearAllReviews(): void {
-    if (typeof window === 'undefined') return;
-    try {
-        window.localStorage.removeItem(LS_KEY);
-    } catch {
-        /* ignore */
-    }
+    removeUserValue(browserLocalStorage(), REVIEWS_STORAGE_KEY);
 }

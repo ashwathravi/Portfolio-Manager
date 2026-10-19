@@ -12,7 +12,7 @@ export const metadata: Metadata = {
 // the page is public (see isPublicRoute in src/proxy.ts) and renders without
 // the app chrome (src/components/layout/AppFrame.tsx).
 const CONTACT_EMAIL = "ashwath.ravi@gmail.com";
-const LAST_UPDATED = "October 18, 2026";
+const LAST_UPDATED = "October 19, 2026";
 const PLAID_PRIVACY_URL = "https://plaid.com/legal/#end-user-privacy-policy";
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
@@ -78,8 +78,10 @@ export default async function PrivacyPage({ searchParams }: { searchParams: Sear
                         display, notification and trading preferences, the account names, last four digits and
                         balances shown there, and your risk policy, including cash, employer-stock and tax-limit
                         details), research theses, journal entries, watchlist, price alerts and their notes,
-                        weekly reviews and Ask history. Anyone using the same browser profile can see them, and
-                        clearing this site&rsquo;s data removes them. To show prices, the ticker symbols in your
+                        weekly reviews and Ask history. Each account that signs in on this browser gets its own
+                        copy of everything except Settings, signing out removes your Ask history, and clearing
+                        this site&rsquo;s data removes the rest. Someone with access to this browser profile could
+                        still read them. To show prices, the ticker symbols in your
                         watchlist and theses are sent to our server and on to the market data provider. API keys
                         you enter in Settings are held in memory for the current session only.
                     </p>
