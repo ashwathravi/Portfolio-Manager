@@ -16,8 +16,13 @@ import {
  * never stores what it can't read back.
  */
 const objectSlice = z.record(z.string(), z.unknown());
-// Accounts and tags are lists of objects.
-const listSlice = z.array(z.record(z.string(), z.unknown()), { message: 'accounts and tags must be lists of objects' });
+// Accounts and tags are lists of objects, each with an id and a name the
+// Settings page shows.
+const listItem = z.looseObject({
+    id: z.string({ message: 'accounts and tags need an id' }).min(1, 'accounts and tags need an id'),
+    name: z.string({ message: 'accounts and tags need a name' }),
+});
+const listSlice = z.array(listItem, { message: 'accounts and tags must be lists of objects' });
 
 const sliceShape = Object.fromEntries(
     PERSISTED_SETTINGS_SLICES.map((slice) => [slice, (LIST_SETTINGS_SLICES.has(slice) ? listSlice : objectSlice).optional()]),

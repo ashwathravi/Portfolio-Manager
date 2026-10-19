@@ -11,6 +11,7 @@ const NOTICES: SyncNotices = {
     onSaveFailed: () => toast.error("Couldn't save your settings to your account. They're kept in this browser and will be sent again.", {
         id: 'settings-save-failed',
     }),
+    onReadOnly: () => toast.warning("These settings were saved by a newer version of Atlas Wealth, so changes made here won't be kept. Reload to get the latest version."),
 };
 
 /**

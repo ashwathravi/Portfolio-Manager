@@ -792,17 +792,37 @@ export function normalizeSettings(settings: Partial<PersistedSettings>): Partial
     return normalized as Partial<PersistedSettings>;
 }
 
+interface ListItems {
+    kind: 'string' | 'object';
+    /** String fields an item can't do without; items missing one are dropped. */
+    required?: readonly string[];
+    /** The fields every item has, with fallbacks (else the first default item). */
+    template?: Record<string, unknown>;
+}
+
 /**
- * What the items of each list are, for lists that are empty by default (the
- * others show it with their first default item).
+ * What the items of a list must be, for lists that are empty by default and
+ * lists whose items carry an identity. Other lists go by their first default
+ * item.
  */
-const EMPTY_DEFAULT_LIST_ITEMS: Readonly<Record<string, 'string' | 'object'>> = {
-    accounts: 'object',
-    'alphaRadarDelivery.tickerFilters': 'string',
-    'alphaRadarDelivery.fundStyleFilters': 'string',
-    'alphaRadarDelivery.trackedFilerIds': 'string',
-    'riskPolicy.cashJobs': 'object',
+const LIST_ITEMS: Readonly<Record<string, ListItems>> = {
+    accounts: {
+        kind: 'object',
+        required: ['id', 'name'],
+        template: { type: '', accountMask: '', holdings: 0, accountValue: 0, lastSynced: '', status: 'needs-review' },
+    },
+    tags: { kind: 'object', required: ['id', 'name'] },
+    'alphaRadarDelivery.tickerFilters': { kind: 'string' },
+    'alphaRadarDelivery.fundStyleFilters': { kind: 'string' },
+    'alphaRadarDelivery.trackedFilerIds': { kind: 'string' },
+    'riskPolicy.cashJobs': { kind: 'object', required: ['id', 'type'], template: { label: '', amount: 0 } },
 };
+
+function isListItem(item: unknown, rule: ListItems): boolean {
+    if (kindOf(item) !== rule.kind) return false;
+    const record = item as Record<string, unknown>;
+    return (rule.required ?? []).every((key) => typeof record[key] === 'string' && record[key] !== '');
+}
 
 function kindOf(value: unknown): string {
     if (value === null) return 'null';
@@ -815,15 +835,15 @@ function coerceToShape(value: unknown, template: unknown, path: string): unknown
     if (kind === 'null' || kind === 'undefined') return value;
     if (kindOf(value) !== kind) return structuredClone(template);
     if (kind === 'array') {
-        const sample = (template as unknown[])[0];
-        if (sample === undefined) {
-            const itemKind = EMPTY_DEFAULT_LIST_ITEMS[path];
+        const rule = LIST_ITEMS[path];
+        const sample = rule?.template ?? (template as unknown[])[0];
+        const items = rule
+            ? (value as unknown[]).filter((item) => isListItem(item, rule))
             // An unlisted list still never holds null or undefined.
-            return (value as unknown[]).filter((item) =>
-                itemKind ? kindOf(item) === itemKind : item !== null && item !== undefined);
-        }
+            : (value as unknown[]).filter((item) => item !== null && item !== undefined);
+        if (sample === undefined) return items;
         const sampleKind = kindOf(sample);
-        return (value as unknown[])
+        return items
             .filter((item) => kindOf(item) === sampleKind)
             .map((item) => coerceToShape(item, sample, `${path}[]`));
     }

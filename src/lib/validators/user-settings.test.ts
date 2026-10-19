@@ -46,7 +46,13 @@ describe('settingsDocumentSchema', () => {
     test('regression: list items are objects, so an account like null is refused', () => {
         assert.equal(accepts(body({ accounts: [null] })), false);
         assert.equal(accepts(body({ tags: ['x'] })), false);
-        assert.equal(accepts(body({ accounts: [{ id: 'plaid-1' }] })), true);
+        assert.equal(accepts(body({ accounts: [{ id: 'plaid-1', name: 'Brokerage', accountValue: 1 }] })), true);
+    });
+
+    test('regression: account and tag items need an id and a name', () => {
+        assert.equal(message(body({ accounts: [{}] })), 'accounts and tags need an id');
+        assert.equal(message(body({ tags: [{ id: 't1' }] })), 'accounts and tags need a name');
+        assert.equal(accepts(body({ accounts: [{ id: '', name: 'x' }] })), false);
     });
 
     test('lists stay lists and every other slice is an object', () => {

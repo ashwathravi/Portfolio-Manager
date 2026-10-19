@@ -874,7 +874,10 @@ describe('settingsStore', () => {
             const { normalizeSettings, defaultPersistedSettings } = await import('./settingsStore');
             const defaults = defaultPersistedSettings();
             const profile = { ...defaults.profile, fullName: 'Jane Smith', nickname: 'JS' };
-            const accounts = [{ id: 'plaid-1', name: 'Brokerage' }];
+            const accounts = [{
+                id: 'plaid-1', name: 'Brokerage', type: 'brokerage', accountMask: '0000', holdings: 3,
+                accountValue: 1000, lastSynced: '2026-10-19', status: 'reconciled', provider: 'plaid',
+            }];
 
             const normalized = normalizeSettings({ profile, accounts } as never);
 
@@ -883,19 +886,32 @@ describe('settingsStore', () => {
             assert.ok(!('riskPolicy' in normalized));
         });
 
-        test('regression: drops items of the wrong kind from lists that are empty by default', async () => {
+        test('regression: drops list items of the wrong kind, or without the fields they are shown by', async () => {
             const { normalizeSettings, defaultPersistedSettings } = await import('./settingsStore');
             const defaults = defaultPersistedSettings();
 
             const normalized = normalizeSettings({
-                accounts: [null, { id: 'plaid-1' }, 'x'] as never,
+                accounts: [null, {}, { id: 'plaid-1', name: 'Brokerage' }, 'x'] as never,
                 alphaRadarDelivery: { ...defaults.alphaRadarDelivery, tickerFilters: ['AAPL', null, 7] } as never,
-                riskPolicy: { ...defaults.riskPolicy, cashJobs: [undefined, { id: 'job-1' }] } as never,
+                riskPolicy: { ...defaults.riskPolicy, cashJobs: [undefined, { label: 'no id' }, { id: 'job-1', type: 'emergency' }] } as never,
+                tags: [{ color: '#fff' }, ...defaults.tags] as never,
             });
 
-            assert.deepStrictEqual(normalized.accounts, [{ id: 'plaid-1' }]);
+            // An account without a name can't be shown, so it goes; the
+            // fields it does need are filled in.
+            assert.deepStrictEqual(normalized.accounts, [{
+                id: 'plaid-1',
+                name: 'Brokerage',
+                type: '',
+                accountMask: '',
+                holdings: 0,
+                accountValue: 0,
+                lastSynced: '',
+                status: 'needs-review',
+            }]);
             assert.deepStrictEqual(normalized.alphaRadarDelivery?.tickerFilters, ['AAPL']);
-            assert.deepStrictEqual(normalized.riskPolicy?.cashJobs, [{ id: 'job-1' }]);
+            assert.deepStrictEqual(normalized.riskPolicy?.cashJobs, [{ id: 'job-1', type: 'emergency', label: '', amount: 0 }]);
+            assert.deepStrictEqual(normalized.tags, defaults.tags);
         });
 
         test('drops list items of the wrong kind', async () => {

@@ -10,6 +10,8 @@ import {
     applySettingsDocument,
     createSettingsPusher,
     currentSettingsDocument,
+    flushSettings,
+    haltSettingsSync,
     persistedSlicesChanged,
     planSettingsStart,
     readBrowserCopy,
@@ -529,6 +531,7 @@ describe("syncSettings", () => {
     test("regression: never saves over settings from a newer version of the app", () => {
         const storage = new FakeStorage();
         let sends = 0;
+        const readOnlyNotices: string[] = [];
         const future: StoredSettingsDocument = { ...stored("From a newer app", T0), version: SETTINGS_VERSION + 1 };
         const sync = syncSettings(serverWith(future), { document: future, push: false, baseUpdatedAt: T0 }, {
             storage,
@@ -538,12 +541,17 @@ describe("syncSettings", () => {
             },
             page: null,
             delayMs: 0,
+            notices: { onReadOnly: () => readOnlyNotices.push("read-only") },
         });
 
         useSettingsStore.getState().setTheme("dark");
+        useSettingsStore.getState().setDensity("compact");
         mock.timers.tick(1000);
 
         assert.equal(sends, 0);
+        // Nor is a copy in this version's shape left pending for a newer app to save.
+        assert.equal(readBrowserCopy(storage)?.pending ?? false, false);
+        assert.deepEqual(readOnlyNotices, ["read-only"]);
         sync.stop();
     });
 
@@ -591,5 +599,101 @@ describe("syncSettings", () => {
         assert.equal(useSettingsStore.getState().profile.fullName, "Newer on the server");
         assert.equal(readBrowserCopy(storage)?.baseUpdatedAt, T1);
         sync.stop();
+    });
+
+    test("regression: ignores a refreshed snapshot older than this page's latest save", async () => {
+        const sync = syncSettings(serverWith(stored("Start", T0)), { document: null, push: false, baseUpdatedAt: T0 }, {
+            storage: new FakeStorage(),
+            send: async () => saved(T1),
+            page: null,
+            delayMs: 0,
+        });
+
+        useSettingsStore.getState().updateProfile({ fullName: "Saved just now" });
+        mock.timers.tick(0);
+        await settle();
+        // A refresh that read the settings before that save landed.
+        sync.rebase(serverWith(stored("Start", T0)));
+
+        assert.equal(useSettingsStore.getState().profile.fullName, "Saved just now");
+        sync.stop();
+    });
+
+    test("regression: sign-out's flush gives up on a stalled save", async () => {
+        const sync = syncSettings(SERVER_NONE, { document: null, push: false, baseUpdatedAt: null }, {
+            storage: new FakeStorage(),
+            send: () => new Promise<SaveResult>(() => {}),
+            page: null,
+            delayMs: 0,
+        });
+        useSettingsStore.getState().setTheme("dark");
+        mock.timers.tick(0);
+
+        let flushed = false;
+        const flushing = flushSettings(3000).then(() => { flushed = true; });
+        await settle();
+        assert.equal(flushed, false);
+        mock.timers.tick(3000);
+        await flushing;
+
+        assert.equal(flushed, true);
+        sync.stop();
+    });
+
+    test("regression: after sign-out halts sync, a late answer doesn't write the copy back", async () => {
+        const storage = new FakeStorage();
+        let answer: () => void = () => {};
+        const sync = syncSettings(SERVER_NONE, { document: null, push: false, baseUpdatedAt: null }, {
+            storage,
+            send: () => new Promise<SaveResult>((resolve) => { answer = () => resolve(saved(T1)); }),
+            page: null,
+            delayMs: 0,
+        });
+        useSettingsStore.getState().setTheme("dark");
+        mock.timers.tick(0);
+        await settle();
+
+        haltSettingsSync();
+        storage.store.clear();
+        answer();
+        await settle();
+        useSettingsStore.getState().setDensity("compact");
+
+        assert.equal(storage.store.size, 0);
+        sync.stop();
+    });
+});
+
+describe("createSettingsPusher, with a save on its way as the page closes", () => {
+    beforeEach(() => mock.timers.enable({ apis: ["setTimeout"] }));
+    afterEach(() => mock.timers.reset());
+
+    test("regression: sends the edit that was waiting once the earlier save settles", async () => {
+        const sent: string[] = [];
+        let answerFirst: () => void = () => {};
+        const pusher = createSettingsPusher({
+            send: (document) => {
+                sent.push(nameOf(document));
+                return sent.length === 1
+                    ? new Promise<SaveResult>((resolve) => { answerFirst = () => resolve(saved(T1)); })
+                    : Promise.resolve(saved("2026-10-19T10:00:00.000Z"));
+            },
+            baseUpdatedAt: T0,
+            onSaved: () => {},
+            onConflict: () => {},
+            delayMs: 100,
+        });
+
+        pusher.schedule(doc("A"));
+        mock.timers.tick(100);
+        pusher.schedule(doc("B"));
+        // The page goes into the back-forward cache, and comes back.
+        pusher.flushOnExit();
+        answerFirst();
+        await settle();
+        mock.timers.tick(100);
+        await settle();
+
+        assert.deepEqual(sent, ["A", "B"]);
     });
 });
