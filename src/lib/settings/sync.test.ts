@@ -150,6 +150,17 @@ describe("applySettingsDocument", () => {
         assert.equal((old.settings.preferences as { defaultLandingPage: string }).defaultLandingPage, "/analytics");
     });
 
+    test("regression: slices a document leaves out go back to their defaults", () => {
+        useSettingsStore.getState().setShowSampleData(false);
+        useSettingsStore.getState().setTheme("dark");
+
+        applySettingsDocument({ version: SETTINGS_VERSION, settings: { profile: { ...useSettingsStore.getState().profile, fullName: "Grace" } } });
+
+        assert.equal(useSettingsStore.getState().profile.fullName, "Grace");
+        assert.equal(useSettingsStore.getState().demo.showSampleData, true);
+        assert.equal(useSettingsStore.getState().appearance.theme, "light");
+    });
+
     test("regression: a malformed slice falls back to the defaults instead of breaking pages", () => {
         applySettingsDocument({ version: SETTINGS_VERSION, settings: { riskPolicy: {}, guardrails: { approvalThresholdUsd: "lots" } } });
 
@@ -360,6 +371,32 @@ describe("syncSettings", () => {
         assert.equal((sent[0].settings.appearance as { theme: string }).theme, "dark");
         assert.equal(readBrowserCopy(storage)?.pending, false);
         assert.equal(readBrowserCopy(storage)?.baseUpdatedAt, T1);
+        sync.stop();
+    });
+
+    test("regression: on a conflict, slices the server's document leaves out don't keep this tab's values", async () => {
+        const storage = new FakeStorage();
+        useSettingsStore.getState().setShowSampleData(false);
+        const partial: StoredSettingsDocument = {
+            version: SETTINGS_VERSION,
+            settings: { profile: { ...useSettingsStore.getState().profile, fullName: "From another device" } },
+            updatedAt: T1,
+        };
+        const sync = syncSettings(serverWith(stored("Mine", T0)), { document: null, push: false, baseUpdatedAt: T0 }, {
+            storage,
+            send: async () => ({ status: "conflict", current: partial }),
+            page: null,
+            delayMs: 0,
+        });
+
+        useSettingsStore.getState().updateProfile({ fullName: "Stale edit" });
+        mock.timers.tick(0);
+        await settle();
+
+        assert.equal(useSettingsStore.getState().profile.fullName, "From another device");
+        assert.equal(useSettingsStore.getState().demo.showSampleData, true);
+        // So the next edit doesn't send this tab's old value back up.
+        assert.deepEqual(readBrowserCopy(storage)?.document.settings.demo, { showSampleData: true });
         sync.stop();
     });
 

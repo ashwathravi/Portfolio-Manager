@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { SETTINGS_VERSION } from '@/lib/settings/document';
+import { FIRST_SAVED_SETTINGS_VERSION, SETTINGS_VERSION } from '@/lib/settings/document';
 import { defaultPersistedSettings } from '@/lib/stores/settingsStore';
 
 import { settingsDocumentSchema } from './user-settings';
@@ -46,20 +46,25 @@ describe('settingsDocumentSchema', () => {
         assert.equal(message(body({ demo: {} })), 'settings.demo.showSampleData is missing');
     });
 
-    test('accepts a partial document from an older version', () => {
-        assert.equal(accepts(body({ appearance: { theme: 'dark' } }, { version: 1 })), true);
+    test('regression: refuses versions no browser saves, whose fields went unchecked', () => {
+        // Browsers migrate before saving, so nothing older than the first saved version arrives.
+        assert.equal(
+            message(body({ profile: { fullName: 'Jane', apiKey: 'secret' } }, { version: FIRST_SAVED_SETTINGS_VERSION - 1 })),
+            `version must be at least ${FIRST_SAVED_SETTINGS_VERSION}`,
+        );
     });
 
-    test('version must be a whole number from 1 to the current version', () => {
+    test('version must be a whole number from the first saved version to the current one', () => {
         assert.equal(message(body({}, { version: '15' })), 'version must be a number');
-        assert.equal(message(body({}, { version: 2.5 })), 'version must be a whole number');
-        assert.equal(message(body({}, { version: 0 })), 'version must be at least 1');
+        assert.equal(message(body({}, { version: 15.5 })), 'version must be a whole number');
+        assert.equal(message(body({}, { version: 1 })), `version must be at least ${FIRST_SAVED_SETTINGS_VERSION}`);
         assert.equal(message(body({}, { version: SETTINGS_VERSION + 1 })), `version must be at most ${SETTINGS_VERSION}`);
+        assert.equal(accepts(body({}, { version: FIRST_SAVED_SETTINGS_VERSION })), true);
     });
 
     test('rejects slices that are not persisted, such as API keys', () => {
         assert.equal(message(body({ apiKeys: { polygon: 'pk' } })), 'settings has an unknown field "apiKeys"');
-        assert.equal(accepts(body({ security: {} }, { version: 1 })), false);
+        assert.equal(message(body({ security: {} })), 'settings has an unknown field "security"');
     });
 
     test('regression: list items are objects, so an account like null is refused', () => {

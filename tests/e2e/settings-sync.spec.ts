@@ -166,16 +166,25 @@ test.describe('Settings sync', () => {
         const future = await page.request.put('/api/settings', { data: { version: 999, settings: {}, baseUpdatedAt: null } });
         expect(future.status()).toBe(400);
 
-        // A field the app could never write. (An older version's document
-        // may leave the plan's other fields out, so this is all it needs.)
+        // A field the app could never write: an optional field of the wrong kind.
+        const account = {
+            id: 'manual-1', name: 'Brokerage', type: 'Brokerage', accountMask: '****1234', holdings: 1,
+            accountValue: 1000, lastSynced: 'Oct 19, 2026', status: 'error', errorMessage: {},
+        };
         const mistyped = await page.request.put('/api/settings', {
-            data: { version: 14, settings: { riskPolicy: { employerStockPlan: { nextActionDate: {} } } }, baseUpdatedAt: null },
+            data: { version: 15, settings: { accounts: [account] }, baseUpdatedAt: null },
         });
         expect(mistyped.status()).toBe(400);
         expect(await mistyped.json()).toMatchObject({
             code: 'INVALID_SETTINGS',
-            error: 'settings.riskPolicy.employerStockPlan.nextActionDate must be a date (YYYY-MM-DD)',
+            error: 'settings.accounts[0].errorMessage must be text',
         });
+
+        // Nor a version older than any browser saves.
+        const older = await page.request.put('/api/settings', {
+            data: { version: 14, settings: { profile: { fullName: 'Jane', apiKey: 'secret' } }, baseUpdatedAt: null },
+        });
+        expect(older.status()).toBe(400);
 
         // A request context of its own: the page's background requests keep
         // setting the session cookie on the shared one.

@@ -10,7 +10,7 @@ import {
 } from '@/lib/risk-policy/de-risking';
 import { SELL_DISCIPLINE_TRIGGER_TYPES } from '@/lib/risk-policy/sell-discipline';
 import { THEME_IDS } from '@/lib/risk-policy/themes';
-import { SETTINGS_VERSION, type PersistedSettingsSlice } from '@/lib/settings/document';
+import type { PersistedSettingsSlice } from '@/lib/settings/document';
 
 import { preferencesSchema } from './settings';
 
@@ -30,9 +30,8 @@ import { preferencesSchema } from './settings';
  *     the wrong kind.
  *
  * A new field goes here, in the store's type and in its defaults, with a bump
- * of SETTINGS_VERSION and a migration step: documents from an older version
- * (a tab not reloaded since the deploy) are checked only on the fields they
- * have.
+ * of SETTINGS_VERSION, a migration step and an entry in FIELDS_ADDED_IN, so
+ * a tab not reloaded since the deploy can still save without it.
  */
 
 // --- Fields ---------------------------------------------------------------
@@ -283,25 +282,43 @@ export interface SettingsIssue {
 }
 
 /**
- * The first field of `settings` the app could not have written, or null. A
- * document from an older `version` may leave out fields added since and keep
- * fields removed since; every value it does hold must still be valid, and it
- * holds only persisted slices.
+ * Fields added since FIRST_SAVED_SETTINGS_VERSION, by the version that added
+ * them, as paths such as "riskPolicy.someField" or "accounts[].someField". A
+ * save from an older version (a tab not reloaded since the deploy) may leave
+ * out the fields added after it, and nothing else.
  */
-export function findSettingsIssue(settings: unknown, version: number): SettingsIssue | null {
+export const FIELDS_ADDED_IN: Readonly<Record<number, readonly string[]>> = {};
+
+/**
+ * The first field of `settings` the app could not have written at
+ * `version`, or null. Only the fields `fieldsAddedIn` lists for later
+ * versions may be missing; unknown fields are never allowed.
+ */
+export function findSettingsIssue(
+    settings: unknown,
+    version: number,
+    fieldsAddedIn: Readonly<Record<number, readonly string[]>> = FIELDS_ADDED_IN,
+): SettingsIssue | null {
     const result = documentSettingsSchema.safeParse(settings);
     if (result.success) return null;
-    const older = version < SETTINGS_VERSION;
-    const issue = result.error.issues.find((candidate) => !(older && isVersionGap(settings, candidate)));
+    const addedSince = new Set(
+        Object.entries(fieldsAddedIn).filter(([added]) => Number(added) > version).flatMap(([, paths]) => paths),
+    );
+    const issue = result.error.issues.find(
+        (candidate) => !(valueAt(settings, candidate.path) === undefined && addedSince.has(fieldPath(candidate.path))),
+    );
     if (!issue) return null;
     // An unknown key in a record names the record, as an unknown field does.
     const path = issue.code === 'invalid_key' ? issue.path.slice(0, -1) : issue.path;
     return { path: issue.path, message: `${formatSettingsPath(path)} ${describeIssue(issue, valueAt(settings, issue.path))}` };
 }
 
-function isVersionGap(settings: unknown, issue: z.core.$ZodIssue): boolean {
-    if (issue.path.length === 0) return false;
-    return issue.code === 'unrecognized_keys' || issue.code === 'invalid_key' || valueAt(settings, issue.path) === undefined;
+/** "accounts[].provider": a path as FIELDS_ADDED_IN names it. */
+function fieldPath(path: readonly PropertyKey[]): string {
+    return path.reduce<string>(
+        (out, key) => (typeof key === 'number' ? `${out}[]` : out ? `${out}.${String(key)}` : String(key)),
+        '',
+    );
 }
 
 /** "settings.riskPolicy.sellDisciplineRules[2].type", as the request body has it. */

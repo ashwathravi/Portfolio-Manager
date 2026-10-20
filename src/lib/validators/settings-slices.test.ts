@@ -413,15 +413,40 @@ describe('findSettingsIssue', () => {
         assert.equal(findSettingsIssue({ appearance: { theme: 'dark' } }, SETTINGS_VERSION)?.message, 'settings.appearance.density is missing');
     });
 
-    test('an older document may lack fields added since and keep fields removed since, but not hold bad values', () => {
-        assert.equal(findSettingsIssue({ appearance: { theme: 'dark' } }, SETTINGS_VERSION - 1), null);
-        assert.equal(findSettingsIssue({ profile: { fullName: 'Jane', nickname: 'JS' } }, 1), null);
-        assert.equal(findSettingsIssue({ riskPolicy: { themeCaps: { retired_theme: 5 } } }, SETTINGS_VERSION - 1), null);
-        assert.equal(
-            findSettingsIssue({ riskPolicy: { employerStockPlan: { nextActionDate: {} } } }, SETTINGS_VERSION - 1)?.message,
-            'settings.riskPolicy.employerStockPlan.nextActionDate must be a date (YYYY-MM-DD)',
-        );
-        assert.notEqual(findSettingsIssue({ appearance: { theme: 'neon' } }, 1), null);
+    describe('a document from an older version', () => {
+        // As if the current version had added the accent and accounts' lastSynced.
+        const added = { [SETTINGS_VERSION]: ['appearance.accent', 'accounts[].lastSynced'] };
+        const older = SETTINGS_VERSION - 1;
+        const withoutField = (path: Path) => withValue(baseline(), path, MISSING);
+
+        test('may leave out the fields added since', () => {
+            assert.equal(findSettingsIssue(withoutField(['appearance', 'accent']), older, added), null);
+            assert.equal(findSettingsIssue(withoutField(['accounts', 0, 'lastSynced']), older, added), null);
+            // Not at the version that added them.
+            assert.equal(findSettingsIssue(withoutField(['appearance', 'accent']), SETTINGS_VERSION, added)?.message, 'settings.appearance.accent is missing');
+        });
+
+        test('regression: may not leave out any other field, or add one', () => {
+            assert.equal(findSettingsIssue(withoutField(['appearance', 'density']), older, added)?.message, 'settings.appearance.density is missing');
+            assert.equal(findSettingsIssue(withoutField(['accounts', 0, 'name']), older, added)?.message, 'settings.accounts[0].name is missing');
+            assert.equal(
+                findSettingsIssue(withValue(baseline(), ['profile', 'apiKey'], 'secret'), older, added)?.message,
+                'settings.profile has an unknown field "apiKey"',
+            );
+            assert.equal(findSettingsIssue({ apiKeys: { polygon: 'pk' } }, older, added)?.message, 'settings has an unknown field "apiKeys"');
+        });
+
+        test('must hold valid values, the added fields included', () => {
+            assert.equal(findSettingsIssue(withValue(baseline(), ['appearance', 'accent'], 'red'), older, added)?.message, 'settings.appearance.accent must be a hex colour such as #17cf54');
+            assert.equal(
+                findSettingsIssue(withValue(baseline(), ['riskPolicy', 'employerStockPlan', 'nextActionDate'], {}), older, added)?.message,
+                'settings.riskPolicy.employerStockPlan.nextActionDate must be a date (YYYY-MM-DD)',
+            );
+        });
+
+        test('no field has been added since the first saved version', () => {
+            assert.equal(findSettingsIssue(withoutField(['appearance', 'accent']), older)?.message, 'settings.appearance.accent is missing');
+        });
     });
 
     describe('rules and boundaries, slice by slice', () => {
