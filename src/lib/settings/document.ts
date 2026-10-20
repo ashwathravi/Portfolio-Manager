@@ -68,9 +68,6 @@ export const PERSISTED_SETTINGS_SLICES = [
 
 export type PersistedSettingsSlice = (typeof PERSISTED_SETTINGS_SLICES)[number];
 
-/** Slices that are lists; every other slice is an object. */
-export const LIST_SETTINGS_SLICES: ReadonlySet<PersistedSettingsSlice> = new Set(["accounts", "tags"]);
-
 export interface SettingsDocument {
     version: number;
     settings: Partial<Record<PersistedSettingsSlice, unknown>>;

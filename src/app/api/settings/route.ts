@@ -7,6 +7,11 @@
  * stored version (`baseUpdatedAt`); otherwise the answer is 409 with what's
  * stored now, which the browser takes instead (src/lib/settings/sync.ts).
  *
+ * Every field must be one the app could have written
+ * (src/lib/validators/settings-slices.ts); otherwise the answer is 400
+ * INVALID_SETTINGS, its error naming the first field that isn't, e.g.
+ * "settings.riskPolicy.employerStockPlan.nextActionDate must be a date (YYYY-MM-DD)".
+ *
  * Body:     { version: number, settings: { [slice]: object | list }, baseUpdatedAt: string | null }
  * Response: { data: { updatedAt } }, or 409 { error, code: SETTINGS_CONFLICT, data: { document } }
  */

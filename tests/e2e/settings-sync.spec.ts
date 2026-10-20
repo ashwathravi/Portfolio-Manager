@@ -128,8 +128,8 @@ test.describe('Settings sync', () => {
             data: {
                 version: 15,
                 settings: {
-                    profile: { fullName: 'Grace Hopper' },
-                    appearance: { theme: 'dark', density: 'compact' },
+                    profile: { fullName: 'Grace Hopper', email: '', phone: '' },
+                    appearance: { theme: 'dark', density: 'compact', compactMode: true, animationsEnabled: true, accent: '#17cf54' },
                     demo: { showSampleData: false },
                 },
                 baseUpdatedAt: null,
@@ -165,6 +165,17 @@ test.describe('Settings sync', () => {
 
         const future = await page.request.put('/api/settings', { data: { version: 999, settings: {}, baseUpdatedAt: null } });
         expect(future.status()).toBe(400);
+
+        // A field the app could never write. (An older version's document
+        // may leave the plan's other fields out, so this is all it needs.)
+        const mistyped = await page.request.put('/api/settings', {
+            data: { version: 14, settings: { riskPolicy: { employerStockPlan: { nextActionDate: {} } } }, baseUpdatedAt: null },
+        });
+        expect(mistyped.status()).toBe(400);
+        expect(await mistyped.json()).toMatchObject({
+            code: 'INVALID_SETTINGS',
+            error: 'settings.riskPolicy.employerStockPlan.nextActionDate must be a date (YYYY-MM-DD)',
+        });
 
         // A request context of its own: the page's background requests keep
         // setting the session cookie on the shared one.

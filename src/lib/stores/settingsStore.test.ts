@@ -870,20 +870,45 @@ describe('settingsStore', () => {
             assert.strictEqual(normalized.guardrails?.approvalThresholdUsd, defaults.guardrails.approvalThresholdUsd);
         });
 
-        test('keeps valid values, unknown fields and lists the defaults leave empty', async () => {
+        test('keeps valid values and lists the defaults leave empty; unknown fields go', async () => {
             const { normalizeSettings, defaultPersistedSettings } = await import('./settingsStore');
             const defaults = defaultPersistedSettings();
-            const profile = { ...defaults.profile, fullName: 'Jane Smith', nickname: 'JS' };
+            const profile = { ...defaults.profile, fullName: 'Jane Smith' };
             const accounts = [{
                 id: 'plaid-1', name: 'Brokerage', type: 'brokerage', accountMask: '0000', holdings: 3,
                 accountValue: 1000, lastSynced: '2026-10-19', status: 'reconciled', provider: 'plaid',
             }];
 
-            const normalized = normalizeSettings({ profile, accounts } as never);
+            const normalized = normalizeSettings({ profile: { ...profile, nickname: 'JS' }, accounts } as never);
 
             assert.deepStrictEqual(normalized.profile, profile);
             assert.deepStrictEqual(normalized.accounts, accounts);
             assert.ok(!('riskPolicy' in normalized));
+        });
+
+        test('regression: a mistyped optional field goes instead of reaching the page', async () => {
+            const { normalizeSettings, defaultPersistedSettings } = await import('./settingsStore');
+            const defaults = defaultPersistedSettings();
+
+            const normalized = normalizeSettings({
+                riskPolicy: { ...defaults.riskPolicy, employerStockPlan: { ...defaults.riskPolicy.employerStockPlan, nextActionDate: {} } },
+            } as never);
+
+            assert.deepStrictEqual(normalized.riskPolicy, defaults.riskPolicy);
+        });
+
+        test('regression: saved settings load back unchanged', async () => {
+            // List items used to take optional fields from the first default
+            // item: every bucket got core's minPct (55, above its own max) and
+            // the stale-thesis rule became GOOG-only.
+            const { normalizeSettings, defaultPersistedSettings } = await import('./settingsStore');
+            const saved = JSON.parse(JSON.stringify(defaultPersistedSettings()));
+
+            const normalized = normalizeSettings(saved);
+
+            assert.deepStrictEqual(normalized, saved);
+            assert.equal(normalized.riskPolicy?.bucketPolicies.find((policy) => policy.bucket === 'active')?.minPct, undefined);
+            assert.equal(normalized.riskPolicy?.sellDisciplineRules.find((rule) => rule.type === 'stale_thesis')?.symbol, undefined);
         });
 
         test('regression: drops list items of the wrong kind, or without the fields they are shown by', async () => {
@@ -893,7 +918,10 @@ describe('settingsStore', () => {
             const normalized = normalizeSettings({
                 accounts: [null, {}, { id: 'plaid-1', name: 'Brokerage' }, 'x'] as never,
                 alphaRadarDelivery: { ...defaults.alphaRadarDelivery, tickerFilters: ['AAPL', null, 7] } as never,
-                riskPolicy: { ...defaults.riskPolicy, cashJobs: [undefined, { label: 'no id' }, { id: 'job-1', type: 'emergency' }] } as never,
+                riskPolicy: {
+                    ...defaults.riskPolicy,
+                    cashJobs: [undefined, { label: 'no id' }, { id: 'job-1', type: 'emergency_fund' }, { id: 'job-2', type: 'emergency' }],
+                } as never,
                 tags: [{ color: '#fff' }, ...defaults.tags] as never,
             });
 
@@ -910,7 +938,8 @@ describe('settingsStore', () => {
                 status: 'needs-review',
             }]);
             assert.deepStrictEqual(normalized.alphaRadarDelivery?.tickerFilters, ['AAPL']);
-            assert.deepStrictEqual(normalized.riskPolicy?.cashJobs, [{ id: 'job-1', type: 'emergency', label: '', amount: 0 }]);
+            // A job of no known type can't be shown either.
+            assert.deepStrictEqual(normalized.riskPolicy?.cashJobs, [{ id: 'job-1', type: 'emergency_fund', label: '', amount: 0 }]);
             assert.deepStrictEqual(normalized.tags, defaults.tags);
         });
 

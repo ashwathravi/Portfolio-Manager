@@ -1,7 +1,10 @@
+import { spawnSync } from 'node:child_process';
+import { join } from 'node:path';
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { PERSISTED_SETTINGS_SLICES, SETTINGS_VERSION } from '@/lib/settings/document';
+import { SETTINGS_VERSION } from '@/lib/settings/document';
+import { defaultPersistedSettings } from '@/lib/stores/settingsStore';
 
 import { settingsDocumentSchema } from './user-settings';
 
@@ -20,11 +23,27 @@ function message(input: unknown): string | undefined {
 }
 
 describe('settingsDocumentSchema', () => {
-    test('accepts a document with every persisted slice', () => {
-        const settings = Object.fromEntries(
-            PERSISTED_SETTINGS_SLICES.map((slice) => [slice, slice === 'tags' || slice === 'accounts' ? [] : {}]),
-        );
-        assert.equal(accepts(body(settings)), true);
+    test('accepts a document with every persisted slice, or with none', () => {
+        assert.equal(accepts(body(defaultPersistedSettings())), true);
+        assert.equal(accepts(body({})), true);
+    });
+
+    test('regression: refuses a mistyped optional field the defaults leave out', () => {
+        // The Codex finding on PR #143: normalizing kept it, and the Today
+        // page's risk policy crashed on it until settings were reset.
+        const defaults = defaultPersistedSettings();
+        const settings = {
+            riskPolicy: { ...defaults.riskPolicy, employerStockPlan: { ...defaults.riskPolicy.employerStockPlan, nextActionDate: {} } },
+        };
+        const result = settingsDocumentSchema.safeParse(body(settings));
+
+        assert.equal(result.success, false);
+        assert.deepEqual(result.error?.issues[0]?.path, ['settings', 'riskPolicy', 'employerStockPlan', 'nextActionDate']);
+        assert.equal(result.error?.issues[0]?.message, 'settings.riskPolicy.employerStockPlan.nextActionDate must be a date (YYYY-MM-DD)');
+    });
+
+    test('a slice at the current version has every field', () => {
+        assert.equal(message(body({ demo: {} })), 'settings.demo.showSampleData is missing');
     });
 
     test('accepts a partial document from an older version', () => {
@@ -39,26 +58,31 @@ describe('settingsDocumentSchema', () => {
     });
 
     test('rejects slices that are not persisted, such as API keys', () => {
-        assert.equal(accepts(body({ apiKeys: { polygon: 'pk' } })), false);
-        assert.equal(accepts(body({ security: {} })), false);
+        assert.equal(message(body({ apiKeys: { polygon: 'pk' } })), 'settings has an unknown field "apiKeys"');
+        assert.equal(accepts(body({ security: {} }, { version: 1 })), false);
     });
 
     test('regression: list items are objects, so an account like null is refused', () => {
-        assert.equal(accepts(body({ accounts: [null] })), false);
+        const account = {
+            id: 'plaid-1', name: 'Brokerage', type: 'Brokerage', accountMask: '****0000', holdings: 1,
+            accountValue: 1, lastSynced: 'Oct 19, 2026', status: 'reconciled',
+        };
+        assert.equal(message(body({ accounts: [null] })), 'settings.accounts[0] must be an object');
         assert.equal(accepts(body({ tags: ['x'] })), false);
-        assert.equal(accepts(body({ accounts: [{ id: 'plaid-1', name: 'Brokerage', accountValue: 1 }] })), true);
+        assert.equal(accepts(body({ accounts: [account] })), true);
     });
 
     test('regression: account and tag items need an id and a name', () => {
-        assert.equal(message(body({ accounts: [{}] })), 'accounts and tags need an id');
-        assert.equal(message(body({ tags: [{ id: 't1' }] })), 'accounts and tags need a name');
-        assert.equal(accepts(body({ accounts: [{ id: '', name: 'x' }] })), false);
+        assert.equal(message(body({ accounts: [{}] })), 'settings.accounts[0].id is missing');
+        assert.equal(message(body({ tags: [{ id: 't1' }] })), 'settings.tags[0].name is missing');
+        assert.equal(message(body({ accounts: [{ id: '', name: 'x' }] })), 'settings.accounts[0].id must not be empty');
     });
 
     test('lists stay lists and every other slice is an object', () => {
-        assert.equal(accepts(body({ tags: {} })), false);
-        assert.equal(accepts(body({ profile: [] })), false);
+        assert.equal(message(body({ tags: {} })), 'settings.tags must be a list');
+        assert.equal(message(body({ profile: [] })), 'settings.profile must be an object');
         assert.equal(accepts(body({ demo: 'off' })), false);
+        assert.equal(message(body([])), 'settings must be an object');
     });
 
     test('baseUpdatedAt is the stored version stamp, or null for a first save', () => {
@@ -70,5 +94,21 @@ describe('settingsDocumentSchema', () => {
     test('rejects extra top-level fields and a missing settings object', () => {
         assert.equal(accepts(body({}, { userId: 'someone-else' })), false);
         assert.equal(accepts({ version: SETTINGS_VERSION, baseUpdatedAt: null }), false);
+    });
+
+    test('loads without the settings store, so the route never runs client code', () => {
+        // A fresh process that refuses to resolve the store or Zustand.
+        const script = `
+            import { registerHooks } from 'node:module';
+            registerHooks({
+                resolve(specifier, context, next) {
+                    if (/zustand|settingsStore/.test(specifier)) throw new Error('loaded ' + specifier);
+                    return next(specifier, context);
+                },
+            });
+            await import(${JSON.stringify(join(__dirname, 'user-settings.ts'))});
+        `;
+        const run = spawnSync(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', script], { encoding: 'utf8' });
+        assert.equal(run.status, 0, run.stderr);
     });
 });
