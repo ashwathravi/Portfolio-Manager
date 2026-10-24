@@ -121,4 +121,47 @@ describe('parseTransactionsCsv', () => {
         assert.deepEqual(issues, []);
         assert.equal(rows.length, 1);
     });
+
+    // The Codex findings on PR #154.
+    test('regression: a price worked out from a net amount leaves the fees out', () => {
+        const csv = 'Date,Action,Symbol,Quantity,Net Amount,Fees\n2026-03-05,Buy,AAPL,10,-1001,1\n2026-03-06,Sell,AAPL,10,999,1';
+        const { rows, issues } = parseTransactionsCsv(csv);
+        assert.deepEqual(issues, []);
+        assert.deepEqual(rows.map((r) => [r.type, r.price, r.amount, r.fees]), [['BUY', 100, 1001, 1], ['SELL', 100, 999, 1]]);
+    });
+
+    test('regression: an unreadable number is an issue, not a dropped value', () => {
+        const csv = 'Date,Action,Symbol,Quantity,Price,Fees\n2026-03-05,Buy,AAPL,1,10,INVALID\n2026-03-05,Buy,AAPL,lots,10,\n2026-03-05,Buy,AAPL,1,10,--';
+        const { rows, issues } = parseTransactionsCsv(csv);
+        assert.deepEqual(issues.map((i) => [i.line, i.message]), [
+            [2, '“INVALID” in fees is not a number.'],
+            [3, '“lots” in quantity is not a number.'],
+        ]);
+        // "--" is an empty cell, as brokers write it.
+        assert.deepEqual(rows.map((r) => r.fees), [null]);
+    });
+
+    test('regression: a file of exactly 2,000 transactions imports; 2,001 says to split it', () => {
+        const header = 'Date,Action,Symbol,Quantity,Price';
+        const lines = (n: number) => [header, ...Array.from({ length: n }, (_, i) => `2026-03-05,Buy,AAPL,${i + 1},10`)].join('\n');
+        const exact = parseTransactionsCsv(lines(2000));
+        assert.equal(exact.rows.length, 2000);
+        assert.deepEqual(exact.issues, []);
+        const over = parseTransactionsCsv(lines(2001));
+        assert.equal(over.rows.length, 2000);
+        assert.deepEqual(over.issues.map((i) => i.message), ['Only 2000 transactions can be imported at once. Split the file.']);
+    });
+
+    test('regression: a security named "... Total ..." is a transaction; a totals line is not', () => {
+        const csv = [
+            'Description,Date,Action,Symbol,Quantity,Price',
+            'VANGUARD TOTAL STOCK MARKET ETF,2026-03-05,Buy,VTI,1,250',
+            'Total,,,,,250',
+        ].join('\n');
+        const { rows, issues, skipped } = parseTransactionsCsv(csv);
+        assert.deepEqual(issues, []);
+        assert.deepEqual(rows.map((r) => r.symbol), ['VTI']);
+        assert.equal(skipped, 1);
+    });
 });
+

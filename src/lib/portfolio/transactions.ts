@@ -60,9 +60,9 @@ export function transactionTimestamp(date: string): Date {
  * trades on one day both count, and importing the file again adds neither.
  */
 export function contentExternalId(
-    row: Pick<TransactionInput, 'type' | 'date' | 'symbol' | 'quantity' | 'price' | 'amount' | 'fees'>,
+    row: Pick<TransactionInput, 'type' | 'date' | 'symbol' | 'quantity' | 'price' | 'amount' | 'fees' | 'currency'>,
     occurrence: number,
 ): string {
-    const parts = [row.date, row.type, row.symbol ?? '', row.quantity ?? '', row.price ?? '', row.amount ?? '', row.fees ?? ''];
+    const parts = [row.date, row.type, row.symbol ?? '', row.quantity ?? '', row.price ?? '', row.amount ?? '', row.fees ?? '', row.currency ?? 'USD'];
     return `content:${parts.join('|')}#${occurrence}`;
 }

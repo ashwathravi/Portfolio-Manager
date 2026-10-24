@@ -20,3 +20,12 @@ test('contentExternalId - the same row gives the same ID; a repeat in the file c
     assert.notEqual(contentExternalId(row, 0), contentExternalId(row, 1));
     assert.notEqual(contentExternalId(row, 0), contentExternalId({ ...row, quantity: 11 }, 0));
 });
+
+test('regression: contentExternalId - the same row in another currency is another transaction', () => {
+    // The Codex finding on PR #154: a CAD deposit was skipped as a copy of a USD one.
+    const deposit = { type: 'DEPOSIT' as const, date: '2026-03-05', amount: 100 };
+    assert.notEqual(contentExternalId({ ...deposit, currency: 'USD' }, 0), contentExternalId({ ...deposit, currency: 'CAD' }, 0));
+    // No currency given is USD, as stored.
+    assert.equal(contentExternalId(deposit, 0), contentExternalId({ ...deposit, currency: 'USD' }, 0));
+});
+

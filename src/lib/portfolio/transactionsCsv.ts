@@ -138,8 +138,7 @@ export function parseTransactionsCsv(text: string): TransactionParseResult {
             issues.push({ line: lineNo, message: record.error });
             continue;
         }
-        const first = (record.cells[0] ?? '').trim();
-        if (record.cells.every((cell) => !cell.trim()) || SUMMARY.test(first)) {
+        if (record.cells.every((cell) => !cell.trim())) {
             skipped++;
             continue;
         }
@@ -157,10 +156,13 @@ export function parseTransactionsCsv(text: string): TransactionParseResult {
 
         const date = parseTradeDate(cell('date'));
         if (!date) {
-            // A note or disclaimer under the table has text but nothing a
-            // transaction would have.
+            // A totals line, or a note or disclaimer under the table: no date,
+            // and "Total" where the date or action would be, or nothing a
+            // transaction would have. (A security named "... Total ..." in
+            // a dated row is a transaction.)
+            const total = SUMMARY.test(cell('date')) || SUMMARY.test(cell('action')) || SUMMARY.test((record.cells[0] ?? '').trim());
             const hasData = [cell('symbol'), cell('quantity'), cell('price'), cell('amount')].some(Boolean);
-            if (!hasData) {
+            if (total || !hasData) {
                 skipped++;
                 continue;
             }
@@ -185,21 +187,40 @@ export function parseTransactionsCsv(text: string): TransactionParseResult {
             continue;
         }
 
-        // Brokers sign quantities and amounts by direction; the type says that.
-        const abs = (n: number | null) => (n == null ? null : Math.abs(n));
-        const quantity = abs(parseNumber(cell('quantity')));
-        const price = abs(parseNumber(cell('price')));
-        const amount = abs(parseNumber(cell('amount')));
-        const feeValues = feeColumns.map((i) => parseNumber(cells[i] ?? '')).filter((n): n is number => n != null);
-        const fees = feeValues.length > 0 ? feeValues.reduce((sum, n) => sum + Math.abs(n), 0) : null;
+        // Brokers sign quantities and amounts by direction; the type says
+        // that. An empty cell (or "--", "n/a") is no value; anything else
+        // that isn't a number is an issue, never a silently dropped value.
+        const unreadable: string[] = [];
+        const numberIn = (raw: string, label: string): number | null => {
+            const n = parseNumber(raw);
+            if (n == null && raw.trim() && !/^(--|n\/?a)$/i.test(raw.trim())) unreadable.push(`“${raw.trim()}” in ${label}`);
+            return n == null ? null : Math.abs(n);
+        };
+        const quantity = numberIn(cell('quantity'), headers[col.quantity] ?? 'quantity');
+        const price = numberIn(cell('price'), headers[col.price] ?? 'price');
+        const amount = numberIn(cell('amount'), headers[col.amount] ?? 'amount');
+        const feeValues = feeColumns.map((i) => numberIn(cells[i] ?? '', headers[i])).filter((n): n is number => n != null);
+        const fees = feeValues.length > 0 ? feeValues.reduce((sum, n) => sum + n, 0) : null;
+        if (unreadable.length > 0) {
+            issues.push({ line: lineNo, message: `${unreadable.join(', ')} ${unreadable.length === 1 ? 'is' : 'are'} not a number.` });
+            continue;
+        }
+        // Room for one more, checked before adding it.
+        if (rows.length >= MAX_TRANSACTION_ROWS) {
+            issues.push({ line: lineNo, message: `Only ${MAX_TRANSACTION_ROWS} transactions can be imported at once. Split the file.` });
+            break;
+        }
 
         if (TRADE_TYPES.has(type)) {
             if (!quantity) {
                 issues.push({ line: lineNo, message: `${symbol}: a ${type === 'BUY' ? 'buy' : 'sell'} needs a quantity.` });
                 continue;
             }
-            // A price from the file, or the amount over the quantity.
-            const unit = price ?? (amount != null ? amount / quantity : null);
+            // A price from the file, or the amount over the quantity. The
+            // amount is the net cash: a buy's includes its fees and a sell's
+            // is after them, so they come out before dividing.
+            const gross = amount == null ? null : type === 'BUY' ? amount - (fees ?? 0) : amount + (fees ?? 0);
+            const unit = price ?? (gross != null && gross > 0 ? gross / quantity : null);
             if (unit == null) {
                 issues.push({ line: lineNo, message: `${symbol}: a ${type === 'BUY' ? 'buy' : 'sell'} needs a price or an amount.` });
                 continue;
@@ -227,10 +248,6 @@ export function parseTransactionsCsv(text: string): TransactionParseResult {
                 notes: noteOf(cell('description')),
                 ...(cell('id') ? { externalId: cell('id') } : {}),
             });
-        }
-        if (rows.length >= MAX_TRANSACTION_ROWS) {
-            issues.push({ line: lineNo, message: `Only the first ${MAX_TRANSACTION_ROWS} transactions can be imported at once.` });
-            break;
         }
     }
     return { rows, issues, skipped };
