@@ -1,7 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
-import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { useAccountStorage, useViewerIdentity } from '@/components/providers/IdentityProvider';
 import { useRequestTime } from '@/components/providers/RequestTimeProvider';
@@ -20,10 +19,10 @@ import {
     type AddWatchError,
     type WatchItem,
 } from './watchlist';
+import { AccountRequestError } from './accountWrites';
+import { useAccountRecords } from './useAccountRecords';
 import {
-    WatchlistRequestError,
     applyWatchWrite,
-    createWatchlistWriter,
     fetchAccountWatchlist,
     importBrowserWatchlist,
     mergeAccountWatchlist,
@@ -32,7 +31,6 @@ import {
     toWatchItemInput,
     type AccountWatchlist,
     type WatchWrite,
-    type WatchlistWriter,
 } from './watchlistAccount';
 
 const SYNC_EVENT = 'atlas:watchlist-changed';
@@ -173,57 +171,24 @@ function useBrowserWatchlist(enabled: boolean, key: string, examples: WatchItem[
     return { all: stored ?? examples, hydrated, failed: false, save: commit, remove: commit };
 }
 
-const writers = new WeakMap<QueryClient, WatchlistWriter>();
-
-function writerFor(queryClient: QueryClient): WatchlistWriter {
-    let writer = writers.get(queryClient);
-    if (!writer) {
-        writer = createWatchlistWriter({
-            send: (id, write, order) => sendWatchWrite(id, write, order),
-            onSaved: (id, write) => {
-                if (queryClient.getQueryData(ACCOUNT_QUERY)) {
-                    queryClient.setQueryData<AccountWatchlist>(ACCOUNT_QUERY, (stored) => applyWatchWrite(stored, id, write));
-                }
-                // A read that started before this save may not include it: read again.
-                if (queryClient.isFetching({ queryKey: ACCOUNT_QUERY }) > 0) {
-                    void queryClient.invalidateQueries({ queryKey: ACCOUNT_QUERY });
-                }
-            },
-            onFailed: (_id, write, error) => {
-                toast.error(saveFailedMessage(write, error));
-                // The change is undone; show what the account has.
-                void queryClient.invalidateQueries({ queryKey: ACCOUNT_QUERY });
-            },
-        });
-        writers.set(queryClient, writer);
-        // A reload or close shouldn't drop an edit queued behind another.
-        if (typeof window !== 'undefined') window.addEventListener('pagehide', writer.sendWaiting);
-    }
-    return writer;
-}
-
 function saveFailedMessage(write: WatchWrite, error: unknown): string {
     const ticker = write.item.ticker;
-    if (error instanceof WatchlistRequestError && error.code === 'DUPLICATE_TICKER') {
+    if (error instanceof AccountRequestError && error.code === 'DUPLICATE_TICKER') {
         return `${ticker} is already on your watchlist.`;
     }
     const action = write.item.dismissed ? 'remove' : 'save';
     return `Couldn't ${action} ${ticker} on your watchlist. Try again.`;
 }
 
-const NO_WRITES: ReadonlyMap<string, WatchWrite> = new Map();
-const noWrites = () => NO_WRITES;
-
 /**
  * The list in the user's account, with this page's unsaved writes on top.
  * The first load sends what this browser kept before, once.
  */
 function useAccountWatchlist(enabled: boolean, key: string, examples: WatchItem[]): WatchlistSource {
-    const queryClient = useQueryClient();
-    const writer = writerFor(queryClient);
-    const query = useQuery({
+    const { data, pending, write, loaded, failed } = useAccountRecords<AccountWatchlist, WatchWrite>({
         queryKey: ACCOUNT_QUERY,
-        queryFn: async () => {
+        enabled,
+        load: async () => {
             try {
                 await importBrowserWatchlist(key, {
                     storage: getBrowserStorage(),
@@ -240,31 +205,25 @@ function useAccountWatchlist(enabled: boolean, key: string, examples: WatchItem[
             }
             return fetchAccountWatchlist();
         },
-        enabled,
-        staleTime: 30_000,
-        refetchOnWindowFocus: true,
+        send: (id, w, order) => sendWatchWrite(id, w, order),
+        apply: applyWatchWrite,
+        failedMessage: saveFailedMessage,
+        loadFailedMessage: "Couldn't load your watchlist. Showing examples only.",
     });
-    const pending = useSyncExternalStore(writer.subscribe, writer.pending, noWrites);
-
-    useEffect(() => {
-        if (enabled && query.isError) {
-            toast.error("Couldn't load your watchlist. Showing examples only.", { id: 'watchlist-load-failed' });
-        }
-    }, [enabled, query.isError]);
 
     const all = useMemo(
-        () => (enabled ? mergeAccountWatchlist(query.data, pending, examples) : examples),
-        [enabled, query.data, pending, examples],
+        () => (enabled ? mergeAccountWatchlist(data, pending, examples) : examples),
+        [enabled, data, pending, examples],
     );
 
     const save = useCallback(
         (_next: WatchItem[], item: WatchItem) => {
             const input = toWatchItemInput(item, { now: Date.now() });
             if (!input) return;
-            const { id, write } = saveWrite(input, writer.pending());
-            writer.write(id, write);
+            const save = saveWrite(input, pending);
+            write(save.id, save.write);
         },
-        [writer],
+        [pending, write],
     );
 
     const remove = useCallback(
@@ -272,10 +231,10 @@ function useAccountWatchlist(enabled: boolean, key: string, examples: WatchItem[
             // Saved as dismissed: an example isn't shown again, and the
             // user's own can't be brought back by a save that lands late.
             const input = toWatchItemInput(item, { now: Date.now(), dismissed: true });
-            if (input) writer.write(item.id, { kind: 'put', item: input });
+            if (input) write(item.id, { kind: 'put', item: input });
         },
-        [writer],
+        [write],
     );
 
-    return { all, hydrated: query.isSuccess, failed: query.isError, save, remove };
+    return { all, hydrated: loaded, failed, save, remove };
 }

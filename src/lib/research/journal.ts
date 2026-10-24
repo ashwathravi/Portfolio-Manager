@@ -1,6 +1,8 @@
 /**
  * Decision-journal CRUD primitives. Pure (no DOM, no localStorage) so the
- * reducer is unit-testable and reusable from a future server-backed API.
+ * reducer is unit-testable and shared by both places the journal is kept:
+ * the user's account (launch item i38, `journalAccount.ts`) and, without a
+ * database, this browser.
  */
 
 export type JournalDecisionType = 'entry' | 'exit' | 'hold';
@@ -141,3 +143,10 @@ export const DEFAULT_JOURNAL_ENTRIES: JournalEntry[] = [
         thesisId: 'seed-msft',
     },
 ];
+
+const EXAMPLE_IDS = new Set(DEFAULT_JOURNAL_ENTRIES.map((entry) => entry.id));
+
+/** Whether `id` is one of the example entries, edited or not. */
+export function isExampleJournalId(id: string): boolean {
+    return EXAMPLE_IDS.has(id);
+}

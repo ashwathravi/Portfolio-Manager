@@ -629,6 +629,39 @@ export const watchlistItems = pgTable("watchlist_items", {
     appRuntimeAccess: appRuntimeAccessPolicy(),
 })).enableRLS();
 
+/**
+ * The user's decision journal (src/lib/research/journal.ts). As with the
+ * watchlist, `id` is the browser's, and an example entry the user deletes
+ * stays as a `dismissed` row so it isn't shown again. `thesis_id` points at
+ * a thesis by its ID; it isn't a foreign key, since example theses aren't
+ * stored.
+ */
+export const journalEntries = pgTable("journal_entries", {
+    userId: text("user_id")
+        .notNull()
+        .references(() => authUsers.id, { onDelete: "cascade" }),
+    id: text("id").notNull(),
+    date: date("date", { mode: "string" }).notNull(),
+    type: text("type").notNull(),
+    ticker: text("ticker").notNull(),
+    decision: text("decision").notNull(),
+    rationale: text("rationale").notNull(),
+    outcome: text("outcome").notNull(),
+    thesisId: text("thesis_id"),
+    dismissed: boolean("dismissed").notNull().default(false),
+    // As for watchlist_items: the page that last wrote the row, and its count.
+    writeSession: text("write_session"),
+    writeSeq: bigint("write_seq", { mode: "number" }),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => ({
+    pk: primaryKey({ columns: [table.userId, table.id], name: "journal_entries_pkey" }),
+    typeCheck: check("journal_entries_type_check", sql`${table.type} in ('entry', 'exit', 'hold')`),
+    outcomeCheck: check("journal_entries_outcome_check", sql`${table.outcome} in ('win', 'loss', 'pending')`),
+    serverOnlyNoClientAccess: serverOnlyNoClientAccessPolicy(),
+    appRuntimeAccess: appRuntimeAccessPolicy(),
+})).enableRLS();
+
 export const portfoliosRelations = relations(portfolios, ({ one, many }) => ({
     user: one(authUsers, {
         fields: [portfolios.userId],

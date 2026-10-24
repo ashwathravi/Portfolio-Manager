@@ -208,7 +208,7 @@ export function ResearchPageClient() {
         ) {
             return;
         }
-        removeJournal(entry.id);
+        if (!removeJournal(entry.id)) return;
         toast.success(`Journal entry for ${entry.ticker} deleted.`);
     };
 
@@ -404,10 +404,9 @@ export function ResearchPageClient() {
                 }}
                 editing={editingJournal}
                 theses={theses}
-                onSubmit={(draft) => {
-                    if (editingJournal) updateJournal(editingJournal.id, draft);
-                    else createJournal(draft);
-                }}
+                onSubmit={(draft) =>
+                    editingJournal ? updateJournal(editingJournal.id, draft) : createJournal(draft)
+                }
             />
         </div>
     );
