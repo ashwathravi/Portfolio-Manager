@@ -148,6 +148,23 @@ describe("importTheses", () => {
         assert.ok(thesisIds.every((id) => id === other.id));
     });
 
+    test("regression: children go in batches small enough for Postgres's parameter limit", async () => {
+        // The Codex finding on PR #151: 200 theses with 50 evidence each made
+        // one 10,000-row insert, over Postgres's 65,535 bound values.
+        const many = Array.from({ length: 200 }, (_, t) => ({
+            ...THESIS,
+            id: `t-${t}`,
+            catalysts: [],
+            linkedEvidence: Array.from({ length: 50 }, (_, e) => ({ id: `e-${e}`, title: "x", type: "note" as const, date: "", url: null })),
+        }));
+        const { database, calls } = fakeDatabase({ inserted: many.map((t) => t.id) });
+        await importTheses(USER, { items: many }, { now: NOW, database });
+        const inserts = calls.filter((c) => c.table === thesisEvidence);
+        assert.equal(inserts.reduce((n, c) => n + (c.rows?.length ?? 0), 0), 10_000);
+        assert.ok(inserts.every((c) => (c.rows?.length ?? 0) <= 1000));
+        assert.ok(inserts.every((c) => (c.rows?.length ?? 0) * 8 < 65_535));
+    });
+
     test("writes nothing for an empty batch", async () => {
         const database = { transaction: () => assert.fail("nothing to write") } as unknown as typeof db;
         await importTheses(USER, { items: [] }, { database });
@@ -165,10 +182,20 @@ describe("loadTheses", () => {
             [thesisCatalysts, THESIS.catalysts.map((c, position) => ({ userId: USER, thesisId: THESIS.id, position, ...c }))],
             [thesisEvidence, THESIS.linkedEvidence.map((e, position) => ({ userId: USER, thesisId: THESIS.id, position, ...e }))],
         ]);
-        const database = {
+        const configs: unknown[] = [];
+        const tx = {
             select: () => ({ from: (table: unknown) => ({ where: () => ({ orderBy: async () => results.get(table) ?? [] }) }) }),
+        };
+        const database = {
+            transaction: async (fn: (t: typeof tx) => Promise<unknown>, config: unknown) => {
+                configs.push(config);
+                return fn(tx);
+            },
         } as unknown as typeof db;
 
         assert.deepEqual(await loadTheses(USER, database), { theses: [THESIS], dismissed: ["seed-meta"] });
+        // Regression (the Codex finding on PR #151): the three reads share one
+        // snapshot, so a thesis is never paired with another save's children.
+        assert.deepEqual(configs, [{ isolationLevel: "repeatable read", accessMode: "read only" }]);
     });
 });

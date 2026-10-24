@@ -158,4 +158,29 @@ test.describe('Theses in the account', () => {
         expect((await anonymous.post('/api/research/theses/import', { data: { items: [] } })).status()).toBe(401);
         await anonymous.dispose();
     });
+
+    test("regression: a 51st catalyst is refused with a message, not saved by dropping one", async ({ context, page }) => {
+        // The Codex finding on PR #151.
+        await signInAsFreshUser(context);
+        await gotoAppPage(page, '/research');
+        const catalysts = Array.from({ length: 50 }, (_, i) => ({ id: `cat-${i}`, title: `Catalyst ${i}`, date: '', impact: 'low' }));
+        expect((await page.request.put(`/api/research/theses/${THESIS.id}`, {
+            data: { thesis: { ...THESIS, catalysts }, order: { session: 'e2e-limit-test', seq: 1 } },
+        })).status()).toBe(204);
+
+        const loaded = researchLoaded(page, 'theses');
+        await gotoAppPage(page, '/research/thesis/AMD');
+        await loaded;
+        const region = page.getByRole('region', { name: 'Catalysts' });
+        await region.getByRole('button', { name: 'Add' }).click();
+        const dialog = page.getByRole('dialog');
+        await dialog.getByPlaceholder('e.g. Q4 Earnings').fill('One too many');
+        await dialog.getByPlaceholder('2026-05-01 or Q2 2026').fill('Q4 2027');
+        await dialog.getByRole('button', { name: 'Add Catalyst' }).click();
+        await expect(page.getByText('A thesis can track up to 50 catalysts.', { exact: false })).toBeVisible();
+        await expect(dialog).toBeVisible();
+        const stored = (await (await page.request.get('/api/research/theses')).json()).data.theses[0];
+        expect(stored.catalysts).toHaveLength(50);
+        expect(stored.catalysts[0].id).toBe('cat-0');
+    });
 });

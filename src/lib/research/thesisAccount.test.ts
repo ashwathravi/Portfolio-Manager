@@ -7,6 +7,7 @@ import { getDefaultTheses, rebaseSeedTheses, type Thesis } from './thesis';
 import {
     THESES_FULL_COPY_KEY,
     applyThesisWrite,
+    childLimitMessage,
     fetchAccountTheses,
     importBrowserTheses,
     mergeAccountTheses,
@@ -134,6 +135,24 @@ describe('toThesisInput', () => {
     test('null for a thesis the API would refuse', () => {
         assert.equal(toThesisInput({ ...MINE, title: ' ' }, { now: NOW }), null);
         assert.equal(toThesisInput({ ...MINE, id: 'Not An Id' }, { now: NOW }), null);
+    });
+});
+
+describe('childLimitMessage', () => {
+    const items = <T,>(n: number, make: (i: number) => T) => Array.from({ length: n }, (_, i) => make(i));
+
+    test('regression: refuses a 51st catalyst or piece of evidence rather than dropping one on save', () => {
+        // The Codex finding on PR #151: the save cut the list to 50, losing
+        // the new catalyst or the oldest evidence without a word.
+        const full = {
+            catalysts: items(50, (i) => ({ id: `c-${i}`, title: 'c', date: '', impact: 'low' as const })),
+            linkedEvidence: items(50, (i) => ({ id: `e-${i}`, title: 'e', type: 'note' as const, date: '' })),
+        };
+        assert.match(childLimitMessage(full, 'catalysts') ?? '', /up to 50 catalysts/);
+        assert.match(childLimitMessage(full, 'linkedEvidence') ?? '', /up to 50 pieces of evidence/);
+        const roomy = { catalysts: full.catalysts.slice(1), linkedEvidence: full.linkedEvidence.slice(1) };
+        assert.equal(childLimitMessage(roomy, 'catalysts'), null);
+        assert.equal(childLimitMessage(roomy, 'linkedEvidence'), null);
     });
 });
 

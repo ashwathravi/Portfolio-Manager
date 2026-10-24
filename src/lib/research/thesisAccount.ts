@@ -188,6 +188,22 @@ export function toThesisInput(
     return parsed.success ? parsed.data : null;
 }
 
+/**
+ * Why `thesis` can't take another catalyst or piece of evidence, or null
+ * when it can. The account keeps at most THESIS_LIMITS of each, and a save
+ * past that would drop one, so an addition at the limit is refused instead.
+ */
+export function childLimitMessage(thesis: Pick<Thesis, 'catalysts' | 'linkedEvidence'>, kind: 'catalysts' | 'linkedEvidence'): string | null {
+    if (kind === 'catalysts') {
+        return thesis.catalysts.length >= THESIS_LIMITS.catalysts
+            ? `A thesis can track up to ${THESIS_LIMITS.catalysts} catalysts. Remove one before adding another.`
+            : null;
+    }
+    return thesis.linkedEvidence.length >= THESIS_LIMITS.evidence
+        ? `A thesis can link up to ${THESIS_LIMITS.evidence} pieces of evidence. Remove one before adding another.`
+        : null;
+}
+
 /** The thesis with its dates taken out: example theses are dated from the day they were shown. */
 function withoutDates(thesis: Thesis) {
     return JSON.stringify({

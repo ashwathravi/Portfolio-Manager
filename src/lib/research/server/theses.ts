@@ -51,12 +51,21 @@ export function buildListEvidenceQuery(userId: string, database: Executor = db) 
         .orderBy(asc(thesisEvidence.thesisId), asc(thesisEvidence.position));
 }
 
+/**
+ * The user's theses with their catalysts and evidence, read from one
+ * snapshot: three reads that could each see a different save would pair a
+ * thesis with another version's children, and the next save of that thesis
+ * would store the mismatch.
+ */
 export async function loadTheses(userId: string, database: Database = db): Promise<StoredTheses> {
-    const [rows, catalysts, evidence] = await Promise.all([
-        buildListThesesQuery(userId, database),
-        buildListCatalystsQuery(userId, database),
-        buildListEvidenceQuery(userId, database),
-    ]);
+    const [rows, catalysts, evidence] = await database.transaction(
+        async (tx) => [
+            await buildListThesesQuery(userId, tx),
+            await buildListCatalystsQuery(userId, tx),
+            await buildListEvidenceQuery(userId, tx),
+        ] as const,
+        { isolationLevel: "repeatable read", accessMode: "read only" },
+    );
     const catalystsOf = new Map<string, ThesisInput["catalysts"]>();
     for (const c of catalysts) {
         const list = catalystsOf.get(c.thesisId) ?? [];
@@ -127,6 +136,22 @@ function toRow(userId: string, thesis: ThesisInput, now: Date, order: WriteOrder
     };
 }
 
+// Postgres takes at most 65,535 bound values a statement; children have 7
+// or 8 columns each.
+const CHILD_ROWS_PER_INSERT = 1000;
+
+/** Inserts `rows` into `table` a bounded number at a time. */
+async function insertChildren(
+    tx: Executor,
+    table: typeof thesisCatalysts | typeof thesisEvidence,
+    rows: readonly (typeof thesisCatalysts.$inferInsert | typeof thesisEvidence.$inferInsert)[],
+): Promise<void> {
+    for (let start = 0; start < rows.length; start += CHILD_ROWS_PER_INSERT) {
+        // The table and its rows always match: catalysts with catalysts, evidence with evidence.
+        await tx.insert(table).values(rows.slice(start, start + CHILD_ROWS_PER_INSERT) as never);
+    }
+}
+
 function catalystRows(userId: string, thesis: ThesisInput) {
     if (thesis.dismissed) return [];
     return thesis.catalysts.map((c, position) => ({ userId, thesisId: thesis.id, id: c.id, position, title: c.title, date: c.date, impact: c.impact }));
@@ -186,10 +211,8 @@ export async function saveThesis(
             and(eq(table.userId, userId), eq(table.thesisId, thesis.id));
         await tx.delete(thesisCatalysts).where(ofThesis(thesisCatalysts));
         await tx.delete(thesisEvidence).where(ofThesis(thesisEvidence));
-        const catalysts = catalystRows(userId, thesis);
-        const evidence = evidenceRows(userId, thesis);
-        if (catalysts.length > 0) await tx.insert(thesisCatalysts).values(catalysts);
-        if (evidence.length > 0) await tx.insert(thesisEvidence).values(evidence);
+        await insertChildren(tx, thesisCatalysts, catalystRows(userId, thesis));
+        await insertChildren(tx, thesisEvidence, evidenceRows(userId, thesis));
         return true;
     });
 }
@@ -224,9 +247,7 @@ export async function importTheses(
     await database.transaction(async (tx) => {
         const inserted = new Set((await buildImportThesesQuery(userId, batch, now, tx)).map((row) => row.id));
         const added = batch.items.filter((thesis) => inserted.has(thesis.id));
-        const catalysts = added.flatMap((thesis) => catalystRows(userId, thesis));
-        const evidence = added.flatMap((thesis) => evidenceRows(userId, thesis));
-        if (catalysts.length > 0) await tx.insert(thesisCatalysts).values(catalysts);
-        if (evidence.length > 0) await tx.insert(thesisEvidence).values(evidence);
+        await insertChildren(tx, thesisCatalysts, added.flatMap((thesis) => catalystRows(userId, thesis)));
+        await insertChildren(tx, thesisEvidence, added.flatMap((thesis) => evidenceRows(userId, thesis)));
     });
 }

@@ -24,6 +24,7 @@ import {
 import { getBrowserStorage, loadThesesFromStorage, saveThesesToStorage } from './storage';
 import {
     applyThesisWrite,
+    childLimitMessage,
     fetchAccountTheses,
     importBrowserTheses,
     mergeAccountTheses,
@@ -103,13 +104,25 @@ export function useThesisStore() {
     const update = useCallback((id: string, patch: Partial<ThesisDraft>) => change(id, (list) => updateThesis(list, id, patch)), [change]);
     const archive = useCallback((id: string) => change(id, (list) => archiveThesis(list, id)), [change]);
     const restore = useCallback((id: string) => change(id, (list) => restoreThesis(list, id)), [change]);
+    /** False, with a message, when the thesis already has as many as the account keeps. */
+    const atLimit = useCallback(
+        (thesisId: string, kind: 'catalysts' | 'linkedEvidence') => {
+            const thesis = all.find((t) => t.id === thesisId);
+            const message = thesis ? childLimitMessage(thesis, kind) : null;
+            if (message) toast.error(message);
+            return message !== null;
+        },
+        [all],
+    );
     const addCatalystTo = useCallback(
-        (thesisId: string, catalyst: Omit<ThesisCatalyst, 'id'>) => change(thesisId, (list) => addCatalyst(list, thesisId, catalyst)),
-        [change],
+        (thesisId: string, catalyst: Omit<ThesisCatalyst, 'id'>) =>
+            !atLimit(thesisId, 'catalysts') && change(thesisId, (list) => addCatalyst(list, thesisId, catalyst)),
+        [atLimit, change],
     );
     const addEvidenceTo = useCallback(
-        (thesisId: string, evidence: Omit<ThesisEvidence, 'id'>) => change(thesisId, (list) => addEvidence(list, thesisId, evidence)),
-        [change],
+        (thesisId: string, evidence: Omit<ThesisEvidence, 'id'>) =>
+            !atLimit(thesisId, 'linkedEvidence') && change(thesisId, (list) => addEvidence(list, thesisId, evidence)),
+        [atLimit, change],
     );
 
     const remove = useCallback(
