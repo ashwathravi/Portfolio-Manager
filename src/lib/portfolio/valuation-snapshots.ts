@@ -225,7 +225,7 @@ export function buildPositionsQuery(database: Pick<Database, "select"> = db) {
         .from(holdings);
 }
 
-export function buildClosesBetweenQuery(symbols: string[], from: string, to: string, database: Database = db) {
+export function buildClosesBetweenQuery(symbols: string[], from: string, to: string, database: Pick<Database, "select"> = db) {
     return database
         .select({ symbol: priceBars.symbol, date: priceBars.date, close: priceBars.close })
         .from(priceBars)
@@ -324,7 +324,7 @@ export async function writeSnapshots(portfolioId: string, snapshots: readonly Sn
 export function buildUserSnapshotsQuery(
     userId: string,
     { portfolioId, from, to }: { portfolioId?: string; from?: string; to?: string } = {},
-    database: Database = db,
+    database: Pick<Database, "select"> = db,
 ) {
     return database
         .select({

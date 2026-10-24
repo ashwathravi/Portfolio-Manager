@@ -1,13 +1,16 @@
 "use client";
 
 import { useMemo, type CSSProperties } from "react";
-import type { MonthlyValuation } from "@/lib/performance/periodSummary";
+import { monthlyReturns, type DatedValue } from "@/lib/performance/periodSummary";
 
 /**
  * Phase 4 (AR-77) Monthly return heatmap.
  *
  * Year × 12-month grid of month-over-month returns, plus a rightmost "YR"
  * column that chain-links the year's monthly returns into a single number.
+ * A month that isn't measured from the month before's close to its own
+ * (the history starts, stops or skips partway) is starred, and its title
+ * says over which dates.
  * Intensity scales with `|ret| / maxAbs` so the hottest and coldest months
  * pop while middling ones fade. Green for positive, red for negative —
  * both use the existing `--pm-success` / `--pm-danger` tokens via
@@ -34,31 +37,28 @@ const TINT_MIN = 0.12;
 const TINT_MAX = 0.82;
 
 export interface MonthlyHeatmapCardProps {
-    portfolio: MonthlyValuation[];
+    portfolio: DatedValue[];
 }
 
 interface ComputedHeatmap {
     years: number[];
     byYear: Map<number, Array<number | null>>;
+    partial: Map<string, { from?: string; to?: string }>;
     yearTotals: Map<number, number>;
     maxAbs: number;
 }
 
 export function MonthlyHeatmapCard({ portfolio }: MonthlyHeatmapCardProps) {
-    const { years, byYear, yearTotals, maxAbs } = useMemo<ComputedHeatmap>(() => {
-        const sorted = [...portfolio].sort((a, b) =>
-            a.year === b.year ? a.month - b.month : a.year - b.year,
-        );
+    const { years, byYear, partial, yearTotals, maxAbs } = useMemo<ComputedHeatmap>(() => {
         const byYear = new Map<number, Array<number | null>>();
-        for (let i = 1; i < sorted.length; i++) {
-            const prev = sorted[i - 1].value;
-            const curr = sorted[i];
-            const ret = prev === 0 ? 0 : (curr.value - prev) / prev;
+        const partial = new Map<string, { from?: string; to?: string }>();
+        for (const curr of monthlyReturns(portfolio)) {
             if (!byYear.has(curr.year)) {
                 byYear.set(curr.year, new Array<number | null>(12).fill(null));
             }
             const row = byYear.get(curr.year);
-            if (row) row[curr.month] = ret;
+            if (row) row[curr.month] = curr.return;
+            if (curr.from || curr.to) partial.set(`${curr.year}-${curr.month}`, { from: curr.from, to: curr.to });
         }
         const years = Array.from(byYear.keys()).sort((a, b) => a - b);
         const yearTotals = new Map<number, number>();
@@ -77,7 +77,7 @@ export function MonthlyHeatmapCard({ portfolio }: MonthlyHeatmapCardProps) {
             }
         }
         const maxAbs = allRets.length > 0 ? Math.max(...allRets) : 0.0001;
-        return { years, byYear, yearTotals, maxAbs };
+        return { years, byYear, partial, yearTotals, maxAbs };
     }, [portfolio]);
 
     return (
@@ -110,20 +110,23 @@ export function MonthlyHeatmapCard({ portfolio }: MonthlyHeatmapCardProps) {
                             return (
                                 <tr key={y}>
                                     <th scope="row">{y}</th>
-                                    {row.map((ret, m) => (
-                                        <td
-                                            key={m}
-                                            className="pm-heatmap-cell"
-                                            style={cellStyle(ret, maxAbs)}
-                                            title={
-                                                ret == null
-                                                    ? `${MONTHS[m]} ${y}: no data`
-                                                    : `${MONTHS[m]} ${y}: ${fmtLongPct(ret)}`
-                                            }
-                                        >
-                                            {ret == null ? "" : fmtShortPct(ret)}
-                                        </td>
-                                    ))}
+                                    {row.map((ret, m) => {
+                                        const span = partial.get(`${y}-${m}`);
+                                        return (
+                                            <td
+                                                key={m}
+                                                className="pm-heatmap-cell"
+                                                style={cellStyle(ret, maxAbs)}
+                                                title={
+                                                    ret == null
+                                                        ? `${MONTHS[m]} ${y}: no data`
+                                                        : `${MONTHS[m]} ${y}${span ? ` (${spanLabel(span)})` : ""}: ${fmtLongPct(ret)}`
+                                                }
+                                            >
+                                                {ret == null ? "" : `${fmtShortPct(ret)}${span ? "*" : ""}`}
+                                            </td>
+                                        );
+                                    })}
                                     <td
                                         className="pm-heatmap-cell pm-heatmap-yr-col"
                                         style={yrStyle(yrTotal)}
@@ -137,8 +140,20 @@ export function MonthlyHeatmapCard({ portfolio }: MonthlyHeatmapCardProps) {
                     </tbody>
                 </table>
             </div>
+            {partial.size > 0 && (
+                <p className="pm-card-subtitle" data-testid="heatmap-partial-note">
+                    * Not a full month: the history starts, stops or has a gap partway. Hover a cell for its dates.
+                </p>
+            )}
         </section>
     );
+}
+
+/** "from Sep 14", "to Oct 1", or "Sep 14 to Oct 1". */
+function spanLabel({ from, to }: { from?: string; to?: string }): string {
+    const day = (date: string) => `${MONTHS[Number(date.slice(5, 7)) - 1]} ${Number(date.slice(8, 10))}`;
+    if (from && to) return `${day(from)} to ${day(to)}`;
+    return from ? `from ${day(from)}` : `to ${day(to ?? "")}`;
 }
 
 function cellStyle(ret: number | null, maxAbs: number): CSSProperties {
