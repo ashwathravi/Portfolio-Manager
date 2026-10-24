@@ -6,6 +6,7 @@ import {
     computePeriodMetrics,
     computeRiskSnapshot,
     measuresRisk,
+    lastSessionOfMonth,
     minusMonths,
     monthlyReturns,
     periodReturns,
@@ -63,6 +64,28 @@ describe('period start dates', () => {
         const { points, covered } = sliceForPeriod(daily, '1M');
         assert.strictEqual(covered, true);
         assert.strictEqual(points[0].date, '2026-09-21');
+    });
+
+    test('regression: a gap across the period start doesn\'t pass a longer span off as the period', () => {
+        // Jul 31, then Oct 20–22: the last value before Sep 22 is Jul 31,
+        // so "1M" would have been the return since July.
+        const gappy: DatedValue[] = [
+            { date: '2026-07-31', value: 100 },
+            { date: '2026-10-20', value: 110 },
+            { date: '2026-10-21', value: 111 },
+            { date: '2026-10-22', value: 112 },
+        ];
+        assert.deepStrictEqual(sliceForPeriod(gappy, '1M'), { points: gappy, covered: false });
+        const [oneMonth] = computePeriodMetrics(gappy, gappy, ['1M']);
+        assert.strictEqual(oneMonth.covered, false);
+        // A weekend and a holiday before the start are fine: Mon Sep 7 2026
+        // is Labor Day, so 1M back from Tue Oct 6 starts at Fri Sep 4.
+        const holiday: DatedValue[] = [
+            { date: '2026-09-04', value: 100 },
+            { date: '2026-09-08', value: 101 },
+            { date: '2026-10-06', value: 102 },
+        ];
+        assert.deepStrictEqual(sliceForPeriod(holiday, '1M'), { points: holiday, covered: true });
     });
 
     test('a series shorter than the period comes back whole, not covered', () => {
@@ -280,6 +303,24 @@ describe('monthlyReturns', () => {
             { date: '2026-10-01', value: 110 },
         ]);
         assert.deepStrictEqual(returns.map((r) => [r.month, r.from, r.to]), [[9, '2026-08-31', '2026-10-01']]);
+    });
+
+    test('the last session of a month comes from the market calendar', () => {
+        assert.strictEqual(lastSessionOfMonth('2026-10-12'), '2026-10-30'); // Oct 31 is a Saturday
+        assert.strictEqual(lastSessionOfMonth('2026-09-01'), '2026-09-30');
+        assert.strictEqual(lastSessionOfMonth('2027-04-05'), '2027-04-30');
+        assert.strictEqual(lastSessionOfMonth('2026-12-02'), '2026-12-31');
+        assert.strictEqual(lastSessionOfMonth('2015-01-10'), '2015-01-30'); // before the calendar: last weekday
+    });
+
+    test('regression: a month that stops before its last session says so, even in its last days', () => {
+        // Oct 28 2026 is a Wednesday: Oct 29 and 30 still trade.
+        const returns = monthlyReturns([
+            { date: '2026-09-30', value: 100 },
+            { date: '2026-10-28', value: 104 },
+            { date: '2026-11-30', value: 105 },
+        ]);
+        assert.deepStrictEqual(returns.map((r) => [r.month, r.from, r.to]), [[9, undefined, '2026-10-28'], [10, '2026-10-28', undefined]]);
     });
 
     test('the month before\'s last session counts as its close; an earlier day doesn\'t', () => {

@@ -5,6 +5,7 @@ import {
     simpleReturn,
     volatility,
 } from './calculations';
+import { getMarketDay, previousTradingDay } from '@/lib/markets/market-hours';
 
 export type PeriodKey = '1M' | '3M' | '6M' | 'YTD' | '1Y' | '3Y' | 'ALL';
 
@@ -87,9 +88,18 @@ function sortByDate(series: readonly DatedValue[]): DatedValue[] {
 }
 
 /**
+ * How far before a period's start its first observation may be: a weekend
+ * and a holiday, with room to spare. An older one means the history has a
+ * gap across the start, and measuring from it would pass a longer span off
+ * as the period.
+ */
+export const MAX_BASELINE_GAP_DAYS = 7;
+
+/**
  * The observations a period covers: from the last one on or before its
- * start to the newest. A series that starts after the period's start isn't
- * long enough: it comes back whole, `covered: false`.
+ * start to the newest. A series that doesn't reach back to the start, or
+ * whose last observation before it is more than MAX_BASELINE_GAP_DAYS
+ * older, doesn't cover the period: it comes back whole, `covered: false`.
  */
 export function sliceForPeriod(
     sortedSeries: readonly DatedValue[],
@@ -101,6 +111,10 @@ export function sliceForPeriod(
     let start = -1;
     for (let i = 0; i < sortedSeries.length && sortedSeries[i].date <= target; i++) start = i;
     if (start < 0) return { points: sortedSeries, covered: false };
+    const baseline = sortedSeries[start];
+    if (calendarDaysBetween(baseline, { date: target, value: 0 }) > MAX_BASELINE_GAP_DAYS) {
+        return { points: sortedSeries, covered: false };
+    }
     return { points: sortedSeries.slice(start), covered: true };
 }
 
@@ -229,12 +243,25 @@ export interface MonthReturn {
     to?: string;
 }
 
-/** The last session of a month is at most this many days before its last day (a weekend and a holiday). */
-const MONTH_CLOSE_SLACK_DAYS = 3;
+/**
+ * The last trading session of `date`'s month; before the market
+ * calendar's first year, its last weekday.
+ */
+export function lastSessionOfMonth(date: string): string {
+    const [y, m] = parts(date);
+    const last = `${y}-${String(m).padStart(2, '0')}-${String(daysInMonth(y, m)).padStart(2, '0')}`;
+    try {
+        return getMarketDay(last).isTradingDay ? last : previousTradingDay(last);
+    } catch {
+        const at = new Date(`${last}T12:00:00Z`);
+        while (at.getUTCDay() === 0 || at.getUTCDay() === 6) at.setUTCDate(at.getUTCDate() - 1);
+        return at.toISOString().slice(0, 10);
+    }
+}
 
+/** Whether `date` is its month's close: on or after the month's last session (a month-end date is). */
 function isMonthClose(date: string): boolean {
-    const [y, m, d] = parts(date);
-    return d >= daysInMonth(y, m) - MONTH_CLOSE_SLACK_DAYS;
+    return date >= lastSessionOfMonth(date);
 }
 
 function monthBefore(date: string): string {
