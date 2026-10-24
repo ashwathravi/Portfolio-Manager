@@ -3,7 +3,7 @@ import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import postgres from 'postgres';
 
-// Migration 0019 (launch item i41) merges holdings that repeat a symbol in
+// Migration 0019 (launch item i41) removes holdings that repeat a symbol in
 // an account before adding the unique (portfolio, symbol) index, so it can
 // run on data written before the index existed. Needs a local Postgres it
 // may create databases in; CI's e2e job sets this.
@@ -13,7 +13,7 @@ const DATABASE_URL = process.env.SCRIPTS_TEST_DATABASE_URL?.trim();
 const MIGRATION = readFileSync('drizzle/0019_holdings_one_row_per_symbol.sql', 'utf8').split('--> statement-breakpoint');
 
 describe('migration 0019: one holdings row per symbol', { skip: !DATABASE_URL && 'SCRIPTS_TEST_DATABASE_URL is not set', timeout: 60_000 }, () => {
-    test('merges repeated symbols, then refuses new repeats', async () => {
+    test('keeps the latest copy of a repeated symbol, then refuses new repeats', async () => {
         const name = `holdings_merge_test_${process.pid}`;
         const scratch = new URL(DATABASE_URL!);
         scratch.pathname = `/${name}`;
@@ -31,29 +31,28 @@ describe('migration 0019: one holdings row per symbol', { skip: !DATABASE_URL &&
             const b = '22222222-2222-4222-8222-222222222222';
             await sql`INSERT INTO holdings (portfolio_id, symbol, quantity, avg_cost, market_value, created_at, updated_at) VALUES
                 (${a}, 'AAPL', 10, 100, 1500, '2026-01-01', '2026-01-05'),
-                (${a}, 'aapl ', 30, 200, 6000, '2026-02-01', '2026-02-05'),
+                (${a}, 'aapl ', 20, 50, 3000, '2026-02-01', '2026-02-05'),
                 (${a}, 'MSFT', 5, 300, 1600, '2026-01-01', '2026-01-01'),
                 (${b}, 'AAPL', 1, 150, 160, '2026-03-01', '2026-03-01'),
-                (${a}, 'ZERO', 0, 10, 0, '2026-01-01', '2026-01-01'),
-                (${a}, 'zero', 0, 20, 0, '2026-02-01', '2026-02-01')`;
+                (${a}, 'ZERO', 3, 10, 30, '2026-01-01', '2026-01-02'),
+                (${a}, 'zero', 3, 10, 30, '2026-01-01', '2026-01-02')`;
 
             for (const statement of MIGRATION) await sql.unsafe(statement);
 
-            const rows = await sql<{ account: string; symbol: string; quantity: number; avg_cost: number; market_value: number | null; created: string; updated: string }[]>`
+            const rows = await sql<{ account: string; symbol: string; quantity: number; avg_cost: number; market_value: number | null; updated: string }[]>`
                 SELECT left(portfolio_id::text, 2) AS account, symbol, quantity::float AS quantity, avg_cost::float AS avg_cost,
-                       market_value, created_at::date::text AS created, updated_at::date::text AS updated
+                       market_value, updated_at::date::text AS updated
                 FROM holdings ORDER BY portfolio_id, symbol`;
             assert.deepEqual(rows.map((r) => ({ ...r })), [
-                // 10 at 100 and 30 at 200: 40 at 175, on the older row, its stale
-                // value cleared. It keeps the group's earliest updated_at, the
-                // stock split watermark, so a split still due is still applied
-                // (the Codex finding on PR #153).
-                { account: '11', symbol: 'AAPL', quantity: 40, avg_cost: 175, market_value: null, created: '2026-01-01', updated: '2026-01-05' },
-                { account: '11', symbol: 'MSFT', quantity: 5, avg_cost: 300, market_value: 1600, created: '2026-01-01', updated: '2026-01-01' },
-                // Nothing held: the older row's cost stands.
-                { account: '11', symbol: 'ZERO', quantity: 0, avg_cost: 10, market_value: null, created: '2026-01-01', updated: '2026-01-01' },
+                // Two copies of one position (the second after a 2-for-1 split):
+                // the latest is kept as it is, not summed into 30 shares that a
+                // split adjustment would then double (the Codex finding on PR #154).
+                { account: '11', symbol: 'AAPL', quantity: 20, avg_cost: 50, market_value: 3000, updated: '2026-02-05' },
+                { account: '11', symbol: 'MSFT', quantity: 5, avg_cost: 300, market_value: 1600, updated: '2026-01-01' },
+                // Exact copies (a race): one is kept, not counted twice.
+                { account: '11', symbol: 'ZERO', quantity: 3, avg_cost: 10, market_value: 30, updated: '2026-01-02' },
                 // Another account's AAPL is its own.
-                { account: '22', symbol: 'AAPL', quantity: 1, avg_cost: 150, market_value: 160, created: '2026-03-01', updated: '2026-03-01' },
+                { account: '22', symbol: 'AAPL', quantity: 1, avg_cost: 150, market_value: 160, updated: '2026-03-01' },
             ]);
 
             await assert.rejects(
