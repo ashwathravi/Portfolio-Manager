@@ -6,6 +6,8 @@ import {
     buildReturnHistory,
     buildUserAccountsQuery,
     buildUserSnapshotPositionsQuery,
+    loadPageReturnHistory,
+    type ReturnHistory,
     type ReturnHistoryRows,
 } from "./return-history";
 
@@ -127,5 +129,87 @@ describe("buildReturnHistory", () => {
         const history = await buildReturnHistory({ accounts: rows.accounts, snapshots: [], positions: [] }, null, load);
         assert.equal(history.hasHistory, false);
         assert.deepEqual(history.points, []);
+    });
+});
+
+describe("loadPageReturnHistory", () => {
+    const history: ReturnHistory = { accounts: [], accountId: null, hasHistory: false, points: [], benchmarks: [] };
+
+    function recordingLoader(result: () => Promise<ReturnHistory>) {
+        const calls: Array<{ userId: string; accountId?: string | null }> = [];
+        const load = async (userId: string, { accountId }: { accountId?: string | null } = {}) => {
+            calls.push({ userId, accountId });
+            return result();
+        };
+        return { calls, load };
+    }
+
+    function silence(method: "warn" | "error") {
+        const original = console[method];
+        const calls: unknown[][] = [];
+        console[method] = (...args: unknown[]) => calls.push(args);
+        return { calls, restore: () => { console[method] = original; } };
+    }
+
+    test("loads the user's history, for the account asked for", async () => {
+        const { calls, load } = recordingLoader(async () => history);
+        const result = await loadPageReturnHistory("user-a", { accountId: "main" }, { databaseConfigured: true, load });
+
+        assert.deepEqual(result, { history, unavailable: false });
+        assert.deepEqual(calls, [{ userId: "user-a", accountId: "main" }]);
+    });
+
+    test("never queries without a configured database, so the example series shows", async () => {
+        const { calls, load } = recordingLoader(async () => history);
+        const warnings = silence("warn");
+        const errors = silence("error");
+        try {
+            const result = await loadPageReturnHistory("user-a", { accountId: null }, { databaseConfigured: false, load });
+
+            assert.deepEqual(result, { history: null, unavailable: false });
+            assert.deepEqual(calls, []);
+            assert.equal(warnings.calls.length + errors.calls.length, 0);
+        } finally {
+            warnings.restore();
+            errors.restore();
+        }
+    });
+
+    test("treats Vercel's \"[SENSITIVE]\" placeholder as no database by default", async () => {
+        const original = process.env.DATABASE_URL;
+        process.env.DATABASE_URL = "[SENSITIVE]";
+        const { calls, load } = recordingLoader(async () => history);
+        try {
+            const result = await loadPageReturnHistory("user-a", {}, { load });
+
+            assert.deepEqual(result, { history: null, unavailable: false });
+            assert.deepEqual(calls, []);
+        } finally {
+            if (original === undefined) delete process.env.DATABASE_URL;
+            else process.env.DATABASE_URL = original;
+        }
+    });
+
+    test("a configured database that fails is an outage, logged without the AggregateError", async () => {
+        // What postgres.js rejects with when neither of localhost's addresses answers.
+        const refused = new AggregateError([
+            new Error("connect ECONNREFUSED ::1:5432"),
+            new Error("connect ECONNREFUSED 127.0.0.1:5432"),
+        ], "");
+        const { load } = recordingLoader(async () => { throw refused; });
+        const errors = silence("error");
+        try {
+            const result = await loadPageReturnHistory("user-a", {}, { databaseConfigured: true, load });
+
+            assert.deepEqual(result, { history: null, unavailable: true });
+            assert.equal(errors.calls.length, 1);
+            const [message, logged] = errors.calls[0];
+            assert.match(String(message), /outage notice/);
+            assert.ok(logged instanceof Error);
+            assert.ok(!(logged instanceof AggregateError));
+            assert.match(logged.message, /ECONNREFUSED ::1:5432; connect ECONNREFUSED 127\.0\.0\.1:5432/);
+        } finally {
+            errors.restore();
+        }
     });
 });
