@@ -266,6 +266,9 @@ describe("API proxy security", () => {
             ["/api/plaid/exchange-public-token", "POST"],
             ["/api/portfolios/count", "GET"],
             ["/api/portfolios", "POST"],
+            ["/api/transactions", "POST"],
+            ["/api/transactions/import", "POST"],
+            ["/api/transactions/00000000-0000-4000-8000-000000000201", "DELETE"],
             ["/api/portfolios/00000000-0000-4000-8000-000000000001", "PATCH"],
             ["/api/portfolios/00000000-0000-4000-8000-000000000001", "DELETE"],
             ["/api/portfolio/00000000-0000-4000-8000-000000000001/value", "GET"],
@@ -330,6 +333,9 @@ describe("API proxy security", () => {
 
         for (const [pathname, method] of [
             ["/api/portfolios", "GET"],
+            ["/api/transactions", "GET"],
+            ["/api/transactions/import", "DELETE"],
+            ["/api/transactions/00000000-0000-4000-8000-000000000201", "PATCH"],
             ["/api/portfolios/count", "DELETE"],
             ["/api/portfolios/00000000-0000-4000-8000-000000000001", "PUT"],
             ["/api/portfolios/00000000-0000-4000-8000-000000000001/holdings", "PATCH"],

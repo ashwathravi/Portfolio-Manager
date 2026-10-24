@@ -141,6 +141,13 @@
       "when": 1792856666083,
       "tag": "0019_holdings_one_row_per_symbol",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1792857564341,
+      "tag": "0020_transactions_fees_currency_source",
+      "breakpoints": true
     }
   ]
 }
