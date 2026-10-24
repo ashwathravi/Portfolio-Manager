@@ -1,5 +1,5 @@
 import { requirePageUserId } from "@/lib/auth/request-user";
-import { buildUserTransactionsQuery } from "@/lib/portfolio-repository";
+import { buildUserPortfolioOptionsQuery, buildUserTransactionsQuery } from "@/lib/portfolio-repository";
 import { toActivityRows, type TransactionRowInput } from "@/lib/portfolio/activity";
 import { ActivityPageClient } from "@/components/portfolio/ActivityPageClient";
 import { PageHeaderSync } from "@/components/layout/TopBar";
@@ -11,8 +11,9 @@ export const dynamic = "force-dynamic";
 export default async function ActivityPage() {
     const userId = await requirePageUserId();
     let rows: TransactionRowInput[] = [];
+    let accounts: { id: string; name: string }[] = [];
     try {
-        rows = await buildUserTransactionsQuery(userId);
+        [rows, accounts] = await Promise.all([buildUserTransactionsQuery(userId), buildUserPortfolioOptionsQuery(userId)]);
     } catch (e) {
         console.warn("Transactions fetch failed — showing empty activity.", e);
     }
@@ -23,7 +24,7 @@ export default async function ActivityPage() {
                 subtitle="Every buy, sell, dividend, and transfer"
                 crumbs={["Portfolio", "Activity"]}
             />
-            <ActivityPageClient rows={toActivityRows(rows)} />
+            <ActivityPageClient rows={toActivityRows(rows)} accountOptions={accounts} />
         </>
     );
 }

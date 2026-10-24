@@ -48,7 +48,8 @@ export interface HoldingsSeed {
     name: string;
     quantity: number;
     avgCost: number;
-    currentPrice: number;
+    /** Null when there is no price for it yet (no quote, nothing stored). */
+    currentPrice: number | null;
     marketValue: number;
     account: string;
     /** Approx days since the position was opened, for the "Avg holding period" cell. */
@@ -91,10 +92,12 @@ export function HoldingsPageClient({
         const withQuote = holdings.map((h) => {
             const q = quotes[h.symbol.toUpperCase()];
             const last = Number.isFinite(q?.price) ? q!.price : h.currentPrice;
-            const marketValue = h.quantity * last;
             const costBasis = h.quantity * h.avgCost;
-            const totalReturnPct =
-                h.avgCost > 0 ? ((last - h.avgCost) / h.avgCost) * 100 : 0;
+            // Without a price a position is valued at cost (and shown as such),
+            // not at $0.
+            const marketValue = last !== null ? h.quantity * last : costBasis;
+            const totalReturnPct: number | null =
+                last !== null && h.avgCost > 0 ? ((last - h.avgCost) / h.avgCost) * 100 : null;
             // An earlier session's closing quote prices the row but isn't today's move.
             const todays = q != null && isTodaysQuote(q, todayEt);
             // Null when there is no move from today's session: shown as a dash.
@@ -182,7 +185,8 @@ export function HoldingsPageClient({
                 case "marketValue":
                     return b.marketValue - a.marketValue;
                 case "totalReturnPct":
-                    return b.totalReturnPct - a.totalReturnPct;
+                    // Rows without a price sort last.
+                    return (b.totalReturnPct ?? -Infinity) - (a.totalReturnPct ?? -Infinity) || 0;
                 case "todayPct":
                     // Rows without a move today sort last.
                     return (b.todayPct ?? -Infinity) - (a.todayPct ?? -Infinity) || 0;
