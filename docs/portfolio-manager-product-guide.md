@@ -206,6 +206,8 @@ Use it to:
 - Review options risk ledger.
 - Identify unassigned or missing metadata.
 
+The sector chips above the table are the sectors you hold, largest first. A position's sector and company name come from market reference data: its industry code, fetched by the nightly price job a few symbols a night. A symbol not fetched yet uses a built-in list of well-known tickers, or "Other".
+
 Important fields:
 
 - Policy bucket: core, satellite, speculative/options, special situation, cash reserve, or unassigned.

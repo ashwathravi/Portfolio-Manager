@@ -30,6 +30,9 @@ import {
     selectTrackedBars,
     trackRequestedSecurities,
     type PriceBarInput,
+    buildSaveReferenceQuery,
+    buildSecurityProfilesQuery,
+    buildSymbolsNeedingReferenceQuery,
 } from "./price-store";
 
 const BAR: PriceBarInput = {
@@ -355,5 +358,39 @@ describe("trackRequestedSecurities", () => {
         const { sql, params } = buildTrackedAmongQuery(["BTC-USD", "NEW"]).toSQL();
         assert.equal(sql, 'select "symbol" from "securities" where "securities"."symbol" in ($1, $2)');
         assert.deepEqual(params, ["BTC-USD", "NEW"]);
+    });
+});
+
+describe("securities master queries", () => {
+    const AT = new Date("2026-10-16T22:30:00.000Z");
+    const STALE_BEFORE = new Date("2026-07-18T22:30:00.000Z");
+
+    test("the reference queue: missing or stale, priority first, never fetched before the oldest", () => {
+        const { sql, params } = buildSymbolsNeedingReferenceQuery(5, ["MSFT"], STALE_BEFORE).toSQL();
+        assert.match(sql, /where \("securities"\."reference_updated_at" is null or "securities"\."reference_updated_at" < \$1\)/);
+        assert.match(sql, /order by case when "securities"\."symbol" in \(\$2\) then 0 else 1 end, "securities"\."reference_updated_at" asc nulls first/);
+        assert.deepEqual(params.slice(1), ["MSFT", 5]);
+    });
+
+    test("saving stores the profile and when it was fetched", () => {
+        const { sql, params } = buildSaveReferenceQuery("AAPL", {
+            symbol: "AAPL", name: "Apple Inc.", type: "CS", primaryExchange: "XNAS", active: true,
+            currency: "usd", sicCode: "3571", sicDescription: "ELECTRONIC COMPUTERS",
+        }, AT).toSQL();
+        assert.match(sql, /^update "securities" set "name" = \$1, "type" = \$2, "primary_exchange" = \$3, "currency" = \$4, "sector" = \$5, "industry" = \$6, "sic_code" = \$7, "reference_updated_at" = \$8, "updated_at" = \$9 where "securities"\."symbol" = \$10$/);
+        assert.deepEqual(params.slice(0, 6), ["Apple Inc.", "CS", "XNAS", "USD", "Tech", "ELECTRONIC COMPUTERS"]);
+        assert.equal(params.at(-1), "AAPL");
+    });
+
+    test("an unknown ticker only records that it was looked for", () => {
+        const { sql, params } = buildSaveReferenceQuery("ZZZZ", null, AT).toSQL();
+        assert.equal(sql, 'update "securities" set "reference_updated_at" = $1, "updated_at" = $2 where "securities"."symbol" = $3');
+        assert.equal(params[2], "ZZZZ");
+    });
+
+    test("profiles are read only for symbols with reference data", () => {
+        const { sql, params } = buildSecurityProfilesQuery(["AAPL", "MSFT"]).toSQL();
+        assert.match(sql, /where \("securities"\."symbol" in \(\$1, \$2\) and "securities"\."reference_updated_at" is not null\)/);
+        assert.deepEqual(params, ["AAPL", "MSFT"]);
     });
 });

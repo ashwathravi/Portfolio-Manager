@@ -9,6 +9,7 @@ import {
 } from "@/lib/providers/polygon-massive-adapter";
 import type { HoldingSplit } from "@/lib/portfolio/split-adjustments";
 import type { OHLC } from "@/types/market-data";
+import type { TickerReference } from "./security-profile";
 
 import {
     BENCHMARK_SYMBOLS,
@@ -17,6 +18,7 @@ import {
     createIngestAdapter,
     historyToBars,
     ingestDailyPrices,
+    MAX_REFERENCE_PER_RUN,
     pacingDelay,
     tradingDaysToIngest,
     type PriceIngestAdapter,
@@ -61,6 +63,7 @@ function fakeAdapter({
     history = {},
     unreadable = {},
     splits = [],
+    references = {},
     rateLimitedOnce = [],
     onCall,
 }: {
@@ -71,6 +74,8 @@ function fakeAdapter({
     unreadable?: Record<string, number>;
     /** Every split the "provider" knows; answers are cut to the asked range. */
     splits?: SplitEvent[] | Error;
+    /** Reference data per symbol; a symbol not listed is one the provider doesn't know. */
+    references?: Record<string, TickerReference | Error>;
     /** Calls (as recorded in `calls`) answered with a 429 the first time only. */
     rateLimitedOnce?: string[];
     onCall?: () => void;
@@ -102,6 +107,12 @@ function fakeAdapter({
             return splits.filter((split) =>
                 split.executionDate >= from && split.executionDate <= to && (!tickers || tickers.includes(split.symbol)));
         },
+        async getTickerReference(symbol) {
+            record(`reference ${symbol}`);
+            const value = references[symbol];
+            if (value instanceof Error) throw value;
+            return value ?? null;
+        },
     };
     return { adapter, calls };
 }
@@ -115,6 +126,7 @@ function fakeStore({
     trackedAt = {},
     positions = {},
     heldSince = {},
+    unreferenced = [],
 }: {
     holdings?: string[];
     /** Tracked symbols whose history is already loaded. */
@@ -132,6 +144,11 @@ function fakeStore({
      * aren't shown its extra call.
      */
     heldSince?: Record<string, string>;
+    /**
+     * Tracked symbols without reference data. Empty by default, so tests
+     * about prices aren't shown reference calls.
+     */
+    unreferenced?: string[];
 } = {}) {
     const securities = new Map<string, string | null>([
         ...loaded.map((symbol) => [symbol, "2024-10-16"] as const),
@@ -143,6 +160,7 @@ function fakeStore({
     const resets: string[] = [];
     const attempted = new Map<string, number>();
     const adjustments: HoldingSplit[] = [];
+    const savedReferences = new Map<string, TickerReference | null>();
     // A loaded symbol has history older than anything a test stores; it
     // isn't modelled bar by bar, so it never moves the catch-up bookmark.
     const olderHistory = new Set(loaded);
@@ -257,8 +275,17 @@ function fakeStore({
             resets.push(...reset);
             return reset;
         },
+        async listSymbolsNeedingReference(limit, priority) {
+            const waiting = unreferenced.filter((symbol) => securities.has(symbol));
+            return [...waiting.filter((symbol) => priority.includes(symbol)), ...waiting.filter((symbol) => !priority.includes(symbol))].slice(0, limit);
+        },
+        countSymbolsNeedingReference: async () => unreferenced.filter((symbol) => securities.has(symbol)).length,
+        async saveReference(symbol, reference) {
+            savedReferences.set(symbol, reference);
+            unreferenced.splice(unreferenced.indexOf(symbol), 1);
+        },
     };
-    return { store, securities, stored, marks, resets, attempted, adjustments };
+    return { store, securities, stored, marks, resets, attempted, adjustments, savedReferences };
 }
 
 function storedDates(stored: Map<string, PriceBarInput>, symbol: string): string[] {
@@ -697,7 +724,7 @@ describe("ingestDailyPrices", () => {
 
         assert.deepEqual(calls.slice(0, 3), ["splits 2026-10-15 2026-10-16", "daily 2026-10-15", "daily 2026-10-16"]);
         assert.ok(calls.slice(2).every((call) => call === "daily 2026-10-16"));
-        assert.deepEqual(detail.stopped, { catchUp: "rate-limited", backfill: "rate-limited" });
+        assert.deepEqual(detail.stopped, { catchUp: "rate-limited", reference: "rate-limited", backfill: "rate-limited" });
         assert.equal(detail.daysBehind, 1);
         assert.equal(detail.backfillQueue, 1);
     });
@@ -910,7 +937,7 @@ describe("ingestDailyPrices", () => {
         const detail = await ingestDailyPrices({ adapter, store, ...fakeClock() });
 
         assert.ok(calls.length > 1 && calls.every((call) => call === "splits 2026-10-16 2026-10-16"));
-        assert.deepEqual(detail.stopped, { catchUp: "rate-limited", backfill: "rate-limited" });
+        assert.deepEqual(detail.stopped, { catchUp: "rate-limited", reference: "rate-limited", backfill: "rate-limited" });
         assert.deepEqual(detail.days, []);
         assert.deepEqual(detail.splits, { skipped: "rate-limited" });
         assert.equal(detail.daysBehind, 1);
@@ -1256,6 +1283,88 @@ describe("ingestDailyPrices › looked-up symbols", () => {
         assert.deepEqual(detail.pruned, ["JUNK"]);
         assert.equal(securities.has("JUNK"), false);
         for (const symbol of ["PRICED", "RECENT", "HELDFUND", ...BENCHMARK_SYMBOLS]) assert.ok(securities.has(symbol), `${symbol} was dropped`);
+    });
+});
+
+describe("ingestDailyPrices › securities master", () => {
+    const reference = (symbol: string, name: string, type: string, sicCode: string | null): TickerReference => ({
+        symbol, name, type, primaryExchange: "XNAS", active: true, currency: "usd", sicCode, sicDescription: null,
+    });
+
+    test("fetches reference data for held symbols first, before the history backfill", async () => {
+        const { store, savedReferences } = fakeStore({
+            holdings: ["MSFT"],
+            loaded: [...BENCHMARK_SYMBOLS, "MSFT", "IBM"],
+            bars: [{ ...dailyBar("SPY", "2026-10-16"), source: "massive" }],
+            unreferenced: ["IBM", "MSFT", "SPY"],
+        });
+        const { adapter, calls } = fakeAdapter({
+            references: {
+                MSFT: reference("MSFT", "Microsoft Corp", "CS", "7372"),
+                SPY: reference("SPY", "SPDR S&P 500 ETF Trust", "ETF", null),
+                IBM: reference("IBM", "International Business Machines", "CS", "3570"),
+            },
+        });
+
+        const detail = await ingestDailyPrices({ adapter, store, ...fakeClock() });
+
+        // Held and benchmark symbols before one only looked up.
+        assert.deepEqual(calls, ["reference MSFT", "reference SPY", "reference IBM"]);
+        assert.deepEqual(detail.reference, { updated: ["MSFT", "SPY", "IBM"], unknown: [], errors: [], queue: 0 });
+        assert.equal(savedReferences.get("MSFT")?.sicCode, "7372");
+    });
+
+    test("at most a few a run, so the backfill keeps the rest of the budget", async () => {
+        const many = Array.from({ length: MAX_REFERENCE_PER_RUN + 3 }, (_, i) => `T${i}`);
+        const { store } = fakeStore({
+            holdings: many,
+            loaded: [...BENCHMARK_SYMBOLS, ...many],
+            bars: [{ ...dailyBar("SPY", "2026-10-16"), source: "massive" }],
+            unreferenced: [...many],
+        });
+        const { adapter, calls } = fakeAdapter({
+            references: Object.fromEntries(many.map((symbol) => [symbol, reference(symbol, symbol, "CS", "3571")])),
+        });
+
+        const detail = await ingestDailyPrices({ adapter, store, ...fakeClock() });
+
+        assert.equal(calls.filter((call) => call.startsWith("reference ")).length, MAX_REFERENCE_PER_RUN);
+        assert.equal(detail.reference?.queue, 3);
+    });
+
+    test("a ticker the provider doesn't know is recorded; a failure is left for the next run", async () => {
+        const { store, savedReferences } = fakeStore({
+            holdings: ["ZZZQ", "MSFT"],
+            loaded: [...BENCHMARK_SYMBOLS, "ZZZQ", "MSFT"],
+            bars: [{ ...dailyBar("SPY", "2026-10-16"), source: "massive" }],
+            unreferenced: ["ZZZQ", "MSFT"],
+        });
+        const { adapter } = fakeAdapter({ references: { MSFT: new Error("HTTP 500") } });
+
+        const detail = await ingestDailyPrices({ adapter, store, ...fakeClock() });
+
+        assert.deepEqual(detail.reference?.unknown, ["ZZZQ"]);
+        assert.equal(savedReferences.get("ZZZQ"), null);
+        assert.deepEqual(detail.reference?.errors.map((e) => e.symbol), ["MSFT"]);
+        assert.equal(savedReferences.has("MSFT"), false);
+        assert.equal(detail.reference?.queue, 1);
+    });
+
+    test("a rate limit that outlasts the budget ends the reference fetches and the backfill", async () => {
+        const { store } = fakeStore({
+            holdings: ["MSFT"],
+            loaded: [...BENCHMARK_SYMBOLS],
+            queued: ["MSFT"],
+            bars: [{ ...dailyBar("SPY", "2026-10-16"), source: "massive" }],
+            unreferenced: ["MSFT"],
+        });
+        const { adapter, calls } = fakeAdapter({ rateLimitedOnce: ["reference MSFT"] });
+
+        const detail = await ingestDailyPrices({ adapter, store, ...fakeClock(), budgetMs: 10_000 });
+
+        assert.deepEqual(calls, ["reference MSFT"]);
+        assert.deepEqual(detail.stopped, { reference: "rate-limited", backfill: "rate-limited" });
+        assert.equal(detail.reference?.queue, 1);
     });
 });
 

@@ -1,0 +1,1 @@
+ALTER TABLE "securities" ADD COLUMN "sic_code" text;

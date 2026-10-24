@@ -14,7 +14,8 @@ import {
 /**
  * Phase 4 (AR-74) Holdings filter row.
  *
- * Left: sector chip buttons (All + 4 sectors from the handoff spec).
+ * Left: sector chip buttons: All, then the sectors the holdings are in
+ * (the page passes them, largest first).
  * Right: a single-select for the sort key.
  *
  * Stateless — the parent holds `sectorFilter` and `sortKey`.
