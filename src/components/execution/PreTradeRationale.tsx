@@ -169,6 +169,8 @@ export function PreTradeRationale({ ticker, value, onChange }: PreTradeRationale
             targetPrice: 0,
             timeHorizon: '6mo',
         });
+        // Null while the theses are still loading; the store says so.
+        if (!newId) return;
         onChange({ ...value, thesisId: newId });
         setInlineTitle('');
         setInlineOpen(false);
