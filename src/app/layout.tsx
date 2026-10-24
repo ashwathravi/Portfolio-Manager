@@ -14,6 +14,7 @@ import { AppFrame } from "@/components/layout/AppFrame";
 import { IdentityProvider } from "@/components/providers/IdentityProvider";
 import { RequestTimeProvider } from "@/components/providers/RequestTimeProvider";
 import { SettingsSync } from "@/components/providers/SettingsSync";
+import { isDatabaseConfigured } from "@/db/connection-options";
 import { resolveViewerIdentity } from "@/lib/auth/viewer";
 import { serverSettingsFor } from "@/lib/settings/server";
 import { storageScopeFor } from "@/lib/storage/user-scope";
@@ -68,7 +69,7 @@ export default async function RootLayout({
         <QueryProvider>
           <SettingsSync server={settings}>
             <ThemeProvider>
-              <IdentityProvider identity={identity}>
+              <IdentityProvider identity={identity} accountStorage={isDatabaseConfigured()}>
                 <RequestTimeProvider now={requestTime}>
                   <AppFrame>{children}</AppFrame>
                 </RequestTimeProvider>

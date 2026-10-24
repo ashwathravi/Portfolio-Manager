@@ -1,5 +1,6 @@
 
 import {
+    bigint,
     boolean,
     check,
     date,
@@ -586,6 +587,166 @@ export const portfolioSnapshotPositions = pgTable("portfolio_snapshot_positions"
         columns: [table.portfolioId, table.date],
         foreignColumns: [portfolioSnapshots.portfolioId, portfolioSnapshots.date],
     }).onDelete("cascade"),
+    serverOnlyNoClientAccess: serverOnlyNoClientAccessPolicy(),
+    appRuntimeAccess: appRuntimeAccessPolicy(),
+})).enableRLS();
+
+// ---------------------------------------------------------------------------
+// Research workspace (launch item i38, decision D6)
+// ---------------------------------------------------------------------------
+
+/**
+ * The user's watchlist (src/lib/research/watchlist.ts). `id` is the one the
+ * browser made, so the example rows keep theirs when the user adopts or
+ * edits one; an example the user removed stays as a `dismissed` row so it
+ * isn't shown again. One live row per ticker.
+ */
+export const watchlistItems = pgTable("watchlist_items", {
+    userId: text("user_id")
+        .notNull()
+        .references(() => authUsers.id, { onDelete: "cascade" }),
+    id: text("id").notNull(),
+    ticker: text("ticker").notNull(),
+    companyName: text("company_name").notNull().default(""),
+    reason: text("reason").notNull().default(""),
+    notes: text("notes").notNull().default(""),
+    targetEntry: doublePrecision("target_entry"),
+    addedAt: date("added_at", { mode: "string" }).notNull(),
+    dismissed: boolean("dismissed").notNull().default(false),
+    // The page that last wrote the row and its count of writes then: a
+    // write from the same page applies only if it is newer, so a request
+    // that arrives late can't undo a later edit.
+    writeSession: text("write_session"),
+    writeSeq: bigint("write_seq", { mode: "number" }),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => ({
+    pk: primaryKey({ columns: [table.userId, table.id], name: "watchlist_items_pkey" }),
+    userTickerIdx: uniqueIndex("watchlist_items_user_ticker_idx")
+        .on(table.userId, table.ticker)
+        .where(sql`not ${table.dismissed}`),
+    serverOnlyNoClientAccess: serverOnlyNoClientAccessPolicy(),
+    appRuntimeAccess: appRuntimeAccessPolicy(),
+})).enableRLS();
+
+/**
+ * The user's decision journal (src/lib/research/journal.ts). As with the
+ * watchlist, `id` is the browser's, and an example entry the user deletes
+ * stays as a `dismissed` row so it isn't shown again. `thesis_id` points at
+ * a thesis by its ID; it isn't a foreign key, since example theses aren't
+ * stored.
+ */
+export const journalEntries = pgTable("journal_entries", {
+    userId: text("user_id")
+        .notNull()
+        .references(() => authUsers.id, { onDelete: "cascade" }),
+    id: text("id").notNull(),
+    date: date("date", { mode: "string" }).notNull(),
+    type: text("type").notNull(),
+    ticker: text("ticker").notNull(),
+    decision: text("decision").notNull(),
+    rationale: text("rationale").notNull(),
+    outcome: text("outcome").notNull(),
+    thesisId: text("thesis_id"),
+    dismissed: boolean("dismissed").notNull().default(false),
+    // As for watchlist_items: the page that last wrote the row, and its count.
+    writeSession: text("write_session"),
+    writeSeq: bigint("write_seq", { mode: "number" }),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => ({
+    pk: primaryKey({ columns: [table.userId, table.id], name: "journal_entries_pkey" }),
+    typeCheck: check("journal_entries_type_check", sql`${table.type} in ('entry', 'exit', 'hold')`),
+    outcomeCheck: check("journal_entries_outcome_check", sql`${table.outcome} in ('win', 'loss', 'pending')`),
+    serverOnlyNoClientAccess: serverOnlyNoClientAccessPolicy(),
+    appRuntimeAccess: appRuntimeAccessPolicy(),
+})).enableRLS();
+
+/**
+ * The user's investment theses (src/lib/research/thesis.ts), with their
+ * catalysts and evidence in tables of their own. As for the watchlist and
+ * journal, `id` is the browser's, a deleted thesis stays as a `dismissed`
+ * row with its text cleared, and writes are ordered per page.
+ */
+export const theses = pgTable("theses", {
+    userId: text("user_id")
+        .notNull()
+        .references(() => authUsers.id, { onDelete: "cascade" }),
+    id: text("id").notNull(),
+    ticker: text("ticker").notNull(),
+    companyName: text("company_name").notNull().default(""),
+    title: text("title").notNull(),
+    description: text("description").notNull().default(""),
+    // bull or bear
+    type: text("type").notNull(),
+    status: text("status").notNull(),
+    conviction: text("conviction").notNull(),
+    targetPrice: doublePrecision("target_price").notNull(),
+    currentPrice: doublePrecision("current_price"),
+    timeHorizon: text("time_horizon").notNull().default(""),
+    dateCreated: date("date_created", { mode: "string" }).notNull(),
+    dateUpdated: date("date_updated", { mode: "string" }).notNull(),
+    tags: jsonb("tags").$type<string[]>().notNull().default([]),
+    hypothesis: text("hypothesis").notNull().default(""),
+    bullCase: jsonb("bull_case").$type<string[]>().notNull().default([]),
+    bearCase: jsonb("bear_case").$type<string[]>().notNull().default([]),
+    healthScore: integer("health_score").notNull().default(50),
+    dismissed: boolean("dismissed").notNull().default(false),
+    writeSession: text("write_session"),
+    writeSeq: bigint("write_seq", { mode: "number" }),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => ({
+    pk: primaryKey({ columns: [table.userId, table.id], name: "theses_pkey" }),
+    typeCheck: check("theses_type_check", sql`${table.type} in ('bull', 'bear')`),
+    statusCheck: check("theses_status_check", sql`${table.status} in ('active', 'monitoring', 'archived')`),
+    convictionCheck: check("theses_conviction_check", sql`${table.conviction} in ('HIGH', 'MEDIUM', 'LOW')`),
+    serverOnlyNoClientAccess: serverOnlyNoClientAccessPolicy(),
+    appRuntimeAccess: appRuntimeAccessPolicy(),
+})).enableRLS();
+
+/**
+ * A thesis's catalysts, in the order the user added them. `date` is free
+ * text ("2026-05-01", "Q2 2026"), as the form takes it.
+ */
+export const thesisCatalysts = pgTable("thesis_catalysts", {
+    userId: text("user_id").notNull(),
+    thesisId: text("thesis_id").notNull(),
+    id: text("id").notNull(),
+    position: integer("position").notNull(),
+    title: text("title").notNull(),
+    date: text("date").notNull().default(""),
+    impact: text("impact").notNull(),
+}, (table) => ({
+    pk: primaryKey({ columns: [table.userId, table.thesisId, table.id], name: "thesis_catalysts_pkey" }),
+    thesis: foreignKey({
+        name: "thesis_catalysts_thesis_fk",
+        columns: [table.userId, table.thesisId],
+        foreignColumns: [theses.userId, theses.id],
+    }).onDelete("cascade"),
+    impactCheck: check("thesis_catalysts_impact_check", sql`${table.impact} in ('high', 'medium', 'low')`),
+    serverOnlyNoClientAccess: serverOnlyNoClientAccessPolicy(),
+    appRuntimeAccess: appRuntimeAccessPolicy(),
+})).enableRLS();
+
+/** A thesis's evidence, newest first as the user added it. */
+export const thesisEvidence = pgTable("thesis_evidence", {
+    userId: text("user_id").notNull(),
+    thesisId: text("thesis_id").notNull(),
+    id: text("id").notNull(),
+    position: integer("position").notNull(),
+    title: text("title").notNull(),
+    type: text("type").notNull(),
+    date: text("date").notNull().default(""),
+    url: text("url"),
+}, (table) => ({
+    pk: primaryKey({ columns: [table.userId, table.thesisId, table.id], name: "thesis_evidence_pkey" }),
+    thesis: foreignKey({
+        name: "thesis_evidence_thesis_fk",
+        columns: [table.userId, table.thesisId],
+        foreignColumns: [theses.userId, theses.id],
+    }).onDelete("cascade"),
+    typeCheck: check("thesis_evidence_type_check", sql`${table.type} in ('article', 'report', 'earnings', 'note')`),
     serverOnlyNoClientAccess: serverOnlyNoClientAccessPolicy(),
     appRuntimeAccess: appRuntimeAccessPolicy(),
 })).enableRLS();

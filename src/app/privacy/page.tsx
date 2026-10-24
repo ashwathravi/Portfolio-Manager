@@ -12,7 +12,7 @@ export const metadata: Metadata = {
 // the page is public (see isPublicRoute in src/proxy.ts) and renders without
 // the app chrome (src/components/layout/AppFrame.tsx).
 const CONTACT_EMAIL = "ashwath.ravi@gmail.com";
-const LAST_UPDATED = "October 19, 2026";
+const LAST_UPDATED = "October 23, 2026";
 const PLAID_PRIVACY_URL = "https://plaid.com/legal/#end-user-privacy-policy";
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
@@ -62,7 +62,9 @@ export default async function PrivacyPage({ searchParams }: { searchParams: Sear
                         </li>
                         <li>
                             <strong>Data you add.</strong> Portfolios, holdings and transactions you import from
-                            CSV or enter by hand, and the SEC filers you add to Alpha Radar. During the beta,
+                            CSV or enter by hand, your watchlist (tickers, why they&rsquo;re on it, target prices and
+                            notes), your decision journal, your research theses (with their catalysts and evidence
+                            links), and the SEC filers you add to Alpha Radar. During the beta,
                             Alpha Radar&rsquo;s list of filers and any notes on them are shared by every account,
                             so don&rsquo;t put anything private there.
                         </li>
@@ -82,8 +84,8 @@ export default async function PrivacyPage({ searchParams }: { searchParams: Sear
                         </li>
                     </ul>
                     <p>
-                        Some things are stored only in your browser, not on our servers: research theses,
-                        journal entries, watchlist, price alerts and their notes, weekly reviews and Ask history.
+                        Some things are stored only in your browser, not on our servers: price alerts and their
+                        notes, weekly reviews and Ask history.
                         Each account that signs in on this browser gets its own copy, signing out removes your
                         Ask history, and clearing this site&rsquo;s data removes the rest. Someone with access to
                         this browser profile could still read them. To show prices, the ticker symbols in your
@@ -150,9 +152,15 @@ export default async function PrivacyPage({ searchParams }: { searchParams: Sear
                     <p>
                         We keep your data while your account is open. Email <ContactLink /> to delete your
                         account: within 30 days we remove your account, linked-account data (including our
-                        encrypted access to your institutions), portfolios, transactions and settings from our
-                        database,
+                        encrypted access to your institutions), portfolios, transactions, watchlist, journal,
+                        theses and settings from our database,
                         unless the law requires us to keep something.
+                    </p>
+                    <p>
+                        When you remove a watchlist ticker or delete a journal entry or thesis, its notes and
+                        reasoning are erased straight away. A short record stays (the ticker and its dates, and
+                        for a journal entry or thesis its type, outcome or status, and conviction) so your other
+                        devices know it was removed; it goes when your account does.
                     </p>
                     <p>
                         Plaid keeps its own record of each connection under its policy. To end it, remove Atlas

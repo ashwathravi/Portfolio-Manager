@@ -1,5 +1,28 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 import { gotoAppPage, reloadAppPage, selectAppTab } from './helpers/app';
+import { researchLoaded } from './helpers/research';
+import { signInAsFreshUser } from './helpers/users';
+
+// With a database the watchlist, journal and theses are kept in the
+// account (launch item i38).
+const databaseAuthEnabled = Boolean(process.env.CI || process.env.E2E_DATABASE_AUTH === '1');
+
+/**
+ * Resolves once a save to `collection` containing `text` has landed; at once
+ * when research data is kept in the browser.
+ */
+async function savedTo(page: Page, collection: 'watchlist' | 'journal' | 'theses', text: string) {
+    if (!databaseAuthEnabled) return;
+    await page.waitForResponse((response) =>
+        response.url().includes(`/api/research/${collection}/`)
+        && response.request().method() === 'PUT'
+        && (response.request().postData() ?? '').includes(text)
+        && response.ok());
+}
+
+function watchlistSaved(page: Page, text: string) {
+    return savedTo(page, 'watchlist', text);
+}
 
 test.describe('Research page', () => {
     test.beforeEach(async ({ page }) => {
@@ -284,8 +307,15 @@ test.describe('Research thesis price strip', () => {
 });
 
 test.describe('Research watchlist', () => {
-    test.beforeEach(async ({ page }) => {
+    // Changes are saved to the account, so each test has one of its own,
+    // and wait for its list to load.
+    test.beforeEach(async ({ context, page }) => {
+        await signInAsFreshUser(context);
+        const loaded = databaseAuthEnabled
+            ? page.waitForResponse((response) => response.url().endsWith('/api/research/watchlist') && response.ok())
+            : Promise.resolve();
         await gotoAppPage(page, '/research?tab=watchlist');
+        await loaded;
     });
 
     test('regression: example rows are tagged Sample and the pane is real, not a placeholder', async ({ page }) => {
@@ -305,9 +335,11 @@ test.describe('Research watchlist', () => {
             await add.fill('amd');
             await expect(add).toHaveValue('AMD', { timeout: 1_000 });
         }).toPass({ timeout: 10_000 });
+        const saved = watchlistSaved(page, '"AMD"');
         await page.getByRole('button', { name: 'Add', exact: true }).click();
         const pane = page.locator('.pm-research-pane');
         await expect(pane.locator('.pm-thesis-detail-sym')).toHaveText('AMD');
+        await saved;
         await reloadAppPage(page);
         await expect(page.locator('.pm-research-list').getByRole('button', { name: /AMD/ })).toBeVisible();
     });
@@ -333,12 +365,23 @@ test.describe('Research watchlist', () => {
         await page.locator('.pm-research-list').getByRole('button', { name: /SHOP/ }).click();
         const pane = page.locator('.pm-research-pane');
         await pane.getByLabel('Target entry ($)').fill('70');
+        const saved = watchlistSaved(page, 'Check margins first');
         await pane.getByRole('textbox', { name: 'Notes' }).fill('Check margins first');
         await pane.getByRole('textbox', { name: 'Notes' }).blur();
+        await saved;
         await reloadAppPage(page);
         await page.locator('.pm-research-list').getByRole('button', { name: /SHOP/ }).click();
         await expect(pane.getByRole('textbox', { name: 'Notes' })).toHaveValue('Check margins first');
         await expect(pane.getByLabel('Target entry ($)')).toHaveValue('70');
+    });
+
+    test("regression: why and notes stop at what the account keeps", async ({ page }) => {
+        // The Codex finding on PR #147: longer text could be typed, then was
+        // cut short when saved.
+        await page.locator('.pm-research-list').getByRole('button', { name: /PLTR/ }).click();
+        const pane = page.locator('.pm-research-pane');
+        await expect(pane.getByLabel('Why it is on the list')).toHaveAttribute('maxlength', '500');
+        await expect(pane.getByRole('textbox', { name: 'Notes' })).toHaveAttribute('maxlength', '5000');
     });
 
     test('adding a ticker that is only an example makes it yours (no Sample tag)', async ({ page }) => {
@@ -354,16 +397,31 @@ test.describe('Research watchlist', () => {
         await expect(card.getByTestId('sample-tag')).toHaveCount(0);
     });
 
-    test('remove takes a ticker off the list', async ({ page }) => {
+    test('remove takes a ticker off the list, and it stays off after a reload', async ({ page }) => {
         await page.locator('.pm-research-list').getByRole('button', { name: /COIN/ }).click();
+        const saved = watchlistSaved(page, '"dismissed":true');
         await page.locator('.pm-research-pane').getByRole('button', { name: 'Remove' }).click();
+        await expect(page.locator('.pm-research-list').getByRole('button', { name: /COIN/ })).toHaveCount(0);
+        await saved;
+        await reloadAppPage(page);
+        await expect(page.locator('.pm-research-list').getByRole('button', { name: /PLTR/ })).toBeVisible();
         await expect(page.locator('.pm-research-list').getByRole('button', { name: /COIN/ })).toHaveCount(0);
     });
 });
 
 test.describe('Research journal', () => {
-    test('selecting an entry shows its rationale beside the linked thesis', async ({ page }) => {
+    // Changes are saved to the account, so each test has one of its own,
+    // and wait for its journal to load.
+    test.beforeEach(async ({ context, page }) => {
+        await signInAsFreshUser(context);
+        const loaded = databaseAuthEnabled
+            ? page.waitForResponse((response) => response.url().endsWith('/api/research/journal') && response.ok())
+            : Promise.resolve();
         await gotoAppPage(page, '/research?tab=journal');
+        await loaded;
+    });
+
+    test('selecting an entry shows its rationale beside the linked thesis', async ({ page }) => {
         await expect(page.getByText(/coming in Phase/)).toHaveCount(0);
         const list = page.locator('.pm-research-list');
         await list.getByRole('button', { name: /Reduced position by 25 shares/ }).click();
@@ -372,4 +430,138 @@ test.describe('Research journal', () => {
         await expect(pane.getByRole('region', { name: 'Rationale at the time' })).toBeVisible();
         await expect(pane.getByRole('region', { name: 'Linked thesis' })).toBeVisible();
     });
+
+    test('the entry form stops at what the account keeps', async ({ page }) => {
+        await page.getByRole('button', { name: 'New entry' }).click();
+        const dialog = page.getByRole('dialog');
+        await expect(dialog.getByPlaceholder('AAPL')).toHaveAttribute('maxlength', '20');
+        await expect(dialog.getByPlaceholder('e.g. Opened position with 20 shares')).toHaveAttribute('maxlength', '500');
+        await expect(dialog.getByPlaceholder('Why are you making this decision?')).toHaveAttribute('maxlength', '5000');
+    });
+
+    test('a new entry is saved and is still there after a reload', async ({ page }) => {
+        await page.getByRole('button', { name: 'New entry' }).click();
+        const dialog = page.getByRole('dialog');
+        await dialog.getByPlaceholder('AAPL').fill('amd');
+        await dialog.getByPlaceholder('e.g. Opened position with 20 shares').fill('Opened a starter position');
+        await dialog.getByPlaceholder('Why are you making this decision?').fill('Data-centre GPUs gaining share');
+        const saved = savedTo(page, 'journal', 'Opened a starter position');
+        await dialog.getByRole('button', { name: 'Add Entry' }).click();
+        const list = page.locator('.pm-research-list');
+        await expect(list.getByRole('button', { name: /Opened a starter position/ })).toBeVisible();
+        await saved;
+
+        await reloadAppPage(page);
+        const entry = list.getByRole('button', { name: /Opened a starter position/ });
+        await expect(entry).toBeVisible();
+        await expect(entry).toContainText('AMD');
+    });
+
+    test('an edited entry keeps the change after a reload', async ({ page }) => {
+        const list = page.locator('.pm-research-list');
+        await list.getByRole('button', { name: /Maintaining position through earnings/ }).click();
+        await page.locator('.pm-research-pane').getByRole('button', { name: 'Edit' }).click();
+        const dialog = page.getByRole('dialog');
+        await dialog.getByPlaceholder('e.g. Opened position with 20 shares').fill('Trimmed ahead of earnings');
+        const saved = savedTo(page, 'journal', 'Trimmed ahead of earnings');
+        await dialog.getByRole('button', { name: 'Save Changes' }).click();
+        await expect(list.getByRole('button', { name: /Trimmed ahead of earnings/ })).toBeVisible();
+        await saved;
+
+        await reloadAppPage(page);
+        await expect(list.getByRole('button', { name: /Trimmed ahead of earnings/ })).toBeVisible();
+        await expect(list.getByRole('button', { name: /Maintaining position through earnings/ })).toHaveCount(0);
+    });
+
+    test('a deleted entry stays deleted after a reload', async ({ page }) => {
+        const list = page.locator('.pm-research-list');
+        await expect(list.getByRole('button', { name: /Increased position by 50 shares/ })).toBeVisible();
+        page.once('dialog', (dialog) => dialog.accept());
+        const saved = savedTo(page, 'journal', '"dismissed":true');
+        await page.getByRole('button', { name: 'Delete journal entry for AAPL' }).click();
+        await expect(list.getByRole('button', { name: /Increased position by 50 shares/ })).toHaveCount(0);
+        await saved;
+
+        await reloadAppPage(page);
+        await expect(list.getByRole('button', { name: /Reduced position by 25 shares/ })).toBeVisible();
+        await expect(list.getByRole('button', { name: /Increased position by 50 shares/ })).toHaveCount(0);
+    });
 });
+
+test.describe('Research theses', () => {
+    // Changes are saved to the account, so each test has one of its own,
+    // and wait for its theses to load.
+    test.beforeEach(async ({ context, page }) => {
+        await signInAsFreshUser(context);
+        const loaded = researchLoaded(page, 'theses');
+        await gotoAppPage(page, '/research');
+        await loaded;
+    });
+
+    test('a new thesis is saved and is still there after a reload', async ({ page }) => {
+        await page.getByRole('button', { name: /New thesis/ }).click();
+        const dialog = page.getByRole('dialog');
+        await dialog.getByPlaceholder('AAPL').fill('AMD');
+        await dialog.getByPlaceholder('Apple Inc.').fill('Advanced Micro Devices');
+        await dialog.getByPlaceholder('e.g. AI-Driven Services Acceleration').fill('MI300 share gains');
+        await dialog.getByPlaceholder('250').fill('200');
+        const saved = savedTo(page, 'theses', 'MI300 share gains');
+        await dialog.getByRole('button', { name: 'Create Thesis' }).click();
+        const list = page.locator('.pm-research-list');
+        await expect(list.getByText('MI300 share gains')).toBeVisible();
+        await saved;
+
+        await reloadAppPage(page);
+        await expect(list.getByText('MI300 share gains')).toBeVisible();
+    });
+
+    test('an archived thesis stays archived, and a deleted one stays deleted, after a reload', async ({ page }) => {
+        const list = page.locator('.pm-research-list');
+        await list.getByText('AI Infrastructure Dominance').click();
+        const archived = savedTo(page, 'theses', '"status":"archived"');
+        await page.getByRole('button', { name: 'More thesis actions' }).click();
+        await page.getByRole('menuitem', { name: 'Archive' }).click();
+        await expect(list.getByText('AI Infrastructure Dominance')).toHaveCount(0);
+        await archived;
+
+        await list.getByText('Azure AI Growth Acceleration').click();
+        page.once('dialog', (dialog) => dialog.accept());
+        const deleted = savedTo(page, 'theses', '"dismissed":true');
+        await page.getByRole('button', { name: 'More thesis actions' }).click();
+        await page.getByRole('menuitem', { name: 'Delete thesis' }).click();
+        await expect(list.getByText('Azure AI Growth Acceleration')).toHaveCount(0);
+        await deleted;
+
+        await reloadAppPage(page);
+        await expect(list.getByText('AI Infrastructure Dominance')).toHaveCount(0);
+        await expect(list.getByText('Azure AI Growth Acceleration')).toHaveCount(0);
+        await selectAppTab(page, 'Archive');
+        await expect(list.getByText('AI Infrastructure Dominance')).toBeVisible();
+    });
+
+    test('a catalyst added on the thesis page is still there after a reload', async ({ page }) => {
+        const loaded = researchLoaded(page, 'theses');
+        await gotoAppPage(page, '/research/thesis/NVDA');
+        await loaded;
+        const catalysts = page.getByRole('region', { name: 'Catalysts' });
+        await catalysts.getByRole('button', { name: 'Add' }).click();
+        const dialog = page.getByRole('dialog');
+        await dialog.getByPlaceholder('e.g. Q4 Earnings').fill('Rubin launch');
+        await dialog.getByPlaceholder('2026-05-01 or Q2 2026').fill('Q3 2027');
+        const saved = savedTo(page, 'theses', 'Rubin launch');
+        await dialog.getByRole('button', { name: 'Add Catalyst' }).click();
+        await expect(catalysts.getByText('Rubin launch')).toBeVisible();
+        await saved;
+
+        await reloadAppPage(page);
+        await expect(page.getByRole('region', { name: 'Catalysts' }).getByText('Rubin launch')).toBeVisible();
+    });
+
+    test('the thesis forms stop at what the account keeps', async ({ page }) => {
+        await page.getByRole('button', { name: /New thesis/ }).click();
+        const dialog = page.getByRole('dialog');
+        await expect(dialog.getByPlaceholder('e.g. AI-Driven Services Acceleration')).toHaveAttribute('maxlength', '200');
+        await expect(dialog.getByPlaceholder('Summarise your thesis...')).toHaveAttribute('maxlength', '5000');
+    });
+});
+

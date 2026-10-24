@@ -148,7 +148,8 @@ export function ResearchPageClient() {
 
     // ---- Handlers -----------------------------------------------------------
     const handleAddWatch = (input: string): string | null => {
-        const { item, error } = watchlist.add(input);
+        const { item, error, message } = watchlist.add(input);
+        if (error === "not-ready") return message ?? "Your watchlist is still loading. Try again in a moment.";
         if (error === "invalid") return "Enter a ticker like NVDA, BRK.B, or BTC-USD.";
         if (error === "duplicate") return `${input.trim().toUpperCase()} is already on your watchlist.`;
         if (item) {
@@ -159,7 +160,7 @@ export function ResearchPageClient() {
         return null;
     };
     const handleRemoveWatch = (item: WatchItem) => {
-        watchlist.remove(item.ticker);
+        if (!watchlist.remove(item.ticker)) return;
         if (selectedWatch === item.ticker) setSelectedWatch(null);
         toast(`${item.ticker} removed from your watchlist.`);
     };
@@ -178,24 +179,22 @@ export function ResearchPageClient() {
         ) {
             return;
         }
-        remove(t.id);
+        if (!remove(t.id)) return;
         if (selectedId === t.id) setSelectedId(null);
         toast.success(`Thesis for ${t.ticker} deleted.`);
     };
     const handleArchive = (t: Thesis) => {
-        archive(t.id);
+        if (!archive(t.id)) return;
         if (selectedId === t.id) setSelectedId(null);
         toast(`Thesis for ${t.ticker} archived.`);
     };
     const handleRestore = (t: Thesis) => {
-        restore(t.id);
+        if (!restore(t.id)) return;
         toast(`Thesis for ${t.ticker} restored.`);
         setTab("theses");
     };
-    const submitThesis = (draft: ThesisDraft) => {
-        if (editingThesis) update(editingThesis.id, draft);
-        else create(draft);
-    };
+    const submitThesis = (draft: ThesisDraft): boolean =>
+        editingThesis ? update(editingThesis.id, draft) : create(draft) !== null;
     const openCreateJournal = useCallback(() => {
         setEditingJournal(null);
         setJournalModalOpen(true);
@@ -207,7 +206,7 @@ export function ResearchPageClient() {
         ) {
             return;
         }
-        removeJournal(entry.id);
+        if (!removeJournal(entry.id)) return;
         toast.success(`Journal entry for ${entry.ticker} deleted.`);
     };
 
@@ -403,10 +402,9 @@ export function ResearchPageClient() {
                 }}
                 editing={editingJournal}
                 theses={theses}
-                onSubmit={(draft) => {
-                    if (editingJournal) updateJournal(editingJournal.id, draft);
-                    else createJournal(draft);
-                }}
+                onSubmit={(draft) =>
+                    editingJournal ? updateJournal(editingJournal.id, draft) : createJournal(draft)
+                }
             />
         </div>
     );

@@ -1,0 +1,168 @@
+/**
+ * The watchlist_items table (launch item i38). Every query is scoped to one
+ * user's ID, which the API routes take from the session.
+ *
+ * Rows are never deleted on request: a removed item is kept as `dismissed`
+ * with its text cleared, so a save from the same page that arrives after the
+ * removal can't bring it back. They go when the account does.
+ */
+
+import { asc, desc, eq, or, sql } from "drizzle-orm";
+
+import { db } from "@/db";
+import { watchlistItems } from "@/db/schema";
+import type { WatchItemInput, WatchWriteOrder } from "@/lib/validators/watchlist";
+
+type Database = typeof db;
+
+export interface StoredWatchlist {
+    items: WatchItemInput[];
+    /** Example rows the user removed. */
+    dismissed: string[];
+}
+
+export function buildListWatchlistQuery(userId: string, database: Database = db) {
+    return database
+        .select()
+        .from(watchlistItems)
+        .where(eq(watchlistItems.userId, userId))
+        .orderBy(desc(watchlistItems.createdAt), asc(watchlistItems.id));
+}
+
+export async function loadWatchlist(userId: string, database: Database = db): Promise<StoredWatchlist> {
+    const rows = await buildListWatchlistQuery(userId, database);
+    return {
+        items: rows.filter((row) => !row.dismissed).map(toItem),
+        dismissed: rows.filter((row) => row.dismissed).map((row) => row.id),
+    };
+}
+
+function toItem(row: typeof watchlistItems.$inferSelect): WatchItemInput {
+    return {
+        id: row.id,
+        ticker: row.ticker,
+        companyName: row.companyName,
+        reason: row.reason,
+        notes: row.notes,
+        targetEntry: row.targetEntry,
+        addedAt: row.addedAt,
+        dismissed: row.dismissed,
+    };
+}
+
+/** The row for `item`. A removed item keeps only what identifies it: its text is cleared. */
+function toRow(userId: string, item: WatchItemInput, now: Date, order: WatchWriteOrder | null) {
+    const removed = item.dismissed;
+    return {
+        userId,
+        id: item.id,
+        ticker: item.ticker,
+        companyName: removed ? "" : item.companyName,
+        reason: removed ? "" : item.reason,
+        notes: removed ? "" : item.notes,
+        targetEntry: removed ? null : item.targetEntry,
+        addedAt: item.addedAt,
+        dismissed: item.dismissed,
+        writeSession: order?.session ?? null,
+        writeSeq: order?.seq ?? null,
+        updatedAt: now,
+    };
+}
+
+/**
+ * Whether a write in `order` may replace the row: always, unless the row's
+ * last write came from the same page and was this one or a later one.
+ */
+function isNewerThanRow(order: WatchWriteOrder) {
+    return or(
+        sql`${watchlistItems.writeSession} is distinct from ${order.session}`,
+        sql`${watchlistItems.writeSeq} < ${order.seq}`,
+    );
+}
+
+/** Adds the item or replaces the user's row with that ID, unless the row has a later write from the same page. */
+export function buildSaveWatchItemQuery(userId: string, item: WatchItemInput, order: WatchWriteOrder, now: Date, database: Database = db) {
+    const row = toRow(userId, item, now, order);
+    return database
+        .insert(watchlistItems)
+        .values({ ...row, createdAt: now })
+        .onConflictDoUpdate({
+            target: [watchlistItems.userId, watchlistItems.id],
+            set: {
+                ticker: row.ticker,
+                companyName: row.companyName,
+                reason: row.reason,
+                notes: row.notes,
+                targetEntry: row.targetEntry,
+                addedAt: row.addedAt,
+                dismissed: row.dismissed,
+                writeSession: row.writeSession,
+                writeSeq: row.writeSeq,
+                updatedAt: now,
+            },
+            setWhere: isNewerThanRow(order),
+        });
+}
+
+export class DuplicateTickerError extends Error {
+    constructor(readonly ticker: string) {
+        super(`${ticker} is already on the watchlist`);
+    }
+}
+
+/** Saves one item. Throws DuplicateTickerError when another live row has its ticker. */
+export async function saveWatchItem(
+    userId: string,
+    item: WatchItemInput,
+    order: WatchWriteOrder,
+    { now = new Date(), database = db }: { now?: Date; database?: Database } = {},
+): Promise<void> {
+    try {
+        await buildSaveWatchItemQuery(userId, item, order, now, database);
+    } catch (error) {
+        if (isUniqueViolation(error, "watchlist_items_user_ticker_idx")) throw new DuplicateTickerError(item.ticker);
+        throw error;
+    }
+}
+
+/**
+ * The one-time move of a browser's list, in its order. Rows the server
+ * already has (by ID, or a live row with the same ticker) are left as they
+ * are, so it is safe to run again, from this browser or another.
+ */
+/**
+ * Rows are created a millisecond apart, counting from when the move began
+ * and the batch's place in the list, so the list keeps the browser's order
+ * (newest first) across batches. A start in the future counts as now.
+ */
+export function buildImportWatchlistQuery(
+    userId: string,
+    { items, first = 0, startedAt }: { items: readonly WatchItemInput[]; first?: number; startedAt?: number },
+    now: Date,
+    database: Database = db,
+) {
+    const base = Math.min(startedAt ?? now.getTime(), now.getTime());
+    return database
+        .insert(watchlistItems)
+        .values(items.map((item, index) => ({ ...toRow(userId, item, now, null), createdAt: new Date(base - first - index) })))
+        .onConflictDoNothing();
+}
+
+export async function importWatchlist(
+    userId: string,
+    batch: { items: readonly WatchItemInput[]; first?: number; startedAt?: number },
+    { now = new Date(), database = db }: { now?: Date; database?: Database } = {},
+): Promise<void> {
+    if (batch.items.length === 0) return;
+    await buildImportWatchlistQuery(userId, batch, now, database);
+}
+
+function isUniqueViolation(error: unknown, constraint: string): boolean {
+    for (let current: unknown = error; current; current = (current as { cause?: unknown }).cause) {
+        const candidate = current as { code?: unknown; constraint_name?: unknown; constraint?: unknown };
+        if (candidate.code === "23505") {
+            return candidate.constraint_name === constraint || candidate.constraint === constraint;
+        }
+    }
+    return false;
+}

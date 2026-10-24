@@ -98,12 +98,15 @@ export function adoptSharedValues(
     }
 }
 
-export function writeUserValue(storage: ReadableStorage | null | undefined, base: string, value: string, scope: string = currentStorageScope()): void {
-    if (!storage) return;
+/** False when the value couldn't be stored (no storage, quota, private mode). */
+export function writeUserValue(storage: ReadableStorage | null | undefined, base: string, value: string, scope: string = currentStorageScope()): boolean {
+    if (!storage) return false;
     try {
         storage.setItem(userStorageKey(base, scope), value);
+        return true;
     } catch {
         // Quota or private mode: the next read falls back to defaults.
+        return false;
     }
 }
 
@@ -123,7 +126,9 @@ export function removeUserValue(storage: ReadableStorage | null | undefined, bas
 export function userScopedStateStorage(getStorage: () => ReadableStorage | null = browserLocalStorage) {
     return {
         getItem: (name: string) => readUserValue(getStorage(), name),
-        setItem: (name: string, value: string) => writeUserValue(getStorage(), name, value),
+        setItem: (name: string, value: string) => {
+            writeUserValue(getStorage(), name, value);
+        },
         removeItem: (name: string) => removeUserValue(getStorage(), name),
     };
 }

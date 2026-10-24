@@ -19,11 +19,13 @@ import {
 } from '@/components/ui/select';
 import { toast } from 'sonner';
 import type { CatalystImpact, ThesisCatalyst } from '@/lib/research/thesis';
+import { THESIS_LIMITS } from '@/lib/validators/thesis';
 
 interface AddCatalystModalProps {
     open: boolean;
     onOpenChange: (open: boolean) => void;
-    onSubmit: (catalyst: Omit<ThesisCatalyst, 'id'>) => void;
+    /** Returns false when the catalyst couldn't be saved; the modal then stays open. */
+    onSubmit: (catalyst: Omit<ThesisCatalyst, 'id'>) => boolean | void;
 }
 
 const defaults = { title: '', date: '', impact: 'medium' as CatalystImpact };
@@ -43,7 +45,8 @@ export function AddCatalystModal({ open, onOpenChange, onSubmit }: AddCatalystMo
             toast.error('Title and date are required.');
             return;
         }
-        onSubmit({ title: form.title.trim(), date: form.date.trim(), impact: form.impact });
+        const saved = onSubmit({ title: form.title.trim(), date: form.date.trim(), impact: form.impact });
+        if (saved === false) return;
         onOpenChange(false);
         toast.success('Catalyst added.');
     };
@@ -59,6 +62,7 @@ export function AddCatalystModal({ open, onOpenChange, onSubmit }: AddCatalystMo
                         <label className="text-sm font-medium">Title *</label>
                         <Input
                             placeholder="e.g. Q4 Earnings"
+                                maxLength={THESIS_LIMITS.itemTitle}
                             value={form.title}
                             onChange={(e) => setForm((p) => ({ ...p, title: e.target.value }))}
                         />
@@ -67,6 +71,7 @@ export function AddCatalystModal({ open, onOpenChange, onSubmit }: AddCatalystMo
                         <label className="text-sm font-medium">Date *</label>
                         <Input
                             placeholder="2026-05-01 or Q2 2026"
+                                maxLength={THESIS_LIMITS.itemDate}
                             value={form.date}
                             onChange={(e) => setForm((p) => ({ ...p, date: e.target.value }))}
                         />
