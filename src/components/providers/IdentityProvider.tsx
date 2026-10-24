@@ -13,7 +13,7 @@ const AccountStorageContext = createContext(false);
  * hands the signed-in user whatever this browser saved before storage was per
  * user, on every page, so no other account can pick it up later.
  *
- * `accountStorage` says whether research data (the watchlist and journal) lives
+ * `accountStorage` says whether research data (watchlist, journal, theses) lives
  * in the viewer's account: true when they're signed in and the app has a
  * database (launch item i38). Without one it stays in this browser.
  */

@@ -179,24 +179,22 @@ export function ResearchPageClient() {
         ) {
             return;
         }
-        remove(t.id);
+        if (!remove(t.id)) return;
         if (selectedId === t.id) setSelectedId(null);
         toast.success(`Thesis for ${t.ticker} deleted.`);
     };
     const handleArchive = (t: Thesis) => {
-        archive(t.id);
+        if (!archive(t.id)) return;
         if (selectedId === t.id) setSelectedId(null);
         toast(`Thesis for ${t.ticker} archived.`);
     };
     const handleRestore = (t: Thesis) => {
-        restore(t.id);
+        if (!restore(t.id)) return;
         toast(`Thesis for ${t.ticker} restored.`);
         setTab("theses");
     };
-    const submitThesis = (draft: ThesisDraft) => {
-        if (editingThesis) update(editingThesis.id, draft);
-        else create(draft);
-    };
+    const submitThesis = (draft: ThesisDraft): boolean =>
+        editingThesis ? update(editingThesis.id, draft) : create(draft) !== null;
     const openCreateJournal = useCallback(() => {
         setEditingJournal(null);
         setJournalModalOpen(true);

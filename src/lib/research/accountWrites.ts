@@ -168,23 +168,25 @@ export async function accountRequest(fetchImpl: Fetch, path: string, init: Reque
     return response;
 }
 
+const encoder = new TextEncoder();
+
+// Browsers refuse keepalive requests with bodies over 64 KiB.
+const KEEPALIVE_MAX_BYTES = 60 * 1024;
+
 /**
- * Saves (PUT `{ ...body, order }`) or deletes (DELETE `{ order }`) one
- * record; keepalive, so a write made just before leaving the page still
- * arrives.
+ * Saves one record (PUT `{ ...body, order }`). Keepalive when the body is
+ * small enough, so a write made just before leaving the page still arrives;
+ * a bigger one (a long thesis) is sent as a normal request.
  */
 export async function sendRecordWrite(
     fetchImpl: Fetch,
     path: string,
-    write: { kind: 'put'; body: Record<string, unknown> } | { kind: 'delete' },
+    write: { kind: 'put'; body: Record<string, unknown> },
     order: WriteOrder,
 ): Promise<void> {
-    await accountRequest(fetchImpl, path, write.kind === 'delete'
-        ? { method: 'DELETE', body: JSON.stringify({ order }), keepalive: true }
-        : { method: 'PUT', body: JSON.stringify({ ...write.body, order }), keepalive: true });
+    const body = JSON.stringify({ ...write.body, order });
+    await accountRequest(fetchImpl, path, { method: 'PUT', body, keepalive: encoder.encode(body).length <= KEEPALIVE_MAX_BYTES });
 }
-
-const encoder = new TextEncoder();
 
 /**
  * Splits `items` into batches whose JSON body stays under `maxBytes` (UTF-8,

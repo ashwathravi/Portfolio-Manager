@@ -20,6 +20,7 @@ import {
 } from '@/components/ui/select';
 import { toast } from 'sonner';
 import type { Thesis, ThesisDraft } from '@/lib/research/thesis';
+import { THESIS_LIMITS } from '@/lib/validators/thesis';
 
 interface ThesisFormData {
     ticker: string;
@@ -59,7 +60,8 @@ function toFormData(thesis: Thesis): ThesisFormData {
 interface NewThesisModalProps {
     open: boolean;
     onOpenChange: (open: boolean) => void;
-    onSubmit: (thesis: ThesisDraft) => void;
+    /** Returns false when the thesis couldn't be saved; the modal then stays open. */
+    onSubmit: (thesis: ThesisDraft) => boolean | void;
     /** When provided, the modal operates in edit mode and pre-fills fields. */
     editing?: Thesis | null;
 }
@@ -83,7 +85,7 @@ export function NewThesisModal({ open, onOpenChange, onSubmit, editing }: NewThe
             return;
         }
         const ticker = form.ticker.toUpperCase();
-        onSubmit({
+        const saved = onSubmit({
             ticker,
             companyName: form.companyName,
             title: form.title,
@@ -93,6 +95,7 @@ export function NewThesisModal({ open, onOpenChange, onSubmit, editing }: NewThe
             targetPrice: parseFloat(form.targetPrice),
             timeHorizon: form.timeHorizon,
         });
+        if (saved === false) return;
         setForm(defaultForm);
         onOpenChange(false);
         toast.success(editing ? `Thesis for ${ticker} updated.` : `Thesis for ${ticker} created.`);
@@ -111,6 +114,7 @@ export function NewThesisModal({ open, onOpenChange, onSubmit, editing }: NewThe
                             <label className="text-sm font-medium">Ticker *</label>
                             <Input
                                 placeholder="AAPL"
+                                maxLength={THESIS_LIMITS.ticker}
                                 value={form.ticker}
                                 onChange={(e) => set('ticker')(e.target.value.toUpperCase())}
                             />
@@ -119,6 +123,7 @@ export function NewThesisModal({ open, onOpenChange, onSubmit, editing }: NewThe
                             <label className="text-sm font-medium">Company Name *</label>
                             <Input
                                 placeholder="Apple Inc."
+                                maxLength={THESIS_LIMITS.companyName}
                                 value={form.companyName}
                                 onChange={(e) => set('companyName')(e.target.value)}
                             />
@@ -129,6 +134,7 @@ export function NewThesisModal({ open, onOpenChange, onSubmit, editing }: NewThe
                         <label className="text-sm font-medium">Thesis Title *</label>
                         <Input
                             placeholder="e.g. AI-Driven Services Acceleration"
+                                maxLength={THESIS_LIMITS.title}
                             value={form.title}
                             onChange={(e) => set('title')(e.target.value)}
                         />
@@ -176,6 +182,7 @@ export function NewThesisModal({ open, onOpenChange, onSubmit, editing }: NewThe
                             <label className="text-sm font-medium">Time Horizon</label>
                             <Input
                                 placeholder="12 months"
+                                maxLength={THESIS_LIMITS.timeHorizon}
                                 value={form.timeHorizon}
                                 onChange={(e) => set('timeHorizon')(e.target.value)}
                             />
@@ -186,6 +193,7 @@ export function NewThesisModal({ open, onOpenChange, onSubmit, editing }: NewThe
                         <label className="text-sm font-medium">Description</label>
                         <Textarea
                             placeholder="Summarise your thesis..."
+                                maxLength={THESIS_LIMITS.description}
                             value={form.description}
                             onChange={(e) => set('description')(e.target.value)}
                             rows={3}

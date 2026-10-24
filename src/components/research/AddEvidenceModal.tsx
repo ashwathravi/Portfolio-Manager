@@ -19,11 +19,13 @@ import {
 } from '@/components/ui/select';
 import { toast } from 'sonner';
 import type { EvidenceType, ThesisEvidence } from '@/lib/research/thesis';
+import { THESIS_LIMITS } from '@/lib/validators/thesis';
 
 interface AddEvidenceModalProps {
     open: boolean;
     onOpenChange: (open: boolean) => void;
-    onSubmit: (evidence: Omit<ThesisEvidence, 'id'>) => void;
+    /** Returns false when the evidence couldn't be saved; the modal then stays open. */
+    onSubmit: (evidence: Omit<ThesisEvidence, 'id'>) => boolean | void;
 }
 
 const defaults = { title: '', type: 'note' as EvidenceType, date: '', url: '' };
@@ -43,12 +45,13 @@ export function AddEvidenceModal({ open, onOpenChange, onSubmit }: AddEvidenceMo
             toast.error('Title and date are required.');
             return;
         }
-        onSubmit({
+        const saved = onSubmit({
             title: form.title.trim(),
             type: form.type,
             date: form.date.trim(),
             url: form.url.trim() || undefined,
         });
+        if (saved === false) return;
         onOpenChange(false);
         toast.success('Evidence linked.');
     };
@@ -64,6 +67,7 @@ export function AddEvidenceModal({ open, onOpenChange, onSubmit }: AddEvidenceMo
                         <label className="text-sm font-medium">Title *</label>
                         <Input
                             placeholder="e.g. Q3 Earnings Transcript"
+                                maxLength={THESIS_LIMITS.itemTitle}
                             value={form.title}
                             onChange={(e) => setForm((p) => ({ ...p, title: e.target.value }))}
                         />
@@ -92,6 +96,7 @@ export function AddEvidenceModal({ open, onOpenChange, onSubmit }: AddEvidenceMo
                             <label className="text-sm font-medium">Date *</label>
                             <Input
                                 placeholder="2026-04-01"
+                                maxLength={THESIS_LIMITS.itemDate}
                                 value={form.date}
                                 onChange={(e) => setForm((p) => ({ ...p, date: e.target.value }))}
                             />
@@ -101,6 +106,7 @@ export function AddEvidenceModal({ open, onOpenChange, onSubmit }: AddEvidenceMo
                         <label className="text-sm font-medium">Source URL</label>
                         <Input
                             placeholder="https://..."
+                                maxLength={THESIS_LIMITS.url}
                             value={form.url}
                             onChange={(e) => setForm((p) => ({ ...p, url: e.target.value }))}
                         />

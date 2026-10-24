@@ -3,10 +3,11 @@ import { currentStorageScope, readUserValue, writeUserValue } from '@/lib/storag
 import type { Thesis, ThesisCatalyst, ThesisEvidence } from './thesis';
 
 /**
- * localStorage-backed persistence for theses until they move to Postgres
- * (launch item i38), one copy per signed-in user (i39). Separated from the
- * React hook so we can unit-test the reader / writer by passing a fake
- * storage.
+ * localStorage-backed persistence for theses, one copy per signed-in user
+ * (i39). Used when the app has no database; with one, theses live in the
+ * account (i38) and this copy is sent there once, then removed
+ * (`thesisAccount.ts`). Separated from the React hook so we can unit-test
+ * the reader / writer by passing a fake storage.
  */
 
 type ThesisStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
