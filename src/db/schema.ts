@@ -1,5 +1,6 @@
 
 import {
+    bigint,
     boolean,
     check,
     date,
@@ -554,6 +555,11 @@ export const watchlistItems = pgTable("watchlist_items", {
     targetEntry: doublePrecision("target_entry"),
     addedAt: date("added_at", { mode: "string" }).notNull(),
     dismissed: boolean("dismissed").notNull().default(false),
+    // The page that last wrote the row and its count of writes then: a
+    // write from the same page applies only if it is newer, so a request
+    // that arrives late can't undo a later edit.
+    writeSession: text("write_session"),
+    writeSeq: bigint("write_seq", { mode: "number" }),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (table) => ({

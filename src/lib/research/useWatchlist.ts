@@ -49,6 +49,8 @@ interface SyncDetail {
 interface WatchlistSource {
     all: WatchItem[];
     hydrated: boolean;
+    /** The stored list couldn't be loaded. */
+    failed: boolean;
     save(next: WatchItem[], item: WatchItem): void;
     remove(next: WatchItem[], item: WatchItem): void;
 }
@@ -71,32 +73,52 @@ export function useWatchlist() {
 
     const browser = useBrowserWatchlist(!inAccount, key, examples);
     const account = useAccountWatchlist(inAccount, key, examples);
-    const { all, hydrated, save, remove: removeItem } = inAccount ? account : browser;
+    const { all, hydrated, failed, save, remove: removeItem } = inAccount ? account : browser;
+    // In the account, changes wait for the stored list: one made to the
+    // examples shown while it loads would replace the user's saved row.
+    const ready = !inAccount || hydrated;
+    const notReadyMessage = failed
+        ? "Your watchlist couldn't be loaded, so changes can't be saved. Reload to try again."
+        : 'Your watchlist is still loading. Try again in a moment.';
 
     const add = useCallback(
-        (ticker: string, companyName?: string): { item?: WatchItem; error?: AddWatchError } => {
+        (ticker: string, companyName?: string): { item?: WatchItem; error?: AddWatchError; message?: string } => {
+            if (!ready) {
+                toast(notReadyMessage, { id: 'watchlist-not-ready' });
+                return { error: 'not-ready', message: notReadyMessage };
+            }
             const result = addToWatchlist(all, ticker, { now: Date.now(), companyName });
             if (result.item) save(result.list, result.item);
             return { item: result.item, error: result.error };
         },
-        [all, save],
+        [all, notReadyMessage, ready, save],
     );
 
+    /** False when nothing was removed (the list hasn't loaded, or the ticker isn't on it). */
     const remove = useCallback(
-        (ticker: string) => {
+        (ticker: string): boolean => {
+            if (!ready) {
+                toast(notReadyMessage, { id: 'watchlist-not-ready' });
+                return false;
+            }
             const item = findWatchItem(all, ticker);
             if (item) removeItem(removeFromWatchlist(all, ticker), item);
+            return Boolean(item);
         },
-        [all, removeItem],
+        [all, notReadyMessage, ready, removeItem],
     );
 
     const update = useCallback(
         (id: string, patch: Parameters<typeof updateWatchItem>[2]) => {
+            if (!ready) {
+                toast(notReadyMessage, { id: 'watchlist-not-ready' });
+                return;
+            }
             const next = updateWatchItem(all, id, patch);
             const item = next.find((w) => w.id === id);
             if (item) save(next, item);
         },
-        [all, save],
+        [all, notReadyMessage, ready, save],
     );
 
     const items = useMemo(() => visibleWatchItems(all, showSample), [all, showSample]);
@@ -148,7 +170,7 @@ function useBrowserWatchlist(enabled: boolean, key: string, examples: WatchItem[
         [key],
     );
 
-    return { all: stored ?? examples, hydrated, save: commit, remove: commit };
+    return { all: stored ?? examples, hydrated, failed: false, save: commit, remove: commit };
 }
 
 const writers = new WeakMap<QueryClient, WatchlistWriter>();
@@ -157,7 +179,7 @@ function writerFor(queryClient: QueryClient): WatchlistWriter {
     let writer = writers.get(queryClient);
     if (!writer) {
         writer = createWatchlistWriter({
-            send: (id, write) => sendWatchWrite(id, write),
+            send: (id, write, order) => sendWatchWrite(id, write, order),
             onSaved: (id, write) => {
                 if (queryClient.getQueryData(ACCOUNT_QUERY)) {
                     queryClient.setQueryData<AccountWatchlist>(ACCOUNT_QUERY, (stored) => applyWatchWrite(stored, id, write));
@@ -248,5 +270,5 @@ function useAccountWatchlist(enabled: boolean, key: string, examples: WatchItem[
         [writer],
     );
 
-    return { all, hydrated: query.isSuccess, save, remove };
+    return { all, hydrated: query.isSuccess, failed: query.isError, save, remove };
 }

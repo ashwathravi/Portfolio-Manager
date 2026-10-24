@@ -148,7 +148,8 @@ export function ResearchPageClient() {
 
     // ---- Handlers -----------------------------------------------------------
     const handleAddWatch = (input: string): string | null => {
-        const { item, error } = watchlist.add(input);
+        const { item, error, message } = watchlist.add(input);
+        if (error === "not-ready") return message ?? "Your watchlist is still loading. Try again in a moment.";
         if (error === "invalid") return "Enter a ticker like NVDA, BRK.B, or BTC-USD.";
         if (error === "duplicate") return `${input.trim().toUpperCase()} is already on your watchlist.`;
         if (item) {
@@ -159,7 +160,7 @@ export function ResearchPageClient() {
         return null;
     };
     const handleRemoveWatch = (item: WatchItem) => {
-        watchlist.remove(item.ticker);
+        if (!watchlist.remove(item.ticker)) return;
         if (selectedWatch === item.ticker) setSelectedWatch(null);
         toast(`${item.ticker} removed from your watchlist.`);
     };

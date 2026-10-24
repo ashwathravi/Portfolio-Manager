@@ -298,10 +298,15 @@ test.describe('Research thesis price strip', () => {
 });
 
 test.describe('Research watchlist', () => {
-    // Changes are saved to the account, so each test has one of its own.
+    // Changes are saved to the account, so each test has one of its own,
+    // and wait for its list to load.
     test.beforeEach(async ({ context, page }) => {
         await signInAsFreshUser(context);
+        const loaded = databaseAuthEnabled
+            ? page.waitForResponse((response) => response.url().endsWith('/api/research/watchlist') && response.ok())
+            : Promise.resolve();
         await gotoAppPage(page, '/research?tab=watchlist');
+        await loaded;
     });
 
     test('regression: example rows are tagged Sample and the pane is real, not a placeholder', async ({ page }) => {

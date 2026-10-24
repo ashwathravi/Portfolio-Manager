@@ -8,6 +8,8 @@ CREATE TABLE "watchlist_items" (
 	"target_entry" double precision,
 	"added_at" date NOT NULL,
 	"dismissed" boolean DEFAULT false NOT NULL,
+	"write_session" text,
+	"write_seq" bigint,
 	"created_at" timestamp DEFAULT now() NOT NULL,
 	"updated_at" timestamp DEFAULT now() NOT NULL,
 	CONSTRAINT "watchlist_items_pkey" PRIMARY KEY("user_id","id")

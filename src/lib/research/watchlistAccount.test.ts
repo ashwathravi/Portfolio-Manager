@@ -7,6 +7,7 @@ import { seedWatchlist, type WatchItem } from './watchlist';
 import {
     WatchlistRequestError,
     applyWatchWrite,
+    batchBySize,
     createWatchlistWriter,
     fetchAccountWatchlist,
     importAccountWatchlist,
@@ -20,6 +21,7 @@ import {
 } from './watchlistAccount';
 
 const NOW = Date.parse('2026-10-23T15:00:00Z');
+const ORDER = { session: '6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b', seq: 3 };
 const EXAMPLES = seedWatchlist(Date.parse('2026-10-23T00:00:00Z'));
 const NO_WRITES = new Map<string, WatchWrite>();
 
@@ -245,6 +247,32 @@ describe('createWatchlistWriter', () => {
         assert.equal(writer.pending().size, 0);
     });
 
+    test('regression: every write is numbered in the order it was made, so a late one loses', async () => {
+        // The Codex finding on PR #147: the write sent on close could be
+        // overtaken by the older one still in flight.
+        const orders: { notes: string; session: string; seq: number }[] = [];
+        const first = deferred();
+        const writer = createWatchlistWriter({
+            session: 'page-0001',
+            send: (_id, write, order) => {
+                orders.push({ notes: write.kind === 'put' ? write.item.notes : write.ticker, ...order });
+                return orders.length === 1 ? first.promise : Promise.resolve();
+            },
+            onSaved: () => {},
+            onFailed: () => assert.fail('no failure'),
+        });
+        assert.equal(writer.session, 'page-0001');
+        writer.write('w-nvda-a', { kind: 'put', item: { ...NVDA, notes: 'older' } });
+        writer.write('w-amd-b', { kind: 'put', item: { ...AMD, notes: 'other' } });
+        writer.write('w-nvda-a', { kind: 'put', item: { ...NVDA, notes: 'newer' } });
+        writer.sendWaiting();
+        first.resolve();
+        await flush();
+
+        assert.deepEqual(orders.map((o) => [o.notes, o.seq]), [['older', 1], ['other', 2], ['newer', 3], ['newer', 3]]);
+        assert.ok(orders.every((o) => o.session === 'page-0001'));
+    });
+
     test('a failed write is dropped and reported; a newer one is still sent', async () => {
         const failures: unknown[] = [];
         const saved: string[] = [];
@@ -293,7 +321,7 @@ describe('requests', () => {
 
     test('a refused request says why', async () => {
         const { fetchImpl } = recorder([Response.json({ error: 'dup', code: 'DUPLICATE_TICKER' }, { status: 409 })]);
-        await assert.rejects(sendWatchWrite('w-nvda-a', { kind: 'put', item: NVDA }, fetchImpl), (error: unknown) => {
+        await assert.rejects(sendWatchWrite('w-nvda-a', { kind: 'put', item: NVDA }, ORDER, fetchImpl), (error: unknown) => {
             assert.ok(error instanceof WatchlistRequestError);
             assert.equal(error.status, 409);
             assert.equal(error.code, 'DUPLICATE_TICKER');
@@ -303,27 +331,38 @@ describe('requests', () => {
         await assert.rejects(fetchAccountWatchlist(down), (error: unknown) => error instanceof WatchlistRequestError && error.code === null);
     });
 
-    test('saves with PUT and deletes with DELETE, both keepalive', async () => {
+    test('saves with PUT and deletes with DELETE, both keepalive and in order', async () => {
         const { calls, fetchImpl } = recorder([]);
-        await sendWatchWrite('w-brk.b-1', { kind: 'put', item: input('w-brk.b-1', 'BRK.B') }, fetchImpl);
-        await sendWatchWrite('w-nvda-a', { kind: 'delete', ticker: 'NVDA' }, fetchImpl);
+        await sendWatchWrite('w-brk.b-1', { kind: 'put', item: input('w-brk.b-1', 'BRK.B') }, ORDER, fetchImpl);
+        await sendWatchWrite('w-nvda-a', { kind: 'delete', ticker: 'NVDA' }, { ...ORDER, seq: 4 }, fetchImpl);
         assert.deepEqual(calls.map((c) => [c.init.method, c.url, c.init.keepalive]), [
             ['PUT', '/api/research/watchlist/w-brk.b-1', true],
             ['DELETE', '/api/research/watchlist/w-nvda-a', true],
         ]);
-        assert.deepEqual(JSON.parse(String(calls[0].init.body)), input('w-brk.b-1', 'BRK.B'));
+        assert.deepEqual(JSON.parse(String(calls[0].init.body)), { item: input('w-brk.b-1', 'BRK.B'), order: ORDER });
+        assert.deepEqual(JSON.parse(String(calls[1].init.body)), { order: { ...ORDER, seq: 4 } });
         assert.deepEqual(calls[0].init.headers, { 'Content-Type': 'application/json' });
-        assert.equal(calls[1].init.body, undefined);
     });
 
-    test('imports in batches of 100', async () => {
+    test('imports everything that fits in one request at once', async () => {
         const { calls, fetchImpl } = recorder([]);
         const items = Array.from({ length: 250 }, (_, i) => input(`w-${i}`, 'NVDA'));
         await importAccountWatchlist(items, fetchImpl);
-        assert.deepEqual(calls.map((c) => JSON.parse(String(c.init.body)).items.length), [100, 100, 50]);
+        assert.deepEqual(calls.map((c) => JSON.parse(String(c.init.body)).items.length), [250]);
         assert.ok(calls.every((c) => c.url === '/api/research/watchlist/import' && c.init.method === 'POST'));
         await importAccountWatchlist([], fetchImpl);
-        assert.equal(calls.length, 3);
+        assert.equal(calls.length, 1);
+    });
+
+    test('regression: long non-ASCII notes are split into requests under the 1 MiB limit', async () => {
+        // The Codex finding on PR #147: 100 rows of 5,000 CJK characters
+        // came to about 1.5 MB in one request, refused every time.
+        const { calls, fetchImpl } = recorder([]);
+        const items = Array.from({ length: 100 }, (_, i) => input(`w-${i}`, 'NVDA', { notes: '株'.repeat(5000) }));
+        await importAccountWatchlist(items, fetchImpl);
+        assert.ok(calls.length > 1);
+        for (const call of calls) assert.ok(new TextEncoder().encode(String(call.init.body)).length < 1024 * 1024);
+        assert.equal(calls.reduce((n, c) => n + JSON.parse(String(c.init.body)).items.length, 0), 100);
     });
 });
 
@@ -371,5 +410,29 @@ describe('importBrowserWatchlist', () => {
         const fetchImpl = (async () => assert.fail('nothing to send')) as unknown as typeof fetch;
         await importBrowserWatchlist('atlas:research:watchlist:user-3', { storage: { getItem: () => null, removeItem: () => {} }, examples: EXAMPLES, now: NOW, fetchImpl });
         await importBrowserWatchlist('atlas:research:watchlist:user-4', { storage: null, examples: EXAMPLES, now: NOW, fetchImpl });
+    });
+});
+
+describe('batchBySize', () => {
+    test('keeps each batch under the byte and count limits, in order', () => {
+        const items = Array.from({ length: 10 }, (_, i) => ({ i, text: 'x'.repeat(100) }));
+        const batches = batchBySize(items, { maxBytes: 400, maxCount: 100 });
+        assert.deepEqual(batches.flat(), items);
+        for (const batch of batches) assert.ok(new TextEncoder().encode(JSON.stringify({ items: batch })).length <= 400);
+        assert.deepEqual(batchBySize(items, { maxBytes: 1e6, maxCount: 4 }).map((b) => b.length), [4, 4, 2]);
+    });
+
+    test('counts UTF-8 bytes and JSON escapes, not characters', () => {
+        const wide = { text: '株'.repeat(100) }; // 300 bytes in UTF-8
+        const escaped = { text: '\u0001'.repeat(100) }; // 600 bytes once escaped
+        assert.deepEqual(batchBySize([wide, wide], { maxBytes: 500, maxCount: 10 }).map((b) => b.length), [1, 1]);
+        assert.deepEqual(batchBySize([escaped, escaped], { maxBytes: 1000, maxCount: 10 }).map((b) => b.length), [1, 1]);
+    });
+
+    test('an item too big on its own goes alone; nothing is dropped', () => {
+        const big = { text: 'x'.repeat(1000) };
+        const small = { text: 'y' };
+        assert.deepEqual(batchBySize([small, big, small], { maxBytes: 100, maxCount: 10 }), [[small], [big], [small]]);
+        assert.deepEqual(batchBySize([], { maxBytes: 100, maxCount: 10 }), []);
     });
 });

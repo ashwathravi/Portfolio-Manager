@@ -107,19 +107,30 @@ test.describe('Watchlist in the account', () => {
             id: 'w-nvda-e2e', ticker: 'NVDA', companyName: '', reason: '', notes: '', targetEntry: null, addedAt: '2026-10-23', dismissed: false,
         };
 
-        const saved = await page.request.put(`/api/research/watchlist/${item.id}`, { data: item });
+        const order = { session: 'e2e-api-test', seq: 1 };
+
+        const saved = await page.request.put(`/api/research/watchlist/${item.id}`, { data: { item, order } });
         expect(saved.status()).toBe(204);
 
-        const duplicate = await page.request.put('/api/research/watchlist/w-nvda-other', { data: { ...item, id: 'w-nvda-other' } });
+        const duplicate = await page.request.put('/api/research/watchlist/w-nvda-other', {
+            data: { item: { ...item, id: 'w-nvda-other' }, order: { ...order, seq: 2 } },
+        });
         expect(duplicate.status()).toBe(409);
         expect((await duplicate.json()).code).toBe('DUPLICATE_TICKER');
 
-        const mismatched = await page.request.put('/api/research/watchlist/w-other', { data: item });
+        const mismatched = await page.request.put('/api/research/watchlist/w-other', { data: { item, order } });
         expect(mismatched.status()).toBe(400);
         expect((await mismatched.json()).code).toBe('INVALID_WATCH_ITEM');
 
-        const extraField = await page.request.put(`/api/research/watchlist/${item.id}`, { data: { ...item, userId: 'someone-else' } });
+        const extraField = await page.request.put(`/api/research/watchlist/${item.id}`, {
+            data: { item: { ...item, userId: 'someone-else' }, order },
+        });
         expect(extraField.status()).toBe(400);
+
+        const unordered = await page.request.put(`/api/research/watchlist/${item.id}`, { data: { item } });
+        expect(unordered.status()).toBe(400);
+        const unorderedDelete = await page.request.delete(`/api/research/watchlist/${item.id}`);
+        expect(unorderedDelete.status()).toBe(400);
 
         const tooMany = await page.request.post('/api/research/watchlist/import', {
             data: { items: Array.from({ length: 501 }, (_, i) => ({ ...item, id: `w-${i}`, ticker: 'AMD' })) },
@@ -138,9 +149,68 @@ test.describe('Watchlist in the account', () => {
             storageState: { cookies: [], origins: [] },
         });
         expect((await anonymous.get('/api/research/watchlist')).status()).toBe(401);
-        expect((await anonymous.put(`/api/research/watchlist/${item.id}`, { data: item })).status()).toBe(401);
-        expect((await anonymous.delete(`/api/research/watchlist/${item.id}`)).status()).toBe(401);
+        expect((await anonymous.put(`/api/research/watchlist/${item.id}`, { data: { item, order } })).status()).toBe(401);
+        expect((await anonymous.delete(`/api/research/watchlist/${item.id}`, { data: { order } })).status()).toBe(401);
         expect((await anonymous.post('/api/research/watchlist/import', { data: { items: [] } })).status()).toBe(401);
         await anonymous.dispose();
+    });
+
+    test("regression: a page's older write that arrives late doesn't undo its newer one", async ({ context, page }) => {
+        // The Codex finding on PR #147: two writes in flight as a page
+        // closes can land in either order.
+        await signInAsFreshUser(context);
+        await gotoAppPage(page, '/research?tab=watchlist');
+        const item = {
+            id: 'w-amd-e2e', ticker: 'AMD', companyName: '', reason: '', notes: 'newer', targetEntry: null, addedAt: '2026-10-23', dismissed: false,
+        };
+        const session = 'e2e-order-test';
+        const put = (notes: string, seq: number) =>
+            page.request.put(`/api/research/watchlist/${item.id}`, { data: { item: { ...item, notes }, order: { session, seq } } });
+
+        expect((await put('newer', 2)).status()).toBe(204);
+        // The older one lands second: accepted, but ignored.
+        expect((await put('older', 1)).status()).toBe(204);
+        // A delete made before the last save is ignored too.
+        expect((await page.request.delete(`/api/research/watchlist/${item.id}`, { data: { order: { session, seq: 1 } } })).status()).toBe(204);
+        expect((await (await page.request.get('/api/research/watchlist')).json()).data.items).toEqual([item]);
+
+        // Another page's write isn't held to this page's count.
+        expect((await page.request.put(`/api/research/watchlist/${item.id}`, {
+            data: { item: { ...item, notes: 'elsewhere' }, order: { session: 'e2e-other-page', seq: 1 } },
+        })).status()).toBe(204);
+        expect((await (await page.request.get('/api/research/watchlist')).json()).data.items[0].notes).toBe('elsewhere');
+    });
+
+    test('regression: changes wait until the account list has loaded', async ({ context, page }) => {
+        // The Codex finding on PR #147: an edit to the examples shown while
+        // the list loaded could replace the user's saved copy of that row.
+        await signInAsFreshUser(context);
+        let release!: () => void;
+        const held = new Promise<void>((resolve) => { release = resolve; });
+        await page.route('**/api/research/watchlist', async (route) => {
+            await held;
+            await route.continue();
+        });
+        const writes: string[] = [];
+        page.on('request', (request) => {
+            if (request.url().includes('/api/research/watchlist/') && request.method() !== 'GET') writes.push(request.url());
+        });
+
+        await gotoAppPage(page, '/research?tab=watchlist');
+        const add = page.getByLabel('Add ticker to watchlist');
+        await expect(async () => {
+            await add.fill('amd');
+            await expect(add).toHaveValue('AMD', { timeout: 1_000 });
+        }).toPass({ timeout: 10_000 });
+        await page.getByRole('button', { name: 'Add', exact: true }).click();
+        await expect(page.locator('#watch-add-error')).toContainText('still loading');
+        expect(writes).toEqual([]);
+
+        release();
+        await expect(list(page).getByRole('button', { name: /COIN/ })).toBeVisible();
+        await expect(async () => {
+            await page.getByRole('button', { name: 'Add', exact: true }).click();
+            await expect(list(page).getByRole('button', { name: /AMD/ })).toBeVisible({ timeout: 1_000 });
+        }).toPass({ timeout: 10_000 });
     });
 });

@@ -3,6 +3,7 @@ import {
     WATCHLIST_IMPORT_MAX_ITEMS,
     watchItemSchema,
     type WatchItemInput,
+    type WatchWriteOrder,
 } from '@/lib/validators/watchlist';
 
 import type { StoredWatchlist } from './server/watchlist';
@@ -16,7 +17,9 @@ import { isExampleWatchId, isoDay, loadWatchlist, type WatchItem } from './watch
  *   on top, then the example rows the user hasn't adopted or removed. A
  *   removed example is saved as `dismissed`, so it stays gone.
  * - Writes show at once and are sent one at a time per item, latest wins; a
- *   write that fails is undone and the list is read again.
+ *   write that fails is undone and the list is read again. Each carries this
+ *   page's session and its count of writes, so the server keeps the newest
+ *   even if two arrive out of order (a page closing with one in flight).
  * - A list this browser kept before (under the user's localStorage key) is
  *   sent once, then removed from the browser.
  */
@@ -129,6 +132,8 @@ export function watchlistImportItems(local: readonly WatchItem[], examples: read
 export interface WatchlistWriter {
     /** Writes not yet saved, by item ID. A new map after every change. */
     pending(): ReadonlyMap<string, WatchWrite>;
+    /** This page's ID, sent with every write. */
+    readonly session: string;
     write(id: string, write: WatchWrite): void;
     /** For a page that is closing: sends the writes still waiting behind one in flight, now. */
     sendWaiting(): void;
@@ -143,13 +148,20 @@ export function createWatchlistWriter({
     send,
     onSaved,
     onFailed,
+    session = newWriteSession(),
 }: {
-    send: (id: string, write: WatchWrite) => Promise<void>;
+    send: (id: string, write: WatchWrite, order: WatchWriteOrder) => Promise<void>;
     onSaved: (id: string, write: WatchWrite) => void;
     onFailed: (id: string, write: WatchWrite, error: unknown) => void;
+    session?: string;
 }): WatchlistWriter {
     const pending = new Map<string, WatchWrite>();
-    const sending = new Set<string>();
+    // Each write's place in this page's order, numbered as it is made.
+    const seqs = new WeakMap<WatchWrite, number>();
+    let count = 0;
+    const orderOf = (write: WatchWrite): WatchWriteOrder => ({ session, seq: seqs.get(write) ?? 0 });
+    // The write in flight for each item.
+    const sending = new Map<string, WatchWrite>();
     const listeners = new Set<() => void>();
     let snapshot: ReadonlyMap<string, WatchWrite> = new Map();
 
@@ -160,14 +172,14 @@ export function createWatchlistWriter({
 
     const drain = async (id: string) => {
         if (sending.has(id)) return;
-        sending.add(id);
         try {
             for (;;) {
                 const write = pending.get(id);
                 if (!write) return;
+                sending.set(id, write);
                 let failure: { error: unknown } | null = null;
                 try {
-                    await send(id, write);
+                    await send(id, write, orderOf(write));
                 } catch (error) {
                     failure = { error };
                 }
@@ -186,17 +198,23 @@ export function createWatchlistWriter({
 
     return {
         pending: () => snapshot,
+        session,
         write(id, write) {
+            count += 1;
+            seqs.set(write, count);
             pending.set(id, write);
             changed();
             void drain(id);
         },
         sendWaiting() {
             for (const [id, write] of pending) {
-                // Not sending: drain already sent it. If the page stays
-                // (back-forward cache), drain sends it again; a repeated
-                // save is harmless.
-                if (sending.has(id)) void send(id, write).catch(() => {});
+                // Only a write waiting behind another: the rest are in
+                // flight already. Sent alongside the older one, it may land
+                // first; its order keeps the older one from replacing it. If
+                // the page stays (back-forward cache), drain sends it again;
+                // the repeat is ignored.
+                const inFlight = sending.get(id);
+                if (inFlight !== undefined && inFlight !== write) void send(id, write, orderOf(write)).catch(() => {});
             }
         },
         subscribe(listener) {
@@ -242,21 +260,54 @@ export async function fetchAccountWatchlist(fetchImpl: Fetch = fetch): Promise<A
 }
 
 /** Saves or deletes one item; keepalive, so a write made just before leaving the page still arrives. */
-export async function sendWatchWrite(id: string, write: WatchWrite, fetchImpl: Fetch = fetch): Promise<void> {
+export async function sendWatchWrite(id: string, write: WatchWrite, order: WatchWriteOrder, fetchImpl: Fetch = fetch): Promise<void> {
     const path = `/api/research/watchlist/${encodeURIComponent(id)}`;
     await request(fetchImpl, path, write.kind === 'delete'
-        ? { method: 'DELETE', keepalive: true }
-        : { method: 'PUT', body: JSON.stringify(write.item), keepalive: true });
+        ? { method: 'DELETE', body: JSON.stringify({ order }), keepalive: true }
+        : { method: 'PUT', body: JSON.stringify({ item: write.item, order }), keepalive: true });
 }
 
-// About 600 KiB at most per request, under the route's 1 MiB limit.
-const IMPORT_BATCH = Math.min(100, WATCHLIST_IMPORT_MAX_ITEMS);
+/** A page ID for write order: a UUID, or random hex where the browser has none. */
+export function newWriteSession(): string {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+    return Array.from({ length: 32 }, () => Math.floor(Math.random() * 16).toString(16)).join('');
+}
+
+const encoder = new TextEncoder();
+
+/**
+ * Splits `items` into batches whose JSON body stays under `maxBytes` (UTF-8,
+ * escapes included) and `maxCount` items. An item too big for any batch on
+ * its own goes alone; the route refuses it, and the rest still move.
+ */
+export function batchBySize<T>(items: readonly T[], { maxBytes, maxCount }: { maxBytes: number; maxCount: number }): T[][] {
+    const envelope = encoder.encode('{"items":[]}').length;
+    const batches: T[][] = [];
+    let batch: T[] = [];
+    let bytes = envelope;
+    for (const item of items) {
+        const size = encoder.encode(JSON.stringify(item)).length;
+        // A comma before every item but the first.
+        if (batch.length > 0 && (bytes + 1 + size > maxBytes || batch.length >= maxCount)) {
+            batches.push(batch);
+            batch = [];
+            bytes = envelope;
+        }
+        bytes += (batch.length > 0 ? 1 : 0) + size;
+        batch.push(item);
+    }
+    if (batch.length > 0) batches.push(batch);
+    return batches;
+}
+
+// Under the import route's 1 MiB limit, with room to spare.
+const IMPORT_MAX_BYTES = 900 * 1024;
 
 export async function importAccountWatchlist(items: readonly WatchItemInput[], fetchImpl: Fetch = fetch): Promise<void> {
-    for (let start = 0; start < items.length; start += IMPORT_BATCH) {
+    for (const batch of batchBySize(items, { maxBytes: IMPORT_MAX_BYTES, maxCount: WATCHLIST_IMPORT_MAX_ITEMS })) {
         await request(fetchImpl, '/api/research/watchlist/import', {
             method: 'POST',
-            body: JSON.stringify({ items: items.slice(start, start + IMPORT_BATCH) }),
+            body: JSON.stringify({ items: batch }),
         });
     }
 }

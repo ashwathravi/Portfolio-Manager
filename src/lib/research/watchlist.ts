@@ -26,7 +26,8 @@ export interface WatchItem {
     sample?: boolean;
 }
 
-export type AddWatchError = 'invalid' | 'duplicate';
+/** `not-ready`: the account's list hasn't loaded, so nothing can be saved yet. */
+export type AddWatchError = 'invalid' | 'duplicate' | 'not-ready';
 
 const DAY_MS = 86_400_000;
 

@@ -26,6 +26,28 @@ export const watchItemSchema = z.object({
 
 export type WatchItemInput = z.infer<typeof watchItemSchema>;
 
+/**
+ * Which page sent a write, and its count of writes so far: of two writes
+ * from one page, the newer wins even if it arrives first.
+ */
+export const watchWriteOrderSchema = z.object({
+    session: z.string().regex(/^[a-z0-9-]{8,64}$/, 'session must be a page ID'),
+    seq: z.number().int('seq must be a whole number').min(1, 'seq must be at least 1').max(Number.MAX_SAFE_INTEGER, 'seq is too large'),
+}).strict();
+
+export type WatchWriteOrder = z.infer<typeof watchWriteOrderSchema>;
+
+/** PUT /api/research/watchlist/[id]: the item, and the order of the write. */
+export const watchItemPutSchema = z.object({
+    item: watchItemSchema,
+    order: watchWriteOrderSchema,
+}).strict();
+
+/** DELETE /api/research/watchlist/[id]: the order of the write. */
+export const watchItemDeleteSchema = z.object({
+    order: watchWriteOrderSchema,
+}).strict();
+
 export const watchlistImportSchema = z.object({
     items: z.array(watchItemSchema).max(WATCHLIST_IMPORT_MAX_ITEMS, 'at most 500 items'),
 }).strict();

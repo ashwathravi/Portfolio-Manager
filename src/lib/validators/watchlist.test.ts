@@ -1,7 +1,7 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { watchItemSchema, watchlistImportSchema } from './watchlist';
+import { watchItemDeleteSchema, watchItemPutSchema, watchItemSchema, watchlistImportSchema } from './watchlist';
 
 const ITEM = {
     id: 'w-nvda-mgx2k1',
@@ -102,5 +102,31 @@ describe('watchlistImportSchema', () => {
         assert.equal(watchlistImportSchema.safeParse({ items: [{ ...ITEM, ticker: '' }] }).success, false);
         assert.equal(watchlistImportSchema.safeParse({ items: [], replace: true }).success, false);
         assert.equal(watchlistImportSchema.safeParse({}).success, false);
+    });
+});
+
+describe('write order', () => {
+    const order = { session: '6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b', seq: 1 };
+
+    test('a PUT carries the item and the order; a DELETE only the order', () => {
+        assert.equal(watchItemPutSchema.safeParse({ item: ITEM, order }).success, true);
+        assert.equal(watchItemDeleteSchema.safeParse({ order }).success, true);
+        assert.equal(watchItemPutSchema.safeParse({ item: ITEM }).success, false);
+        assert.equal(watchItemPutSchema.safeParse(ITEM).success, false);
+        assert.equal(watchItemDeleteSchema.safeParse({}).success, false);
+        assert.equal(watchItemDeleteSchema.safeParse({ order, item: ITEM }).success, false);
+    });
+
+    test('the session is a page ID and seq a whole number from 1', () => {
+        const put = (o: unknown) => watchItemPutSchema.safeParse({ item: ITEM, order: o });
+        assert.equal(put({ ...order, session: 'abcd1234' }).success, true);
+        assert.equal(put({ ...order, session: 'short' }).error?.issues[0]?.message, 'session must be a page ID');
+        assert.equal(put({ ...order, session: 'NOT-LOWER-CASE' }).error?.issues[0]?.message, 'session must be a page ID');
+        assert.equal(put({ ...order, session: 'a'.repeat(65) }).success, false);
+        assert.equal(put({ ...order, seq: Number.MAX_SAFE_INTEGER }).success, true);
+        assert.equal(put({ ...order, seq: 0 }).error?.issues[0]?.message, 'seq must be at least 1');
+        assert.equal(put({ ...order, seq: 1.5 }).error?.issues[0]?.message, 'seq must be a whole number');
+        assert.equal(put({ ...order, seq: Number.MAX_SAFE_INTEGER + 2 }).success, false);
+        assert.equal(put({ ...order, extra: 1 }).success, false);
     });
 });

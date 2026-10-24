@@ -1,5 +1,5 @@
 {
-  "id": "64da2212-2d1d-401f-b503-49f2aff5d36b",
+  "id": "e25531f2-9e3f-402d-ad02-6b51494aa7c0",
   "prevId": "59c7bd83-de95-4a29-b06c-9a6b3b645941",
   "version": "7",
   "dialect": "postgresql",
@@ -3182,6 +3182,18 @@
           "primaryKey": false,
           "notNull": true,
           "default": false
+        },
+        "write_session": {
+          "name": "write_session",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "write_seq": {
+          "name": "write_seq",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
         },
         "created_at": {
           "name": "created_at",

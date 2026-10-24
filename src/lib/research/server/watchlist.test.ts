@@ -17,6 +17,7 @@ import {
 
 const USER = "00000000-0000-4000-8000-00000000a001";
 const NOW = new Date("2026-10-23T08:00:00.000Z");
+const ORDER = { session: "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b", seq: 7 };
 
 const ITEM: WatchItemInput = {
     id: "w-nvda-mgx2k1",
@@ -41,26 +42,37 @@ describe("watchlist queries", () => {
     });
 
     test("save adds the item or replaces the user's row with that id", () => {
-        const { sql, params } = buildSaveWatchItemQuery(USER, ITEM, NOW).toSQL();
-        assert.match(sql, /insert into "watchlist_items" \("user_id", "id", "ticker", "company_name", "reason", "notes", "target_entry", "added_at", "dismissed", "created_at", "updated_at"\)/i);
-        assert.match(sql, /on conflict \("user_id","id"\) do update set "ticker" = \$\d+, "company_name" = \$\d+, "reason" = \$\d+, "notes" = \$\d+, "target_entry" = \$\d+, "added_at" = \$\d+, "dismissed" = \$\d+, "updated_at" = \$\d+$/i);
+        const { sql, params } = buildSaveWatchItemQuery(USER, ITEM, ORDER, NOW).toSQL();
+        assert.match(sql, /insert into "watchlist_items" \("user_id", "id", "ticker", "company_name", "reason", "notes", "target_entry", "added_at", "dismissed", "write_session", "write_seq", "created_at", "updated_at"\)/i);
+        assert.match(sql, /on conflict \("user_id","id"\) do update set "ticker" = \$\d+, "company_name" = \$\d+, "reason" = \$\d+, "notes" = \$\d+, "target_entry" = \$\d+, "added_at" = \$\d+, "dismissed" = \$\d+, "write_session" = \$\d+, "write_seq" = \$\d+, "updated_at" = \$\d+ where/i);
         // The created time is kept: it orders the list.
         assert.doesNotMatch(sql.split("do update")[1] ?? "", /created_at/);
         assert.equal(params[0], USER);
         assert.equal(params[1], ITEM.id);
         assert.ok(params.includes(NOW.toISOString()));
+        assert.ok(params.includes(ORDER.session));
+        assert.ok(params.includes(ORDER.seq));
     });
 
-    test("delete removes the user's row with that id only", () => {
-        const { sql, params } = buildDeleteWatchItemQuery(USER, "w-coin").toSQL();
-        assert.match(sql, /delete from "watchlist_items" where \("watchlist_items"\."user_id" = \$1 and "watchlist_items"\."id" = \$2\)/i);
-        assert.deepEqual(params, [USER, "w-coin"]);
+    test("regression: a late write from the same page can't replace a newer one", () => {
+        // The Codex finding on PR #147: two writes in flight as a page
+        // closes could land out of order.
+        const { sql } = buildSaveWatchItemQuery(USER, ITEM, ORDER, NOW).toSQL();
+        assert.match(sql, /do update set .* where \("watchlist_items"\."write_session" is distinct from \$\d+ or "watchlist_items"\."write_seq" < \$\d+\)$/i);
+    });
+
+    test("delete removes the user's row with that id, unless the same page wrote it later", () => {
+        const { sql, params } = buildDeleteWatchItemQuery(USER, "w-coin", ORDER).toSQL();
+        assert.match(sql, /delete from "watchlist_items" where \("watchlist_items"\."user_id" = \$1 and "watchlist_items"\."id" = \$2 and \("watchlist_items"\."write_session" is distinct from \$3 or "watchlist_items"\."write_seq" < \$4\)\)/i);
+        assert.deepEqual(params, [USER, "w-coin", ORDER.session, ORDER.seq]);
     });
 
     test("import keeps the browser's order and leaves rows the user already has", () => {
         const second = { ...ITEM, id: "w-amd-mgx2k0", ticker: "AMD" };
         const { sql, params } = buildImportWatchlistQuery(USER, [ITEM, second], NOW).toSQL();
         assert.match(sql, /on conflict do nothing$/i);
+        // No page wrote these yet.
+        assert.match(sql, /"write_session", "write_seq"/);
         // Created a millisecond apart, the first newest.
         assert.ok(params.includes(NOW.toISOString()));
         assert.ok(params.includes(new Date(NOW.getTime() - 1).toISOString()));
@@ -90,7 +102,7 @@ describe("saveWatchItem", () => {
         const error = new Error("Failed query", {
             cause: Object.assign(new Error("duplicate key"), { code: "23505", constraint_name: "watchlist_items_user_ticker_idx" }),
         });
-        await assert.rejects(saveWatchItem(USER, ITEM, { database: failingDatabase(error) }), (err: unknown) => {
+        await assert.rejects(saveWatchItem(USER, ITEM, ORDER, { database: failingDatabase(error) }), (err: unknown) => {
             assert.ok(err instanceof DuplicateTickerError);
             assert.equal(err.ticker, "NVDA");
             return true;
@@ -99,9 +111,9 @@ describe("saveWatchItem", () => {
 
     test("passes other failures on", async () => {
         const other = Object.assign(new Error("duplicate key"), { code: "23505", constraint_name: "watchlist_items_pkey" });
-        await assert.rejects(saveWatchItem(USER, ITEM, { database: failingDatabase(other) }), (err: unknown) => err === other);
+        await assert.rejects(saveWatchItem(USER, ITEM, ORDER, { database: failingDatabase(other) }), (err: unknown) => err === other);
         const down = new Error("connect ECONNREFUSED");
-        await assert.rejects(saveWatchItem(USER, ITEM, { database: failingDatabase(down) }), (err: unknown) => err === down);
+        await assert.rejects(saveWatchItem(USER, ITEM, ORDER, { database: failingDatabase(down) }), (err: unknown) => err === down);
     });
 });
 
