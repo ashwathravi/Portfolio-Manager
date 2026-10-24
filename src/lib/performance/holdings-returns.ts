@@ -22,6 +22,7 @@
  * step that starts there.
  */
 
+import { previousTradingDay } from "@/lib/markets/market-hours";
 import { STALE_CLOSE_DAYS, type StoredClose } from "@/lib/portfolio/valuation-snapshots";
 import type { DatedValue } from "./periodSummary";
 
@@ -46,7 +47,12 @@ export interface ReturnPoint {
     index: number;
     /** The step's return into this date; null for the first date or a step with nothing invested. */
     stepReturn: number | null;
-    /** Positions counted as unchanged in this step because a close was missing. */
+    /** Trading sessions the step into this date spans: 1 day to day, more across missed sessions; 0 for the first date. */
+    sessions: number;
+    /**
+     * Holdings whose gain or loss this step leaves out for want of a stored
+     * close: left out of the snapshot's value, or counted as unchanged.
+     */
     unpriced: string[];
 }
 
@@ -74,9 +80,33 @@ export function closeOn(closes: readonly StoredClose[] | undefined, date: string
 }
 
 /**
+ * Trading sessions after `from` up to and including `to`; outside the
+ * market calendar's years, weekdays.
+ */
+export function sessionsBetween(from: string, to: string): number {
+    if (to <= from) return 0;
+    try {
+        let count = 0;
+        for (let day = to; day > from; day = previousTradingDay(day)) count++;
+        return count;
+    } catch {
+        let count = 0;
+        const at = new Date(`${from}T12:00:00Z`);
+        const end = new Date(`${to}T12:00:00Z`);
+        while (at < end) {
+            at.setUTCDate(at.getUTCDate() + 1);
+            if (at.getUTCDay() !== 0 && at.getUTCDay() !== 6) count++;
+        }
+        return Math.max(1, count);
+    }
+}
+
+/**
  * The return from `snapshots`' date to `to` of what they held. A position
- * without a close at either end is counted as unchanged and listed in
- * `unpriced`. Null when nothing was invested (total value zero or less).
+ * the snapshot couldn't value (no close then) is left out of its total; one
+ * without a close at either end of the step is counted as unchanged.
+ * Either way its gain or loss is missing, and it's listed in `unpriced`.
+ * The return is null when nothing was invested (total value zero or less).
  */
 export function stepReturn(
     snapshots: readonly AccountSnapshot[],
@@ -89,15 +119,20 @@ export function stepReturn(
     for (const snapshot of snapshots) {
         base += snapshot.totalValue;
         for (const { symbol, marketValue } of snapshot.positions) {
-            if (marketValue === null || !Number.isFinite(marketValue) || marketValue === 0) continue;
+            if (marketValue === null || !Number.isFinite(marketValue)) {
+                unpriced.add(symbol);
+                continue;
+            }
+            if (marketValue === 0) continue;
             const from = closeOn(closes.get(symbol), snapshot.date);
             const at = closeOn(closes.get(symbol), to);
             if (from === null || at === null) unpriced.add(symbol);
             else gain += marketValue * (at / from - 1);
         }
     }
-    if (!(base > 0)) return { stepReturn: null, unpriced: [] };
-    return { stepReturn: gain / base, unpriced: [...unpriced].sort() };
+    const listed = [...unpriced].sort();
+    if (!(base > 0)) return { stepReturn: null, unpriced: listed };
+    return { stepReturn: gain / base, unpriced: listed };
 }
 
 /**
@@ -118,17 +153,26 @@ export function returnSeries(
     const points: ReturnPoint[] = [];
     let index = INDEX_BASE;
     let previous: AccountSnapshot[] | null = null;
+    let previousDate = "";
     for (const date of dates) {
         const day = byDate.get(date) ?? [];
         const value = day.reduce((sum, snapshot) => sum + snapshot.totalValue, 0);
         if (previous === null) {
-            points.push({ date, value, index, stepReturn: null, unpriced: [] });
+            points.push({ date, value, index, stepReturn: null, sessions: 0, unpriced: [] });
         } else {
             const step = stepReturn(previous, date, closes);
             if (step.stepReturn !== null) index *= 1 + step.stepReturn;
-            points.push({ date, value, index, stepReturn: step.stepReturn, unpriced: step.unpriced });
+            points.push({
+                date,
+                value,
+                index,
+                stepReturn: step.stepReturn,
+                sessions: sessionsBetween(previousDate, date),
+                unpriced: step.unpriced,
+            });
         }
         previous = day;
+        previousDate = date;
     }
     return points;
 }

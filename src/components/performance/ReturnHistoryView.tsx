@@ -18,12 +18,17 @@ export function ReturnHistoryView({ history }: { history: ReturnHistory }) {
     const router = useRouter();
     const { accounts, accountId, points, benchmarks } = history;
 
-    const portfolio = useMemo(() => points.map((p) => ({ date: p.date, value: p.index })), [points]);
+    // A step across missed sessions spans several: risk measures scale it back to one.
+    const portfolio = useMemo(
+        () => points.map((p) => ({ date: p.date, value: p.index, periods: Math.max(1, p.sessions) })),
+        [points],
+    );
     const benchmarkSeries = useMemo<Benchmark[]>(
         () => benchmarks.map((b) => ({ key: b.key, label: b.label, series: b.values })),
         [benchmarks],
     );
-    const estimatedDays = points.filter((p) => p.unpriced.length > 0).length;
+    const estimated = points.filter((p) => p.unpriced.length > 0);
+    const unpricedSymbols = [...new Set(estimated.flatMap((p) => p.unpriced))].sort();
     const accountName = accounts.find((a) => a.id === accountId)?.name ?? "All accounts";
 
     return (
@@ -55,8 +60,8 @@ export function ReturnHistoryView({ history }: { history: ReturnHistory }) {
                         {accountName}: {points.length} closing valuations, {fmtDate(points[0].date)} to{" "}
                         {fmtDate(points[points.length - 1].date)}. Price returns: dividends aren&apos;t included, and
                         money added, withdrawn or moved between your accounts doesn&apos;t count as a return.
-                        {estimatedDays > 0 &&
-                            ` On ${estimatedDays} ${estimatedDays === 1 ? "day" : "days"} a position had no stored close and was counted as unchanged.`}
+                        {estimated.length > 0 &&
+                            ` On ${estimated.length} ${estimated.length === 1 ? "day" : "days"} some holdings had no stored price (${listSymbols(unpricedSymbols)}), so their gain or loss isn't included.`}
                     </p>
                 )}
             </div>
@@ -91,6 +96,12 @@ export function ReturnHistoryView({ history }: { history: ReturnHistory }) {
             )}
         </div>
     );
+}
+
+/** "KO, PG and 3 more" */
+function listSymbols(symbols: readonly string[]): string {
+    if (symbols.length <= 3) return symbols.join(", ");
+    return `${symbols.slice(0, 3).join(", ")} and ${symbols.length - 3} more`;
 }
 
 /** "Aug 31, 2026" for a YYYY-MM-DD date, the same on server and client. */

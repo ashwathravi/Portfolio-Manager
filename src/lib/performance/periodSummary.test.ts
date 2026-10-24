@@ -8,6 +8,7 @@ import {
     measuresRisk,
     minusMonths,
     monthlyReturns,
+    periodReturns,
     periodStartTarget,
     sliceForPeriod,
     type DatedValue,
@@ -138,6 +139,38 @@ describe('computePeriodMetrics', () => {
         assert.ok(Math.abs(dailyScale.volatility / monthlyScale.volatility - Math.sqrt(252 / 12)) < 1e-9);
     });
 
+    test('regression: a step across missed sessions is scaled to one before annualizing', () => {
+        // Snapshots a month (21 sessions) apart, as history with gaps has:
+        // +10%, -10%, +10%. Read as daily returns they annualized to 183%
+        // volatility and a Sharpe of 4.58; at their real spacing it's 40% and 1.00.
+        const gappy: DatedValue[] = [
+            { date: '2026-07-31', value: 100 },
+            { date: '2026-08-31', value: 110, periods: 21 },
+            { date: '2026-09-30', value: 99, periods: 21 },
+            { date: '2026-10-30', value: 108.9, periods: 21 },
+        ];
+        const [all] = computePeriodMetrics(gappy, gappy, ['ALL'], { periodsPerYear: DAILY });
+        assert.ok(all.volatility !== null && Math.abs(all.volatility - 0.4) < 1e-9, `volatility ${all.volatility}`);
+        assert.ok(all.sharpe !== null && Math.abs(all.sharpe - 1) < 1e-9, `sharpe ${all.sharpe}`);
+        // The same returns as month ends, annualized monthly, agree.
+        const [asMonths] = computePeriodMetrics(monthly([100, 110, 99, 108.9], 2026, 6), [], ['ALL']);
+        assert.ok(asMonths.volatility !== null && Math.abs(asMonths.volatility - 0.4) < 1e-9);
+        const risk = computeRiskSnapshot(gappy, gappy, { periodsPerYear: DAILY });
+        assert.ok(Math.abs(risk.volatility - 0.4) < 1e-9);
+        assert.ok(Math.abs(risk.beta - 1) < 1e-9);
+    });
+
+    test('periodReturns: one-period steps are the plain returns', () => {
+        const { scaled, meanPerPeriod } = periodReturns([
+            { date: '2026-10-19', value: 100 },
+            { date: '2026-10-20', value: 102 },
+            { date: '2026-10-23', value: 99.96, periods: 3 },
+        ]);
+        assert.ok(Math.abs(scaled[0] - 0.02) < 1e-12);
+        assert.ok(Math.abs(scaled[1] - -0.02 / Math.sqrt(3)) < 1e-12);
+        assert.ok(Math.abs(meanPerPeriod - (0.02 - 0.02) / 4) < 1e-12);
+    });
+
     test('regression: risk needs three returns over four weeks, not a Sharpe of 123 from two days', () => {
         const days: DatedValue[] = [
             { date: '2026-10-20', value: 100 },
@@ -228,16 +261,39 @@ describe('monthlyReturns', () => {
         assert.ok(Math.abs(returns[1].return + 0.1) < 1e-12);
     });
 
-    test('daily closes: each month from the last close of the month before; a mid-month start is partial', () => {
+    test('daily closes: each month from the last close of the month before; a mid-month start or the month so far says so', () => {
         const returns = monthlyReturns([
             { date: '2026-09-14', value: 100 },
             { date: '2026-09-30', value: 105 },
             { date: '2026-10-01', value: 104 },
             { date: '2026-10-22', value: 110.25 },
         ]);
-        assert.deepStrictEqual(returns.map((r) => [r.month, r.from]), [[8, '2026-09-14'], [9, undefined]]);
+        assert.deepStrictEqual(returns.map((r) => [r.month, r.from, r.to]), [[8, '2026-09-14', undefined], [9, undefined, '2026-10-22']]);
         assert.ok(Math.abs(returns[0].return - 0.05) < 1e-12);
         assert.ok(Math.abs(returns[1].return - 0.05) < 1e-12);
+    });
+
+    test('regression: a skipped month isn\'t shown as the next month\'s return without saying so', () => {
+        // Aug 31 then Oct 1: the 10% covers all of September too.
+        const returns = monthlyReturns([
+            { date: '2026-08-31', value: 100 },
+            { date: '2026-10-01', value: 110 },
+        ]);
+        assert.deepStrictEqual(returns.map((r) => [r.month, r.from, r.to]), [[9, '2026-08-31', '2026-10-01']]);
+    });
+
+    test('the month before\'s last session counts as its close; an earlier day doesn\'t', () => {
+        // Oct 31 2026 is a Saturday: the last session is Friday the 30th.
+        const fromFriday = monthlyReturns([
+            { date: '2026-10-30', value: 100 },
+            { date: '2026-11-30', value: 101 },
+        ]);
+        assert.deepStrictEqual(fromFriday.map((r) => [r.month, r.from, r.to]), [[10, undefined, undefined]]);
+        const fromMidMonth = monthlyReturns([
+            { date: '2026-10-15', value: 100 },
+            { date: '2026-11-30', value: 101 },
+        ]);
+        assert.deepStrictEqual(fromMidMonth.map((r) => [r.month, r.from]), [[10, '2026-10-15']]);
     });
 
     test('fewer than two observations have no months', () => {

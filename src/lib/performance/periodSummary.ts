@@ -1,9 +1,7 @@
 import {
     CALENDAR_DAYS_PER_YEAR,
     annualizedReturn,
-    dailyReturns,
     maxDrawdown,
-    sharpeRatio,
     simpleReturn,
     volatility,
 } from './calculations';
@@ -17,6 +15,12 @@ export type PeriodKey = '1M' | '3M' | '6M' | 'YTD' | '1Y' | '3Y' | 'ALL';
 export interface DatedValue {
     date: string;
     value: number;
+    /**
+     * How many periods (sessions, or months) the step into this value
+     * spans; 1 when omitted. History that skipped sessions has longer
+     * steps, which risk measures scale back to one period.
+     */
+    periods?: number;
 }
 
 /** Observations per year, for annualizing volatility and Sharpe: 12 monthly, 252 daily. */
@@ -133,6 +137,35 @@ function benchmarkReturn(benchmark: ReadonlyMap<string, number>, slice: readonly
 }
 
 /**
+ * Per-period returns for risk measures. A step spanning n periods is
+ * scaled to one (r / √n: a random walk's variance grows with time), so a
+ * missed session or month doesn't read as one big daily or monthly move;
+ * the mean return per period is the total over all the periods.
+ */
+export function periodReturns(slice: readonly DatedValue[]): { scaled: number[]; meanPerPeriod: number } {
+    const scaled: number[] = [];
+    let total = 0;
+    let periods = 0;
+    for (let i = 1; i < slice.length; i++) {
+        const prev = slice[i - 1].value;
+        const r = prev === 0 ? 0 : slice[i].value / prev - 1;
+        const n = Math.max(1, slice[i].periods ?? 1);
+        scaled.push(r / Math.sqrt(n));
+        total += r;
+        periods += n;
+    }
+    return { scaled, meanPerPeriod: periods > 0 ? total / periods : 0 };
+}
+
+/** Annualized Sharpe ratio from `periodReturns`; 0 for a series without volatility. */
+function sharpeFrom(scaled: readonly number[], meanPerPeriod: number, riskFreeRate: number, periodsPerYear: number): number {
+    if (scaled.length < 2) return 0;
+    const vol = volatility(scaled, periodsPerYear);
+    if (vol === 0) return 0;
+    return (meanPerPeriod * periodsPerYear - riskFreeRate) / vol;
+}
+
+/**
  * Period-level headline metrics for a portfolio series and a benchmark
  * observed on the same dates. Volatility and Sharpe are annualized with
  * `periodsPerYear` (monthly by default).
@@ -167,7 +200,7 @@ export function computePeriodMetrics(
         const values = slice.map((o) => o.value);
         const totalReturn = simpleReturn(values[0], values[values.length - 1]);
         const benchReturn = benchmarkReturn(bench, slice);
-        const returns = dailyReturns(values);
+        const { scaled, meanPerPeriod } = periodReturns(slice);
         const days = calendarDaysBetween(slice[0], slice[slice.length - 1]);
         const risk = measuresRisk(slice);
         return {
@@ -177,9 +210,9 @@ export function computePeriodMetrics(
             return: totalReturn,
             benchmark: benchReturn,
             alpha: benchReturn === null ? null : totalReturn - benchReturn,
-            sharpe: risk ? sharpeRatio(returns, riskFreeRate, periodsPerYear) : null,
+            sharpe: risk ? sharpeFrom(scaled, meanPerPeriod, riskFreeRate, periodsPerYear) : null,
             maxDrawdown: maxDrawdown(values),
-            volatility: risk ? volatility(returns, periodsPerYear) : null,
+            volatility: risk ? volatility(scaled, periodsPerYear) : null,
             annualizedReturn: annualizedReturn(totalReturn, days),
         };
     });
@@ -190,15 +223,33 @@ export interface MonthReturn {
     /** 0 = Jan. */
     month: number;
     return: number;
-    /** Set when the series starts inside the month: the date the return is measured from. */
+    /** Set when the return isn't measured from the month before's close: the date it is measured from. */
     from?: string;
+    /** Set when the return doesn't run to the month's close (the month so far, or a gap): the date it runs to. */
+    to?: string;
+}
+
+/** The last session of a month is at most this many days before its last day (a weekend and a holiday). */
+const MONTH_CLOSE_SLACK_DAYS = 3;
+
+function isMonthClose(date: string): boolean {
+    const [y, m, d] = parts(date);
+    return d >= daysInMonth(y, m) - MONTH_CLOSE_SLACK_DAYS;
+}
+
+function monthBefore(date: string): string {
+    const [y, m] = parts(date);
+    return m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, '0')}`;
 }
 
 /**
- * Month-by-month returns: each month's last value over the month before's.
- * The first month is measured from the series' first value, so a series
- * that starts mid-month gets a partial first month (`from`); one that
- * starts on its month's last observation gets none for that month.
+ * Month-by-month returns: each month's last value over the month before's
+ * last. A return that doesn't run from the month before's close to the
+ * month's own says so: `from` when it starts elsewhere (the series starts
+ * mid-month, or skipped the month before or its close), `to` when it ends
+ * before the month's close (the month so far, or the history stops). A
+ * series that starts on its month's last observation has no return for
+ * that month.
  */
 export function monthlyReturns(series: readonly DatedValue[]): MonthReturn[] {
     const sorted = sortByDate(series);
@@ -216,11 +267,13 @@ export function monthlyReturns(series: readonly DatedValue[]): MonthReturn[] {
         if (i === 0 && current.date === base.date) continue;
         const previous = i === 0 ? base : monthEnds[i - 1];
         const [year, month1] = parts(current.date);
+        const fromClose = previous.date.slice(0, 7) === monthBefore(current.date) && isMonthClose(previous.date);
         out.push({
             year,
             month: month1 - 1,
             return: previous.value === 0 ? 0 : current.value / previous.value - 1,
-            ...(i === 0 ? { from: base.date } : {}),
+            ...(fromClose ? {} : { from: previous.date }),
+            ...(isMonthClose(current.date) ? {} : { to: current.date }),
         });
     }
     return out;
@@ -249,17 +302,18 @@ export function computeRiskSnapshot(
         return { volatility: 0, beta: 0, sortinoRatio: 0, valueAtRisk95: 0 };
     }
     const portfolioSorted = sortByDate(portfolio);
-    const pReturns = dailyReturns(portfolioSorted.map((o) => o.value));
+    const { scaled: pReturns, meanPerPeriod } = periodReturns(portfolioSorted);
     const annualVol = volatility(pReturns, periodsPerYear);
 
     // Beta = cov(portfolio, benchmark) / var(benchmark), over the steps
-    // where the benchmark has a value at both ends.
+    // where the benchmark has a value at both ends, scaled alike.
     const bench = new Map(benchmark.map((b) => [b.date, b.value]));
     const pairs: Array<[number, number]> = [];
     for (let i = 1; i < portfolioSorted.length; i++) {
         const b0 = bench.get(portfolioSorted[i - 1].date);
         const b1 = bench.get(portfolioSorted[i].date);
-        if (b0 !== undefined && b1 !== undefined && b0 > 0) pairs.push([pReturns[i - 1], b1 / b0 - 1]);
+        const n = Math.max(1, portfolioSorted[i].periods ?? 1);
+        if (b0 !== undefined && b1 !== undefined && b0 > 0) pairs.push([pReturns[i - 1], (b1 / b0 - 1) / Math.sqrt(n)]);
     }
     const n = pairs.length;
     let beta = 0;
@@ -285,8 +339,7 @@ export function computeRiskSnapshot(
     const downsideSq = pReturns.reduce((sum, r) => sum + (r < 0 ? r * r : 0), 0);
     const downsideDev = pReturns.length > 0 ? Math.sqrt(downsideSq / pReturns.length) : 0;
     const downsideAnnual = downsideDev * Math.sqrt(periodsPerYear);
-    const meanReturn = pReturns.reduce((a, b) => a + b, 0) / pReturns.length;
-    const annualMean = meanReturn * periodsPerYear;
+    const annualMean = meanPerPeriod * periodsPerYear;
     const sortino = downsideAnnual === 0 ? 0 : (annualMean - riskFreeRate) / downsideAnnual;
 
     // Historical 95% VaR from per-period returns. We take the 5th

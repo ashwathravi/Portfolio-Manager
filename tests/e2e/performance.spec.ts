@@ -139,10 +139,12 @@ test.describe('Performance › Returns from your history', () => {
         await expect(table.locator('tr', { has: page.locator('td', { hasText: /^3M$/ }) }).locator('td').nth(1)).toHaveText('—');
     });
 
-    test('the heatmap shows each month\'s return', async ({ page }) => {
+    test('the heatmap shows each month\'s return, starring a month so far', async ({ page }) => {
         await gotoAppPage(page, '/performance');
         await expect(page.locator('.pm-heatmap td[title^="Sep 2026:"]')).toHaveText('+4.1');
-        await expect(page.locator('.pm-heatmap td[title^="Oct 2026:"]')).toHaveText('+5.0');
+        // October so far (to Oct 1) is starred and explained.
+        await expect(page.locator('.pm-heatmap td[title^="Oct 2026 (to Oct 1):"]')).toHaveText('+5.0*');
+        await expect(page.getByTestId('heatmap-partial-note')).toBeVisible();
         await expect(page.locator('.pm-heatmap td[title^="Aug 2026:"]')).toHaveText('');
     });
 

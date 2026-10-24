@@ -8,8 +8,9 @@ import { monthlyReturns, type DatedValue } from "@/lib/performance/periodSummary
  *
  * Year × 12-month grid of month-over-month returns, plus a rightmost "YR"
  * column that chain-links the year's monthly returns into a single number.
- * A first month the series starts partway through is measured from its
- * first value (the cell's title says from when).
+ * A month that isn't measured from the month before's close to its own
+ * (the history starts, stops or skips partway) is starred, and its title
+ * says over which dates.
  * Intensity scales with `|ret| / maxAbs` so the hottest and coldest months
  * pop while middling ones fade. Green for positive, red for negative —
  * both use the existing `--pm-success` / `--pm-danger` tokens via
@@ -42,7 +43,7 @@ export interface MonthlyHeatmapCardProps {
 interface ComputedHeatmap {
     years: number[];
     byYear: Map<number, Array<number | null>>;
-    partial: Map<string, string>;
+    partial: Map<string, { from?: string; to?: string }>;
     yearTotals: Map<number, number>;
     maxAbs: number;
 }
@@ -50,14 +51,14 @@ interface ComputedHeatmap {
 export function MonthlyHeatmapCard({ portfolio }: MonthlyHeatmapCardProps) {
     const { years, byYear, partial, yearTotals, maxAbs } = useMemo<ComputedHeatmap>(() => {
         const byYear = new Map<number, Array<number | null>>();
-        const partial = new Map<string, string>();
+        const partial = new Map<string, { from?: string; to?: string }>();
         for (const curr of monthlyReturns(portfolio)) {
             if (!byYear.has(curr.year)) {
                 byYear.set(curr.year, new Array<number | null>(12).fill(null));
             }
             const row = byYear.get(curr.year);
             if (row) row[curr.month] = curr.return;
-            if (curr.from) partial.set(`${curr.year}-${curr.month}`, curr.from);
+            if (curr.from || curr.to) partial.set(`${curr.year}-${curr.month}`, { from: curr.from, to: curr.to });
         }
         const years = Array.from(byYear.keys()).sort((a, b) => a - b);
         const yearTotals = new Map<number, number>();
@@ -109,20 +110,23 @@ export function MonthlyHeatmapCard({ portfolio }: MonthlyHeatmapCardProps) {
                             return (
                                 <tr key={y}>
                                     <th scope="row">{y}</th>
-                                    {row.map((ret, m) => (
-                                        <td
-                                            key={m}
-                                            className="pm-heatmap-cell"
-                                            style={cellStyle(ret, maxAbs)}
-                                            title={
-                                                ret == null
-                                                    ? `${MONTHS[m]} ${y}: no data`
-                                                    : `${MONTHS[m]} ${y}${partial.has(`${y}-${m}`) ? ` (from ${partial.get(`${y}-${m}`)})` : ""}: ${fmtLongPct(ret)}`
-                                            }
-                                        >
-                                            {ret == null ? "" : fmtShortPct(ret)}
-                                        </td>
-                                    ))}
+                                    {row.map((ret, m) => {
+                                        const span = partial.get(`${y}-${m}`);
+                                        return (
+                                            <td
+                                                key={m}
+                                                className="pm-heatmap-cell"
+                                                style={cellStyle(ret, maxAbs)}
+                                                title={
+                                                    ret == null
+                                                        ? `${MONTHS[m]} ${y}: no data`
+                                                        : `${MONTHS[m]} ${y}${span ? ` (${spanLabel(span)})` : ""}: ${fmtLongPct(ret)}`
+                                                }
+                                            >
+                                                {ret == null ? "" : `${fmtShortPct(ret)}${span ? "*" : ""}`}
+                                            </td>
+                                        );
+                                    })}
                                     <td
                                         className="pm-heatmap-cell pm-heatmap-yr-col"
                                         style={yrStyle(yrTotal)}
@@ -136,8 +140,20 @@ export function MonthlyHeatmapCard({ portfolio }: MonthlyHeatmapCardProps) {
                     </tbody>
                 </table>
             </div>
+            {partial.size > 0 && (
+                <p className="pm-card-subtitle" data-testid="heatmap-partial-note">
+                    * Not a full month: the history starts, stops or has a gap partway. Hover a cell for its dates.
+                </p>
+            )}
         </section>
     );
+}
+
+/** "from Sep 14", "to Oct 1", or "Sep 14 to Oct 1". */
+function spanLabel({ from, to }: { from?: string; to?: string }): string {
+    const day = (date: string) => `${MONTHS[Number(date.slice(5, 7)) - 1]} ${Number(date.slice(8, 10))}`;
+    if (from && to) return `${day(from)} to ${day(to)}`;
+    return from ? `from ${day(from)}` : `to ${day(to ?? "")}`;
 }
 
 function cellStyle(ret: number | null, maxAbs: number): CSSProperties {

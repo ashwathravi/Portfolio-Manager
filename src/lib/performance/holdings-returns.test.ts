@@ -2,7 +2,7 @@ import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 
 import type { StoredClose } from "@/lib/portfolio/valuation-snapshots";
-import { benchmarkSeries, closeOn, returnSeries, stepReturn, type AccountSnapshot } from "./holdings-returns";
+import { benchmarkSeries, closeOn, returnSeries, sessionsBetween, stepReturn, type AccountSnapshot } from "./holdings-returns";
 
 function closes(entries: Record<string, Array<[string, number]>>): Map<string, StoredClose[]> {
     return new Map(Object.entries(entries).map(([symbol, bars]) => [symbol, bars.map(([date, close]) => ({ date, close }))]));
@@ -60,8 +60,28 @@ describe("stepReturn", () => {
         assert.deepEqual(step.unpriced, ["XNEW"]);
     });
 
+    test("regression: a holding the snapshot couldn't value is listed, not silently left out", () => {
+        // XNEW had no close at Monday's snapshot: its value isn't in the
+        // total, so the return is KO's alone, and that has to be disclosed.
+        const step = stepReturn([snapshot("a", MON, 0, { KO: 6000, XNEW: null })], TUE, bars);
+        near(step.stepReturn, 0.1);
+        assert.deepEqual(step.unpriced, ["XNEW"]);
+        // An account with nothing priced has no return, but still says why.
+        assert.deepEqual(stepReturn([snapshot("a", MON, 0, { XNEW: null })], TUE, bars), { stepReturn: null, unpriced: ["XNEW"] });
+    });
+
     test("nothing invested has no return", () => {
         assert.equal(stepReturn([snapshot("a", MON, 0, {})], TUE, bars).stepReturn, null);
+    });
+});
+
+describe("sessionsBetween", () => {
+    test("counts trading sessions after the first date through the second", () => {
+        assert.equal(sessionsBetween(MON, TUE), 1);
+        assert.equal(sessionsBetween(MON, THU), 3);
+        assert.equal(sessionsBetween("2026-10-16", MON), 1); // Fri to Mon
+        assert.equal(sessionsBetween("2026-08-31", "2026-09-30"), 21); // Labor Day off
+        assert.equal(sessionsBetween(MON, MON), 0);
     });
 });
 
@@ -77,6 +97,7 @@ describe("returnSeries", () => {
         assert.deepEqual(series.map((p) => p.value), [7000, 7600, 7600, 6940]);
         assert.equal(series[0].stepReturn, null);
         assert.equal(series[0].index, 100);
+        assert.deepEqual(series.map((p) => p.sessions), [0, 1, 1, 1]);
         near(series[1].stepReturn, 600 / 7000);
         near(series[2].stepReturn, 0);
         near(series[3].stepReturn, -660 / 7600);
@@ -159,6 +180,7 @@ describe("returnSeries", () => {
             snapshot("a", THU, 0, { KO: 5940 }),
         ], bars);
         near(series[1].stepReturn, 59.4 / 60 - 1);
+        assert.equal(series[1].sessions, 3);
     });
 
     test("no snapshots, no points", () => {
