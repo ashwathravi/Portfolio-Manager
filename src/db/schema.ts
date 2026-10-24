@@ -221,6 +221,9 @@ export const holdings = pgTable("holdings", {
 }, (table) => ({
     portfolioIdIdx: index("holdings_portfolio_id_idx").on(table.portfolioId),
     symbolIdx: index("holdings_symbol_idx").on(table.symbol),
+    // One row per symbol in an account (launch item i41); symbols are stored
+    // upper-case.
+    portfolioSymbolIdx: uniqueIndex("holdings_portfolio_symbol_idx").on(table.portfolioId, table.symbol),
     serverOnlyNoClientAccess: serverOnlyNoClientAccessPolicy(),
     appRuntimeAccess: appRuntimeAccessPolicy(),
 })).enableRLS();

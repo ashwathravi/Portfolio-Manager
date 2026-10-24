@@ -1,5 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { gotoAppPage } from './helpers/app';
+import { signInAsFreshUser } from './helpers/users';
 
 /**
  * Portfolio › Holdings (/portfolios/holdings).
@@ -263,6 +264,22 @@ test.describe('POST /api/portfolio/import', () => {
             data: { portfolioId: '00000000-0000-4000-8000-000000000009', rows: [{ symbol: 'XUSR', quantity: 5, avgCost: 1 }] },
         });
         expect(res.status()).toBe(404);
+    });
+
+    test('regression: a position with no price yet is valued at cost, not $0', async ({ context, page }) => {
+        // Launch item i41: with no market data, imported holdings showed $0.
+        test.skip(!dbMode, 'needs the seeded E2E database');
+        await signInAsFreshUser(context);
+        await gotoAppPage(page, '/portfolios/holdings');
+        const res = await page.request.post('/api/portfolio/import', {
+            data: { newPortfolioName: 'Unpriced', rows: [{ symbol: 'ZZZQ', name: 'No Price Co', quantity: 10, avgCost: 12.5 }] },
+        });
+        expect(res.status()).toBe(200);
+
+        await gotoAppPage(page, '/portfolios/holdings');
+        const row = page.getByRole('row').filter({ has: page.getByRole('cell', { name: 'ZZZQ', exact: false }) });
+        await expect(row.getByTestId('holding-value')).toHaveText('$125 at cost');
+        await expect(row).not.toContainText('$0');
     });
 
     test('database: re-importing an identical position reports it unchanged', async ({ page }) => {

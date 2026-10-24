@@ -26,16 +26,32 @@ export interface ImportResult {
  * foreign id is a 404 with nothing written); a new account is created for
  * them otherwise. Rows for symbols already held replace those positions;
  * other positions are untouched.
+ *
+ * `prices` (upper-case symbol → last price, from the price store) values
+ * the rows it covers, so an imported position shows its worth straight
+ * away instead of $0. Rows without one keep no stored price, and readers
+ * value them at cost.
  */
-export async function importHoldings(userId: string, body: PortfolioImportBody): Promise<ImportResult> {
-    return db.transaction(async (tx) => {
+export async function importHoldings(
+    userId: string,
+    body: PortfolioImportBody,
+    prices: Readonly<Record<string, number>> = {},
+    database: typeof db = db,
+): Promise<ImportResult> {
+    const valued = (symbol: string, quantity: number) => {
+        const price = prices[symbol.toUpperCase()];
+        return Number.isFinite(price) && price > 0
+            ? { currentPrice: price, marketValue: quantity * price }
+            : { currentPrice: null, marketValue: null };
+    };
+    return database.transaction(async (tx) => {
         let portfolioId: string;
         let createdPortfolio = false;
 
         if (body.portfolioId) {
             // FOR UPDATE serializes concurrent imports into the same account:
-            // the second waits, then sees the first one's rows, so a symbol is
-            // never inserted twice (there is no unique (portfolio, symbol) key).
+            // the second waits, then sees the first one's rows and updates them
+            // rather than tripping the unique (portfolio, symbol) key.
             const [owned] = await tx
                 .select({ id: portfolios.id })
                 .from(portfolios)
@@ -73,6 +89,7 @@ export async function importHoldings(userId: string, body: PortfolioImportBody):
                     name: r.name || r.symbol,
                     quantity: String(r.quantity),
                     avgCost: String(r.avgCost),
+                    ...valued(r.symbol, r.quantity),
                 })),
             );
         }
@@ -83,9 +100,9 @@ export async function importHoldings(userId: string, body: PortfolioImportBody):
                 .set({
                     quantity: String(p.row.quantity),
                     avgCost: String(p.row.avgCost),
-                    // Snapshot fields were computed for the old quantity; clear
-                    // them so readers fall back to quantity × price.
-                    marketValue: null,
+                    // Snapshot fields were computed for the old quantity: value
+                    // the new one at the stored price, or leave it to readers.
+                    ...valued(p.row.symbol, p.row.quantity),
                     allocation: null,
                     ...(p.row.name ? { name: p.row.name } : {}),
                     updatedAt: now,
