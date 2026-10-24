@@ -1,5 +1,19 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 import { gotoAppPage, reloadAppPage, selectAppTab } from './helpers/app';
+import { signInAsFreshUser } from './helpers/users';
+
+// With a database the watchlist is kept in the account (launch item i38).
+const databaseAuthEnabled = Boolean(process.env.CI || process.env.E2E_DATABASE_AUTH === '1');
+
+/** Resolves once a watchlist save containing `text` has landed; at once when the list is kept in the browser. */
+async function watchlistSaved(page: Page, text: string) {
+    if (!databaseAuthEnabled) return;
+    await page.waitForResponse((response) =>
+        response.url().includes('/api/research/watchlist/')
+        && response.request().method() === 'PUT'
+        && (response.request().postData() ?? '').includes(text)
+        && response.ok());
+}
 
 test.describe('Research page', () => {
     test.beforeEach(async ({ page }) => {
@@ -284,8 +298,15 @@ test.describe('Research thesis price strip', () => {
 });
 
 test.describe('Research watchlist', () => {
-    test.beforeEach(async ({ page }) => {
+    // Changes are saved to the account, so each test has one of its own,
+    // and wait for its list to load.
+    test.beforeEach(async ({ context, page }) => {
+        await signInAsFreshUser(context);
+        const loaded = databaseAuthEnabled
+            ? page.waitForResponse((response) => response.url().endsWith('/api/research/watchlist') && response.ok())
+            : Promise.resolve();
         await gotoAppPage(page, '/research?tab=watchlist');
+        await loaded;
     });
 
     test('regression: example rows are tagged Sample and the pane is real, not a placeholder', async ({ page }) => {
@@ -305,9 +326,11 @@ test.describe('Research watchlist', () => {
             await add.fill('amd');
             await expect(add).toHaveValue('AMD', { timeout: 1_000 });
         }).toPass({ timeout: 10_000 });
+        const saved = watchlistSaved(page, '"AMD"');
         await page.getByRole('button', { name: 'Add', exact: true }).click();
         const pane = page.locator('.pm-research-pane');
         await expect(pane.locator('.pm-thesis-detail-sym')).toHaveText('AMD');
+        await saved;
         await reloadAppPage(page);
         await expect(page.locator('.pm-research-list').getByRole('button', { name: /AMD/ })).toBeVisible();
     });
@@ -333,12 +356,23 @@ test.describe('Research watchlist', () => {
         await page.locator('.pm-research-list').getByRole('button', { name: /SHOP/ }).click();
         const pane = page.locator('.pm-research-pane');
         await pane.getByLabel('Target entry ($)').fill('70');
+        const saved = watchlistSaved(page, 'Check margins first');
         await pane.getByRole('textbox', { name: 'Notes' }).fill('Check margins first');
         await pane.getByRole('textbox', { name: 'Notes' }).blur();
+        await saved;
         await reloadAppPage(page);
         await page.locator('.pm-research-list').getByRole('button', { name: /SHOP/ }).click();
         await expect(pane.getByRole('textbox', { name: 'Notes' })).toHaveValue('Check margins first');
         await expect(pane.getByLabel('Target entry ($)')).toHaveValue('70');
+    });
+
+    test("regression: why and notes stop at what the account keeps", async ({ page }) => {
+        // The Codex finding on PR #147: longer text could be typed, then was
+        // cut short when saved.
+        await page.locator('.pm-research-list').getByRole('button', { name: /PLTR/ }).click();
+        const pane = page.locator('.pm-research-pane');
+        await expect(pane.getByLabel('Why it is on the list')).toHaveAttribute('maxlength', '500');
+        await expect(pane.getByRole('textbox', { name: 'Notes' })).toHaveAttribute('maxlength', '5000');
     });
 
     test('adding a ticker that is only an example makes it yours (no Sample tag)', async ({ page }) => {
@@ -354,9 +388,14 @@ test.describe('Research watchlist', () => {
         await expect(card.getByTestId('sample-tag')).toHaveCount(0);
     });
 
-    test('remove takes a ticker off the list', async ({ page }) => {
+    test('remove takes a ticker off the list, and it stays off after a reload', async ({ page }) => {
         await page.locator('.pm-research-list').getByRole('button', { name: /COIN/ }).click();
+        const saved = watchlistSaved(page, '"dismissed":true');
         await page.locator('.pm-research-pane').getByRole('button', { name: 'Remove' }).click();
+        await expect(page.locator('.pm-research-list').getByRole('button', { name: /COIN/ })).toHaveCount(0);
+        await saved;
+        await reloadAppPage(page);
+        await expect(page.locator('.pm-research-list').getByRole('button', { name: /PLTR/ })).toBeVisible();
         await expect(page.locator('.pm-research-list').getByRole('button', { name: /COIN/ })).toHaveCount(0);
     });
 });

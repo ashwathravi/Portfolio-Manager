@@ -268,6 +268,9 @@ describe("API proxy security", () => {
             ["/api/portfolio/00000000-0000-4000-8000-000000000001/value", "GET"],
             ["/api/portfolio/import", "POST"],
             ["/api/settings", "PUT"],
+            ["/api/research/watchlist", "GET"],
+            ["/api/research/watchlist/import", "POST"],
+            ["/api/research/watchlist/w-coin", "PUT"],
             ["/api/alpha-radar/refresh", "POST"],
             ["/api/alpha-radar/filers", "POST"],
             ["/api/alpha-radar/filers/00000000-0000-4000-8000-000000000001", "PATCH"],
@@ -315,6 +318,18 @@ describe("API proxy security", () => {
             "DELETE",
         ));
         assert.equal(settingsWrongMethod.status, 401);
+
+        for (const [pathname, method] of [
+            ["/api/research/watchlist", "POST"],
+            ["/api/research/watchlist/import", "GET"],
+            ["/api/research/watchlist/w-coin", "GET"],
+            ["/api/research/watchlist/w-coin/extra", "PUT"],
+            ["/api/research/watchlist/w-coin", "DELETE"],
+            ["/api/research/watchlist/import", "PUT"],
+        ] as const) {
+            const response = await handleVerifiedRequest(apiRequest({}, pathname, null, [], method));
+            assert.equal(response.status, 401, `${method} ${pathname} was delegated`);
+        }
     });
 
     test("rate limits signed-in API calls per user, once per request", async () => {

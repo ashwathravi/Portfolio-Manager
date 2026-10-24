@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { gotoAppPage } from './helpers/app';
+import { signInAsFreshUser } from './helpers/users';
 
 /**
  * Position detail (/portfolios/detail/[symbol]). Used to dead-end with
@@ -58,7 +59,9 @@ test.describe('Position detail', () => {
         await expect(page.getByText('🔍')).toHaveCount(0);
     });
 
-    test('Add to watchlist puts the symbol on the Research watchlist, and can be undone', async ({ page }) => {
+    test('Add to watchlist puts the symbol on the Research watchlist, and can be undone', async ({ context, page }) => {
+        // The watchlist is saved to the account: a user of its own.
+        await signInAsFreshUser(context);
         await gotoAppPage(page, '/portfolios/detail/AMD');
         const toggle = page.getByRole('button', { name: 'Add to watchlist' });
         await expect(async () => {

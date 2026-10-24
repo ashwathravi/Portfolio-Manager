@@ -32,6 +32,12 @@ test.describe('Privacy policy', () => {
     }
   });
 
+  test('says the watchlist is saved with the account, not only in the browser', async ({ page }) => {
+    const collected = page.getByRole('region', { name: 'What we collect' });
+    await expect(collected.getByRole('listitem').filter({ hasText: 'Data you add.' })).toContainText('your watchlist');
+    await expect(collected.getByText(/stored only in your browser/)).not.toContainText('watchlist,');
+  });
+
   test('names every service that receives data, including error reports', async ({ page }) => {
     const sharing = page.getByRole('region', { name: 'Who we share it with' });
     for (const service of ['Plaid', 'Google', 'Vercel', 'Upstash', 'Supabase', 'Sentry']) {

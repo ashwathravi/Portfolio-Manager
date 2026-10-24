@@ -1,5 +1,6 @@
 
 import {
+    bigint,
     boolean,
     check,
     date,
@@ -586,6 +587,44 @@ export const portfolioSnapshotPositions = pgTable("portfolio_snapshot_positions"
         columns: [table.portfolioId, table.date],
         foreignColumns: [portfolioSnapshots.portfolioId, portfolioSnapshots.date],
     }).onDelete("cascade"),
+    serverOnlyNoClientAccess: serverOnlyNoClientAccessPolicy(),
+    appRuntimeAccess: appRuntimeAccessPolicy(),
+})).enableRLS();
+
+// ---------------------------------------------------------------------------
+// Research workspace (launch item i38, decision D6)
+// ---------------------------------------------------------------------------
+
+/**
+ * The user's watchlist (src/lib/research/watchlist.ts). `id` is the one the
+ * browser made, so the example rows keep theirs when the user adopts or
+ * edits one; an example the user removed stays as a `dismissed` row so it
+ * isn't shown again. One live row per ticker.
+ */
+export const watchlistItems = pgTable("watchlist_items", {
+    userId: text("user_id")
+        .notNull()
+        .references(() => authUsers.id, { onDelete: "cascade" }),
+    id: text("id").notNull(),
+    ticker: text("ticker").notNull(),
+    companyName: text("company_name").notNull().default(""),
+    reason: text("reason").notNull().default(""),
+    notes: text("notes").notNull().default(""),
+    targetEntry: doublePrecision("target_entry"),
+    addedAt: date("added_at", { mode: "string" }).notNull(),
+    dismissed: boolean("dismissed").notNull().default(false),
+    // The page that last wrote the row and its count of writes then: a
+    // write from the same page applies only if it is newer, so a request
+    // that arrives late can't undo a later edit.
+    writeSession: text("write_session"),
+    writeSeq: bigint("write_seq", { mode: "number" }),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => ({
+    pk: primaryKey({ columns: [table.userId, table.id], name: "watchlist_items_pkey" }),
+    userTickerIdx: uniqueIndex("watchlist_items_user_ticker_idx")
+        .on(table.userId, table.ticker)
+        .where(sql`not ${table.dismissed}`),
     serverOnlyNoClientAccess: serverOnlyNoClientAccessPolicy(),
     appRuntimeAccess: appRuntimeAccessPolicy(),
 })).enableRLS();
