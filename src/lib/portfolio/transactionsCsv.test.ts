@@ -190,5 +190,20 @@ describe('parseTransactionsCsv', () => {
         // An empty cell (or "--") is no currency given: USD.
         assert.deepEqual(rows.map((r) => r.currency), ['CAD', 'USD', 'USD']);
     });
+
+    test('regression: an action it can\'t read is an issue, never guessed from the security\'s name', () => {
+        // The Codex finding on PR #154: a Journal of VYM imported as a dividend
+        // because the fund is "VANGUARD HIGH DIVIDEND YIELD ETF".
+        const csv = [
+            'Date,Action,Symbol,Description,Amount',
+            '2026-03-05,Journal,VYM,VANGUARD HIGH DIVIDEND YIELD ETF,1000',
+            '2026-03-06,Other,,INTEREST EARNED,2.10',
+        ].join('\n');
+        const { rows, issues } = parseTransactionsCsv(csv);
+        assert.deepEqual(rows, []);
+        assert.deepEqual(issues.map((i) => i.line), [2, 3]);
+        assert.match(issues[0].message, /^Can't tell what “Journal” is\./);
+        assert.match(issues[1].message, /^Can't tell what “Other” is\./);
+    });
 });
 

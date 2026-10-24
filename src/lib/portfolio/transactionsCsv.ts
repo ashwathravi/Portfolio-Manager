@@ -12,7 +12,7 @@ import { TRADE_TYPES, type TransactionType } from './transactions';
  * ("Run Date"/"Trade Date", "Action"/"Type"), describe the same thing in
  * words ("YOU BOUGHT", "Reinvest Dividend"), sign amounts both ways, and
  * add notes above and below the table. Anything that isn't clearly a
- * transaction becomes a listed issue, never a guessed number.
+ * transaction becomes a listed issue, never a guess.
  */
 
 export const MAX_TRANSACTION_ROWS = 2000;
@@ -172,10 +172,11 @@ export function parseTransactionsCsv(text: string): TransactionParseResult {
             issues.push({ line: lineNo, message: `“${cell('date')}” is not a date.` });
             continue;
         }
-        const actionText = [cell('action'), cell('description')].filter(Boolean).join(' ');
-        const type = transactionTypeFor(cell('action')) ?? transactionTypeFor(actionText);
+        // The action column alone: a description is often the security's
+        // name ("... HIGH DIVIDEND YIELD ETF"), not what happened.
+        const type = transactionTypeFor(cell('action'));
         if (!type) {
-            issues.push({ line: lineNo, message: `Can't tell what “${cell('action') || actionText}” is. Leave it out or change it to Buy, Sell, Dividend, Interest, Deposit, Withdrawal or Fee.` });
+            issues.push({ line: lineNo, message: `Can't tell what “${cell('action')}” is. Leave it out or change it to Buy, Sell, Dividend, Interest, Deposit, Withdrawal or Fee.` });
             continue;
         }
 
