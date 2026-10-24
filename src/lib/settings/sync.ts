@@ -23,6 +23,7 @@ import { browserLocalStorage, readUserValue, removeUserValue, writeUserValue } f
 import {
     PERSISTED_SETTINGS_SLICES,
     SETTINGS_VERSION,
+    defaultPersistedSettings,
     migrateSettings,
     normalizeSettings,
     persistedSettings,
@@ -123,11 +124,15 @@ export function currentSettingsDocument(state: SettingsState = useSettingsStore.
     return { version: SETTINGS_VERSION, settings: persistedSettings(state) };
 }
 
-/** Loads a document of any version, and of any shape, into the store. */
+/**
+ * Loads a document of any version, and of any shape, into the store. A
+ * document is the whole of the settings: slices it leaves out are at their
+ * defaults, not at whatever this tab had.
+ */
 export function applySettingsDocument(document: SettingsDocument): void {
     // migrateSettings edits what it's given; never the caller's copy.
     const migrated = migrateSettings(structuredClone(document.settings), document.version);
-    useSettingsStore.setState(normalizeSettings(migrated));
+    useSettingsStore.setState({ ...defaultPersistedSettings(), ...normalizeSettings(migrated) });
 }
 
 export function persistedSlicesChanged(next: SettingsState, previous: SettingsState): boolean {

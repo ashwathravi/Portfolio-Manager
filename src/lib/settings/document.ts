@@ -51,6 +51,13 @@
  */
 export const SETTINGS_VERSION = 15;
 
+/**
+ * The version settings were first saved to the server at. A browser migrates
+ * its settings to its own SETTINGS_VERSION before saving them, so no save is
+ * older than this.
+ */
+export const FIRST_SAVED_SETTINGS_VERSION = 15;
+
 /** Persisted slices; API keys and the security slice stay in memory only. */
 export const PERSISTED_SETTINGS_SLICES = [
     "profile",
@@ -67,9 +74,6 @@ export const PERSISTED_SETTINGS_SLICES = [
 ] as const;
 
 export type PersistedSettingsSlice = (typeof PERSISTED_SETTINGS_SLICES)[number];
-
-/** Slices that are lists; every other slice is an object. */
-export const LIST_SETTINGS_SLICES: ReadonlySet<PersistedSettingsSlice> = new Set(["accounts", "tags"]);
 
 export interface SettingsDocument {
     version: number;

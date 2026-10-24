@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { PERSISTED_SETTINGS_SLICES, SETTINGS_VERSION } from '@/lib/settings/document';
+import { sanitizeSettings } from '@/lib/validators/settings-slices';
 import { migrateLandingPage, stripSeededDemoAccounts, type LandingPage } from './settingsMigrations';
 import {
     DEFAULT_BUCKET_POLICIES,
@@ -776,87 +777,17 @@ export function defaultPersistedSettings(): PersistedSettings {
 }
 
 /**
- * Makes stored settings safe to load, whatever they hold: every field the
- * defaults have keeps its kind (object, list, string, number, boolean), so a
- * missing or mistyped field, or an empty slice, falls back to the default
- * instead of crashing the page that reads it. List items of the wrong kind
- * are dropped. Fields the defaults don't have (optional ones, keys a user
- * added) are kept as they are.
+ * Makes stored settings safe to load, whatever they hold, by the slices'
+ * schemas (src/lib/validators/settings-slices.ts sanitizeSettings): a field
+ * that is missing, of the wrong kind or out of range falls back to the
+ * default; an optional field without a default goes, as do unknown fields; a
+ * list item goes when it is the wrong kind or lacks what identifies it.
  */
 export function normalizeSettings(settings: Partial<PersistedSettings>): Partial<PersistedSettings> {
-    const defaults = defaultPersistedSettings();
-    const normalized: Record<string, unknown> = {};
-    for (const slice of PERSISTED_SETTINGS_SLICES) {
-        if (slice in settings) normalized[slice] = coerceToShape(settings[slice], defaults[slice], slice);
-    }
-    return normalized as Partial<PersistedSettings>;
-}
-
-interface ListItems {
-    kind: 'string' | 'object';
-    /** String fields an item can't do without; items missing one are dropped. */
-    required?: readonly string[];
-    /** The fields every item has, with fallbacks (else the first default item). */
-    template?: Record<string, unknown>;
-}
-
-/**
- * What the items of a list must be, for lists that are empty by default and
- * lists whose items carry an identity. Other lists go by their first default
- * item.
- */
-const LIST_ITEMS: Readonly<Record<string, ListItems>> = {
-    accounts: {
-        kind: 'object',
-        required: ['id', 'name'],
-        template: { type: '', accountMask: '', holdings: 0, accountValue: 0, lastSynced: '', status: 'needs-review' },
-    },
-    tags: { kind: 'object', required: ['id', 'name'] },
-    'alphaRadarDelivery.tickerFilters': { kind: 'string' },
-    'alphaRadarDelivery.fundStyleFilters': { kind: 'string' },
-    'alphaRadarDelivery.trackedFilerIds': { kind: 'string' },
-    'riskPolicy.cashJobs': { kind: 'object', required: ['id', 'type'], template: { label: '', amount: 0 } },
-};
-
-function isListItem(item: unknown, rule: ListItems): boolean {
-    if (kindOf(item) !== rule.kind) return false;
-    const record = item as Record<string, unknown>;
-    return (rule.required ?? []).every((key) => typeof record[key] === 'string' && record[key] !== '');
-}
-
-function kindOf(value: unknown): string {
-    if (value === null) return 'null';
-    return Array.isArray(value) ? 'array' : typeof value;
-}
-
-function coerceToShape(value: unknown, template: unknown, path: string): unknown {
-    const kind = kindOf(template);
-    // A default of null or undefined says nothing about the shape.
-    if (kind === 'null' || kind === 'undefined') return value;
-    if (kindOf(value) !== kind) return structuredClone(template);
-    if (kind === 'array') {
-        const rule = LIST_ITEMS[path];
-        const sample = rule?.template ?? (template as unknown[])[0];
-        const items = rule
-            ? (value as unknown[]).filter((item) => isListItem(item, rule))
-            // An unlisted list still never holds null or undefined.
-            : (value as unknown[]).filter((item) => item !== null && item !== undefined);
-        if (sample === undefined) return items;
-        const sampleKind = kindOf(sample);
-        return items
-            .filter((item) => kindOf(item) === sampleKind)
-            .map((item) => coerceToShape(item, sample, `${path}[]`));
-    }
-    if (kind === 'object') {
-        const source = value as Record<string, unknown>;
-        const shape = template as Record<string, unknown>;
-        const coerced: Record<string, unknown> = { ...source };
-        for (const key of Object.keys(shape)) {
-            coerced[key] = key in source ? coerceToShape(source[key], shape[key], `${path}.${key}`) : structuredClone(shape[key]);
-        }
-        return coerced;
-    }
-    return value;
+    const present = Object.fromEntries(
+        PERSISTED_SETTINGS_SLICES.filter((slice) => slice in settings).map((slice) => [slice, settings[slice]]),
+    );
+    return sanitizeSettings(present, defaultPersistedSettings());
 }
 
 /** Brings a stored document written at `version` up to {@link SETTINGS_VERSION}. */
