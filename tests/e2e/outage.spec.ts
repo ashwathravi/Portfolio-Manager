@@ -48,6 +48,18 @@ test.describe('Database outage', () => {
             await expect(page.getByTestId('accounts-empty')).toHaveCount(0);
         });
     }
+
+    test('the notice still comes promptly after many failed reads', async ({ page, request }) => {
+        // Every render tries the database and fails. The pool used to wait
+        // longer before each new connect (up to 20 s), so an outage page got
+        // slower with every request until it timed out.
+        for (let render = 0; render < 4; render++) {
+            expect((await request.get('/portfolios/holdings')).ok()).toBe(true);
+        }
+
+        await page.goto('/portfolios/holdings');
+        await expect(page.getByTestId('data-unavailable')).toBeVisible();
+    });
 });
 
 test.describe('Unusable DATABASE_URL', () => {

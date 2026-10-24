@@ -2,15 +2,32 @@ type DatabaseSslMode = false | "require";
 
 const LOCAL_DATABASE_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
 
+/** The longest a pooled connection waits to try again after a failed connect. */
+export const MAX_RECONNECT_BACKOFF_SECONDS = 1;
+
+/**
+ * Seconds a pooled connection waits before its next connect after one failed
+ * (postgres.js `backoff`). postgres.js counts failed connects across the whole
+ * pool, resets the count only when a connect succeeds, and by default waits
+ * up to 20 s, so during an outage a warm instance made every later query wait
+ * that long before even trying: pages hung instead of showing the outage
+ * notice. The same jittered curve, capped at a second.
+ */
+export function databaseReconnectBackoff(retries: number, random: () => number = Math.random): number {
+    return (0.5 + random() / 2) * Math.min(3 ** retries / 100, MAX_RECONNECT_BACKOFF_SECONDS);
+}
+
 /**
  * Pool settings for serverless functions behind the Supavisor transaction
  * pooler: a few connections per instance, released after 20s idle so warm
- * instances don't hold pooler slots, and recycled every 30 minutes.
+ * instances don't hold pooler slots, recycled every 30 minutes, and quick to
+ * fail while the database is unreachable.
  */
 export const DATABASE_POOL_OPTIONS = {
     max: 5,
     idle_timeout: 20,
     max_lifetime: 30 * 60,
+    backoff: databaseReconnectBackoff,
 } as const;
 
 /**
