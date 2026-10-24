@@ -3,8 +3,9 @@ import { tickerSchema } from '@/lib/validators/market-data';
 
 /**
  * Watchlist — tickers the user is waiting on, with why and at what price.
- * Persists to localStorage (like theses) until the research workspace moves
- * to the database. Pure functions here; `useWatchlist` wraps them in React.
+ * Kept in the user's account when the app has a database (launch item i38,
+ * `watchlistAccount.ts`), otherwise in this browser's localStorage. Pure
+ * functions here; `useWatchlist` wraps them in React.
  *
  * Seed rows are example data (`sample: true`) and carry no price: a stored
  * "current price" would go stale and read as real. Prices come from live
@@ -29,7 +30,7 @@ export type AddWatchError = 'invalid' | 'duplicate';
 
 const DAY_MS = 86_400_000;
 
-function isoDay(ms: number): string {
+export function isoDay(ms: number): string {
     return new Date(Math.floor(ms / DAY_MS) * DAY_MS).toISOString().slice(0, 10);
 }
 
@@ -132,6 +133,13 @@ const SEED: ReadonlyArray<Omit<WatchItem, 'id' | 'addedAt'> & { daysAgo: number 
         daysAgo: 6,
     },
 ];
+
+const EXAMPLE_IDS = new Set(SEED.map((w) => `w-${w.ticker.toLowerCase()}`));
+
+/** Whether `id` is one of the example rows, adopted or not. */
+export function isExampleWatchId(id: string): boolean {
+    return EXAMPLE_IDS.has(id);
+}
 
 /** Example rows, dated relative to `now` (UTC day) so they never look neglected. */
 export function seedWatchlist(now: number): WatchItem[] {

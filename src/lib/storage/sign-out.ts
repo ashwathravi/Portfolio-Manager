@@ -9,9 +9,12 @@
  *   settings come back at the next sign-in.
  * - Anything still under a key that used to be shared by every account.
  *
- * Theses, the journal, the watchlist, alerts and review notes stay under this
- * user's key, because this browser holds the only copy until they move to
- * Postgres (i38); each joins this list once it has a server copy.
+ * Theses, the journal, alerts and review notes stay under this user's key,
+ * because this browser holds the only copy until they move to Postgres
+ * (i38); each joins this list once it has a server copy. The watchlist
+ * already lives in the account when the app has a database, and the browser's
+ * copy is removed once the account has it; without a database, this browser's
+ * copy is the only one, so it stays.
  */
 
 import { ASK_STORAGE_KEY } from "@/lib/ask/storage";

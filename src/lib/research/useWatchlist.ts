@@ -1,12 +1,16 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useViewerIdentity } from '@/components/providers/IdentityProvider';
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
+import { useAccountStorage, useViewerIdentity } from '@/components/providers/IdentityProvider';
+import { useRequestTime } from '@/components/providers/RequestTimeProvider';
 import { useShowSampleData } from '@/lib/hooks/useShowSampleData';
 import { getBrowserStorage } from './storage';
 import {
     addToWatchlist,
     findWatchItem,
+    isExampleWatchId,
     loadWatchlist,
     removeFromWatchlist,
     saveWatchlist,
@@ -17,46 +21,115 @@ import {
     type AddWatchError,
     type WatchItem,
 } from './watchlist';
+import {
+    WatchlistRequestError,
+    applyWatchWrite,
+    createWatchlistWriter,
+    fetchAccountWatchlist,
+    importBrowserWatchlist,
+    mergeAccountWatchlist,
+    sendWatchWrite,
+    toWatchItemInput,
+    type AccountWatchlist,
+    type WatchWrite,
+    type WatchlistWriter,
+} from './watchlistAccount';
 
 const SYNC_EVENT = 'atlas:watchlist-changed';
 const DAY_MS = 86_400_000;
+// One user per page load (signing in or out reloads), so one key.
+const ACCOUNT_QUERY = ['research', 'watchlist'] as const;
 
 interface SyncDetail {
     key: string;
     items: WatchItem[];
 }
 
+/** Where the list lives: how to read it and how to keep one change. */
+interface WatchlistSource {
+    all: WatchItem[];
+    hydrated: boolean;
+    save(next: WatchItem[], item: WatchItem): void;
+    remove(next: WatchItem[], item: WatchItem): void;
+}
+
 /**
- * The signed-in user's watchlist, persisted to localStorage under a per-user
- * key. Server render and first client paint use the example seed (dated to
- * the UTC day, so they agree); the stored list replaces it after mount.
- *
- * Mounted instances (Research, position detail, Today) sync from the change
- * event's payload rather than re-reading storage, so an edit still shows when
- * the write fails (quota); other tabs sync through the `storage` event.
- * Example rows are hidden when the user turns example data off.
+ * The signed-in user's watchlist: in their account when the app has a
+ * database (launch item i38), otherwise in this browser under a per-user
+ * key. Server render and first client paint show the example rows (dated to
+ * the request's UTC day, so they agree); the stored list replaces them once
+ * it has loaded. Example rows are hidden when the user turns example data
+ * off.
  */
 export function useWatchlist() {
     const identity = useViewerIdentity();
+    const inAccount = useAccountStorage();
     const key = watchlistStorageKey(identity?.id);
     const showSample = useShowSampleData();
-    const [all, setAll] = useState<WatchItem[]>(() => seedWatchlist(Math.floor(Date.now() / DAY_MS) * DAY_MS));
+    const requestTime = useRequestTime();
+    const examples = useMemo(() => seedWatchlist(Math.floor(requestTime / DAY_MS) * DAY_MS), [requestTime]);
+
+    const browser = useBrowserWatchlist(!inAccount, key, examples);
+    const account = useAccountWatchlist(inAccount, key, examples);
+    const { all, hydrated, save, remove: removeItem } = inAccount ? account : browser;
+
+    const add = useCallback(
+        (ticker: string, companyName?: string): { item?: WatchItem; error?: AddWatchError } => {
+            const result = addToWatchlist(all, ticker, { now: Date.now(), companyName });
+            if (result.item) save(result.list, result.item);
+            return { item: result.item, error: result.error };
+        },
+        [all, save],
+    );
+
+    const remove = useCallback(
+        (ticker: string) => {
+            const item = findWatchItem(all, ticker);
+            if (item) removeItem(removeFromWatchlist(all, ticker), item);
+        },
+        [all, removeItem],
+    );
+
+    const update = useCallback(
+        (id: string, patch: Parameters<typeof updateWatchItem>[2]) => {
+            const next = updateWatchItem(all, id, patch);
+            const item = next.find((w) => w.id === id);
+            if (item) save(next, item);
+        },
+        [all, save],
+    );
+
+    const items = useMemo(() => visibleWatchItems(all, showSample), [all, showSample]);
+    const isWatched = useCallback((ticker: string) => Boolean(findWatchItem(items, ticker)), [items]);
+
+    return { items, hydrated, add, remove, update, isWatched };
+}
+
+/**
+ * The list in localStorage. Mounted instances (Research, position detail,
+ * Today) sync from the change event's payload rather than re-reading
+ * storage, so an edit still shows when the write fails (quota); other tabs
+ * sync through the `storage` event.
+ */
+function useBrowserWatchlist(enabled: boolean, key: string, examples: WatchItem[]): WatchlistSource {
+    const [stored, setStored] = useState<WatchItem[] | null>(null);
     const [hydrated, setHydrated] = useState(false);
 
     useEffect(() => {
-        const stored = loadWatchlist(getBrowserStorage(), key);
+        if (!enabled) return;
+        const initial = loadWatchlist(getBrowserStorage(), key);
         // Client-only state: localStorage is unavailable during the server render.
         // eslint-disable-next-line react-hooks/set-state-in-effect
-        if (stored) setAll(stored);
+        if (initial) setStored(initial);
         setHydrated(true);
         const onSync = (e: Event) => {
             const detail = (e as CustomEvent<SyncDetail>).detail;
-            if (detail?.key === key) setAll(detail.items);
+            if (detail?.key === key) setStored(detail.items);
         };
         const onStorage = (e: StorageEvent) => {
             if (e.key !== key) return;
             const next = loadWatchlist(getBrowserStorage(), key);
-            if (next) setAll(next);
+            if (next) setStored(next);
         };
         window.addEventListener(SYNC_EVENT, onSync);
         window.addEventListener('storage', onStorage);
@@ -64,35 +137,116 @@ export function useWatchlist() {
             window.removeEventListener(SYNC_EVENT, onSync);
             window.removeEventListener('storage', onStorage);
         };
-    }, [key]);
+    }, [enabled, key]);
 
     const commit = useCallback(
         (next: WatchItem[]) => {
-            setAll(next);
+            setStored(next);
             saveWatchlist(getBrowserStorage(), next, key);
             window.dispatchEvent(new CustomEvent<SyncDetail>(SYNC_EVENT, { detail: { key, items: next } }));
         },
         [key],
     );
 
-    const add = useCallback(
-        (ticker: string, companyName?: string): { item?: WatchItem; error?: AddWatchError } => {
-            const result = addToWatchlist(all, ticker, { now: Date.now(), companyName });
-            if (!result.error) commit(result.list);
-            return { item: result.item, error: result.error };
+    return { all: stored ?? examples, hydrated, save: commit, remove: commit };
+}
+
+const writers = new WeakMap<QueryClient, WatchlistWriter>();
+
+function writerFor(queryClient: QueryClient): WatchlistWriter {
+    let writer = writers.get(queryClient);
+    if (!writer) {
+        writer = createWatchlistWriter({
+            send: (id, write) => sendWatchWrite(id, write),
+            onSaved: (id, write) => {
+                if (queryClient.getQueryData(ACCOUNT_QUERY)) {
+                    queryClient.setQueryData<AccountWatchlist>(ACCOUNT_QUERY, (stored) => applyWatchWrite(stored, id, write));
+                }
+                // A read that started before this save may not include it: read again.
+                if (queryClient.isFetching({ queryKey: ACCOUNT_QUERY }) > 0) {
+                    void queryClient.invalidateQueries({ queryKey: ACCOUNT_QUERY });
+                }
+            },
+            onFailed: (_id, write, error) => {
+                toast.error(saveFailedMessage(write, error));
+                // The change is undone; show what the account has.
+                void queryClient.invalidateQueries({ queryKey: ACCOUNT_QUERY });
+            },
+        });
+        writers.set(queryClient, writer);
+        // A reload or close shouldn't drop an edit queued behind another.
+        if (typeof window !== 'undefined') window.addEventListener('pagehide', writer.sendWaiting);
+    }
+    return writer;
+}
+
+function saveFailedMessage(write: WatchWrite, error: unknown): string {
+    const ticker = write.kind === 'put' ? write.item.ticker : write.ticker;
+    if (error instanceof WatchlistRequestError && error.code === 'DUPLICATE_TICKER') {
+        return `${ticker} is already on your watchlist.`;
+    }
+    const action = write.kind === 'delete' || write.item.dismissed ? 'remove' : 'save';
+    return `Couldn't ${action} ${ticker} on your watchlist. Try again.`;
+}
+
+const NO_WRITES: ReadonlyMap<string, WatchWrite> = new Map();
+const noWrites = () => NO_WRITES;
+
+/**
+ * The list in the user's account, with this page's unsaved writes on top.
+ * The first load sends what this browser kept before, once.
+ */
+function useAccountWatchlist(enabled: boolean, key: string, examples: WatchItem[]): WatchlistSource {
+    const queryClient = useQueryClient();
+    const writer = writerFor(queryClient);
+    const query = useQuery({
+        queryKey: ACCOUNT_QUERY,
+        queryFn: async () => {
+            try {
+                await importBrowserWatchlist(key, { storage: getBrowserStorage(), examples, now: Date.now() });
+            } catch (error) {
+                // Kept in this browser and sent again next time.
+                console.warn('[watchlist] import from this browser failed', error);
+            }
+            return fetchAccountWatchlist();
         },
-        [all, commit],
+        enabled,
+        staleTime: 30_000,
+        refetchOnWindowFocus: true,
+    });
+    const pending = useSyncExternalStore(writer.subscribe, writer.pending, noWrites);
+
+    useEffect(() => {
+        if (enabled && query.isError) {
+            toast.error("Couldn't load your watchlist. Showing examples only.", { id: 'watchlist-load-failed' });
+        }
+    }, [enabled, query.isError]);
+
+    const all = useMemo(
+        () => (enabled ? mergeAccountWatchlist(query.data, pending, examples) : examples),
+        [enabled, query.data, pending, examples],
     );
 
-    const remove = useCallback((ticker: string) => commit(removeFromWatchlist(all, ticker)), [all, commit]);
-
-    const update = useCallback(
-        (id: string, patch: Parameters<typeof updateWatchItem>[2]) => commit(updateWatchItem(all, id, patch)),
-        [all, commit],
+    const save = useCallback(
+        (_next: WatchItem[], item: WatchItem) => {
+            const input = toWatchItemInput(item, { now: Date.now() });
+            if (input) writer.write(item.id, { kind: 'put', item: input });
+        },
+        [writer],
     );
 
-    const items = useMemo(() => visibleWatchItems(all, showSample), [all, showSample]);
-    const isWatched = useCallback((ticker: string) => Boolean(findWatchItem(items, ticker)), [items]);
+    const remove = useCallback(
+        (_next: WatchItem[], item: WatchItem) => {
+            if (!isExampleWatchId(item.id)) {
+                writer.write(item.id, { kind: 'delete', ticker: item.ticker });
+                return;
+            }
+            // Kept as dismissed, so the example isn't shown again.
+            const input = toWatchItemInput(item, { now: Date.now(), dismissed: true });
+            if (input) writer.write(item.id, { kind: 'put', item: input });
+        },
+        [writer],
+    );
 
-    return { items, hydrated, add, remove, update, isWatched };
+    return { all, hydrated: query.isSuccess, save, remove };
 }
