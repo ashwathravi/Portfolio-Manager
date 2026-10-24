@@ -4,7 +4,7 @@
  * can be unit tested and shared between the server page and client view.
  */
 
-export type ActivitySide = 'BUY' | 'SELL' | 'DIVIDEND' | 'DEPOSIT' | 'WITHDRAWAL' | 'OTHER';
+export type ActivitySide = 'BUY' | 'SELL' | 'DIVIDEND' | 'INTEREST' | 'DEPOSIT' | 'WITHDRAWAL' | 'FEE' | 'OTHER';
 
 export interface TransactionRowInput {
     id: string;
@@ -16,6 +16,8 @@ export interface TransactionRowInput {
     timestamp: Date | string;
     notes?: string | null;
     portfolioName: string;
+    fees?: string | number | null;
+    currency?: string | null;
 }
 
 export interface ActivityRow {
@@ -30,6 +32,10 @@ export interface ActivityRow {
     value: number;
     account: string;
     notes: string | null;
+    /** Fees and commission on top of the value; null when none were recorded. */
+    fees: number | null;
+    /** ISO code; amounts are in it. */
+    currency: string;
 }
 
 export interface ActivitySummary {
@@ -56,7 +62,7 @@ function toNumber(value: string | number | null | undefined): number | null {
 
 export function normalizeSide(type: string): ActivitySide {
     const t = type.trim().toUpperCase();
-    if (t === 'BUY' || t === 'SELL' || t === 'DIVIDEND' || t === 'DEPOSIT' || t === 'WITHDRAWAL') return t;
+    if (t === 'BUY' || t === 'SELL' || t === 'DIVIDEND' || t === 'INTEREST' || t === 'DEPOSIT' || t === 'WITHDRAWAL' || t === 'FEE') return t;
     return 'OTHER';
 }
 
@@ -78,6 +84,8 @@ export function toActivityRows(rows: readonly TransactionRowInput[]): ActivityRo
                 value,
                 account: r.portfolioName,
                 notes: r.notes ?? null,
+                fees: toNumber(r.fees ?? null),
+                currency: r.currency || 'USD',
             };
         })
         .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));

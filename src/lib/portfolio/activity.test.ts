@@ -21,6 +21,8 @@ describe('portfolio activity', () => {
         assert.strictEqual(normalizeSide('buy'), 'BUY');
         assert.strictEqual(normalizeSide(' Withdrawal '), 'WITHDRAWAL');
         assert.strictEqual(normalizeSide('split'), 'OTHER');
+        assert.strictEqual(normalizeSide('interest'), 'INTEREST');
+        assert.strictEqual(normalizeSide('FEE'), 'FEE');
     });
 
     test('toActivityRows coerces numeric strings, uppercases symbols, and sorts newest first', () => {
@@ -35,6 +37,15 @@ describe('portfolio activity', () => {
         const out = toActivityRows(rows);
         assert.strictEqual(out.find((r) => r.id === 't3')?.value, 5000);
         assert.strictEqual(out.find((r) => r.id === 't4')?.value, 12.5);
+    });
+
+    test('fees and currency come through; none recorded reads as no fees, in USD', () => {
+        const [row] = toActivityRows([{ ...rows[0], fees: '0.02', currency: 'CAD' }]);
+        assert.strictEqual(row.fees, 0.02);
+        assert.strictEqual(row.currency, 'CAD');
+        const [plain] = toActivityRows([rows[0]]);
+        assert.strictEqual(plain.fees, null);
+        assert.strictEqual(plain.currency, 'USD');
     });
 
     test('summarizeActivity counts buys and sells and distinct accounts', () => {

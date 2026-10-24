@@ -1,8 +1,10 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
-import { Download, Repeat2 } from "lucide-react";
+import { Download, Repeat2, Trash2 } from "lucide-react";
+import { toast } from "sonner";
 import { computeChurnAnalysis } from "@/lib/risk-policy";
 import { exportToCsv } from "@/lib/exportCsv";
 import { formatQty, formatShortDate, formatUsd } from "@/lib/format";
@@ -13,11 +15,15 @@ import {
     type ActivityRow,
     type ActivitySide,
 } from "@/lib/portfolio/activity";
+import { AddTransactionDialog, type TransactionAccountOption } from "./AddTransactionDialog";
+import { ImportTransactionsDialog } from "./ImportTransactionsDialog";
 
 /**
  * Portfolio › Activity. Replaces the retired trade log, which rendered a
  * hardcoded list. Rows come from the transactions table; the churn and
  * tax-friction callout (kept from the trade log) runs on the same rows.
+ * Transactions are added by hand or from a broker's CSV, and deleted here
+ * (launch item i40).
  */
 
 const SIDES: ReadonlyArray<{ key: "ALL" | ActivitySide; label: string }> = [
@@ -26,7 +32,50 @@ const SIDES: ReadonlyArray<{ key: "ALL" | ActivitySide; label: string }> = [
     { key: "SELL", label: "Sells" },
 ];
 
-export function ActivityPageClient({ rows }: { rows: ActivityRow[] }) {
+/** Adding and importing need an account to put the transactions in. */
+function AddControls({ accounts }: { accounts: readonly TransactionAccountOption[] }) {
+    if (accounts.length === 0) {
+        return (
+            <Link href="/portfolios/accounts" className="pm-btn pm-btn-ghost">Add an account first</Link>
+        );
+    }
+    return (
+        <>
+            <AddTransactionDialog accounts={accounts} />
+            <ImportTransactionsDialog accounts={accounts} />
+        </>
+    );
+}
+
+function DeleteTransactionButton({ row }: { row: ActivityRow }) {
+    const router = useRouter();
+    const label = `${row.side.charAt(0)}${row.side.slice(1).toLowerCase()}${row.symbol ? ` ${row.symbol}` : ""} on ${formatShortDate(row.date)}`;
+    const remove = async () => {
+        if (!window.confirm(`Delete ${label}? This can't be undone.`)) return;
+        try {
+            const response = await fetch(`/api/transactions/${row.id}`, { method: "DELETE", credentials: "same-origin" });
+            if (!response.ok) throw new Error(String(response.status));
+            toast.success(`Deleted ${label}.`);
+            router.refresh();
+        } catch {
+            toast.error("Couldn't delete the transaction. Try again.");
+        }
+    };
+    return (
+        <button type="button" className="pm-icon-btn" aria-label={`Delete ${label}`} onClick={() => void remove()}>
+            <Trash2 size={14} aria-hidden="true" />
+        </button>
+    );
+}
+
+export function ActivityPageClient({
+    rows,
+    accountOptions = [],
+}: {
+    rows: ActivityRow[];
+    /** The user's accounts, to add or import transactions into. */
+    accountOptions?: readonly TransactionAccountOption[];
+}) {
     const [query, setQuery] = useState("");
     const [side, setSide] = useState<"ALL" | ActivitySide>("ALL");
     const [account, setAccount] = useState<string>("ALL");
@@ -70,11 +119,12 @@ export function ActivityPageClient({ rows }: { rows: ActivityRow[] }) {
                     <h2>No transactions yet</h2>
                     <p>
                         Buys, sells, dividends, and transfers from your connected accounts show up here,
-                        along with a churn and tax-friction check on repeat trading.
+                        along with a churn and tax-friction check on repeat trading. You can also add them
+                        yourself or import your broker&apos;s activity CSV.
                     </p>
                     <div className="pm-empty-actions">
                         <Link href="/settings#accounts" className="pm-btn pm-btn-primary">Connect an account</Link>
-                        <Link href="/execution" className="pm-btn pm-btn-ghost">Draft an order</Link>
+                        <AddControls accounts={accountOptions} />
                     </div>
                 </section>
             </div>
@@ -152,6 +202,7 @@ export function ActivityPageClient({ rows }: { rows: ActivityRow[] }) {
                         </select>
                     )}
                     <span className="pm-spacer" />
+                    <AddControls accounts={accountOptions} />
                     <button
                         type="button"
                         className="pm-btn pm-btn-ghost"
@@ -166,6 +217,8 @@ export function ActivityPageClient({ rows }: { rows: ActivityRow[] }) {
                                     quantity: r.quantity ?? "",
                                     price: r.price ?? "",
                                     value: r.value,
+                                    fees: r.fees ?? "",
+                                    currency: r.currency,
                                     account: r.account,
                                     notes: r.notes ?? "",
                                 })),
@@ -190,8 +243,10 @@ export function ActivityPageClient({ rows }: { rows: ActivityRow[] }) {
                                     <th scope="col" className="num">Qty</th>
                                     <th scope="col" className="num">Price</th>
                                     <th scope="col" className="num">Value</th>
+                                    <th scope="col" className="num">Fees</th>
                                     <th scope="col">Account</th>
                                     <th scope="col">Note</th>
+                                    <th scope="col" aria-label="Actions" />
                                 </tr>
                             </thead>
                             <tbody>
@@ -210,9 +265,14 @@ export function ActivityPageClient({ rows }: { rows: ActivityRow[] }) {
                                         <td><span className="pm-side" data-side={r.side}>{r.side}</span></td>
                                         <td className="num">{formatQty(r.quantity)}</td>
                                         <td className="num">{r.price === null ? "—" : formatUsd(r.price)}</td>
-                                        <td className="num">{formatUsd(r.value)}</td>
+                                        <td className="num">
+                                            {formatUsd(r.value)}
+                                            {r.currency !== "USD" && <span className="pm-card-subtitle"> {r.currency}</span>}
+                                        </td>
+                                        <td className="num">{r.fees == null ? "—" : formatUsd(r.fees)}</td>
                                         <td>{r.account}</td>
                                         <td className="pm-card-subtitle">{r.notes ?? ""}</td>
+                                        <td><DeleteTransactionButton row={r} /></td>
                                     </tr>
                                 ))}
                             </tbody>
