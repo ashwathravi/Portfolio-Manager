@@ -223,6 +223,10 @@ Use it to:
 - Navigate into portfolio or holding details.
 - Track account count and high-level portfolio metadata.
 
+On **Portfolio › Accounts**, **New account** adds an account with its cash and an optional description, and each row's **⋯** menu edits or deletes one. Deleting an account deletes its positions, transactions and valuation history.
+
+Account names are unique, ignoring case and surrounding spaces: creating an account, renaming one, or importing a CSV into a new account with a name you already use is refused, so the import's account picker and the Returns account switcher can tell your accounts apart. You can have up to 50 accounts.
+
 ## Trade Log
 
 Open **Portfolios > Trade Log** to review transaction activity.
