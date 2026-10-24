@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { userKey } from './helpers/storage';
 import { clickUntil, collectConsoleErrors, gotoAppPage, openPolicyChecks, reloadAppPage } from './helpers/app';
+import { signInAsFreshUser } from './helpers/users';
 
 /**
  * Today (/) — formerly the Dashboard.
@@ -454,6 +455,28 @@ test.describe('Today › Net worth hero', () => {
         await gotoAppPage(page, '/');
         test.skip(!(await hasHoldings(page)), 'no holdings in this database');
         await expect(page.getByTestId('today-change')).toHaveText(/^\+\$[\d,]+\.\d{2} \(\+\d+\.\d{2}%\) today$/);
+    });
+
+    test('regression: a position with no price yet counts at cost in net worth, not $0', async ({ context, page }) => {
+        // Launch item i41 (the Codex finding on PR #153): Today valued an
+        // imported position without a quote or stored price at $0.
+        test.skip(!(process.env.CI || process.env.E2E_DATABASE_AUTH === '1'), 'needs the seeded E2E database');
+        await signInAsFreshUser(context);
+        // The same quotes on both loads, so only the new position changes the total.
+        await page.route('**/api/market-data/quotes**', (route) => route.fulfill({ status: 200, json: { data: HELD.map(quote) } }));
+        const netWorth = async () => {
+            await gotoAppPage(page, '/');
+            const text = await page.getByTestId('today-networth').textContent();
+            return Number((text ?? '').replace(/[$,]/g, ''));
+        };
+        const before = await netWorth();
+
+        const imported = await page.request.post('/api/portfolio/import', {
+            data: { newPortfolioName: 'Unpriced', rows: [{ symbol: 'ZZZQ', name: 'No Price Co', quantity: 10, avgCost: 12.5 }] },
+        });
+        expect(imported.status()).toBe(200);
+
+        expect(Math.round(((await netWorth()) - before) * 100) / 100).toBe(125);
     });
 
     test('regression: a move for some positions only is labelled partial, with no portfolio percentage', async ({ page }) => {

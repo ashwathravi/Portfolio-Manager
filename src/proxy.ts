@@ -151,6 +151,11 @@ function isSessionBackedApiRoute(pathname: string, method: string): boolean {
     if (pathname === "/api/plaid/link-token" && method === "POST") return true;
     if (pathname === "/api/plaid/exchange-public-token" && method === "POST") return true;
     if (pathname === "/api/portfolios/count" && method === "GET") return true;
+    if (pathname === "/api/portfolios" && method === "POST") return true;
+    if (pathname === "/api/transactions" && method === "POST") return true;
+    if (pathname === "/api/transactions/import" && method === "POST") return true;
+    if (/^\/api\/transactions\/(?!import$)[^/]+$/.test(pathname) && method === "DELETE") return true;
+    if (/^\/api\/portfolios\/(?!count$)[^/]+$/.test(pathname) && (method === "PATCH" || method === "DELETE")) return true;
     if (/^\/api\/portfolio\/[^/]+\/value$/.test(pathname) && method === "GET") return true;
     if (pathname === "/api/portfolio/import" && method === "POST") return true;
     if (pathname === "/api/settings" && method === "PUT") return true;

@@ -39,11 +39,13 @@ export interface HoldingsTableRow {
     themeWeights: readonly ThemeWeight[];
     quantity: number;
     avgCost: number;
-    last: number;
+    /** Null when there is no price yet: the row is valued at cost. */
+    last: number | null;
     marketValue: number;
     /** Today's move; null when there is none from today's session. */
     todayPct: number | null;
-    totalReturnPct: number;
+    /** Null without a price. */
+    totalReturnPct: number | null;
     allocationPct: number; // 0..100
     account: string;
 }
@@ -184,13 +186,16 @@ function HoldingRow({
             </td>
             <td className="num">{fmtQty(row.quantity)}</td>
             <td className="num">{fmtCurrency2(row.avgCost)}</td>
-            <td className="num">{fmtCurrency2(row.last)}</td>
-            <td className="num">{fmtCurrency0(row.marketValue)}</td>
+            <td className="num">{row.last === null ? "—" : fmtCurrency2(row.last)}</td>
+            <td className="num" data-testid="holding-value">
+                {fmtCurrency0(row.marketValue)}
+                {row.last === null && <span className="pm-card-subtitle" title="No price yet, so it is valued at what you paid"> at cost</span>}
+            </td>
             <td className={`num ${todayClass}`} data-testid="holding-today">
                 {row.todayPct === null ? "—" : fmtSignedPct(row.todayPct)}
             </td>
-            <td className={`num ${row.totalReturnPct < 0 ? "pm-num-neg" : "pm-num-pos"}`}>
-                {fmtSignedPct(row.totalReturnPct)}
+            <td className={`num ${row.totalReturnPct === null ? "" : row.totalReturnPct < 0 ? "pm-num-neg" : "pm-num-pos"}`}>
+                {row.totalReturnPct === null ? "—" : fmtSignedPct(row.totalReturnPct)}
             </td>
             <td className="pm-alloc-bar-cell">
                 <div style={{ display: "flex", alignItems: "center", gap: 6 }}>

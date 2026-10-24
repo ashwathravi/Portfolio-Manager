@@ -221,6 +221,9 @@ export const holdings = pgTable("holdings", {
 }, (table) => ({
     portfolioIdIdx: index("holdings_portfolio_id_idx").on(table.portfolioId),
     symbolIdx: index("holdings_symbol_idx").on(table.symbol),
+    // One row per symbol in an account (launch item i41); symbols are stored
+    // upper-case.
+    portfolioSymbolIdx: uniqueIndex("holdings_portfolio_symbol_idx").on(table.portfolioId, table.symbol),
     serverOnlyNoClientAccess: serverOnlyNoClientAccessPolicy(),
     appRuntimeAccess: appRuntimeAccessPolicy(),
 })).enableRLS();
@@ -239,10 +242,20 @@ export const transactions = pgTable("transactions", {
     // Legacy / convenience columns kept for backward compat
     amount: doublePrecision("amount"),
     notes: text("notes"),
+    // Launch item i40: what the trade cost beyond its value, the currency
+    // its amounts are in, where it came from (manual, csv), and the source's
+    // own ID for it, which keeps an import from adding it twice.
+    fees: numeric("fees"),
+    currency: text("currency").notNull().default("USD"),
+    source: text("source").notNull().default("manual"),
+    externalId: text("external_id"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (table) => ({
     portfolioIdIdx: index("transactions_portfolio_id_idx").on(table.portfolioId),
     symbolIdx: index("transactions_symbol_idx").on(table.symbol),
+    externalIdIdx: uniqueIndex("transactions_portfolio_external_id_idx")
+        .on(table.portfolioId, table.externalId)
+        .where(sql`${table.externalId} is not null`),
     serverOnlyNoClientAccess: serverOnlyNoClientAccessPolicy(),
     appRuntimeAccess: appRuntimeAccessPolicy(),
 })).enableRLS();

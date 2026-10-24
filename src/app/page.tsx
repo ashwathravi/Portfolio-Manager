@@ -69,15 +69,22 @@ export default async function Today() {
   const allHoldings = allPortfolios.flatMap((p) =>
     p.holdings.map((h) => {
       const quantity = Number(h.quantity) || 0;
-      const currentPrice = Number(liveQuotes[h.symbol.toUpperCase()]?.price ?? h.currentPrice ?? 0);
+      const avgCost = Number(h.avgCost) || 0;
+      const live = liveQuotes[h.symbol.toUpperCase()]?.price;
+      const currentPrice = Number(live ?? h.currentPrice ?? 0);
       return {
         id: h.id,
         portfolio: p.name,
         symbol: h.symbol,
         quantity,
-        avgCost: Number(h.avgCost) || 0,
+        avgCost,
         currentPrice,
-        marketValue: Number(h.marketValue) || quantity * currentPrice,
+        // A live quote values it now; otherwise the stored value, then the
+        // stored price; without any price it counts at cost, as on Holdings
+        // and Accounts, rather than as nothing.
+        marketValue: live != null && live > 0
+          ? quantity * live
+          : Number(h.marketValue) || quantity * (currentPrice > 0 ? currentPrice : avgCost),
       };
     }),
   );

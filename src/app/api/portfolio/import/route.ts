@@ -15,6 +15,7 @@ import { apiError, internalServerError, logApiEvent } from '@/lib/api/security';
 import { requestIdFrom } from '@/lib/observability/request-id';
 import { requireSessionApiUserScope } from '@/lib/api/session-security';
 import { ImportAccessError, importHoldings } from '@/lib/portfolio/importHoldings';
+import { loadQuotes } from '@/lib/services/market-data-service';
 import { portfolioImportSchema } from '@/lib/validators/portfolio-import';
 
 export const dynamic = 'force-dynamic';
@@ -38,7 +39,11 @@ export async function POST(request: Request) {
     }
 
     try {
-        const result = await importHoldings(auth.context.userId, parsed.data);
+        // The last stored prices, so imported positions show their worth at
+        // once. Never throws: without market data they're valued at cost.
+        const quotes = await loadQuotes(parsed.data.rows.map((r) => r.symbol));
+        const prices = Object.fromEntries(Object.entries(quotes).map(([symbol, quote]) => [symbol, quote.price]));
+        const result = await importHoldings(auth.context.userId, parsed.data, prices);
         logApiEvent('portfolio_csv_imported', {
             route: '/api/portfolio/import',
             requestId: requestIdFrom(request.headers),

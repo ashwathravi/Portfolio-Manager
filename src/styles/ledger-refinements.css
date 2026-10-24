@@ -911,3 +911,10 @@ a.pm-watchlist-sym:hover .pm-watchlist-ticker { text-decoration: underline; }
   color: var(--pm-fg);
 }
 .pm-data-unavailable strong { font-weight: 600; }
+
+/* Portfolio › Accounts: add, edit and delete accounts (launch item i41). */
+.pm-accounts-actions { display: flex; justify-content: flex-end; }
+.pm-form-error { margin: 0; font-size: 13px; color: var(--pm-neg); }
+
+/* Portfolio › Activity: add a transaction (launch item i40). */
+.pm-form-pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }

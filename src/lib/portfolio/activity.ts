@@ -4,7 +4,9 @@
  * can be unit tested and shared between the server page and client view.
  */
 
-export type ActivitySide = 'BUY' | 'SELL' | 'DIVIDEND' | 'DEPOSIT' | 'WITHDRAWAL' | 'OTHER';
+import { computeChurnAnalysis, type ChurnTickerRow } from '../risk-policy/churn';
+
+export type ActivitySide = 'BUY' | 'SELL' | 'DIVIDEND' | 'INTEREST' | 'DEPOSIT' | 'WITHDRAWAL' | 'FEE' | 'OTHER';
 
 export interface TransactionRowInput {
     id: string;
@@ -16,6 +18,8 @@ export interface TransactionRowInput {
     timestamp: Date | string;
     notes?: string | null;
     portfolioName: string;
+    fees?: string | number | null;
+    currency?: string | null;
 }
 
 export interface ActivityRow {
@@ -30,16 +34,32 @@ export interface ActivityRow {
     value: number;
     account: string;
     notes: string | null;
+    /** Fees and commission on top of the value; null when none were recorded. */
+    fees: number | null;
+    /** ISO code; amounts are in it. */
+    currency: string;
+}
+
+export interface MoneyAmount {
+    currency: string;
+    amount: number;
 }
 
 export interface ActivitySummary {
     count: number;
     buyCount: number;
     sellCount: number;
-    boughtUsd: number;
-    soldUsd: number;
+    /**
+     * What was bought and sold, one total per currency (USD first, then by
+     * code): amounts in different currencies aren't added together.
+     */
+    bought: MoneyAmount[];
+    sold: MoneyAmount[];
     accounts: number;
 }
+
+/** A churn row for one symbol's trades in one currency; turnover is in it. */
+export type ActivityChurnRow = ChurnTickerRow & { currency: string };
 
 export interface ActivityFilter {
     query?: string;
@@ -56,7 +76,7 @@ function toNumber(value: string | number | null | undefined): number | null {
 
 export function normalizeSide(type: string): ActivitySide {
     const t = type.trim().toUpperCase();
-    if (t === 'BUY' || t === 'SELL' || t === 'DIVIDEND' || t === 'DEPOSIT' || t === 'WITHDRAWAL') return t;
+    if (t === 'BUY' || t === 'SELL' || t === 'DIVIDEND' || t === 'INTEREST' || t === 'DEPOSIT' || t === 'WITHDRAWAL' || t === 'FEE') return t;
     return 'OTHER';
 }
 
@@ -78,35 +98,80 @@ export function toActivityRows(rows: readonly TransactionRowInput[]): ActivityRo
                 value,
                 account: r.portfolioName,
                 notes: r.notes ?? null,
+                fees: toNumber(r.fees ?? null),
+                currency: r.currency || 'USD',
             };
         })
         .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
 }
 
+function byCurrency(a: string, b: string): number {
+    return a === b ? 0 : a === 'USD' ? -1 : b === 'USD' ? 1 : a.localeCompare(b);
+}
+
+function totals(sums: Map<string, number>): MoneyAmount[] {
+    return [...sums.entries()]
+        .sort(([a], [b]) => byCurrency(a, b))
+        .map(([currency, amount]) => ({ currency, amount: Math.round(amount * 100) / 100 }));
+}
+
 export function summarizeActivity(rows: readonly ActivityRow[]): ActivitySummary {
     let buyCount = 0;
     let sellCount = 0;
-    let boughtUsd = 0;
-    let soldUsd = 0;
+    const bought = new Map<string, number>();
+    const sold = new Map<string, number>();
     const accounts = new Set<string>();
     for (const r of rows) {
         accounts.add(r.account);
         if (r.side === 'BUY') {
             buyCount += 1;
-            boughtUsd += r.value;
+            bought.set(r.currency, (bought.get(r.currency) ?? 0) + r.value);
         } else if (r.side === 'SELL') {
             sellCount += 1;
-            soldUsd += r.value;
+            sold.set(r.currency, (sold.get(r.currency) ?? 0) + r.value);
         }
     }
     return {
         count: rows.length,
         buyCount,
         sellCount,
-        boughtUsd: Math.round(boughtUsd * 100) / 100,
-        soldUsd: Math.round(soldUsd * 100) / 100,
+        bought: totals(bought),
+        sold: totals(sold),
         accounts: accounts.size,
     };
+}
+
+/**
+ * The churn review of the buys and sells, run for each currency on its own
+ * so turnover is never a sum of amounts in different currencies. Every
+ * currency is measured over the same window, ending at the latest trade.
+ * Rows are sorted by churn score, then turnover within a currency.
+ */
+export function activityChurn(rows: readonly ActivityRow[]): ActivityChurnRow[] {
+    const trades = rows.filter((r) => r.side === 'BUY' || r.side === 'SELL');
+    if (trades.length === 0) return [];
+    const asOf = trades.reduce((latest, r) => (r.date > latest ? r.date : latest), trades[0].date);
+    const groups = new Map<string, ActivityRow[]>();
+    for (const r of trades) groups.set(r.currency, [...(groups.get(r.currency) ?? []), r]);
+    return [...groups.entries()]
+        .sort(([a], [b]) => byCurrency(a, b))
+        .flatMap(([currency, group]) =>
+            computeChurnAnalysis(
+                group.map((r) => ({
+                    id: r.id,
+                    date: r.date,
+                    type: r.side.toLowerCase(),
+                    symbol: r.symbol,
+                    quantity: r.quantity,
+                    price: r.price,
+                    amount: r.value,
+                    account: r.account,
+                })),
+                { asOf },
+            ).rows.map((row) => ({ ...row, currency })),
+        )
+        // Stable: equal scores keep their currency order and turnover order.
+        .sort((a, b) => b.churnScore - a.churnScore);
 }
 
 export function filterActivity(rows: readonly ActivityRow[], filter: ActivityFilter): ActivityRow[] {
