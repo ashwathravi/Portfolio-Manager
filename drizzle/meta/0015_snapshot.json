@@ -1,5 +1,5 @@
 {
-  "id": "e25531f2-9e3f-402d-ad02-6b51494aa7c0",
+  "id": "4e41249b-b56e-41d6-8286-e65384f629d9",
   "prevId": "59c7bd83-de95-4a29-b06c-9a6b3b645941",
   "version": "7",
   "dialect": "postgresql",
@@ -2542,6 +2542,250 @@
       "checkConstraints": {},
       "isRLSEnabled": true
     },
+    "public.portfolio_snapshot_positions": {
+      "name": "portfolio_snapshot_positions",
+      "schema": "",
+      "columns": {
+        "portfolio_id": {
+          "name": "portfolio_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "date": {
+          "name": "date",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "symbol": {
+          "name": "symbol",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "quantity": {
+          "name": "quantity",
+          "type": "numeric",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "cost_basis": {
+          "name": "cost_basis",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "close": {
+          "name": "close",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "close_date": {
+          "name": "close_date",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "market_value": {
+          "name": "market_value",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "portfolio_snapshot_positions_snapshot_fk": {
+          "name": "portfolio_snapshot_positions_snapshot_fk",
+          "tableFrom": "portfolio_snapshot_positions",
+          "tableTo": "portfolio_snapshots",
+          "columnsFrom": [
+            "portfolio_id",
+            "date"
+          ],
+          "columnsTo": [
+            "portfolio_id",
+            "date"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "portfolio_snapshot_positions_portfolio_id_date_symbol_pk": {
+          "name": "portfolio_snapshot_positions_portfolio_id_date_symbol_pk",
+          "columns": [
+            "portfolio_id",
+            "date",
+            "symbol"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {
+        "server_only_no_client_access": {
+          "name": "server_only_no_client_access",
+          "as": "RESTRICTIVE",
+          "for": "ALL",
+          "to": [
+            "anon",
+            "authenticated"
+          ],
+          "using": "false",
+          "withCheck": "false"
+        },
+        "app_runtime_access": {
+          "name": "app_runtime_access",
+          "as": "PERMISSIVE",
+          "for": "ALL",
+          "to": [
+            "app_runtime"
+          ],
+          "using": "true",
+          "withCheck": "true"
+        }
+      },
+      "checkConstraints": {},
+      "isRLSEnabled": true
+    },
+    "public.portfolio_snapshots": {
+      "name": "portfolio_snapshots",
+      "schema": "",
+      "columns": {
+        "portfolio_id": {
+          "name": "portfolio_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "date": {
+          "name": "date",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "holdings_value": {
+          "name": "holdings_value",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "cash": {
+          "name": "cash",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "total_value": {
+          "name": "total_value",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "cost_basis": {
+          "name": "cost_basis",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "positions": {
+          "name": "positions",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "unpriced": {
+          "name": "unpriced",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::text[]"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "portfolio_snapshots_date_idx": {
+          "name": "portfolio_snapshots_date_idx",
+          "columns": [
+            {
+              "expression": "date",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "portfolio_snapshots_portfolio_id_portfolios_id_fk": {
+          "name": "portfolio_snapshots_portfolio_id_portfolios_id_fk",
+          "tableFrom": "portfolio_snapshots",
+          "tableTo": "portfolios",
+          "columnsFrom": [
+            "portfolio_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "portfolio_snapshots_portfolio_id_date_pk": {
+          "name": "portfolio_snapshots_portfolio_id_date_pk",
+          "columns": [
+            "portfolio_id",
+            "date"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {
+        "server_only_no_client_access": {
+          "name": "server_only_no_client_access",
+          "as": "RESTRICTIVE",
+          "for": "ALL",
+          "to": [
+            "anon",
+            "authenticated"
+          ],
+          "using": "false",
+          "withCheck": "false"
+        },
+        "app_runtime_access": {
+          "name": "app_runtime_access",
+          "as": "PERMISSIVE",
+          "for": "ALL",
+          "to": [
+            "app_runtime"
+          ],
+          "using": "true",
+          "withCheck": "true"
+        }
+      },
+      "checkConstraints": {},
+      "isRLSEnabled": true
+    },
     "public.portfolios": {
       "name": "portfolios",
       "schema": "",
@@ -3094,170 +3338,6 @@
         }
       },
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {
-        "server_only_no_client_access": {
-          "name": "server_only_no_client_access",
-          "as": "RESTRICTIVE",
-          "for": "ALL",
-          "to": [
-            "anon",
-            "authenticated"
-          ],
-          "using": "false",
-          "withCheck": "false"
-        },
-        "app_runtime_access": {
-          "name": "app_runtime_access",
-          "as": "PERMISSIVE",
-          "for": "ALL",
-          "to": [
-            "app_runtime"
-          ],
-          "using": "true",
-          "withCheck": "true"
-        }
-      },
-      "checkConstraints": {},
-      "isRLSEnabled": true
-    },
-    "public.watchlist_items": {
-      "name": "watchlist_items",
-      "schema": "",
-      "columns": {
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "ticker": {
-          "name": "ticker",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "company_name": {
-          "name": "company_name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "''"
-        },
-        "reason": {
-          "name": "reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "''"
-        },
-        "notes": {
-          "name": "notes",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "''"
-        },
-        "target_entry": {
-          "name": "target_entry",
-          "type": "double precision",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "added_at": {
-          "name": "added_at",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "dismissed": {
-          "name": "dismissed",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
-        "write_session": {
-          "name": "write_session",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "write_seq": {
-          "name": "write_seq",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "watchlist_items_user_ticker_idx": {
-          "name": "watchlist_items_user_ticker_idx",
-          "columns": [
-            {
-              "expression": "user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "ticker",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "not \"watchlist_items\".\"dismissed\"",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "watchlist_items_user_id_auth_users_id_fk": {
-          "name": "watchlist_items_user_id_auth_users_id_fk",
-          "tableFrom": "watchlist_items",
-          "tableTo": "auth_users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "watchlist_items_pkey": {
-          "name": "watchlist_items_pkey",
-          "columns": [
-            "user_id",
-            "id"
-          ]
-        }
-      },
       "uniqueConstraints": {},
       "policies": {
         "server_only_no_client_access": {

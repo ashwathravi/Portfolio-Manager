@@ -1016,7 +1016,10 @@ describe("ingestDailyPrices › held positions after a split", () => {
         const detail = await ingestDailyPrices({ adapter, store, ...fakeClock() });
 
         assert.deepEqual(adjustments, []);
-        assert.deepEqual((detail.holdingSplits as { unadjusted?: string[] }).unadjusted, ["BRK.B", "NVDA"]);
+        assert.deepEqual((detail.holdingSplits as { unadjusted?: unknown[] }).unadjusted, [
+            { symbol: "BRK.B", executionDate: "2026-09-10" },
+            { symbol: "NVDA", executionDate: "2026-09-15" },
+        ]);
     });
 
     test("a failed holdings check is reported, and prices are still stored", async () => {

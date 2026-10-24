@@ -76,8 +76,12 @@ export function combineSameDaySplits(
 
 export interface HoldingSplitOutcome {
     adjusted: Array<{ symbol: string; executionDate: string; ratio: string; positions: number }>;
-    /** Stocks with a split that couldn't be applied safely (no ratio, or ambiguous same-day actions). */
-    unadjusted: string[];
+    /**
+     * Splits that couldn't be applied safely (no ratio, or ambiguous same-day
+     * actions): positions in the stock last updated before the split are
+     * still on the old share scale (valuation snapshots wait for them).
+     */
+    unadjusted: Array<{ symbol: string; executionDate: string }>;
 }
 
 /**
@@ -102,7 +106,7 @@ export async function reconcileHoldingSplits(
         const dayEvents = byDay.get(key)!;
         const split = combineSameDaySplits(dayEvents);
         if (!split) {
-            if (!outcome.unadjusted.includes(dayEvents[0].symbol)) outcome.unadjusted.push(dayEvents[0].symbol);
+            outcome.unadjusted.push({ symbol: dayEvents[0].symbol, executionDate: dayEvents[0].executionDate });
             continue;
         }
         const positions = await adjust(split);
