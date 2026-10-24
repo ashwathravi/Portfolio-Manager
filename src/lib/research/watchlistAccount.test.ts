@@ -333,7 +333,7 @@ describe('createWatchlistWriter', () => {
         // The Codex finding on PR #147: a write still queued at sign-out
         // was sent after the session had gone, and refused.
         const sent = deferred();
-        const writer = createWatchlistWriter({ send: () => sent.promise, onSaved: () => {}, onFailed: () => {} });
+        const writer = createWatchlistWriter({ send: () => sent.promise, onSaved: () => {}, onFailed: () => {}, register: true });
         writer.write('w-nvda-a', { kind: 'put', item: NVDA });
         let flushed = false;
         const flushing = flushWatchlistWrites(1000).then(() => { flushed = true; });
@@ -344,11 +344,27 @@ describe('createWatchlistWriter', () => {
         assert.equal(flushed, true);
 
         // A write that never finishes doesn't hold sign-out up.
-        const stuck = createWatchlistWriter({ send: () => new Promise<void>(() => {}), onSaved: () => {}, onFailed: () => {} });
+        const slow = deferred();
+        const stuck = createWatchlistWriter({ send: () => slow.promise, onSaved: () => {}, onFailed: () => {}, register: true });
         stuck.write('w-amd-b', { kind: 'put', item: AMD });
         const started = Date.now();
         await flushWatchlistWrites(50);
         assert.ok(Date.now() - started < 1000);
+        // Done, so it doesn't hold up later flushes.
+        slow.resolve();
+        await stuck.idle();
+    });
+
+    test("regression: writers made on the server aren't kept for sign-out", async () => {
+        // The Codex finding on PR #147: every server render made a writer,
+        // and the sign-out registry kept each one (and its query client).
+        assert.equal(typeof window, 'undefined');
+        const neverDone = createWatchlistWriter({ send: () => new Promise<void>(() => {}), onSaved: () => {}, onFailed: () => {} });
+        neverDone.write('w-nvda-a', { kind: 'put', item: NVDA });
+        // Not registered, so the flush doesn't wait on it: it returns before its timeout.
+        const started = Date.now();
+        await flushWatchlistWrites(5_000);
+        assert.ok(Date.now() - started < 1_000);
     });
 
     test('a failed write is dropped and reported; a newer one is still sent', async () => {

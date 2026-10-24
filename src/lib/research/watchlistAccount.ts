@@ -184,11 +184,16 @@ export function createWatchlistWriter({
     onSaved,
     onFailed,
     session = newWriteSession(),
+    // Only the browser's writers wait for sign-out. On the server a writer
+    // is made for every render, and the registry would keep each one (and
+    // its request's query client) forever.
+    register = typeof window !== 'undefined',
 }: {
     send: (id: string, write: WatchWrite, order: WatchWriteOrder) => Promise<void>;
     onSaved: (id: string, write: WatchWrite) => void;
     onFailed: (id: string, write: WatchWrite, error: unknown) => void;
     session?: string;
+    register?: boolean;
 }): WatchlistWriter {
     const pending = new Map<string, WatchWrite>();
     // Each write's place in this page's order, numbered as it is made.
@@ -267,7 +272,7 @@ export function createWatchlistWriter({
             return () => listeners.delete(listener);
         },
     };
-    writers.add(writer);
+    if (register) writers.add(writer);
     return writer;
 }
 
