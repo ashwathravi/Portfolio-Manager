@@ -20,7 +20,8 @@ export const watchItemSchema = z.object({
     notes: z.string().max(WATCH_ITEM_LIMITS.notes, 'notes must be at most 5000 characters'),
     targetEntry: z.number().positive('targetEntry must be a positive price').finite().nullable(),
     addedAt: z.iso.date({ message: 'addedAt must be a date (YYYY-MM-DD)' }),
-    // An example the user removed, kept so it isn't shown again.
+    // Removed: an example, kept so it isn't shown again, or the user's own,
+    // kept (with its text cleared) so a late save can't bring it back.
     dismissed: z.boolean().default(false),
 }).strict();
 
@@ -37,16 +38,22 @@ export const watchWriteOrderSchema = z.object({
 
 export type WatchWriteOrder = z.infer<typeof watchWriteOrderSchema>;
 
-/** PUT /api/research/watchlist/[id]: the item, and the order of the write. */
+/**
+ * PUT /api/research/watchlist/[id]: the item, and the order of the write.
+ * Removing an item is a PUT with `dismissed: true`, so a removal is ordered
+ * like any other write.
+ */
 export const watchItemPutSchema = z.object({
     item: watchItemSchema,
     order: watchWriteOrderSchema,
 }).strict();
 
-/** DELETE /api/research/watchlist/[id]: the order of the write. */
-export const watchItemDeleteSchema = z.object({
-    order: watchWriteOrderSchema,
-}).strict();
+/**
+ * The PUT route's body limit: room for the largest item the schema allows,
+ * with every character of its text JSON-escaped (6 bytes each), and still
+ * under browsers' 64 KiB keepalive limit.
+ */
+export const WATCH_ITEM_PUT_MAX_BYTES = 48 * 1024;
 
 export const watchlistImportSchema = z.object({
     items: z.array(watchItemSchema).max(WATCHLIST_IMPORT_MAX_ITEMS, 'at most 500 items'),

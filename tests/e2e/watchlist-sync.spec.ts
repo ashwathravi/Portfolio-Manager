@@ -129,8 +129,6 @@ test.describe('Watchlist in the account', () => {
 
         const unordered = await page.request.put(`/api/research/watchlist/${item.id}`, { data: { item } });
         expect(unordered.status()).toBe(400);
-        const unorderedDelete = await page.request.delete(`/api/research/watchlist/${item.id}`);
-        expect(unorderedDelete.status()).toBe(400);
 
         const tooMany = await page.request.post('/api/research/watchlist/import', {
             data: { items: Array.from({ length: 501 }, (_, i) => ({ ...item, id: `w-${i}`, ticker: 'AMD' })) },
@@ -150,7 +148,6 @@ test.describe('Watchlist in the account', () => {
         });
         expect((await anonymous.get('/api/research/watchlist')).status()).toBe(401);
         expect((await anonymous.put(`/api/research/watchlist/${item.id}`, { data: { item, order } })).status()).toBe(401);
-        expect((await anonymous.delete(`/api/research/watchlist/${item.id}`, { data: { order } })).status()).toBe(401);
         expect((await anonymous.post('/api/research/watchlist/import', { data: { items: [] } })).status()).toBe(401);
         await anonymous.dispose();
     });
@@ -164,21 +161,50 @@ test.describe('Watchlist in the account', () => {
             id: 'w-amd-e2e', ticker: 'AMD', companyName: '', reason: '', notes: 'newer', targetEntry: null, addedAt: '2026-10-23', dismissed: false,
         };
         const session = 'e2e-order-test';
-        const put = (notes: string, seq: number) =>
-            page.request.put(`/api/research/watchlist/${item.id}`, { data: { item: { ...item, notes }, order: { session, seq } } });
+        const put = (notes: string, seq: number, dismissed = false) =>
+            page.request.put(`/api/research/watchlist/${item.id}`, { data: { item: { ...item, notes, dismissed }, order: { session, seq } } });
+        const stored = async () => (await (await page.request.get('/api/research/watchlist')).json()).data;
 
         expect((await put('newer', 2)).status()).toBe(204);
         // The older one lands second: accepted, but ignored.
         expect((await put('older', 1)).status()).toBe(204);
-        // A delete made before the last save is ignored too.
-        expect((await page.request.delete(`/api/research/watchlist/${item.id}`, { data: { order: { session, seq: 1 } } })).status()).toBe(204);
-        expect((await (await page.request.get('/api/research/watchlist')).json()).data.items).toEqual([item]);
+        // A removal made before the last save is ignored too.
+        expect((await put('newer', 1, true)).status()).toBe(204);
+        expect((await stored()).items).toEqual([item]);
 
         // Another page's write isn't held to this page's count.
         expect((await page.request.put(`/api/research/watchlist/${item.id}`, {
             data: { item: { ...item, notes: 'elsewhere' }, order: { session: 'e2e-other-page', seq: 1 } },
         })).status()).toBe(204);
-        expect((await (await page.request.get('/api/research/watchlist')).json()).data.items[0].notes).toBe('elsewhere');
+        expect((await stored()).items[0].notes).toBe('elsewhere');
+    });
+
+    test("regression: a removal that lands first isn't undone by the older save", async ({ context, page }) => {
+        // The Codex finding on PR #147: a DELETE that landed before the
+        // add it followed left nothing to compare with, and the add then
+        // put the item back.
+        await signInAsFreshUser(context);
+        await gotoAppPage(page, '/research?tab=watchlist');
+        const item = {
+            id: 'w-tsla-e2e', ticker: 'TSLA', companyName: 'Tesla', reason: 'Robotaxi', notes: 'private', targetEntry: 200, addedAt: '2026-10-23', dismissed: false,
+        };
+        const order = (seq: number) => ({ session: 'e2e-removal-test', seq });
+
+        // Remove (2) arrives before add (1).
+        expect((await page.request.put(`/api/research/watchlist/${item.id}`, { data: { item: { ...item, dismissed: true }, order: order(2) } })).status()).toBe(204);
+        expect((await page.request.put(`/api/research/watchlist/${item.id}`, { data: { item, order: order(1) } })).status()).toBe(204);
+        const data = (await (await page.request.get('/api/research/watchlist')).json()).data;
+        expect(data.items).toEqual([]);
+        expect(data.dismissed).toEqual([item.id]);
+
+        // There is no DELETE: removing is a save.
+        expect([401, 405]).toContain((await page.request.delete(`/api/research/watchlist/${item.id}`)).status());
+
+        // And the same ticker can be added again under a new id.
+        expect((await page.request.put('/api/research/watchlist/w-tsla-again', {
+            data: { item: { ...item, id: 'w-tsla-again' }, order: order(3) },
+        })).status()).toBe(204);
+        expect((await (await page.request.get('/api/research/watchlist')).json()).data.items.map((i: { id: string }) => i.id)).toEqual(['w-tsla-again']);
     });
 
     test('regression: changes wait until the account list has loaded', async ({ context, page }) => {

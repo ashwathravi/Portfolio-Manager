@@ -1,7 +1,7 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { watchItemDeleteSchema, watchItemPutSchema, watchItemSchema, watchlistImportSchema } from './watchlist';
+import { WATCH_ITEM_PUT_MAX_BYTES, watchItemPutSchema, watchItemSchema, watchlistImportSchema } from './watchlist';
 
 const ITEM = {
     id: 'w-nvda-mgx2k1',
@@ -108,13 +108,36 @@ describe('watchlistImportSchema', () => {
 describe('write order', () => {
     const order = { session: '6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b', seq: 1 };
 
-    test('a PUT carries the item and the order; a DELETE only the order', () => {
+    test('a PUT carries the item and the order', () => {
         assert.equal(watchItemPutSchema.safeParse({ item: ITEM, order }).success, true);
-        assert.equal(watchItemDeleteSchema.safeParse({ order }).success, true);
+        assert.equal(watchItemPutSchema.safeParse({ item: { ...ITEM, dismissed: true }, order }).success, true);
         assert.equal(watchItemPutSchema.safeParse({ item: ITEM }).success, false);
         assert.equal(watchItemPutSchema.safeParse(ITEM).success, false);
-        assert.equal(watchItemDeleteSchema.safeParse({}).success, false);
-        assert.equal(watchItemDeleteSchema.safeParse({ order, item: ITEM }).success, false);
+        assert.equal(watchItemPutSchema.safeParse({ item: ITEM, order, extra: 1 }).success, false);
+    });
+
+    test('regression: the largest item the schema allows fits the PUT body limit', () => {
+        // The Codex finding on PR #147: long non-ASCII text passed the
+        // schema but not the old 16 KiB limit, so saving it failed.
+        const escaped = (n: number) => '\u0001'.repeat(n); // 6 bytes each once escaped
+        const item = {
+            ...ITEM,
+            id: 'a'.repeat(64),
+            ticker: 'ABCDEFGHIJ',
+            companyName: escaped(200),
+            reason: escaped(500),
+            notes: escaped(5000),
+            targetEntry: Number.MAX_VALUE,
+        };
+        const body = { item, order: { session: 'a'.repeat(64), seq: Number.MAX_SAFE_INTEGER } };
+        assert.equal(watchItemPutSchema.safeParse(body).success, true);
+        const bytes = new TextEncoder().encode(JSON.stringify(body)).length;
+        assert.ok(bytes <= WATCH_ITEM_PUT_MAX_BYTES, `${bytes} bytes`);
+        assert.ok(WATCH_ITEM_PUT_MAX_BYTES < 64 * 1024);
+        // And unescaped text at UTF-8's widest per counted character.
+        const wide = { ...body, item: { ...item, companyName: '株'.repeat(200), reason: '株'.repeat(500), notes: '😀'.repeat(2500) } };
+        assert.equal(watchItemPutSchema.safeParse(wide).success, true);
+        assert.ok(new TextEncoder().encode(JSON.stringify(wide)).length <= WATCH_ITEM_PUT_MAX_BYTES);
     });
 
     test('the session is a page ID and seq a whole number from 1', () => {

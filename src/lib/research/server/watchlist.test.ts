@@ -6,7 +6,6 @@ import type { WatchItemInput } from "@/lib/validators/watchlist";
 
 import {
     DuplicateTickerError,
-    buildDeleteWatchItemQuery,
     buildImportWatchlistQuery,
     buildListWatchlistQuery,
     buildSaveWatchItemQuery,
@@ -61,10 +60,17 @@ describe("watchlist queries", () => {
         assert.match(sql, /do update set .* where \("watchlist_items"\."write_session" is distinct from \$\d+ or "watchlist_items"\."write_seq" < \$\d+\)$/i);
     });
 
-    test("delete removes the user's row with that id, unless the same page wrote it later", () => {
-        const { sql, params } = buildDeleteWatchItemQuery(USER, "w-coin", ORDER).toSQL();
-        assert.match(sql, /delete from "watchlist_items" where \("watchlist_items"\."user_id" = \$1 and "watchlist_items"\."id" = \$2 and \("watchlist_items"\."write_session" is distinct from \$3 or "watchlist_items"\."write_seq" < \$4\)\)/i);
-        assert.deepEqual(params, [USER, "w-coin", ORDER.session, ORDER.seq]);
+    test("regression: a removal keeps the row, its text cleared, so a late save can't bring it back", () => {
+        // The Codex finding on PR #147: a DELETE that landed first left no
+        // row for the order check, and the older PUT inserted it again.
+        const removed = { ...ITEM, dismissed: true };
+        const { sql, params } = buildSaveWatchItemQuery(USER, removed, ORDER, NOW).toSQL();
+        assert.match(sql, /^insert into "watchlist_items"/i);
+        assert.match(sql, /where \("watchlist_items"\."write_session" is distinct from \$\d+ or "watchlist_items"\."write_seq" < \$\d+\)$/i);
+        assert.ok(params.includes(true));
+        assert.ok(params.includes(ITEM.ticker));
+        for (const text of [ITEM.companyName, ITEM.reason]) assert.ok(!params.includes(text), text);
+        assert.ok(!params.includes(ITEM.targetEntry));
     });
 
     test("import keeps the browser's order and leaves rows the user already has", () => {

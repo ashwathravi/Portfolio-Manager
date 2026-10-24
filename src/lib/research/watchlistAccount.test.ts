@@ -67,7 +67,7 @@ describe('mergeAccountWatchlist', () => {
             ['w-intc-c', { kind: 'put', item: input('w-intc-c', 'INTC') }],
             ['w-amd-b', { kind: 'put', item: { ...AMD, notes: 'edited' } }],
             ['w-tsla-d', { kind: 'put', item: input('w-tsla-d', 'TSLA') }],
-            ['w-nvda-a', { kind: 'delete', ticker: 'NVDA' }],
+            ['w-nvda-a', { kind: 'put', item: { ...NVDA, dismissed: true } }],
             ['w-coin', { kind: 'put', item: input('w-coin', 'COIN', { dismissed: true }) }],
         ]);
         const merged = mergeAccountWatchlist({ items: [NVDA, AMD], dismissed: [] }, pending, EXAMPLES);
@@ -92,8 +92,8 @@ describe('applyWatchWrite', () => {
         assert.deepEqual(edited.items.map((i) => [i.id, i.notes]), [['w-nvda-a', 'x'], ['w-amd-b', '']]);
     });
 
-    test('a delete removes the row; a dismissal moves it to dismissed; a save un-dismisses', () => {
-        assert.deepEqual(applyWatchWrite(stored, 'w-amd-b', { kind: 'delete', ticker: 'AMD' }), { items: [NVDA], dismissed: ['w-coin'] });
+    test("a removal moves the row to dismissed, the user's own or an example; a save un-dismisses", () => {
+        assert.deepEqual(applyWatchWrite(stored, 'w-amd-b', { kind: 'put', item: { ...AMD, dismissed: true } }), { items: [NVDA], dismissed: ['w-coin', 'w-amd-b'] });
         assert.deepEqual(
             applyWatchWrite(stored, 'w-pltr', { kind: 'put', item: input('w-pltr', 'PLTR', { dismissed: true }) }),
             { items: [NVDA, AMD], dismissed: ['w-coin', 'w-pltr'] },
@@ -203,7 +203,7 @@ describe('createWatchlistWriter', () => {
         writer.write('w-nvda-a', { kind: 'put', item: { ...NVDA, notes: '1' } });
         writer.write('w-nvda-a', { kind: 'put', item: { ...NVDA, notes: '2' } });
         writer.write('w-nvda-a', { kind: 'put', item: { ...NVDA, notes: '3' } });
-        writer.write('w-amd-b', { kind: 'delete', ticker: 'AMD' });
+        writer.write('w-amd-b', { kind: 'put', item: { ...AMD, notes: 'AMD', dismissed: true } });
         // Another item's write doesn't wait for this one.
         assert.deepEqual(calls.map((c) => c.id), ['w-nvda-a', 'w-amd-b']);
 
@@ -212,13 +212,13 @@ describe('createWatchlistWriter', () => {
         // The first save is out of date, so nothing is reported yet.
         assert.equal(saved.length, 0);
         assert.equal(calls.length, 3);
-        assert.equal(calls[2].write.kind === 'put' && calls[2].write.item.notes, '3');
+        assert.equal(calls[2].write.item.notes, '3');
         assert.equal(writer.pending().get('w-nvda-a')?.kind, 'put');
 
         calls[2].done.resolve();
         calls[1].done.resolve();
         await flush();
-        assert.deepEqual(saved.map((w) => (w.kind === 'put' ? w.item.notes : w.ticker)), ['3', 'AMD']);
+        assert.deepEqual(saved.map((w) => w.item.notes), ['3', 'AMD']);
         assert.equal(writer.pending().size, 0);
     });
 
@@ -227,7 +227,7 @@ describe('createWatchlistWriter', () => {
         const first = deferred();
         const writer = createWatchlistWriter({
             send: (_id, write) => {
-                sent.push(write.kind === 'put' ? write.item.notes : write.ticker);
+                sent.push(write.item.notes);
                 return sent.length === 1 ? first.promise : Promise.resolve();
             },
             onSaved: () => {},
@@ -235,12 +235,12 @@ describe('createWatchlistWriter', () => {
         });
         writer.write('w-nvda-a', { kind: 'put', item: { ...NVDA, notes: 'target' } });
         writer.write('w-nvda-a', { kind: 'put', item: { ...NVDA, notes: 'target and notes' } });
-        writer.write('w-amd-b', { kind: 'delete', ticker: 'AMD' });
+        writer.write('w-amd-b', { kind: 'put', item: { ...AMD, notes: 'AMD', dismissed: true } });
         await flush();
         assert.deepEqual(sent, ['target', 'AMD']);
 
         writer.sendWaiting();
-        // Only the write that was waiting; the delete was already sent.
+        // Only the write that was waiting; the removal was already sent.
         assert.deepEqual(sent, ['target', 'AMD', 'target and notes']);
         first.resolve();
         await flush();
@@ -255,7 +255,7 @@ describe('createWatchlistWriter', () => {
         const writer = createWatchlistWriter({
             session: 'page-0001',
             send: (_id, write, order) => {
-                orders.push({ notes: write.kind === 'put' ? write.item.notes : write.ticker, ...order });
+                orders.push({ notes: write.item.notes, ...order });
                 return orders.length === 1 ? first.promise : Promise.resolve();
             },
             onSaved: () => {},
@@ -331,16 +331,17 @@ describe('requests', () => {
         await assert.rejects(fetchAccountWatchlist(down), (error: unknown) => error instanceof WatchlistRequestError && error.code === null);
     });
 
-    test('saves with PUT and deletes with DELETE, both keepalive and in order', async () => {
+    test('saves and removals are both a keepalive PUT, in order', async () => {
         const { calls, fetchImpl } = recorder([]);
+        const removed = input('w-nvda-a', 'NVDA', { dismissed: true });
         await sendWatchWrite('w-brk.b-1', { kind: 'put', item: input('w-brk.b-1', 'BRK.B') }, ORDER, fetchImpl);
-        await sendWatchWrite('w-nvda-a', { kind: 'delete', ticker: 'NVDA' }, { ...ORDER, seq: 4 }, fetchImpl);
+        await sendWatchWrite('w-nvda-a', { kind: 'put', item: removed }, { ...ORDER, seq: 4 }, fetchImpl);
         assert.deepEqual(calls.map((c) => [c.init.method, c.url, c.init.keepalive]), [
             ['PUT', '/api/research/watchlist/w-brk.b-1', true],
-            ['DELETE', '/api/research/watchlist/w-nvda-a', true],
+            ['PUT', '/api/research/watchlist/w-nvda-a', true],
         ]);
         assert.deepEqual(JSON.parse(String(calls[0].init.body)), { item: input('w-brk.b-1', 'BRK.B'), order: ORDER });
-        assert.deepEqual(JSON.parse(String(calls[1].init.body)), { order: { ...ORDER, seq: 4 } });
+        assert.deepEqual(JSON.parse(String(calls[1].init.body)), { item: removed, order: { ...ORDER, seq: 4 } });
         assert.deepEqual(calls[0].init.headers, { 'Content-Type': 'application/json' });
     });
 

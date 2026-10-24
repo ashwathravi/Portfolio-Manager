@@ -271,7 +271,6 @@ describe("API proxy security", () => {
             ["/api/research/watchlist", "GET"],
             ["/api/research/watchlist/import", "POST"],
             ["/api/research/watchlist/w-coin", "PUT"],
-            ["/api/research/watchlist/w-nvda-mgx2k1", "DELETE"],
             ["/api/alpha-radar/refresh", "POST"],
             ["/api/alpha-radar/filers", "POST"],
             ["/api/alpha-radar/filers/00000000-0000-4000-8000-000000000001", "PATCH"],
@@ -325,6 +324,8 @@ describe("API proxy security", () => {
             ["/api/research/watchlist/import", "GET"],
             ["/api/research/watchlist/w-coin", "GET"],
             ["/api/research/watchlist/w-coin/extra", "PUT"],
+            ["/api/research/watchlist/w-coin", "DELETE"],
+            ["/api/research/watchlist/import", "PUT"],
         ] as const) {
             const response = await handleVerifiedRequest(apiRequest({}, pathname, null, [], method));
             assert.equal(response.status, 401, `${method} ${pathname} was delegated`);

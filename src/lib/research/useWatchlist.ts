@@ -10,7 +10,6 @@ import { getBrowserStorage } from './storage';
 import {
     addToWatchlist,
     findWatchItem,
-    isExampleWatchId,
     loadWatchlist,
     removeFromWatchlist,
     saveWatchlist,
@@ -203,11 +202,11 @@ function writerFor(queryClient: QueryClient): WatchlistWriter {
 }
 
 function saveFailedMessage(write: WatchWrite, error: unknown): string {
-    const ticker = write.kind === 'put' ? write.item.ticker : write.ticker;
+    const ticker = write.item.ticker;
     if (error instanceof WatchlistRequestError && error.code === 'DUPLICATE_TICKER') {
         return `${ticker} is already on your watchlist.`;
     }
-    const action = write.kind === 'delete' || write.item.dismissed ? 'remove' : 'save';
+    const action = write.item.dismissed ? 'remove' : 'save';
     return `Couldn't ${action} ${ticker} on your watchlist. Try again.`;
 }
 
@@ -259,11 +258,8 @@ function useAccountWatchlist(enabled: boolean, key: string, examples: WatchItem[
 
     const remove = useCallback(
         (_next: WatchItem[], item: WatchItem) => {
-            if (!isExampleWatchId(item.id)) {
-                writer.write(item.id, { kind: 'delete', ticker: item.ticker });
-                return;
-            }
-            // Kept as dismissed, so the example isn't shown again.
+            // Saved as dismissed: an example isn't shown again, and the
+            // user's own can't be brought back by a save that lands late.
             const input = toWatchItemInput(item, { now: Date.now(), dismissed: true });
             if (input) writer.write(item.id, { kind: 'put', item: input });
         },

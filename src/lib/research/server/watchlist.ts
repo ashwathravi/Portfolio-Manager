@@ -1,9 +1,13 @@
 /**
  * The watchlist_items table (launch item i38). Every query is scoped to one
  * user's ID, which the API routes take from the session.
+ *
+ * Rows are never deleted on request: a removed item is kept as `dismissed`
+ * with its text cleared, so a save from the same page that arrives after the
+ * removal can't bring it back. They go when the account does.
  */
 
-import { and, asc, desc, eq, or, sql } from "drizzle-orm";
+import { asc, desc, eq, or, sql } from "drizzle-orm";
 
 import { db } from "@/db";
 import { watchlistItems } from "@/db/schema";
@@ -46,15 +50,17 @@ function toItem(row: typeof watchlistItems.$inferSelect): WatchItemInput {
     };
 }
 
+/** The row for `item`. A removed item keeps only what identifies it: its text is cleared. */
 function toRow(userId: string, item: WatchItemInput, now: Date, order: WatchWriteOrder | null) {
+    const removed = item.dismissed;
     return {
         userId,
         id: item.id,
         ticker: item.ticker,
-        companyName: item.companyName,
-        reason: item.reason,
-        notes: item.notes,
-        targetEntry: item.targetEntry,
+        companyName: removed ? "" : item.companyName,
+        reason: removed ? "" : item.reason,
+        notes: removed ? "" : item.notes,
+        targetEntry: removed ? null : item.targetEntry,
         addedAt: item.addedAt,
         dismissed: item.dismissed,
         writeSession: order?.session ?? null,
@@ -117,17 +123,6 @@ export async function saveWatchItem(
         if (isUniqueViolation(error, "watchlist_items_user_ticker_idx")) throw new DuplicateTickerError(item.ticker);
         throw error;
     }
-}
-
-/** Removes the user's row with that ID, unless it has a later write from the same page. */
-export function buildDeleteWatchItemQuery(userId: string, id: string, order: WatchWriteOrder, database: Database = db) {
-    return database
-        .delete(watchlistItems)
-        .where(and(eq(watchlistItems.userId, userId), eq(watchlistItems.id, id), isNewerThanRow(order)));
-}
-
-export async function deleteWatchItem(userId: string, id: string, order: WatchWriteOrder, database: Database = db): Promise<void> {
-    await buildDeleteWatchItemQuery(userId, id, order, database);
 }
 
 /**

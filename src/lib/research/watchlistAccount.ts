@@ -15,7 +15,8 @@ import { isExampleWatchId, isoDay, loadWatchlist, type WatchItem } from './watch
  *
  * - The list shown is the account's rows, with this page's unsaved writes
  *   on top, then the example rows the user hasn't adopted or removed. A
- *   removed example is saved as `dismissed`, so it stays gone.
+ *   removed item is saved as `dismissed`, so a removed example stays gone
+ *   and a late save can't bring the user's own back.
  * - Writes show at once and are sent one at a time per item, latest wins; a
  *   write that fails is undone and the list is read again. Each carries this
  *   page's session and its count of writes, so the server keeps the newest
@@ -26,7 +27,8 @@ import { isExampleWatchId, isoDay, loadWatchlist, type WatchItem } from './watch
 
 export type AccountWatchlist = StoredWatchlist;
 
-export type WatchWrite = { kind: 'put'; item: WatchItemInput } | { kind: 'delete'; ticker: string };
+/** One save. Removing an item saves it with `dismissed: true`. */
+export type WatchWrite = { kind: 'put'; item: WatchItemInput };
 
 function toWatchItem(input: WatchItemInput): WatchItem {
     return {
@@ -51,9 +53,9 @@ export function mergeAccountWatchlist(
     const dismissed = new Set(stored?.dismissed ?? []);
     const added: WatchItemInput[] = [];
     for (const [id, write] of pending) {
-        if (write.kind === 'delete' || write.item.dismissed) {
+        if (write.item.dismissed) {
             rows.delete(id);
-            if (write.kind === 'put') dismissed.add(id);
+            dismissed.add(id);
             continue;
         }
         dismissed.delete(id);
@@ -77,7 +79,6 @@ export function mergeAccountWatchlist(
 export function applyWatchWrite(stored: AccountWatchlist | undefined, id: string, write: WatchWrite): AccountWatchlist {
     const items = (stored?.items ?? []).filter((item) => item.id !== id);
     const dismissed = (stored?.dismissed ?? []).filter((d) => d !== id);
-    if (write.kind === 'delete') return { items, dismissed };
     if (write.item.dismissed) return { items, dismissed: [...dismissed, id] };
     const index = stored?.items.findIndex((item) => item.id === id) ?? -1;
     if (index < 0) return { items: [write.item, ...items], dismissed };
@@ -259,12 +260,13 @@ export async function fetchAccountWatchlist(fetchImpl: Fetch = fetch): Promise<A
     };
 }
 
-/** Saves or deletes one item; keepalive, so a write made just before leaving the page still arrives. */
+/** Saves one item; keepalive, so a write made just before leaving the page still arrives. */
 export async function sendWatchWrite(id: string, write: WatchWrite, order: WatchWriteOrder, fetchImpl: Fetch = fetch): Promise<void> {
-    const path = `/api/research/watchlist/${encodeURIComponent(id)}`;
-    await request(fetchImpl, path, write.kind === 'delete'
-        ? { method: 'DELETE', body: JSON.stringify({ order }), keepalive: true }
-        : { method: 'PUT', body: JSON.stringify({ item: write.item, order }), keepalive: true });
+    await request(fetchImpl, `/api/research/watchlist/${encodeURIComponent(id)}`, {
+        method: 'PUT',
+        body: JSON.stringify({ item: write.item, order }),
+        keepalive: true,
+    });
 }
 
 /** A page ID for write order: a UUID, or random hex where the browser has none. */
