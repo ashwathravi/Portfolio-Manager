@@ -55,6 +55,16 @@ export const watchItemPutSchema = z.object({
  */
 export const WATCH_ITEM_PUT_MAX_BYTES = 48 * 1024;
 
+/**
+ * POST /api/research/watchlist/import. A list too big for one request comes
+ * in batches: `first` is the position of this batch's first item in the
+ * whole list and `startedAt` (ms) when the move began, so every batch is
+ * ordered as one list.
+ */
 export const watchlistImportSchema = z.object({
     items: z.array(watchItemSchema).max(WATCHLIST_IMPORT_MAX_ITEMS, 'at most 500 items'),
+    first: z.number().int('first must be a whole number').min(0, 'first must be 0 or more').max(1_000_000, 'first is too large').default(0),
+    startedAt: z.number().int('startedAt must be a time in milliseconds').positive('startedAt must be a time in milliseconds').optional(),
 }).strict();
+
+export type WatchlistImport = z.infer<typeof watchlistImportSchema>;

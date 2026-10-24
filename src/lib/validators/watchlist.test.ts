@@ -94,6 +94,17 @@ describe('watchlistImportSchema', () => {
         assert.equal(watchlistImportSchema.safeParse({ items }).success, true);
     });
 
+    test('a batch says where it starts in the list and when the move began', () => {
+        assert.equal(watchlistImportSchema.parse({ items: [] }).first, 0);
+        assert.deepEqual(watchlistImportSchema.parse({ items: [], first: 500, startedAt: 1_761_220_000_000 }), { items: [], first: 500, startedAt: 1_761_220_000_000 });
+        const message = (input: unknown) => watchlistImportSchema.safeParse(input).error?.issues[0]?.message;
+        assert.equal(message({ items: [], first: -1 }), 'first must be 0 or more');
+        assert.equal(message({ items: [], first: 1.5 }), 'first must be a whole number');
+        assert.equal(message({ items: [], first: 1_000_001 }), 'first is too large');
+        assert.equal(message({ items: [], startedAt: 0 }), 'startedAt must be a time in milliseconds');
+        assert.equal(message({ items: [], startedAt: '2026-10-23' }) !== undefined, true);
+    });
+
     test('refuses more than 500 items, a bad item, or extra fields', () => {
         const items = Array.from({ length: 501 }, (_, i) => ({ ...ITEM, id: `w-${i}` }));
         const tooMany = watchlistImportSchema.safeParse({ items });

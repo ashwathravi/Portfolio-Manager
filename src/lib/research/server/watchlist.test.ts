@@ -75,7 +75,7 @@ describe("watchlist queries", () => {
 
     test("import keeps the browser's order and leaves rows the user already has", () => {
         const second = { ...ITEM, id: "w-amd-mgx2k0", ticker: "AMD" };
-        const { sql, params } = buildImportWatchlistQuery(USER, [ITEM, second], NOW).toSQL();
+        const { sql, params } = buildImportWatchlistQuery(USER, { items: [ITEM, second] }, NOW).toSQL();
         assert.match(sql, /on conflict do nothing$/i);
         // No page wrote these yet.
         assert.match(sql, /"write_session", "write_seq"/);
@@ -83,6 +83,18 @@ describe("watchlist queries", () => {
         assert.ok(params.includes(NOW.toISOString()));
         assert.ok(params.includes(new Date(NOW.getTime() - 1).toISOString()));
         assert.ok(params.indexOf(ITEM.id) < params.indexOf(second.id));
+    });
+
+    test("regression: a later batch continues the first one's order", () => {
+        // The Codex finding on PR #147: each batch counted from its own
+        // arrival, so later (older) items sorted above the newest ones.
+        const startedAt = NOW.getTime() - 5_000;
+        const later = new Date(NOW.getTime() + 2_000);
+        const { params } = buildImportWatchlistQuery(USER, { items: [ITEM], first: 500, startedAt }, later).toSQL();
+        assert.ok(params.includes(new Date(startedAt - 500).toISOString()));
+        // A start time in the future counts as now.
+        const ahead = buildImportWatchlistQuery(USER, { items: [ITEM], startedAt: NOW.getTime() + 60_000 }, NOW).toSQL();
+        assert.ok(ahead.params.includes(NOW.toISOString()));
     });
 });
 
@@ -126,6 +138,6 @@ describe("saveWatchItem", () => {
 describe("importWatchlist", () => {
     test("writes nothing for an empty list", async () => {
         const database = { insert: () => assert.fail("nothing to insert") } as unknown as typeof db;
-        await importWatchlist(USER, [], { database });
+        await importWatchlist(USER, { items: [] }, { database });
     });
 });

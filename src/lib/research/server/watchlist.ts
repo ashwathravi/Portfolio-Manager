@@ -130,21 +130,31 @@ export async function saveWatchItem(
  * already has (by ID, or a live row with the same ticker) are left as they
  * are, so it is safe to run again, from this browser or another.
  */
-export function buildImportWatchlistQuery(userId: string, items: readonly WatchItemInput[], now: Date, database: Database = db) {
+/**
+ * Rows are created a millisecond apart, counting from when the move began
+ * and the batch's place in the list, so the list keeps the browser's order
+ * (newest first) across batches. A start in the future counts as now.
+ */
+export function buildImportWatchlistQuery(
+    userId: string,
+    { items, first = 0, startedAt }: { items: readonly WatchItemInput[]; first?: number; startedAt?: number },
+    now: Date,
+    database: Database = db,
+) {
+    const base = Math.min(startedAt ?? now.getTime(), now.getTime());
     return database
         .insert(watchlistItems)
-        // A millisecond apart, so the list keeps the browser's order (newest first).
-        .values(items.map((item, index) => ({ ...toRow(userId, item, now, null), createdAt: new Date(now.getTime() - index) })))
+        .values(items.map((item, index) => ({ ...toRow(userId, item, now, null), createdAt: new Date(base - first - index) })))
         .onConflictDoNothing();
 }
 
 export async function importWatchlist(
     userId: string,
-    items: readonly WatchItemInput[],
+    batch: { items: readonly WatchItemInput[]; first?: number; startedAt?: number },
     { now = new Date(), database = db }: { now?: Date; database?: Database } = {},
 ): Promise<void> {
-    if (items.length === 0) return;
-    await buildImportWatchlistQuery(userId, items, now, database);
+    if (batch.items.length === 0) return;
+    await buildImportWatchlistQuery(userId, batch, now, database);
 }
 
 function isUniqueViolation(error: unknown, constraint: string): boolean {

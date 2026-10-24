@@ -5,7 +5,8 @@
  * (launch item i38). Items the account already has are left as they are,
  * so it is safe to send again.
  *
- * Body: { items: WatchItem[] }
+ * Body: { items: WatchItem[], first?: number, startedAt?: number } (a big list
+ * comes in batches; see watchlistImportSchema)
  * Responses: 204; 400 INVALID_WATCHLIST_IMPORT
  */
 
@@ -37,7 +38,7 @@ export async function POST(request: Request) {
     }
 
     try {
-        await importWatchlist(auth.context.userId, parsed.data.items);
+        await importWatchlist(auth.context.userId, parsed.data);
         return new NextResponse(null, { status: 204 });
     } catch (err) {
         return internalServerError(err, 'Unable to import the watchlist.', 'WATCHLIST_IMPORT_FAILED');

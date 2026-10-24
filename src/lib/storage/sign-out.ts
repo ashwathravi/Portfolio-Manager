@@ -18,6 +18,7 @@
  */
 
 import { ASK_STORAGE_KEY } from "@/lib/ask/storage";
+import { flushWatchlistWrites } from "@/lib/research/watchlistAccount";
 import { flushSettings, haltSettingsSync, removeBrowserCopy } from "@/lib/settings/sync";
 
 import { FORMERLY_SHARED_KEYS, adoptFormerlySharedData } from "./shared-keys";
@@ -47,13 +48,16 @@ export function clearBrowserDataOnSignOut(
 }
 
 /**
- * Saves what's unsaved (for up to 3 seconds), stops settings sync so a late
- * answer can't write the copy back, then clears this browser; call before
- * signOut().
+ * Saves what's unsaved, settings and watchlist edits both (for up to 3
+ * seconds, while the session still lets them through), stops settings sync
+ * so a late answer can't write the copy back, then clears this browser; call
+ * before signOut().
  */
-export async function prepareForSignOut(): Promise<void> {
+export async function prepareForSignOut(
+    flushes: ReadonlyArray<(timeoutMs: number) => Promise<void>> = [flushSettings, flushWatchlistWrites],
+): Promise<void> {
     try {
-        await flushSettings(3000);
+        await Promise.all(flushes.map((flush) => flush(3000)));
     } finally {
         haltSettingsSync();
         clearBrowserDataOnSignOut();

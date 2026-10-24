@@ -10,11 +10,14 @@ import {
     batchBySize,
     createWatchlistWriter,
     fetchAccountWatchlist,
+    flushWatchlistWrites,
     importAccountWatchlist,
     importBrowserWatchlist,
     mergeAccountWatchlist,
+    saveWrite,
     sendWatchWrite,
     toWatchItemInput,
+    watchlistFullCopyKey,
     watchlistImportItems,
     type AccountWatchlist,
     type WatchWrite,
@@ -108,6 +111,25 @@ describe('applyWatchWrite', () => {
     });
 });
 
+describe('saveWrite', () => {
+    test('saves an item under its own id', () => {
+        assert.deepEqual(saveWrite(AMD, NO_WRITES), { id: AMD.id, write: { kind: 'put', item: AMD } });
+    });
+
+    test("regression: re-adding a ticker whose removal is still being sent reuses the removed row's id", () => {
+        // The Codex finding on PR #147: the add, sent alongside the removal,
+        // could land first and be refused as a duplicate.
+        const pending = new Map<string, WatchWrite>([[AMD.id, { kind: 'put', item: { ...AMD, dismissed: true } }]]);
+        const readded = input('w-amd-new', 'AMD', { reason: 'back on the list' });
+        assert.deepEqual(saveWrite(readded, pending), { id: AMD.id, write: { kind: 'put', item: { ...readded, id: AMD.id } } });
+        // Not for another ticker, another removal, or a pending save that isn't one.
+        assert.equal(saveWrite(input('w-intc-x', 'INTC'), pending).id, 'w-intc-x');
+        assert.equal(saveWrite({ ...readded, dismissed: true }, pending).id, 'w-amd-new');
+        const live = new Map<string, WatchWrite>([[AMD.id, { kind: 'put', item: AMD }]]);
+        assert.equal(saveWrite(readded, live).id, 'w-amd-new');
+    });
+});
+
 describe('toWatchItemInput', () => {
     const item: WatchItem = { id: 'w-nvda-a', ticker: 'NVDA', companyName: ' NVIDIA ', reason: 'r', notes: 'n', targetEntry: 120, addedAt: '2026-10-20', sample: true };
 
@@ -141,21 +163,34 @@ describe('watchlistImportItems', () => {
             adopted,
             EXAMPLES[1],
         ];
-        const items = watchlistImportItems(local, EXAMPLES, NOW);
+        const { items, shortened } = watchlistImportItems(local, EXAMPLES, NOW);
         assert.deepEqual(items.map((i) => [i.id, i.dismissed]), [['w-nvda-a', false], ['w-coin', false], ['w-shop', true]]);
         assert.equal(items[1].notes, 'adopted');
+        assert.equal(shortened, false);
     });
 
     test('an emptied list dismisses every example; an untouched one sends nothing', () => {
-        assert.deepEqual(watchlistImportItems([], EXAMPLES, NOW).map((i) => i.id), ['w-coin', 'w-pltr', 'w-shop']);
-        assert.deepEqual(watchlistImportItems(EXAMPLES, EXAMPLES, NOW), []);
+        assert.deepEqual(watchlistImportItems([], EXAMPLES, NOW).items.map((i) => i.id), ['w-coin', 'w-pltr', 'w-shop']);
+        assert.deepEqual(watchlistImportItems(EXAMPLES, EXAMPLES, NOW), { items: [], shortened: false });
     });
 
     test('skips repeated ids and rows the API would refuse', () => {
         const nvda: WatchItem = { id: 'w-nvda-a', ticker: 'NVDA', companyName: '', reason: '', notes: '', targetEntry: null, addedAt: '2026-10-01' };
-        const items = watchlistImportItems([nvda, { ...nvda, notes: 'again' }, { ...nvda, id: 'BAD ID', ticker: 'AMD' }, ...EXAMPLES], EXAMPLES, NOW);
+        const { items, shortened } = watchlistImportItems([nvda, { ...nvda, notes: 'again' }, { ...nvda, id: 'BAD ID', ticker: 'AMD' }, ...EXAMPLES], EXAMPLES, NOW);
         assert.deepEqual(items.map((i) => i.id), ['w-nvda-a']);
         assert.equal(items[0].notes, '');
+        // The refused row is reported, so the browser keeps its copy.
+        assert.equal(shortened, true);
+    });
+
+    test('says when text was longer than the account keeps', () => {
+        const nvda: WatchItem = { id: 'w-nvda-a', ticker: 'NVDA', companyName: '', reason: '', notes: '', targetEntry: null, addedAt: '2026-10-01' };
+        for (const long of [{ reason: 'r'.repeat(501) }, { notes: 'n'.repeat(5001) }, { companyName: 'c'.repeat(201) }]) {
+            assert.equal(watchlistImportItems([{ ...nvda, ...long }, ...EXAMPLES], EXAMPLES, NOW).shortened, true, Object.keys(long)[0]);
+        }
+        // Spaces the account trims anyway don't count.
+        assert.equal(watchlistImportItems([{ ...nvda, reason: `  ${'r'.repeat(500)}  ` }, ...EXAMPLES], EXAMPLES, NOW).shortened, false);
+        assert.equal(watchlistImportItems([{ ...nvda, notes: 'n'.repeat(5000) }, ...EXAMPLES], EXAMPLES, NOW).shortened, false);
     });
 });
 
@@ -273,6 +308,49 @@ describe('createWatchlistWriter', () => {
         assert.ok(orders.every((o) => o.session === 'page-0001'));
     });
 
+    test('idle resolves once every write has been sent, saved or not', async () => {
+        const first = deferred();
+        const second = deferred();
+        const writer = createWatchlistWriter({
+            send: (id) => (id === 'w-nvda-a' ? first.promise : second.promise),
+            onSaved: () => {},
+            onFailed: () => {},
+        });
+        await writer.idle();
+        writer.write('w-nvda-a', { kind: 'put', item: NVDA });
+        writer.write('w-amd-b', { kind: 'put', item: AMD });
+        let idle = false;
+        void writer.idle().then(() => { idle = true; });
+        first.resolve();
+        await flush();
+        assert.equal(idle, false);
+        second.reject(new Error('offline'));
+        await flush();
+        assert.equal(idle, true);
+    });
+
+    test("regression: sign-out waits for this page's watchlist writes, for a while at most", async () => {
+        // The Codex finding on PR #147: a write still queued at sign-out
+        // was sent after the session had gone, and refused.
+        const sent = deferred();
+        const writer = createWatchlistWriter({ send: () => sent.promise, onSaved: () => {}, onFailed: () => {} });
+        writer.write('w-nvda-a', { kind: 'put', item: NVDA });
+        let flushed = false;
+        const flushing = flushWatchlistWrites(1000).then(() => { flushed = true; });
+        await flush();
+        assert.equal(flushed, false);
+        sent.resolve();
+        await flushing;
+        assert.equal(flushed, true);
+
+        // A write that never finishes doesn't hold sign-out up.
+        const stuck = createWatchlistWriter({ send: () => new Promise<void>(() => {}), onSaved: () => {}, onFailed: () => {} });
+        stuck.write('w-amd-b', { kind: 'put', item: AMD });
+        const started = Date.now();
+        await flushWatchlistWrites(50);
+        assert.ok(Date.now() - started < 1000);
+    });
+
     test('a failed write is dropped and reported; a newer one is still sent', async () => {
         const failures: unknown[] = [];
         const saved: string[] = [];
@@ -355,6 +433,23 @@ describe('requests', () => {
         assert.equal(calls.length, 1);
     });
 
+    test('regression: each batch says where it starts, so the server keeps one order', async () => {
+        // The Codex finding on PR #147: batches were ordered by when each
+        // arrived, so later (older) items sorted first.
+        const { calls, fetchImpl } = recorder([]);
+        const items = Array.from({ length: 100 }, (_, i) => input(`w-${i}`, 'NVDA', { notes: '株'.repeat(5000) }));
+        await importAccountWatchlist(items, fetchImpl, 1_761_220_000_000);
+        const bodies = calls.map((c) => JSON.parse(String(c.init.body)) as { items: unknown[]; first: number; startedAt: number });
+        assert.ok(bodies.length > 1);
+        let next = 0;
+        for (const body of bodies) {
+            assert.equal(body.first, next);
+            assert.equal(body.startedAt, 1_761_220_000_000);
+            next += body.items.length;
+        }
+        assert.equal(next, 100);
+    });
+
     test('regression: long non-ASCII notes are split into requests under the 1 MiB limit', async () => {
         // The Codex finding on PR #147: 100 rows of 5,000 CJK characters
         // came to about 1.5 MB in one request, refused every time.
@@ -370,7 +465,14 @@ describe('requests', () => {
 describe('importBrowserWatchlist', () => {
     function storageWith(key: string, items: unknown) {
         const map = new Map<string, string>([[key, JSON.stringify({ version: 1, items })]]);
-        return { map, storage: { getItem: (k: string) => map.get(k) ?? null, removeItem: (k: string) => void map.delete(k) } };
+        return {
+            map,
+            storage: {
+                getItem: (k: string) => map.get(k) ?? null,
+                setItem: (k: string, v: string) => void map.set(k, v),
+                removeItem: (k: string) => void map.delete(k),
+            },
+        };
     }
     const nvda: WatchItem = { id: 'w-nvda-a', ticker: 'NVDA', companyName: '', reason: '', notes: '', targetEntry: null, addedAt: '2026-10-01' };
 
@@ -387,8 +489,28 @@ describe('importBrowserWatchlist', () => {
             importBrowserWatchlist(key, { storage, examples: EXAMPLES, now: NOW, fetchImpl }),
             importBrowserWatchlist(key, { storage, examples: EXAMPLES, now: NOW, fetchImpl }),
         ]);
-        assert.deepEqual(bodies, [{ items: [toWatchItemInput(nvda, { now: NOW })] }]);
+        assert.equal(bodies.length, 1);
+        assert.deepEqual((bodies[0] as { items: unknown }).items, [toWatchItemInput(nvda, { now: NOW })]);
         assert.equal(map.has(key), false);
+        assert.equal(map.size, 0);
+    });
+
+    test('regression: text the account cut short stays in this browser, and the user is told once', async () => {
+        // The Codex finding on PR #147: the browser copy was removed after
+        // a shortened import, losing the rest of long notes.
+        const key = 'atlas:research:watchlist:user-5';
+        const long = { ...nvda, notes: 'n'.repeat(6000) };
+        const { map, storage } = storageWith(key, [long, ...EXAMPLES]);
+        const original = map.get(key);
+        let told = 0;
+        const fetchImpl = (async () => new Response(null, { status: 204 })) as unknown as typeof fetch;
+
+        await importBrowserWatchlist(key, { storage, examples: EXAMPLES, now: NOW, fetchImpl, onShortened: () => { told += 1; } });
+        await importBrowserWatchlist(key, { storage, examples: EXAMPLES, now: NOW, fetchImpl, onShortened: () => { told += 1; } });
+        assert.equal(told, 1);
+        assert.equal(map.has(key), false);
+        assert.equal(map.get(watchlistFullCopyKey(key)), original);
+        assert.equal(watchlistFullCopyKey(key), 'atlas:research:watchlist-full-copy:user-5');
     });
 
     test('keeps the copy when the send fails, and tries again next time', async () => {
@@ -409,7 +531,7 @@ describe('importBrowserWatchlist', () => {
 
     test('sends nothing when this browser kept no list', async () => {
         const fetchImpl = (async () => assert.fail('nothing to send')) as unknown as typeof fetch;
-        await importBrowserWatchlist('atlas:research:watchlist:user-3', { storage: { getItem: () => null, removeItem: () => {} }, examples: EXAMPLES, now: NOW, fetchImpl });
+        await importBrowserWatchlist('atlas:research:watchlist:user-3', { storage: { getItem: () => null, setItem: () => {}, removeItem: () => {} }, examples: EXAMPLES, now: NOW, fetchImpl });
         await importBrowserWatchlist('atlas:research:watchlist:user-4', { storage: null, examples: EXAMPLES, now: NOW, fetchImpl });
     });
 });

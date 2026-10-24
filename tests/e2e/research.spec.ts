@@ -366,6 +366,15 @@ test.describe('Research watchlist', () => {
         await expect(pane.getByLabel('Target entry ($)')).toHaveValue('70');
     });
 
+    test("regression: why and notes stop at what the account keeps", async ({ page }) => {
+        // The Codex finding on PR #147: longer text could be typed, then was
+        // cut short when saved.
+        await page.locator('.pm-research-list').getByRole('button', { name: /PLTR/ }).click();
+        const pane = page.locator('.pm-research-pane');
+        await expect(pane.getByLabel('Why it is on the list')).toHaveAttribute('maxlength', '500');
+        await expect(pane.getByRole('textbox', { name: 'Notes' })).toHaveAttribute('maxlength', '5000');
+    });
+
     test('adding a ticker that is only an example makes it yours (no Sample tag)', async ({ page }) => {
         const add = page.getByLabel('Add ticker to watchlist');
         await expect(async () => {

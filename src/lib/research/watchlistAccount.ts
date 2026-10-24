@@ -7,7 +7,7 @@ import {
 } from '@/lib/validators/watchlist';
 
 import type { StoredWatchlist } from './server/watchlist';
-import { isExampleWatchId, isoDay, loadWatchlist, type WatchItem } from './watchlist';
+import { WATCHLIST_STORAGE_KEY, isExampleWatchId, isoDay, loadWatchlist, type WatchItem } from './watchlist';
 
 /**
  * The watchlist in the user's account (launch item i38), for `useWatchlist`
@@ -75,6 +75,23 @@ export function mergeAccountWatchlist(
     return [...own.filter((w) => !isExampleWatchId(w.id)), ...shownExamples];
 }
 
+/**
+ * The write for saving `item`. Re-adding a ticker whose removal hasn't been
+ * saved yet reuses the removed row's ID, so the add queues behind the
+ * removal (and replaces it) rather than racing it: sent separately, an add
+ * that landed first would collide with the row still live under its ticker.
+ */
+export function saveWrite(item: WatchItemInput, pending: ReadonlyMap<string, WatchWrite>): { id: string; write: WatchWrite } {
+    if (!item.dismissed) {
+        for (const [id, write] of pending) {
+            if (id !== item.id && write.item.dismissed && write.item.ticker === item.ticker) {
+                return { id, write: { kind: 'put', item: { ...item, id } } };
+            }
+        }
+    }
+    return { id: item.id, write: { kind: 'put', item } };
+}
+
 /** The account's list once `write` is saved. */
 export function applyWatchWrite(stored: AccountWatchlist | undefined, id: string, write: WatchWrite): AccountWatchlist {
     const items = (stored?.items ?? []).filter((item) => item.id !== id);
@@ -109,13 +126,23 @@ export function toWatchItemInput(item: WatchItem, { now, dismissed = false }: { 
  * examples included) and a dismissal for each example they removed.
  * Untouched examples need nothing.
  */
-export function watchlistImportItems(local: readonly WatchItem[], examples: readonly WatchItem[], now: number): WatchItemInput[] {
+export function watchlistImportItems(
+    local: readonly WatchItem[],
+    examples: readonly WatchItem[],
+    now: number,
+): { items: WatchItemInput[]; shortened: boolean } {
     const ids = new Set(local.map((w) => w.id));
     const seen = new Set<string>();
+    let shortened = false;
     const own = local.flatMap((item) => {
         if (item.sample || seen.has(item.id)) return [];
         seen.add(item.id);
         const input = toWatchItemInput(item, { now });
+        // Text the browser allowed but the account doesn't (or a row it can't store at all).
+        if (!input || input.reason.length < item.reason.trim().length || input.notes.length < item.notes.length
+            || input.companyName.length < item.companyName.trim().length) {
+            shortened = true;
+        }
         return input ? [input] : [];
     });
     const removed = examples.flatMap((example) => {
@@ -123,7 +150,12 @@ export function watchlistImportItems(local: readonly WatchItem[], examples: read
         const input = toWatchItemInput(example, { now, dismissed: true });
         return input ? [input] : [];
     });
-    return [...own, ...removed];
+    return { items: [...own, ...removed], shortened };
+}
+
+/** Where this browser keeps its full list when the account couldn't take all of its text. */
+export function watchlistFullCopyKey(key: string): string {
+    return `${WATCHLIST_STORAGE_KEY}-full-copy${key.slice(WATCHLIST_STORAGE_KEY.length)}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -138,6 +170,8 @@ export interface WatchlistWriter {
     write(id: string, write: WatchWrite): void;
     /** For a page that is closing: sends the writes still waiting behind one in flight, now. */
     sendWaiting(): void;
+    /** Resolves once no write is waiting or in flight. */
+    idle(): Promise<void>;
     subscribe(listener: () => void): () => void;
 }
 
@@ -166,9 +200,16 @@ export function createWatchlistWriter({
     const listeners = new Set<() => void>();
     let snapshot: ReadonlyMap<string, WatchWrite> = new Map();
 
+    let idleWaiters: (() => void)[] = [];
+
     const changed = () => {
         snapshot = new Map(pending);
         for (const listener of listeners) listener();
+        if (pending.size === 0) {
+            const waiters = idleWaiters;
+            idleWaiters = [];
+            for (const resolve of waiters) resolve();
+        }
     };
 
     const drain = async (id: string) => {
@@ -197,7 +238,7 @@ export function createWatchlistWriter({
         }
     };
 
-    return {
+    const writer: WatchlistWriter = {
         pending: () => snapshot,
         session,
         write(id, write) {
@@ -218,11 +259,31 @@ export function createWatchlistWriter({
                 if (inFlight !== undefined && inFlight !== write) void send(id, write, orderOf(write)).catch(() => {});
             }
         },
+        idle() {
+            return pending.size === 0 ? Promise.resolve() : new Promise<void>((resolve) => idleWaiters.push(resolve));
+        },
         subscribe(listener) {
             listeners.add(listener);
             return () => listeners.delete(listener);
         },
     };
+    writers.add(writer);
+    return writer;
+}
+
+const writers = new Set<WatchlistWriter>();
+
+/**
+ * For sign-out: waits (for up to `timeoutMs`) until every watchlist write
+ * this page made has been sent, while the session still lets them through.
+ */
+export async function flushWatchlistWrites(timeoutMs = 3000): Promise<void> {
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([
+        Promise.all([...writers].map((writer) => writer.idle())),
+        new Promise<void>((resolve) => { timeout = setTimeout(resolve, timeoutMs); }),
+    ]);
+    clearTimeout(timeout);
 }
 
 // ---------------------------------------------------------------------------
@@ -305,12 +366,20 @@ export function batchBySize<T>(items: readonly T[], { maxBytes, maxCount }: { ma
 // Under the import route's 1 MiB limit, with room to spare.
 const IMPORT_MAX_BYTES = 900 * 1024;
 
-export async function importAccountWatchlist(items: readonly WatchItemInput[], fetchImpl: Fetch = fetch): Promise<void> {
-    for (const batch of batchBySize(items, { maxBytes: IMPORT_MAX_BYTES, maxCount: WATCHLIST_IMPORT_MAX_ITEMS })) {
+/** Sends `items` in batches that the server orders as one list. */
+export async function importAccountWatchlist(
+    items: readonly WatchItemInput[],
+    fetchImpl: Fetch = fetch,
+    startedAt: number = Date.now(),
+): Promise<void> {
+    let first = 0;
+    // Room for the batch's position fields beside its items.
+    for (const batch of batchBySize(items, { maxBytes: IMPORT_MAX_BYTES - 64, maxCount: WATCHLIST_IMPORT_MAX_ITEMS })) {
         await request(fetchImpl, '/api/research/watchlist/import', {
             method: 'POST',
-            body: JSON.stringify({ items: batch }),
+            body: JSON.stringify({ items: batch, first, startedAt }),
         });
+        first += batch.length;
     }
 }
 
@@ -329,19 +398,33 @@ export function importBrowserWatchlist(
         examples,
         now,
         fetchImpl = fetch,
-    }: { storage: Pick<Storage, 'getItem' | 'removeItem'> | null; examples: readonly WatchItem[]; now: number; fetchImpl?: Fetch },
+        onShortened,
+    }: {
+        storage: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> | null;
+        examples: readonly WatchItem[];
+        now: number;
+        fetchImpl?: Fetch;
+        /** Called once when some text was longer than the account keeps. */
+        onShortened?: () => void;
+    },
 ): Promise<void> {
     const running = imports.get(key);
     if (running) return running;
     const run = (async () => {
         const local = loadWatchlist(storage, key);
         if (!local) return;
-        await importAccountWatchlist(watchlistImportItems(local, examples, now), fetchImpl);
+        const { items, shortened } = watchlistImportItems(local, examples, now);
+        await importAccountWatchlist(items, fetchImpl);
         try {
+            // Text the account couldn't take stays in this browser, under a
+            // key of its own, rather than being lost.
+            if (shortened) storage?.setItem(watchlistFullCopyKey(key), storage.getItem(key) ?? '');
             storage?.removeItem(key);
         } catch {
-            // Sent again next time; the account keeps what it has.
+            // Sent again next time (the account keeps what it has), and the
+            // full list stays where it was.
         }
+        if (shortened) onShortened?.();
     })();
     imports.set(key, run);
     run.catch(() => imports.delete(key));

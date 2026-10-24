@@ -27,6 +27,7 @@ import {
     fetchAccountWatchlist,
     importBrowserWatchlist,
     mergeAccountWatchlist,
+    saveWrite,
     sendWatchWrite,
     toWatchItemInput,
     type AccountWatchlist,
@@ -224,7 +225,15 @@ function useAccountWatchlist(enabled: boolean, key: string, examples: WatchItem[
         queryKey: ACCOUNT_QUERY,
         queryFn: async () => {
             try {
-                await importBrowserWatchlist(key, { storage: getBrowserStorage(), examples, now: Date.now() });
+                await importBrowserWatchlist(key, {
+                    storage: getBrowserStorage(),
+                    examples,
+                    now: Date.now(),
+                    onShortened: () => toast(
+                        'Some watchlist notes were longer than your account keeps (500 characters for why, 5,000 for notes) and were shortened. This browser keeps the full text.',
+                        { duration: 15_000 },
+                    ),
+                });
             } catch (error) {
                 // Kept in this browser and sent again next time.
                 console.warn('[watchlist] import from this browser failed', error);
@@ -251,7 +260,9 @@ function useAccountWatchlist(enabled: boolean, key: string, examples: WatchItem[
     const save = useCallback(
         (_next: WatchItem[], item: WatchItem) => {
             const input = toWatchItemInput(item, { now: Date.now() });
-            if (input) writer.write(item.id, { kind: 'put', item: input });
+            if (!input) return;
+            const { id, write } = saveWrite(input, writer.pending());
+            writer.write(id, write);
         },
         [writer],
     );

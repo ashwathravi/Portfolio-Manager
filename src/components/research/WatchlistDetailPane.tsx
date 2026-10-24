@@ -5,6 +5,7 @@ import { useState } from "react";
 import { SampleTag } from "@/components/data-display/SampleTag";
 import { distanceToEntryPct, type WatchItem } from "@/lib/research/watchlist";
 import type { Thesis } from "@/lib/research/thesis";
+import { WATCH_ITEM_LIMITS } from "@/lib/validators/watchlist";
 
 /**
  * Research › Watchlist detail. Shows why a ticker is on the list, the live
@@ -70,6 +71,7 @@ export function WatchlistDetailPane({
                     label="Why it is on the list"
                     initial={item.reason}
                     placeholder="What would make you buy?"
+                    maxLength={WATCH_ITEM_LIMITS.reason}
                     onSave={(reason) => onUpdate({ reason })}
                 />
                 <EditableField
@@ -86,6 +88,7 @@ export function WatchlistDetailPane({
                     initial={item.notes}
                     placeholder="Levels, catalysts, what to check first"
                     multiline
+                    maxLength={WATCH_ITEM_LIMITS.notes}
                     onSave={(notes) => onUpdate({ notes })}
                 />
             </section>
@@ -114,6 +117,7 @@ function EditableField({
     placeholder,
     multiline,
     inputMode,
+    maxLength,
     onSave,
 }: {
     label: string;
@@ -121,6 +125,8 @@ function EditableField({
     placeholder: string;
     multiline?: boolean;
     inputMode?: "decimal";
+    /** What the account keeps; longer text can't be typed. */
+    maxLength?: number;
     onSave: (value: string) => void;
 }) {
     const [value, setValue] = useState(initial);
@@ -136,6 +142,7 @@ function EditableField({
                     rows={3}
                     value={value}
                     placeholder={placeholder}
+                    maxLength={maxLength}
                     onChange={(e) => setValue(e.target.value)}
                     onBlur={commit}
                 />
@@ -145,6 +152,7 @@ function EditableField({
                     value={value}
                     placeholder={placeholder}
                     inputMode={inputMode}
+                    maxLength={maxLength}
                     onChange={(e) => setValue(e.target.value)}
                     onBlur={commit}
                 />
