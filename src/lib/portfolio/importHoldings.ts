@@ -31,8 +31,9 @@ export interface ImportResult {
  * the rows it covers a stored price, so an imported position shows its
  * worth straight away instead of $0. No market value is stored with it:
  * readers value positions at quantity × the newest price they have, and a
- * stored value would hold them at today's. Rows without a price keep none,
- * and readers value them at cost.
+ * stored value would hold them at today's. A new row without a price gets
+ * none, and readers value it at cost; a replaced row without one keeps the
+ * price it had.
  */
 export async function importHoldings(
     userId: string,
@@ -40,9 +41,9 @@ export async function importHoldings(
     prices: Readonly<Record<string, number>> = {},
     database: typeof db = db,
 ): Promise<ImportResult> {
-    const priced = (symbol: string) => {
+    const quote = (symbol: string): number | null => {
         const price = prices[symbol.toUpperCase()];
-        return { currentPrice: Number.isFinite(price) && price > 0 ? price : null, marketValue: null };
+        return Number.isFinite(price) && price > 0 ? price : null;
     };
     return database.transaction(async (tx) => {
         let portfolioId: string;
@@ -89,20 +90,24 @@ export async function importHoldings(
                     name: r.name || r.symbol,
                     quantity: String(r.quantity),
                     avgCost: String(r.avgCost),
-                    ...priced(r.symbol),
+                    currentPrice: quote(r.symbol),
+                    marketValue: null,
                 })),
             );
         }
         for (const p of plan) {
             if (p.kind !== 'update') continue;
+            const price = quote(p.row.symbol);
             await tx
                 .update(holdings)
                 .set({
                     quantity: String(p.row.quantity),
                     avgCost: String(p.row.avgCost),
                     // Snapshot fields were computed for the old quantity: keep
-                    // the stored price, and leave the value to readers.
-                    ...priced(p.row.symbol),
+                    // the stored price unless there's a newer one, and leave
+                    // the value to readers.
+                    ...(price != null ? { currentPrice: price } : {}),
+                    marketValue: null,
                     allocation: null,
                     ...(p.row.name ? { name: p.row.name } : {}),
                     updatedAt: now,

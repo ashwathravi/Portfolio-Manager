@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import { getExampleMonthlySeries } from "@/lib/performance/series";
-import type { MonthlyValuation } from "@/lib/performance/periodSummary";
+import { MONTHLY, type DatedValue } from "@/lib/performance/periodSummary";
 import { EquityCurveCard, type Benchmark } from "./EquityCurveCard";
 import { MetricsByPeriodTable } from "./MetricsByPeriodTable";
 import { MonthlyHeatmapCard } from "./MonthlyHeatmapCard";
@@ -11,49 +11,67 @@ import { SampleEmptyState } from "@/components/data-display/SampleEmptyState";
 import { SampleGate } from "@/components/data-display/SampleGate";
 
 /**
- * Performance page wrapper.
- *
  * Performance › Returns. Composes:
  *   - EquityCurveCard        (AR-75, hero)
  *   - MetricsByPeriodTable   (AR-76, period × metrics matrix)
  *   - MonthlyHeatmapCard     (AR-77, year × month intensity grid)
  *
+ * `ReturnsCards` renders them for any series: the user's real history
+ * (ReturnHistoryView, daily closes) or, before there is any, the example
+ * series here (month ends, behind "Show example data").
+ *
  * Attribution has its own tab (AttributionPageClient). Behavioural cards
  * (mood, P&L density, trading calendar, weekly reviews) live on
  * Performance › Behaviour — see BehaviourPageClient.
- *
- * All state is local to each card. The client wrapper exists purely to
- * keep the page file thin and to keep the topbar / breadcrumbs / actions
- * in sync with the rest of the Workspace routes.
  *
  * `now` is the server's request time, shared with the CSV export, so the
  * browser hydrates the same months and the export matches the charts.
  */
 
-// Derive alt benchmarks from the single live series we have until AR-11/12
-// wires up real benchmark feeds. Scaling *returns* (not values) keeps the
-// shape distinct for each option so switching the dropdown actually
-// redraws the chart.
+export function ReturnsCards({
+    portfolio,
+    benchmarks,
+    periodsPerYear,
+}: {
+    portfolio: DatedValue[];
+    benchmarks: Benchmark[];
+    periodsPerYear: number;
+}) {
+    return (
+        <>
+            <EquityCurveCard portfolio={portfolio} benchmarks={benchmarks} periodsPerYear={periodsPerYear} />
+            <MetricsByPeriodTable
+                portfolio={portfolio}
+                benchmark={benchmarks[0]?.series ?? []}
+                periodsPerYear={periodsPerYear}
+            />
+            <MonthlyHeatmapCard portfolio={portfolio} />
+        </>
+    );
+}
+
+// The example series has one benchmark; scaling its *returns* (not values)
+// gives the other options distinct shapes, so switching the dropdown
+// actually redraws the chart.
 function rescaleReturns(
-    series: MonthlyValuation[],
+    series: DatedValue[],
     factor: number,
-): MonthlyValuation[] {
+): DatedValue[] {
     if (series.length === 0) return [];
-    const out: MonthlyValuation[] = [{ ...series[0] }];
+    const out: DatedValue[] = [{ ...series[0] }];
     for (let i = 1; i < series.length; i++) {
         const prevOrig = series[i - 1].value;
         const prevOut = out[i - 1].value;
         const origRet = prevOrig === 0 ? 0 : (series[i].value - prevOrig) / prevOrig;
         out.push({
-            year: series[i].year,
-            month: series[i].month,
+            date: series[i].date,
             value: prevOut * (1 + origRet * factor),
         });
     }
     return out;
 }
 
-function buildBenchmarks(sp500: MonthlyValuation[]): Benchmark[] {
+function buildBenchmarks(sp500: DatedValue[]): Benchmark[] {
     return [
         { key: "sp500", label: "S&P 500", series: sp500 },
         {
@@ -83,25 +101,15 @@ export function PerformancePageClient({ now }: { now: number }) {
                 fallback={
                     <SampleEmptyState
                         title="No return history yet"
-                        body="Time-weighted returns and benchmark comparison need your account history. Connect an account to start tracking."
+                        body="Returns are measured from a valuation of your accounts at each market close. The first is recorded at the close after you add holdings, and returns start from the next one."
                     />
                 }
             >
                 <SampleDataNotice>
-                    Returns and benchmarks are example data until account history is connected.
+                    Returns and benchmarks are example data until your accounts have valuation history.
                 </SampleDataNotice>
 
-                <EquityCurveCard
-                    portfolio={portfolio}
-                    benchmarks={benchmarks}
-                />
-
-                <MetricsByPeriodTable
-                    portfolio={portfolio}
-                    benchmark={benchmark}
-                />
-
-                <MonthlyHeatmapCard portfolio={portfolio} />
+                <ReturnsCards portfolio={portfolio} benchmarks={benchmarks} periodsPerYear={MONTHLY} />
             </SampleGate>
         </div>
     );

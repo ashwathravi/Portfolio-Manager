@@ -30,6 +30,7 @@ test.describe('Database outage', () => {
         { path: '/', what: 'your portfolios', container: '.pm-dashboard-stack' },
         { path: '/portfolios/holdings', what: 'your holdings', container: '.pm-holdings-stack' },
         { path: '/portfolios/accounts', what: 'your accounts', container: '.pm-page' },
+        { path: '/performance', what: 'your return history', container: '.pm-perf-stack' },
     ];
 
     for (const { path, what, container } of pages) {
@@ -64,6 +65,8 @@ test.describe('Unusable DATABASE_URL', () => {
         { path: '/', empty: (page: Page) => page.locator('[data-testid="today-hero"][data-empty="true"]') },
         { path: '/portfolios/holdings', empty: (page: Page) => page.getByTestId('holdings-empty') },
         { path: '/portfolios/accounts', empty: (page: Page) => page.getByTestId('accounts-empty') },
+        // No history without a database: the labelled example series.
+        { path: '/performance', empty: (page: Page) => page.getByTestId('sample-data-notice') },
     ];
 
     for (const { path, empty } of pages) {
