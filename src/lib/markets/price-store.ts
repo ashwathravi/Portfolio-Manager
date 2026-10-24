@@ -581,8 +581,9 @@ const needsReference = (staleBefore: Date) =>
 
 /**
  * Tracked symbols whose reference data is missing or older than
- * `staleBefore`: `priority` (held, benchmarks) first, then never fetched,
- * then the oldest.
+ * `staleBefore`: `priority` (held, benchmarks) first; within each group,
+ * never-failed before failed (least recently first, so a symbol that keeps
+ * failing can't hold the others back), then never fetched, then the oldest.
  */
 export function buildSymbolsNeedingReferenceQuery(
     limit: number,
@@ -597,8 +598,22 @@ export function buildSymbolsNeedingReferenceQuery(
         .select({ symbol: securities.symbol })
         .from(securities)
         .where(needsReference(staleBefore))
-        .orderBy(...first, sql`${securities.referenceUpdatedAt} asc nulls first`, asc(securities.createdAt), asc(securities.symbol))
+        .orderBy(
+            ...first,
+            sql`${securities.referenceAttemptedAt} asc nulls first`,
+            sql`${securities.referenceUpdatedAt} asc nulls first`,
+            asc(securities.createdAt),
+            asc(securities.symbol),
+        )
         .limit(limit);
+}
+
+/** Records a reference fetch that failed, so the symbol rotates behind untried ones. */
+export function buildMarkReferenceAttemptedQuery(symbol: string, at: Date, database: Pick<Database, "update"> = db) {
+    return database
+        .update(securities)
+        .set({ referenceAttemptedAt: at, updatedAt: at })
+        .where(eq(securities.symbol, symbol));
 }
 
 export function buildSymbolsNeedingReferenceCountQuery(staleBefore: Date, database: Pick<Database, "select"> = db) {
@@ -629,9 +644,10 @@ export function buildSaveReferenceQuery(
                 industry: profile.industry,
                 sicCode: reference.sicCode,
                 referenceUpdatedAt: at,
+                referenceAttemptedAt: null,
                 updatedAt: at,
             }
-            : { referenceUpdatedAt: at, updatedAt: at })
+            : { referenceUpdatedAt: at, referenceAttemptedAt: null, updatedAt: at })
         .where(eq(securities.symbol, symbol));
 }
 
@@ -665,6 +681,10 @@ export async function countSymbolsNeedingReference(staleBefore: Date, database: 
 
 export async function saveReference(symbol: string, reference: TickerReference | null, at: Date, database: Database = db): Promise<void> {
     await buildSaveReferenceQuery(symbol, reference, at, database);
+}
+
+export async function markReferenceAttempted(symbol: string, at: Date, database: Database = db): Promise<void> {
+    await buildMarkReferenceAttemptedQuery(symbol, at, database);
 }
 
 /**

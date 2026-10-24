@@ -473,6 +473,9 @@ export const securities = pgTable("securities", {
     // When the reference data was last fetched (or found missing); null
     // until the nightly job has fetched it.
     referenceUpdatedAt: timestamp("reference_updated_at"),
+    // The last fetch that failed (a provider error), so the queue takes
+    // never-tried symbols first and failures rotate behind them.
+    referenceAttemptedAt: timestamp("reference_attempted_at"),
     // Null until the history backfill has run; then the earliest date it covers.
     historyStartDate: date("history_start_date", { mode: "string" }),
     // The last backfill attempt that left the symbol queued (an error, or no

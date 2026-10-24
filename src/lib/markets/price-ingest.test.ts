@@ -161,6 +161,7 @@ function fakeStore({
     const attempted = new Map<string, number>();
     const adjustments: HoldingSplit[] = [];
     const savedReferences = new Map<string, TickerReference | null>();
+    const referenceAttempted = new Map<string, number>();
     // A loaded symbol has history older than anything a test stores; it
     // isn't modelled bar by bar, so it never moves the catch-up bookmark.
     const olderHistory = new Set(loaded);
@@ -275,13 +276,24 @@ function fakeStore({
             resets.push(...reset);
             return reset;
         },
+        // The real queue's order: priority first; within each group never-failed, then least recently failed.
         async listSymbolsNeedingReference(limit, priority) {
             const waiting = unreferenced.filter((symbol) => securities.has(symbol));
-            return [...waiting.filter((symbol) => priority.includes(symbol)), ...waiting.filter((symbol) => !priority.includes(symbol))].slice(0, limit);
+            const order = (group: string[]) => [
+                ...group.filter((symbol) => !referenceAttempted.has(symbol)),
+                ...group.filter((symbol) => referenceAttempted.has(symbol))
+                    .sort((a, b) => referenceAttempted.get(a)! - referenceAttempted.get(b)!),
+            ];
+            return [...order(waiting.filter((symbol) => priority.includes(symbol))), ...order(waiting.filter((symbol) => !priority.includes(symbol)))]
+                .slice(0, limit);
+        },
+        async markReferenceAttempted(symbol, at) {
+            referenceAttempted.set(symbol, at.getTime());
         },
         countSymbolsNeedingReference: async () => unreferenced.filter((symbol) => securities.has(symbol)).length,
         async saveReference(symbol, reference) {
             savedReferences.set(symbol, reference);
+            referenceAttempted.delete(symbol);
             unreferenced.splice(unreferenced.indexOf(symbol), 1);
         },
     };
@@ -1348,6 +1360,33 @@ describe("ingestDailyPrices › securities master", () => {
         assert.deepEqual(detail.reference?.errors.map((e) => e.symbol), ["MSFT"]);
         assert.equal(savedReferences.has("MSFT"), false);
         assert.equal(detail.reference?.queue, 1);
+    });
+
+    test("regression: symbols that keep failing rotate behind ones not yet tried", async () => {
+        // The Codex finding on PR #158: five failures at the front of the
+        // queue were picked again every night, so the rest never got names.
+        const failing = Array.from({ length: MAX_REFERENCE_PER_RUN }, (_, i) => `F${i}`);
+        const { store, savedReferences } = fakeStore({
+            holdings: [...failing, "LATE"],
+            loaded: [...BENCHMARK_SYMBOLS, ...failing, "LATE"],
+            bars: [{ ...dailyBar("SPY", "2026-10-16"), source: "massive" }],
+            unreferenced: [...failing, "LATE"],
+        });
+        const { adapter, calls } = fakeAdapter({
+            references: {
+                ...Object.fromEntries(failing.map((symbol) => [symbol, new Error("HTTP 500")])),
+                LATE: reference("LATE", "Late Corp", "CS", "3571"),
+            },
+        });
+
+        const first = await ingestDailyPrices({ adapter, store, ...fakeClock() });
+        assert.deepEqual(first.reference?.errors.map((e) => e.symbol), failing);
+        assert.equal(savedReferences.has("LATE"), false);
+
+        calls.length = 0;
+        await ingestDailyPrices({ adapter, store, ...fakeClock("2026-10-19T22:30:00.000Z") });
+        assert.equal(calls.filter((call) => call.startsWith("reference "))[0], "reference LATE");
+        assert.equal(savedReferences.get("LATE")?.name, "Late Corp");
     });
 
     test("a rate limit that outlasts the budget ends the reference fetches and the backfill", async () => {

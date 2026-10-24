@@ -25,7 +25,9 @@
  *    whose copy is over 90 days old, held symbols and benchmarks first, at
  *    most MAX_REFERENCE_PER_RUN a run so the history backfill keeps most of
  *    the budget. A ticker Massive doesn't know is recorded as looked for and
- *    asked about again only when that copy would be stale.
+ *    asked about again only when that copy would be stale. A fetch that
+ *    fails is retried on later runs, behind symbols not yet tried, so one
+ *    that keeps failing can't hold the others back.
  * 4. Backfill two years of history for symbols that don't have it yet, one
  *    aggregates call per symbol, while the run's time budget lasts: held
  *    symbols and benchmarks first, and a looked-up symbol only once a daily
@@ -84,6 +86,7 @@ import {
     listSymbolsNeedingReference,
     listTrackedSymbols,
     markHistoryAttempted,
+    markReferenceAttempted,
     markHistoryLoaded,
     normalizeSymbols,
     pruneUnpricedSecurities,
@@ -183,6 +186,8 @@ export interface PriceIngestStore {
     countSymbolsNeedingReference(staleBefore: Date): Promise<number>;
     /** Stores a symbol's reference data; null records a ticker the provider doesn't know. */
     saveReference(symbol: string, reference: TickerReference | null, at: Date): Promise<void>;
+    /** Records a failed fetch, so the symbol goes behind untried ones next run. */
+    markReferenceAttempted(symbol: string, at: Date): Promise<void>;
 }
 
 export interface IngestPricesOptions {
@@ -370,6 +375,7 @@ export function createPriceIngestStore(database: Database = db): PriceIngestStor
         listSymbolsNeedingReference: (limit, priority, staleBefore) => listSymbolsNeedingReference(limit, priority, staleBefore, database),
         countSymbolsNeedingReference: (staleBefore) => countSymbolsNeedingReference(staleBefore, database),
         saveReference: (symbol, reference, at) => saveReference(symbol, reference, at, database),
+        markReferenceAttempted: (symbol, at) => markReferenceAttempted(symbol, at, database),
     };
 }
 
@@ -567,7 +573,9 @@ export async function ingestDailyPrices({
             try {
                 answer = await paced(() => adapter.getTickerReference(symbol));
             } catch (error) {
+                // Left for a later run, behind symbols not yet tried.
                 reference.errors.push({ symbol, error: summarizeError(error) });
+                await store.markReferenceAttempted(symbol, now());
                 continue;
             }
             if ("stopped" in answer) {

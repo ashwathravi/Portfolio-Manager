@@ -1,5 +1,5 @@
 {
-  "id": "e2996454-1658-426b-80bd-0581a22576f0",
+  "id": "75e08f62-dcd4-4772-8280-c840f3b4bd7a",
   "prevId": "5302708a-af64-4754-9752-09bfb118cd4a",
   "version": "7",
   "dialect": "postgresql",
@@ -3268,6 +3268,12 @@
         },
         "reference_updated_at": {
           "name": "reference_updated_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "reference_attempted_at": {
+          "name": "reference_attempted_at",
           "type": "timestamp",
           "primaryKey": false,
           "notNull": false

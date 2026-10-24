@@ -30,6 +30,7 @@ import {
     selectTrackedBars,
     trackRequestedSecurities,
     type PriceBarInput,
+    buildMarkReferenceAttemptedQuery,
     buildSaveReferenceQuery,
     buildSecurityProfilesQuery,
     buildSymbolsNeedingReferenceQuery,
@@ -368,7 +369,7 @@ describe("securities master queries", () => {
     test("the reference queue: missing or stale, priority first, never fetched before the oldest", () => {
         const { sql, params } = buildSymbolsNeedingReferenceQuery(5, ["MSFT"], STALE_BEFORE).toSQL();
         assert.match(sql, /where \("securities"\."reference_updated_at" is null or "securities"\."reference_updated_at" < \$1\)/);
-        assert.match(sql, /order by case when "securities"\."symbol" in \(\$2\) then 0 else 1 end, "securities"\."reference_updated_at" asc nulls first/);
+        assert.match(sql, /order by case when "securities"\."symbol" in \(\$2\) then 0 else 1 end, "securities"\."reference_attempted_at" asc nulls first, "securities"\."reference_updated_at" asc nulls first/);
         assert.deepEqual(params.slice(1), ["MSFT", 5]);
     });
 
@@ -377,15 +378,22 @@ describe("securities master queries", () => {
             symbol: "AAPL", name: "Apple Inc.", type: "CS", primaryExchange: "XNAS", active: true,
             currency: "usd", sicCode: "3571", sicDescription: "ELECTRONIC COMPUTERS",
         }, AT).toSQL();
-        assert.match(sql, /^update "securities" set "name" = \$1, "type" = \$2, "primary_exchange" = \$3, "currency" = \$4, "sector" = \$5, "industry" = \$6, "sic_code" = \$7, "reference_updated_at" = \$8, "updated_at" = \$9 where "securities"\."symbol" = \$10$/);
+        assert.match(sql, /^update "securities" set "name" = \$1, "type" = \$2, "primary_exchange" = \$3, "currency" = \$4, "sector" = \$5, "industry" = \$6, "sic_code" = \$7, "reference_updated_at" = \$8, "reference_attempted_at" = \$9, "updated_at" = \$10 where "securities"\."symbol" = \$11$/);
         assert.deepEqual(params.slice(0, 6), ["Apple Inc.", "CS", "XNAS", "USD", "Tech", "ELECTRONIC COMPUTERS"]);
         assert.equal(params.at(-1), "AAPL");
     });
 
     test("an unknown ticker only records that it was looked for", () => {
         const { sql, params } = buildSaveReferenceQuery("ZZZZ", null, AT).toSQL();
-        assert.equal(sql, 'update "securities" set "reference_updated_at" = $1, "updated_at" = $2 where "securities"."symbol" = $3');
-        assert.equal(params[2], "ZZZZ");
+        assert.equal(sql, 'update "securities" set "reference_updated_at" = $1, "reference_attempted_at" = $2, "updated_at" = $3 where "securities"."symbol" = $4');
+        assert.equal(params[1], null);
+        assert.equal(params[3], "ZZZZ");
+    });
+
+    test("a failed fetch records when, so the symbol rotates behind untried ones", () => {
+        const { sql, params } = buildMarkReferenceAttemptedQuery("MSFT", AT).toSQL();
+        assert.equal(sql, 'update "securities" set "reference_attempted_at" = $1, "updated_at" = $2 where "securities"."symbol" = $3');
+        assert.equal(params[2], "MSFT");
     });
 
     test("profiles are read only for symbols with reference data", () => {
