@@ -1,16 +1,17 @@
 import { test, expect, type Page } from '@playwright/test';
 import { gotoAppPage, reloadAppPage, selectAppTab } from './helpers/app';
+import { researchLoaded } from './helpers/research';
 import { signInAsFreshUser } from './helpers/users';
 
-// With a database the watchlist and journal are kept in the account
-// (launch item i38).
+// With a database the watchlist, journal and theses are kept in the
+// account (launch item i38).
 const databaseAuthEnabled = Boolean(process.env.CI || process.env.E2E_DATABASE_AUTH === '1');
 
 /**
  * Resolves once a save to `collection` containing `text` has landed; at once
  * when research data is kept in the browser.
  */
-async function savedTo(page: Page, collection: 'watchlist' | 'journal', text: string) {
+async function savedTo(page: Page, collection: 'watchlist' | 'journal' | 'theses', text: string) {
     if (!databaseAuthEnabled) return;
     await page.waitForResponse((response) =>
         response.url().includes(`/api/research/${collection}/`)
@@ -486,3 +487,81 @@ test.describe('Research journal', () => {
         await expect(list.getByRole('button', { name: /Increased position by 50 shares/ })).toHaveCount(0);
     });
 });
+
+test.describe('Research theses', () => {
+    // Changes are saved to the account, so each test has one of its own,
+    // and wait for its theses to load.
+    test.beforeEach(async ({ context, page }) => {
+        await signInAsFreshUser(context);
+        const loaded = researchLoaded(page, 'theses');
+        await gotoAppPage(page, '/research');
+        await loaded;
+    });
+
+    test('a new thesis is saved and is still there after a reload', async ({ page }) => {
+        await page.getByRole('button', { name: /New thesis/ }).click();
+        const dialog = page.getByRole('dialog');
+        await dialog.getByPlaceholder('AAPL').fill('AMD');
+        await dialog.getByPlaceholder('Apple Inc.').fill('Advanced Micro Devices');
+        await dialog.getByPlaceholder('e.g. AI-Driven Services Acceleration').fill('MI300 share gains');
+        await dialog.getByPlaceholder('250').fill('200');
+        const saved = savedTo(page, 'theses', 'MI300 share gains');
+        await dialog.getByRole('button', { name: 'Create Thesis' }).click();
+        const list = page.locator('.pm-research-list');
+        await expect(list.getByText('MI300 share gains')).toBeVisible();
+        await saved;
+
+        await reloadAppPage(page);
+        await expect(list.getByText('MI300 share gains')).toBeVisible();
+    });
+
+    test('an archived thesis stays archived, and a deleted one stays deleted, after a reload', async ({ page }) => {
+        const list = page.locator('.pm-research-list');
+        await list.getByText('AI Infrastructure Dominance').click();
+        const archived = savedTo(page, 'theses', '"status":"archived"');
+        await page.getByRole('button', { name: 'More thesis actions' }).click();
+        await page.getByRole('menuitem', { name: 'Archive' }).click();
+        await expect(list.getByText('AI Infrastructure Dominance')).toHaveCount(0);
+        await archived;
+
+        await list.getByText('Azure AI Growth Acceleration').click();
+        page.once('dialog', (dialog) => dialog.accept());
+        const deleted = savedTo(page, 'theses', '"dismissed":true');
+        await page.getByRole('button', { name: 'More thesis actions' }).click();
+        await page.getByRole('menuitem', { name: 'Delete thesis' }).click();
+        await expect(list.getByText('Azure AI Growth Acceleration')).toHaveCount(0);
+        await deleted;
+
+        await reloadAppPage(page);
+        await expect(list.getByText('AI Infrastructure Dominance')).toHaveCount(0);
+        await expect(list.getByText('Azure AI Growth Acceleration')).toHaveCount(0);
+        await selectAppTab(page, 'Archive');
+        await expect(list.getByText('AI Infrastructure Dominance')).toBeVisible();
+    });
+
+    test('a catalyst added on the thesis page is still there after a reload', async ({ page }) => {
+        const loaded = researchLoaded(page, 'theses');
+        await gotoAppPage(page, '/research/thesis/NVDA');
+        await loaded;
+        const catalysts = page.getByRole('region', { name: 'Catalysts' });
+        await catalysts.getByRole('button', { name: 'Add' }).click();
+        const dialog = page.getByRole('dialog');
+        await dialog.getByPlaceholder('e.g. Q4 Earnings').fill('Rubin launch');
+        await dialog.getByPlaceholder('2026-05-01 or Q2 2026').fill('Q3 2027');
+        const saved = savedTo(page, 'theses', 'Rubin launch');
+        await dialog.getByRole('button', { name: 'Add Catalyst' }).click();
+        await expect(catalysts.getByText('Rubin launch')).toBeVisible();
+        await saved;
+
+        await reloadAppPage(page);
+        await expect(page.getByRole('region', { name: 'Catalysts' }).getByText('Rubin launch')).toBeVisible();
+    });
+
+    test('the thesis forms stop at what the account keeps', async ({ page }) => {
+        await page.getByRole('button', { name: /New thesis/ }).click();
+        const dialog = page.getByRole('dialog');
+        await expect(dialog.getByPlaceholder('e.g. AI-Driven Services Acceleration')).toHaveAttribute('maxlength', '200');
+        await expect(dialog.getByPlaceholder('Summarise your thesis...')).toHaveAttribute('maxlength', '5000');
+    });
+});
+

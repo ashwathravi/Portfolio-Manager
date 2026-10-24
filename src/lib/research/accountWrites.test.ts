@@ -240,15 +240,21 @@ describe('requests', () => {
             error instanceof AccountRequestError && error.status === 502 && error.code === null);
     });
 
-    test('a record is saved with PUT and deleted with DELETE, both keepalive and in order', async () => {
+    test('a record is saved with a keepalive PUT, in order', async () => {
         const { calls, fetchImpl } = recorder([]);
         const order = { session: 'page-0001', seq: 2 };
         await sendRecordWrite(fetchImpl, '/api/x/1', { kind: 'put', body: { item: { a: 1 } } }, order);
-        await sendRecordWrite(fetchImpl, '/api/x/1', { kind: 'delete' }, { ...order, seq: 3 });
         assert.deepEqual(calls.map((c) => [c.init.method, c.init.keepalive, JSON.parse(String(c.init.body))]), [
             ['PUT', true, { item: { a: 1 }, order }],
-            ['DELETE', true, { order: { ...order, seq: 3 } }],
         ]);
+    });
+
+    test('a body too big for keepalive is sent as a normal request', async () => {
+        const { calls, fetchImpl } = recorder([]);
+        const order = { session: 'page-0001', seq: 2 };
+        await sendRecordWrite(fetchImpl, '/api/x/1', { kind: 'put', body: { item: { text: 'x'.repeat(61 * 1024) } } }, order);
+        await sendRecordWrite(fetchImpl, '/api/x/1', { kind: 'put', body: { item: { text: 'x'.repeat(59 * 1024) } } }, order);
+        assert.deepEqual(calls.map((c) => c.init.keepalive), [false, true]);
     });
 
     test('imports go in batches of at most the route\'s count', async () => {

@@ -160,6 +160,9 @@ function isSessionBackedApiRoute(pathname: string, method: string): boolean {
     if (pathname === "/api/research/journal" && method === "GET") return true;
     if (pathname === "/api/research/journal/import" && method === "POST") return true;
     if (/^\/api\/research\/journal\/(?!import$)[^/]+$/.test(pathname) && method === "PUT") return true;
+    if (pathname === "/api/research/theses" && method === "GET") return true;
+    if (pathname === "/api/research/theses/import" && method === "POST") return true;
+    if (/^\/api\/research\/theses\/(?!import$)[^/]+$/.test(pathname) && method === "PUT") return true;
     if (pathname === "/api/alpha-radar/refresh" && method === "POST") return true;
     if (pathname === "/api/alpha-radar/filers" && method === "POST") return true;
     if (/^\/api\/alpha-radar\/filers\/[^/]+\/refresh$/.test(pathname) && method === "POST") return true;

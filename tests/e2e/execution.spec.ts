@@ -1,5 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { clickUntil, gotoAppPage, reloadAppPage } from './helpers/app';
+import { researchLoaded } from './helpers/research';
 import { signInAsFreshUser } from './helpers/users';
 
 /**
@@ -196,7 +197,10 @@ test.describe('Execution page (Focus variant, default)', () => {
  * and the settings override.
  */
 test.describe('Execution page — pre-trade rationale (AR-109)', () => {
-    test.beforeEach(async ({ page }) => {
+    // These may create a thesis, which is saved to the account: each test
+    // has a user of its own.
+    test.beforeEach(async ({ context, page }) => {
+        await signInAsFreshUser(context);
         // `addInitScript` re-runs on every navigation, which would wipe
         // the settings store mid-test. So we ONLY use it to install the
         // analytics sink (idempotent to rerun), and clear the persisted
@@ -222,7 +226,9 @@ test.describe('Execution page — pre-trade rationale (AR-109)', () => {
         // Reload so the stores pick up the cleared state on this first
         // visit. Settings start at the defaults: tests that change them sign
         // in as a fresh user (tests/e2e/helpers/users.ts).
+        const loaded = researchLoaded(page, 'theses');
         await reloadAppPage(page);
+        await loaded;
     });
 
     test('renders the rationale panel on the Focus variant by default', async ({ page }) => {
@@ -366,7 +372,10 @@ test.describe('Execution page — pre-trade rationale (AR-109)', () => {
  * then the user can press again to actually submit.
  */
 test.describe('Execution page — caution-mood cooldown (AR-110)', () => {
-    test.beforeEach(async ({ page }) => {
+    // These may create a thesis, which is saved to the account: each test
+    // has a user of its own.
+    test.beforeEach(async ({ context, page }) => {
+        await signInAsFreshUser(context);
         await page.addInitScript(() => {
             (window as unknown as {
                 __pmAnalytics: { events: unknown[] };
@@ -380,7 +389,9 @@ test.describe('Execution page — caution-mood cooldown (AR-110)', () => {
                 /* ignore */
             }
         });
+        const loaded = researchLoaded(page, 'theses');
         await reloadAppPage(page);
+        await loaded;
     });
 
     test('pressing Submit with mood=FOMO starts the cooldown timer instead of firing', async ({ page }) => {
@@ -561,7 +572,10 @@ test.describe('Execution page — caution-mood cooldown (AR-110)', () => {
  * mapping until the user links one.
  */
 test.describe('Execution page — live adherence panel (AR-111)', () => {
-    test.beforeEach(async ({ page }) => {
+    // These may create a thesis, which is saved to the account: each test
+    // has a user of its own.
+    test.beforeEach(async ({ context, page }) => {
+        await signInAsFreshUser(context);
         await page.addInitScript(() => {
             (window as unknown as {
                 __pmAnalytics: { events: unknown[] };
@@ -575,7 +589,9 @@ test.describe('Execution page — live adherence panel (AR-111)', () => {
                 /* ignore */
             }
         });
+        const loaded = researchLoaded(page, 'theses');
         await reloadAppPage(page);
+        await loaded;
     });
 
     test('panel is hidden when no thesis is linked', async ({ page }) => {
