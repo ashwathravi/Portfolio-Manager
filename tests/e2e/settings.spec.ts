@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { clickUntil, gotoAppPage, openPolicyChecks, reloadAppPage } from './helpers/app';
+import { signInAsFreshUser } from './helpers/users';
 
 /**
  * Phase 9 (AR-94) Settings tests, refreshed for JournalPlus (AR-109).
@@ -16,7 +17,9 @@ import { clickUntil, gotoAppPage, openPolicyChecks, reloadAppPage } from './help
  */
 
 test.describe('Settings page', () => {
-    test.beforeEach(async ({ page }) => {
+    test.beforeEach(async ({ context, page }) => {
+        // These tests change settings, which the server keeps per user.
+        await signInAsFreshUser(context);
         await gotoAppPage(page, '/settings');
     });
 
@@ -171,7 +174,6 @@ test.describe('Settings page', () => {
             };
         });
 
-        await page.evaluate(() => window.localStorage.removeItem('atlas-settings'));
         await reloadAppPage(page);
 
         const card = page.getByTestId('integrations-card');
@@ -298,8 +300,6 @@ test.describe('Settings page', () => {
     });
 
     test('bucket policy targets can be edited and reset', async ({ page }) => {
-        await page.evaluate(() => window.localStorage.removeItem('atlas-settings'));
-        await reloadAppPage(page);
 
         const card = page.getByTestId('bucket-policy-card');
         await expect(card).toBeVisible();
@@ -316,8 +316,6 @@ test.describe('Settings page', () => {
     });
 
     test('trading activity policy thresholds can be edited and reset', async ({ page }) => {
-        await page.evaluate(() => window.localStorage.removeItem('atlas-settings'));
-        await reloadAppPage(page);
 
         const card = page.getByTestId('churn-policy-card');
         await expect(card).toBeVisible();
@@ -336,8 +334,6 @@ test.describe('Settings page', () => {
     });
 
     test('GOOG de-risking plan can be activated and surfaced on the dashboard', async ({ page }) => {
-        await page.evaluate(() => window.localStorage.removeItem('atlas-settings'));
-        await reloadAppPage(page);
 
         const card = page.getByTestId('employer-stock-plan-card');
         await expect(card).toBeVisible();
@@ -364,8 +360,6 @@ test.describe('Settings page', () => {
     });
 
     test('sell discipline rules can be created, triggered, snoozed, resolved, and used as execution guardrails', async ({ page }) => {
-        await page.evaluate(() => window.localStorage.removeItem('atlas-settings'));
-        await reloadAppPage(page);
 
         const card = page.getByTestId('sell-discipline-card');
         await expect(card).toBeVisible();

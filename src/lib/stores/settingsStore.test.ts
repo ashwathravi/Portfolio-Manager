@@ -822,4 +822,108 @@ describe('settingsStore', () => {
             assert.strictEqual(state.accounts.length, 0);
         });
     });
+
+    // -----------------------------------------------------------------------
+    // Persistence (i37)
+    // -----------------------------------------------------------------------
+
+    describe('persistedSettings', () => {
+        test('holds every persisted slice and nothing session-only', async () => {
+            const { PERSISTED_SETTINGS_SLICES, persistedSettings } = await import('./settingsStore');
+            useSettingsStore.getState().setProviderKey('polygon', 'pk-session-only');
+
+            const persisted = persistedSettings(useSettingsStore.getState());
+
+            assert.deepStrictEqual(Object.keys(persisted).sort(), [...PERSISTED_SETTINGS_SLICES].sort());
+            assert.ok(!JSON.stringify(persisted).includes('pk-session-only'));
+        });
+    });
+
+    describe('migrateSettings', () => {
+        test('brings a v14 document to the current version', async () => {
+            const { migrateSettings } = await import('./settingsStore');
+            const migrated = migrateSettings({ preferences: { defaultLandingPage: '/portfolios' } }, 14);
+
+            assert.strictEqual(migrated.preferences?.defaultLandingPage, '/portfolios/holdings');
+            assert.strictEqual(migrated.demo?.showSampleData, true);
+        });
+
+        test('leaves a current document as it is', async () => {
+            const { migrateSettings, SETTINGS_VERSION } = await import('./settingsStore');
+            const demo = { showSampleData: false };
+
+            assert.deepStrictEqual(migrateSettings({ demo }, SETTINGS_VERSION), { demo });
+        });
+    });
+
+    describe('normalizeSettings', () => {
+        test('fills an empty or mistyped slice from the defaults', async () => {
+            const { normalizeSettings, defaultPersistedSettings } = await import('./settingsStore');
+            const defaults = defaultPersistedSettings();
+
+            const normalized = normalizeSettings({
+                riskPolicy: {} as never,
+                guardrails: { approvalThresholdUsd: 'lots' } as never,
+            });
+
+            assert.deepStrictEqual(normalized.riskPolicy, defaults.riskPolicy);
+            assert.strictEqual(normalized.guardrails?.approvalThresholdUsd, defaults.guardrails.approvalThresholdUsd);
+        });
+
+        test('keeps valid values, unknown fields and lists the defaults leave empty', async () => {
+            const { normalizeSettings, defaultPersistedSettings } = await import('./settingsStore');
+            const defaults = defaultPersistedSettings();
+            const profile = { ...defaults.profile, fullName: 'Jane Smith', nickname: 'JS' };
+            const accounts = [{
+                id: 'plaid-1', name: 'Brokerage', type: 'brokerage', accountMask: '0000', holdings: 3,
+                accountValue: 1000, lastSynced: '2026-10-19', status: 'reconciled', provider: 'plaid',
+            }];
+
+            const normalized = normalizeSettings({ profile, accounts } as never);
+
+            assert.deepStrictEqual(normalized.profile, profile);
+            assert.deepStrictEqual(normalized.accounts, accounts);
+            assert.ok(!('riskPolicy' in normalized));
+        });
+
+        test('regression: drops list items of the wrong kind, or without the fields they are shown by', async () => {
+            const { normalizeSettings, defaultPersistedSettings } = await import('./settingsStore');
+            const defaults = defaultPersistedSettings();
+
+            const normalized = normalizeSettings({
+                accounts: [null, {}, { id: 'plaid-1', name: 'Brokerage' }, 'x'] as never,
+                alphaRadarDelivery: { ...defaults.alphaRadarDelivery, tickerFilters: ['AAPL', null, 7] } as never,
+                riskPolicy: { ...defaults.riskPolicy, cashJobs: [undefined, { label: 'no id' }, { id: 'job-1', type: 'emergency' }] } as never,
+                tags: [{ color: '#fff' }, ...defaults.tags] as never,
+            });
+
+            // An account without a name can't be shown, so it goes; the
+            // fields it does need are filled in.
+            assert.deepStrictEqual(normalized.accounts, [{
+                id: 'plaid-1',
+                name: 'Brokerage',
+                type: '',
+                accountMask: '',
+                holdings: 0,
+                accountValue: 0,
+                lastSynced: '',
+                status: 'needs-review',
+            }]);
+            assert.deepStrictEqual(normalized.alphaRadarDelivery?.tickerFilters, ['AAPL']);
+            assert.deepStrictEqual(normalized.riskPolicy?.cashJobs, [{ id: 'job-1', type: 'emergency', label: '', amount: 0 }]);
+            assert.deepStrictEqual(normalized.tags, defaults.tags);
+        });
+
+        test('drops list items of the wrong kind', async () => {
+            const { normalizeSettings, defaultPersistedSettings } = await import('./settingsStore');
+            const defaults = defaultPersistedSettings();
+            const [first] = defaults.riskPolicy.bucketPolicies;
+
+            const normalized = normalizeSettings({
+                riskPolicy: { ...defaults.riskPolicy, bucketPolicies: [first, 42, 'x'] } as never,
+            });
+
+            assert.deepStrictEqual(normalized.riskPolicy?.bucketPolicies, [first]);
+        });
+    });
 });

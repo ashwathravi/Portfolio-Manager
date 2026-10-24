@@ -267,6 +267,7 @@ describe("API proxy security", () => {
             ["/api/portfolios/count", "GET"],
             ["/api/portfolio/00000000-0000-4000-8000-000000000001/value", "GET"],
             ["/api/portfolio/import", "POST"],
+            ["/api/settings", "PUT"],
             ["/api/alpha-radar/refresh", "POST"],
             ["/api/alpha-radar/filers", "POST"],
             ["/api/alpha-radar/filers/00000000-0000-4000-8000-000000000001", "PATCH"],
@@ -305,6 +306,15 @@ describe("API proxy security", () => {
             "GET",
         ));
         assert.equal(importWrongMethod.status, 401);
+
+        const settingsWrongMethod = await handleVerifiedRequest(apiRequest(
+            {},
+            "/api/settings",
+            null,
+            [],
+            "DELETE",
+        ));
+        assert.equal(settingsWrongMethod.status, 401);
     });
 
     test("rate limits signed-in API calls per user, once per request", async () => {

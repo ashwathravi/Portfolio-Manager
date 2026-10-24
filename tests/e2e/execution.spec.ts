@@ -1,5 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { clickUntil, gotoAppPage, reloadAppPage } from './helpers/app';
+import { signInAsFreshUser } from './helpers/users';
 
 /**
  * Phase 9 (AR-94) Execution tests.
@@ -214,13 +215,13 @@ test.describe('Execution page — pre-trade rationale (AR-109)', () => {
         await page.evaluate(() => {
             try {
                 window.localStorage.removeItem('pm-exec-variant');
-                window.localStorage.removeItem('atlas-settings');
             } catch {
                 /* ignore */
             }
         });
         // Reload so the stores pick up the cleared state on this first
-        // visit (rationaleRequired defaults back to `true`).
+        // visit. Settings start at the defaults: tests that change them sign
+        // in as a fresh user (tests/e2e/helpers/users.ts).
         await reloadAppPage(page);
     });
 
@@ -332,7 +333,9 @@ test.describe('Execution page — pre-trade rationale (AR-109)', () => {
         );
     });
 
-    test('disabling the rationale requirement in Settings lifts the gate', async ({ page }) => {
+    test('disabling the rationale requirement in Settings lifts the gate', async ({ context, page }) => {
+        // Settings are kept per user on the server; change a copy of user A's.
+        await signInAsFreshUser(context);
         // Flip the setting off.
         await gotoAppPage(page, '/settings');
         const toggle = page.getByLabel(
@@ -373,7 +376,6 @@ test.describe('Execution page — caution-mood cooldown (AR-110)', () => {
         await page.evaluate(() => {
             try {
                 window.localStorage.removeItem('pm-exec-variant');
-                window.localStorage.removeItem('atlas-settings');
             } catch {
                 /* ignore */
             }
@@ -480,7 +482,9 @@ test.describe('Execution page — caution-mood cooldown (AR-110)', () => {
         ).toBeEnabled();
     });
 
-    test('setting cooldown to Off in Settings bypasses the timer', async ({ page }) => {
+    test('setting cooldown to Off in Settings bypasses the timer', async ({ context, page }) => {
+        // Settings are kept per user on the server; change a copy of user A's.
+        await signInAsFreshUser(context);
         // Flip cooldown to "Off".
         await gotoAppPage(page, '/settings');
         const group = page.getByRole('radiogroup', {
@@ -567,7 +571,6 @@ test.describe('Execution page — live adherence panel (AR-111)', () => {
         await page.evaluate(() => {
             try {
                 window.localStorage.removeItem('pm-exec-variant');
-                window.localStorage.removeItem('atlas-settings');
             } catch {
                 /* ignore */
             }

@@ -67,6 +67,14 @@ export default async function PrivacyPage({ searchParams }: { searchParams: Sear
                             so don&rsquo;t put anything private there.
                         </li>
                         <li>
+                            <strong>Your settings.</strong> Profile, display, notification and trading
+                            preferences, the account names, last four digits and balances shown in Settings, and
+                            your risk policy, including cash, employer-stock and tax-limit details. They are
+                            saved with your account so they follow you to any browser; this browser keeps a copy
+                            until you sign out. API keys you enter in Settings are never saved: they&rsquo;re held
+                            in memory for the current session only.
+                        </li>
+                        <li>
                             <strong>Sign-in cookies and request logs.</strong> A session cookie keeps you signed
                             in, and Auth.js sets short-lived cookies to secure the sign-in itself. Our hosting
                             provider records standard request logs (IP address, browser and time) that we use
@@ -74,16 +82,12 @@ export default async function PrivacyPage({ searchParams }: { searchParams: Sear
                         </li>
                     </ul>
                     <p>
-                        Some things are stored only in your browser, not on our servers: your Settings (profile,
-                        display, notification and trading preferences, the account names, last four digits and
-                        balances shown there, and your risk policy, including cash, employer-stock and tax-limit
-                        details), research theses, journal entries, watchlist, price alerts and their notes,
-                        weekly reviews and Ask history. Each account that signs in on this browser gets its own
-                        copy of everything except Settings, signing out removes your Ask history, and clearing
-                        this site&rsquo;s data removes the rest. Someone with access to this browser profile could
-                        still read them. To show prices, the ticker symbols in your
-                        watchlist and theses are sent to our server and on to the market data provider. API keys
-                        you enter in Settings are held in memory for the current session only.
+                        Some things are stored only in your browser, not on our servers: research theses,
+                        journal entries, watchlist, price alerts and their notes, weekly reviews and Ask history.
+                        Each account that signs in on this browser gets its own copy, signing out removes your
+                        Ask history, and clearing this site&rsquo;s data removes the rest. Someone with access to
+                        this browser profile could still read them. To show prices, the ticker symbols in your
+                        watchlist and theses are sent to our server and on to the market data provider.
                     </p>
                     <p>We do not use advertising or analytics cookies, tracking pixels or third-party trackers.</p>
                 </section>
@@ -146,7 +150,8 @@ export default async function PrivacyPage({ searchParams }: { searchParams: Sear
                     <p>
                         We keep your data while your account is open. Email <ContactLink /> to delete your
                         account: within 30 days we remove your account, linked-account data (including our
-                        encrypted access to your institutions), portfolios and transactions from our database,
+                        encrypted access to your institutions), portfolios, transactions and settings from our
+                        database,
                         unless the law requires us to keep something.
                     </p>
                     <p>

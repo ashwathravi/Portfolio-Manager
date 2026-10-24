@@ -8,11 +8,13 @@ import { SNOOZE_STORAGE_KEY } from "@/lib/patterns/snooze";
 import { JOURNAL_STORAGE_KEY } from "@/lib/research/journalStorage";
 import { THESIS_STORAGE_KEY } from "@/lib/research/storage";
 import { REVIEWS_STORAGE_KEY } from "@/lib/reviews/storage";
+import { SETTINGS_STORAGE_KEY } from "@/lib/settings/sync";
 import { ALERTS_STORAGE_KEY } from "@/lib/stores/alertsStore";
 
 import { adoptSharedValues, browserLocalStorage, currentStorageScope } from "./user-scope";
 
 export const FORMERLY_SHARED_KEYS = [
+    SETTINGS_STORAGE_KEY,
     THESIS_STORAGE_KEY,
     JOURNAL_STORAGE_KEY,
     ALERTS_STORAGE_KEY,

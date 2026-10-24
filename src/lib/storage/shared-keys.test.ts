@@ -15,6 +15,7 @@ describe("adoptFormerlySharedData", () => {
     test("covers every key that used to be shared", () => {
         assert.deepEqual([...FORMERLY_SHARED_KEYS].sort(), [
             "atlas-alerts",
+            "atlas-settings",
             "atlas:research:journal",
             "atlas:research:theses",
             "pm-ask-v1",
