@@ -164,6 +164,13 @@ export default defineConfig({
                 ...webServerEnv,
                 NEXT_DIST_DIR: '.next/e2e-placeholder',
                 DATABASE_URL: '[SENSITIVE]',
+                // Without a usable URL postgres.js falls back to PGHOST:PGPORT,
+                // localhost:5432 by default, where CI's Postgres service
+                // answers. A closed port keeps this server off every database,
+                // and a page that still queries fails as it would on macOS
+                // (localhost is two addresses, so the refusal is an AggregateError).
+                PGHOST: 'localhost',
+                PGPORT: '9',
                 AUTH_SECRET: '',
                 AUTH_GOOGLE_ID: '',
                 AUTH_GOOGLE_SECRET: '',

@@ -5,10 +5,9 @@ import { PerformanceExportButton } from "@/components/performance/PerformanceExp
 import { ReturnHistoryView } from "@/components/performance/ReturnHistoryView";
 import { DataUnavailableNotice } from "@/components/data-display/DataUnavailableNotice";
 import { SampleGate } from "@/components/data-display/SampleGate";
-import { isDatabaseConfigured } from "@/db/connection-options";
 import { requirePageUserId } from "@/lib/auth/request-user";
 import { dailyExportRows, monthlyExportRows } from "@/lib/performance/export";
-import { loadReturnHistory, type ReturnHistory } from "@/lib/performance/return-history";
+import { loadPageReturnHistory } from "@/lib/performance/return-history";
 import { getExampleMonthlySeries } from "@/lib/performance/series";
 import PerformanceLoading from "./loading";
 
@@ -30,17 +29,7 @@ const CRUMBS = ["Performance", "Returns"];
 
 async function ReturnsContent({ accountId }: { accountId: string | null }) {
     const userId = await requirePageUserId();
-    let history: ReturnHistory | null = null;
-    let unavailable = false;
-    try {
-        history = await loadReturnHistory(userId, { accountId });
-    } catch (e) {
-        // With a configured database a failure is an outage, not a user
-        // without history; without one (local runs) the example stands.
-        unavailable = isDatabaseConfigured();
-        if (unavailable) console.error("Return history fetch failed — showing the outage notice.", e);
-        else console.warn("Return history fetch failed without a configured database — showing example data.", e);
-    }
+    const { history, unavailable } = await loadPageReturnHistory(userId, { accountId });
 
     if (unavailable) {
         return (
