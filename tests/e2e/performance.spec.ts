@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { test, expect } from '@playwright/test';
+import { userKey } from './helpers/storage';
 
 /**
  * Performance tests.
@@ -290,17 +291,17 @@ test.describe('Performance › Behaviour — Reviews archive (AR-114)', () => {
         // test navigates across pages. Using addInitScript alone would
         // re-wipe the key on every goto — the sessionStorage sentinel
         // gates the clear to the first navigation in the session.
-        await page.addInitScript(() => {
+        await page.addInitScript((key) => {
             try {
                 const done = window.sessionStorage.getItem('__pm_test_wipe_done');
                 if (!done) {
-                    window.localStorage.removeItem('pm-weekly-reviews-v1');
+                    window.localStorage.removeItem(key);
                     window.sessionStorage.setItem('__pm_test_wipe_done', '1');
                 }
             } catch {
                 /* ignore */
             }
-        });
+        }, userKey('pm-weekly-reviews-v1'));
         await page.goto('/performance/behaviour');
     });
 
@@ -339,9 +340,7 @@ test.describe('Performance › Behaviour — Reviews archive (AR-114)', () => {
         await textarea.blur();
         // Give onBlur a moment to commit.
         await expect(async () => {
-            const raw = await page.evaluate(() =>
-                window.localStorage.getItem('pm-weekly-reviews-v1'),
-            );
+            const raw = await page.evaluate((key) => window.localStorage.getItem(key), userKey('pm-weekly-reviews-v1'));
             expect(raw).not.toBeNull();
         }).toPass({ timeout: 2000 });
 

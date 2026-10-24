@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { userKey } from './helpers/storage';
 import { gotoAppPage } from './helpers/app';
 
 /**
@@ -30,17 +31,17 @@ async function openAskOverlay(page: import('@playwright/test').Page) {
 test.describe('Ask Ledger — ⌘K command palette', () => {
     test.beforeEach(async ({ page }) => {
         // Reset persisted chat so every test starts with an empty sheet.
-        await page.addInitScript(() => {
+        await page.addInitScript((key) => {
             try {
                 const done = window.sessionStorage.getItem('__pm_test_ask_wipe');
                 if (!done) {
-                    window.localStorage.removeItem('pm-ask-v1');
+                    window.localStorage.removeItem(key);
                     window.sessionStorage.setItem('__pm_test_ask_wipe', '1');
                 }
             } catch {
                 /* ignore */
             }
-        });
+        }, userKey('pm-ask-v1'));
         await gotoAppPage(page, '/');
     });
 
@@ -115,17 +116,17 @@ test.describe('Ask Ledger — ⌘K command palette', () => {
 
 test.describe('Ask Ledger — dedicated /ask page', () => {
     test.beforeEach(async ({ page }) => {
-        await page.addInitScript(() => {
+        await page.addInitScript((key) => {
             try {
                 const done = window.sessionStorage.getItem('__pm_test_ask_wipe');
                 if (!done) {
-                    window.localStorage.removeItem('pm-ask-v1');
+                    window.localStorage.removeItem(key);
                     window.sessionStorage.setItem('__pm_test_ask_wipe', '1');
                 }
             } catch {
                 /* ignore */
             }
-        });
+        }, userKey('pm-ask-v1'));
     });
 
     test('/ask renders the AskSheet inline (page variant)', async ({ page }) => {
@@ -175,9 +176,7 @@ test.describe('Ask Ledger — dedicated /ask page', () => {
         await expect(page.getByTestId('ask-msg-user')).toHaveCount(1);
         await expect(page.getByTestId('ask-msg-assistant')).toHaveCount(1);
 
-        const raw = await page.evaluate(() =>
-            window.localStorage.getItem('pm-ask-v1'),
-        );
+        const raw = await page.evaluate((key) => window.localStorage.getItem(key), userKey('pm-ask-v1'));
         expect(raw).not.toBeNull();
         const parsed = JSON.parse(raw!);
         expect(Array.isArray(parsed.history)).toBe(true);

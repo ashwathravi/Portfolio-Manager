@@ -1,10 +1,14 @@
+import { currentStorageScope, readUserValue, writeUserValue } from '@/lib/storage/user-scope';
+
 import type { JournalEntry } from './journal';
 
 /**
- * localStorage-backed persistence for decision-journal entries until the
- * Supabase-backed API lands. Mirrors the shape used for theses so future
- * migration is straightforward.
+ * localStorage-backed persistence for decision-journal entries until they
+ * move to Postgres (launch item i38), one copy per signed-in user (i39).
+ * Mirrors the shape used for theses so future migration is straightforward.
  */
+
+type JournalStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
 
 export const JOURNAL_STORAGE_KEY = 'atlas:research:journal';
 
@@ -44,19 +48,19 @@ function parseEnvelope(raw: string): JournalEntry[] | null {
 }
 
 export function loadJournalFromStorage(
-    storage: Pick<Storage, 'getItem'> | null | undefined,
+    storage: JournalStorage | null | undefined,
+    scope: string = currentStorageScope(),
 ): JournalEntry[] | null {
-    if (!storage) return null;
-    const raw = storage.getItem(JOURNAL_STORAGE_KEY);
+    const raw = readUserValue(storage, JOURNAL_STORAGE_KEY, scope);
     if (!raw) return null;
     return parseEnvelope(raw);
 }
 
 export function saveJournalToStorage(
-    storage: Pick<Storage, 'setItem'> | null | undefined,
+    storage: JournalStorage | null | undefined,
     entries: readonly JournalEntry[],
+    scope: string = currentStorageScope(),
 ): void {
-    if (!storage) return;
     const envelope: EnvelopeV1 = { version: CURRENT_VERSION, entries: [...entries] };
-    storage.setItem(JOURNAL_STORAGE_KEY, JSON.stringify(envelope));
+    writeUserValue(storage, JOURNAL_STORAGE_KEY, JSON.stringify(envelope), scope);
 }

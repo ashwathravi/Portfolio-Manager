@@ -1,3 +1,4 @@
+import { storageScopeFor, userStorageKey } from '@/lib/storage/user-scope';
 import { tickerSchema } from '@/lib/validators/market-data';
 
 /**
@@ -153,7 +154,7 @@ export const WATCHLIST_STORAGE_KEY = 'atlas:research:watchlist';
  * loads another's tickers and notes.
  */
 export function watchlistStorageKey(userId: string | null | undefined): string {
-    return `${WATCHLIST_STORAGE_KEY}:${userId?.trim() || 'anonymous'}`;
+    return userStorageKey(WATCHLIST_STORAGE_KEY, storageScopeFor(userId));
 }
 
 /** Example rows are hidden when the user turns example data off. */

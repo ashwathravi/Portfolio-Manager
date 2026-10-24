@@ -1,6 +1,9 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { createJSONStorage, persist } from 'zustand/middleware';
 import type { AlertRule, AlertTrigger } from '@/lib/alerts/types';
+import { userScopedStateStorage } from '@/lib/storage/user-scope';
+
+export const ALERTS_STORAGE_KEY = 'atlas-alerts';
 
 const MAX_TRIGGER_LOG = 200;
 
@@ -120,7 +123,9 @@ export const useAlertsStore = create<AlertsState>()(
             clearTriggers: () => set({ triggers: [] }),
         }),
         {
-            name: 'atlas-alerts',
+            name: ALERTS_STORAGE_KEY,
+            // One copy per signed-in user (src/lib/storage/user-scope.ts).
+            storage: createJSONStorage(() => userScopedStateStorage()),
             partialize: (state) => ({ rules: state.rules, triggers: state.triggers }),
         },
     ),

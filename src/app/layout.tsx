@@ -14,6 +14,7 @@ import { AppFrame } from "@/components/layout/AppFrame";
 import { IdentityProvider } from "@/components/providers/IdentityProvider";
 import { RequestTimeProvider } from "@/components/providers/RequestTimeProvider";
 import { resolveViewerIdentity } from "@/lib/auth/viewer";
+import { storageScopeFor } from "@/lib/storage/user-scope";
 
 export const metadata: Metadata = {
   title: "Atlas Wealth | Personal Investment Operating System",
@@ -50,8 +51,10 @@ export default async function RootLayout({
   // data from the same instant as this render.
   // eslint-disable-next-line react-hooks/purity
   const requestTime = Date.now();
+  // Browser storage is kept per user under `data-storage-scope`
+  // (STORAGE_SCOPE_ATTRIBUTE in src/lib/storage/user-scope.ts).
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en" data-storage-scope={storageScopeFor(identity?.id)} suppressHydrationWarning>
       <body
         className={cn(
           "min-h-screen bg-background font-sans antialiased overflow-hidden",

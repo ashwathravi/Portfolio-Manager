@@ -3,8 +3,9 @@
  *
  * When the user dismisses a pattern row it disappears for 30 days. The
  * snooze state is a flat `{ [patternId]: expiresAtISO }` map kept in
- * localStorage under the `pm-pattern-snoozed` key. SSR-safe — every
- * function guards `typeof window` so importers don't have to.
+ * localStorage under the `pm-pattern-snoozed` key, one per signed-in user
+ * (src/lib/storage/user-scope.ts). SSR-safe: on the server there is no
+ * storage, so reads are empty and writes do nothing.
  *
  * Expired entries are pruned on read, so the map never grows
  * unbounded. The 30-day window is aggressive on purpose — a pattern
@@ -12,15 +13,16 @@
  * to come back and nag.
  */
 
-const LS_KEY = 'pm-pattern-snoozed';
+import { browserLocalStorage, readUserValue, writeUserValue } from '@/lib/storage/user-scope';
+
+export const SNOOZE_STORAGE_KEY = 'pm-pattern-snoozed';
 const SNOOZE_MS = 30 * 86_400_000;
 
 type SnoozeMap = Record<string, string>; // patternId → expiresAt ISO
 
 function load(): SnoozeMap {
-    if (typeof window === 'undefined') return {};
     try {
-        const raw = window.localStorage.getItem(LS_KEY);
+        const raw = readUserValue(browserLocalStorage(), SNOOZE_STORAGE_KEY);
         if (!raw) return {};
         const parsed = JSON.parse(raw);
         if (parsed && typeof parsed === 'object') return parsed as SnoozeMap;
@@ -31,12 +33,8 @@ function load(): SnoozeMap {
 }
 
 function save(map: SnoozeMap): void {
-    if (typeof window === 'undefined') return;
-    try {
-        window.localStorage.setItem(LS_KEY, JSON.stringify(map));
-    } catch {
-        /* quota / private-mode — drop silently, next read returns {} */
-    }
+    // Quota / private mode: dropped silently, and the next read returns {}.
+    writeUserValue(browserLocalStorage(), SNOOZE_STORAGE_KEY, JSON.stringify(map));
 }
 
 /** Returns a set of pattern ids currently snoozed (expiry in future).
