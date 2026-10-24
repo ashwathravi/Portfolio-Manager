@@ -49,17 +49,25 @@ describe("importHoldings", () => {
         ],
     };
 
-    test("regression: imported positions are valued at the stored price, not $0", async () => {
+    test("regression: imported positions get the stored price, not $0", async () => {
         const { database, inserted, updated } = fakeDatabase();
         const result = await importHoldings(USER, body, { AAPL: 200, MSFT: 410 }, database);
         assert.deepEqual([result.insert, result.update], [2, 1]);
 
         const msft = inserted.find((row) => row.symbol === "MSFT");
         assert.equal(msft?.currentPrice, 410);
-        assert.equal(msft?.marketValue, 1640);
-        // AAPL was held: its row is replaced and valued at the new quantity.
+        // AAPL was held: its row is replaced with the new quantity and price.
         assert.equal(updated[0]?.currentPrice, 200);
-        assert.equal(updated[0]?.marketValue, 2000);
+    });
+
+    test("regression: no market value is stored, so a newer quote values the position", () => {
+        // The Codex finding on PR #153: a stored value outranked later
+        // quotes on Today, holding the position at its import-day worth.
+        const { database, inserted, updated } = fakeDatabase();
+        return importHoldings(USER, body, { AAPL: 200, MSFT: 410 }, database).then(() => {
+            assert.ok(inserted.every((row) => row.marketValue === null));
+            assert.ok(updated.every((row) => row.marketValue === null));
+        });
     });
 
     test("a symbol without a stored price keeps none, for readers to value at cost", async () => {

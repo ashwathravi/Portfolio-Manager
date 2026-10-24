@@ -100,7 +100,7 @@ Every page in the application must have a corresponding E2E spec. The current ma
 
 | Route | E2E Spec File | Key assertions |
 |-------|--------------|----------------|
-| `/` (Today) | `dashboard.spec.ts` | Single "Today" header with greeting/market state, money-first hero (or connect-account empty state), ranked "Needs your attention", policy strip + disclosure, example section labelled and hideable, no fabricated deltas |
+| `/` (Today) | `dashboard.spec.ts` | Single "Today" header with greeting/market state, money-first hero (or connect-account empty state), ranked "Needs your attention", policy strip + disclosure, example section labelled and hideable, no fabricated deltas, a position with no price yet counts at cost in net worth |
 | `/portfolios/holdings` | `holdings.spec.ts` | Portfolio title + Holdings tab, one heading, table or single empty state, LEAPS ledger only with holdings and tagged Sample, sparklines never invented, Import CSV (preview, issues, exact payload, errors; API 400/cross-tenant 404/unchanged in DB mode; a position with no price yet is valued at cost, not $0), Today P&L counts only today's session, page gutter |
 | `/portfolios/accounts` | `accounts.spec.ts` | Accounts tab, real accounts or empty state (never seeded balances). With a database: add an account with cash (survives reload), rename and change cash, form errors explained, delete after a confirm that names what goes with it, and the API changes only your own accounts (another user's is a 404, signed-out a 401) |
 | `/portfolios/activity` | `activity.spec.ts` | Activity tab, real transactions or empty state, side filters |

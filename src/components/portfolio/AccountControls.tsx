@@ -177,8 +177,10 @@ export function AccountRowActions({ account }: { account: EditableAccount }) {
     const [editOpen, setEditOpen] = useState(false);
 
     const remove = async () => {
+        // Transactions and value history go too, even without positions: a
+        // cash-only account has both.
         const what = account.positions === 0
-            ? "It has no positions."
+            ? "Its transactions and value history go with it."
             : `Its ${account.positions} ${account.positions === 1 ? "position" : "positions"}, transactions and value history go with it.`;
         if (!window.confirm(`Delete ${account.name}? ${what} This can't be undone.`)) return;
         const result = await send(`/api/portfolios/${account.id}`, { method: "DELETE" });

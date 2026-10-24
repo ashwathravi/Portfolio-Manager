@@ -27,10 +27,12 @@ export interface ImportResult {
  * them otherwise. Rows for symbols already held replace those positions;
  * other positions are untouched.
  *
- * `prices` (upper-case symbol → last price, from the price store) values
- * the rows it covers, so an imported position shows its worth straight
- * away instead of $0. Rows without one keep no stored price, and readers
- * value them at cost.
+ * `prices` (upper-case symbol → last price, from the price store) gives
+ * the rows it covers a stored price, so an imported position shows its
+ * worth straight away instead of $0. No market value is stored with it:
+ * readers value positions at quantity × the newest price they have, and a
+ * stored value would hold them at today's. Rows without a price keep none,
+ * and readers value them at cost.
  */
 export async function importHoldings(
     userId: string,
@@ -38,11 +40,9 @@ export async function importHoldings(
     prices: Readonly<Record<string, number>> = {},
     database: typeof db = db,
 ): Promise<ImportResult> {
-    const valued = (symbol: string, quantity: number) => {
+    const priced = (symbol: string) => {
         const price = prices[symbol.toUpperCase()];
-        return Number.isFinite(price) && price > 0
-            ? { currentPrice: price, marketValue: quantity * price }
-            : { currentPrice: null, marketValue: null };
+        return { currentPrice: Number.isFinite(price) && price > 0 ? price : null, marketValue: null };
     };
     return database.transaction(async (tx) => {
         let portfolioId: string;
@@ -89,7 +89,7 @@ export async function importHoldings(
                     name: r.name || r.symbol,
                     quantity: String(r.quantity),
                     avgCost: String(r.avgCost),
-                    ...valued(r.symbol, r.quantity),
+                    ...priced(r.symbol),
                 })),
             );
         }
@@ -100,9 +100,9 @@ export async function importHoldings(
                 .set({
                     quantity: String(p.row.quantity),
                     avgCost: String(p.row.avgCost),
-                    // Snapshot fields were computed for the old quantity: value
-                    // the new one at the stored price, or leave it to readers.
-                    ...valued(p.row.symbol, p.row.quantity),
+                    // Snapshot fields were computed for the old quantity: keep
+                    // the stored price, and leave the value to readers.
+                    ...priced(p.row.symbol),
                     allocation: null,
                     ...(p.row.name ? { name: p.row.name } : {}),
                     updatedAt: now,

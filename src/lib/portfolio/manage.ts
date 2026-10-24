@@ -4,7 +4,7 @@
  * the session: another user's account reads as not found.
  */
 
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 
 import { db } from "@/db";
 import { portfolios } from "@/db/schema";
@@ -48,14 +48,24 @@ export async function createPortfolio(userId: string, body: PortfolioCreateBody,
     return toManaged(row);
 }
 
+/**
+ * `updated_at` marks the account's last financial change: valuation
+ * snapshots (valuation-snapshots.ts) skip every close before it. So only a
+ * change of cash moves it; a new name or description, or the same cash
+ * again, leaves it where it was.
+ */
 export function buildUpdatePortfolioQuery(userId: string, id: string, body: PortfolioUpdateBody, now: Date, database: Database = db) {
     return database
         .update(portfolios)
         .set({
             ...(body.name !== undefined ? { name: body.name } : {}),
             ...(body.description !== undefined ? { description: body.description || null } : {}),
-            ...(body.cashBalance !== undefined ? { cashBalance: body.cashBalance } : {}),
-            updatedAt: now,
+            ...(body.cashBalance !== undefined
+                ? {
+                    cashBalance: body.cashBalance,
+                    updatedAt: sql`case when ${portfolios.cashBalance} is distinct from ${body.cashBalance} then ${now.toISOString()}::timestamp else ${portfolios.updatedAt} end`,
+                }
+                : {}),
         })
         .where(and(eq(portfolios.id, id), eq(portfolios.userId, userId)))
         .returning(returned);

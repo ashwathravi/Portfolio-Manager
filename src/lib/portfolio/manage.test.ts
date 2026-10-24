@@ -24,13 +24,26 @@ describe("account queries", () => {
 
     test("update changes only what it was given, only on the user's own account", () => {
         const { sql, params } = buildUpdatePortfolioQuery(USER, ID, { cashBalance: 10 }, NOW).toSQL();
-        assert.match(sql, /^update "portfolios" set "cash_balance" = \$1, "updated_at" = \$2 where \("portfolios"\."id" = \$3 and "portfolios"\."user_id" = \$4\) returning/i);
-        assert.deepEqual(params, [10, NOW.toISOString(), ID, USER]);
+        assert.match(sql, /^update "portfolios" set "cash_balance" = \$1, "updated_at" = case when .* end where \("portfolios"\."id" = \$\d+ and "portfolios"\."user_id" = \$\d+\) returning/i);
+        assert.equal(params[0], 10);
+        assert.ok(params.includes(ID));
+        assert.ok(params.includes(USER));
 
         const renamed = buildUpdatePortfolioQuery(USER, ID, { name: "Renamed", description: "" }, NOW).toSQL();
-        assert.match(renamed.sql, /set "name" = \$1, "description" = \$2, "updated_at" = \$3/i);
+        assert.match(renamed.sql, /set "name" = \$1, "description" = \$2 where/i);
         // An empty description clears it.
         assert.equal(renamed.params[1], null);
+    });
+
+    test("regression: only a change of cash moves the account's last-change time", () => {
+        // The Codex finding on PR #153: a rename after the close moved it,
+        // and that day's valuation snapshot was skipped for good.
+        const renamed = buildUpdatePortfolioQuery(USER, ID, { name: "Renamed" }, NOW).toSQL();
+        assert.doesNotMatch(renamed.sql, /updated_at/);
+        // Cash given: moved only if it differs from what's stored.
+        const cash = buildUpdatePortfolioQuery(USER, ID, { name: "Renamed", cashBalance: 10 }, NOW).toSQL();
+        assert.match(cash.sql, /"updated_at" = case when "portfolios"\."cash_balance" is distinct from \$\d+ then \$\d+::timestamp else "portfolios"\."updated_at" end/i);
+        assert.ok(cash.params.includes(NOW.toISOString()));
     });
 
     test("delete removes only the user's own account and says whether it did", () => {
