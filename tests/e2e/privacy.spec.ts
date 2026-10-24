@@ -32,10 +32,20 @@ test.describe('Privacy policy', () => {
     }
   });
 
-  test('says the watchlist is saved with the account, not only in the browser', async ({ page }) => {
+  test('says the watchlist and journal are saved with the account, not only in the browser', async ({ page }) => {
     const collected = page.getByRole('region', { name: 'What we collect' });
-    await expect(collected.getByRole('listitem').filter({ hasText: 'Data you add.' })).toContainText('your watchlist');
-    await expect(collected.getByText(/stored only in your browser/)).not.toContainText('watchlist,');
+    const added = collected.getByRole('listitem').filter({ hasText: 'Data you add.' });
+    await expect(added).toContainText('your watchlist');
+    await expect(added).toContainText('your decision journal');
+    const browserOnly = collected.getByText(/stored only in your browser/);
+    await expect(browserOnly).not.toContainText('watchlist,');
+    await expect(browserOnly).not.toContainText('journal');
+  });
+
+  test('says what stays when you remove a watchlist ticker or journal entry', async ({ page }) => {
+    const retention = page.getByRole('region', { name: 'Keeping and deleting your data' });
+    await expect(retention).toContainText('watchlist, journal and settings');
+    await expect(retention.getByText(/When you remove a watchlist ticker or delete a journal entry/)).toContainText('notes and reasoning are erased');
   });
 
   test('names every service that receives data, including error reports', async ({ page }) => {

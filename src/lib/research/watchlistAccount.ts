@@ -6,6 +6,7 @@ import {
     type WatchWriteOrder,
 } from '@/lib/validators/watchlist';
 
+import { accountRequest, importInBatches, importOnce, sendRecordWrite, type Fetch } from './accountWrites';
 import type { StoredWatchlist } from './server/watchlist';
 import { WATCHLIST_STORAGE_KEY, isExampleWatchId, isoDay, loadWatchlist, type WatchItem } from './watchlist';
 
@@ -159,166 +160,11 @@ export function watchlistFullCopyKey(key: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Writes
-// ---------------------------------------------------------------------------
-
-export interface WatchlistWriter {
-    /** Writes not yet saved, by item ID. A new map after every change. */
-    pending(): ReadonlyMap<string, WatchWrite>;
-    /** This page's ID, sent with every write. */
-    readonly session: string;
-    write(id: string, write: WatchWrite): void;
-    /** For a page that is closing: sends the writes still waiting behind one in flight, now. */
-    sendWaiting(): void;
-    /** Resolves once no write is waiting or in flight. */
-    idle(): Promise<void>;
-    subscribe(listener: () => void): () => void;
-}
-
-/**
- * Sends each item's writes one at a time; a write made while one is in
- * flight replaces any still waiting, so only the latest is sent next.
- */
-export function createWatchlistWriter({
-    send,
-    onSaved,
-    onFailed,
-    session = newWriteSession(),
-    // Only the browser's writers wait for sign-out. On the server a writer
-    // is made for every render, and the registry would keep each one (and
-    // its request's query client) forever.
-    register = typeof window !== 'undefined',
-}: {
-    send: (id: string, write: WatchWrite, order: WatchWriteOrder) => Promise<void>;
-    onSaved: (id: string, write: WatchWrite) => void;
-    onFailed: (id: string, write: WatchWrite, error: unknown) => void;
-    session?: string;
-    register?: boolean;
-}): WatchlistWriter {
-    const pending = new Map<string, WatchWrite>();
-    // Each write's place in this page's order, numbered as it is made.
-    const seqs = new WeakMap<WatchWrite, number>();
-    let count = 0;
-    const orderOf = (write: WatchWrite): WatchWriteOrder => ({ session, seq: seqs.get(write) ?? 0 });
-    // The write in flight for each item.
-    const sending = new Map<string, WatchWrite>();
-    const listeners = new Set<() => void>();
-    let snapshot: ReadonlyMap<string, WatchWrite> = new Map();
-
-    let idleWaiters: (() => void)[] = [];
-
-    const changed = () => {
-        snapshot = new Map(pending);
-        for (const listener of listeners) listener();
-        if (pending.size === 0) {
-            const waiters = idleWaiters;
-            idleWaiters = [];
-            for (const resolve of waiters) resolve();
-        }
-    };
-
-    const drain = async (id: string) => {
-        if (sending.has(id)) return;
-        try {
-            for (;;) {
-                const write = pending.get(id);
-                if (!write) return;
-                sending.set(id, write);
-                let failure: { error: unknown } | null = null;
-                try {
-                    await send(id, write, orderOf(write));
-                } catch (error) {
-                    failure = { error };
-                }
-                // A newer write came in meanwhile: send that one.
-                if (pending.get(id) !== write) continue;
-                pending.delete(id);
-                if (failure) onFailed(id, write, failure.error);
-                else onSaved(id, write);
-                changed();
-                return;
-            }
-        } finally {
-            sending.delete(id);
-        }
-    };
-
-    const writer: WatchlistWriter = {
-        pending: () => snapshot,
-        session,
-        write(id, write) {
-            count += 1;
-            seqs.set(write, count);
-            pending.set(id, write);
-            changed();
-            void drain(id);
-        },
-        sendWaiting() {
-            for (const [id, write] of pending) {
-                // Only a write waiting behind another: the rest are in
-                // flight already. Sent alongside the older one, it may land
-                // first; its order keeps the older one from replacing it. If
-                // the page stays (back-forward cache), drain sends it again;
-                // the repeat is ignored.
-                const inFlight = sending.get(id);
-                if (inFlight !== undefined && inFlight !== write) void send(id, write, orderOf(write)).catch(() => {});
-            }
-        },
-        idle() {
-            return pending.size === 0 ? Promise.resolve() : new Promise<void>((resolve) => idleWaiters.push(resolve));
-        },
-        subscribe(listener) {
-            listeners.add(listener);
-            return () => listeners.delete(listener);
-        },
-    };
-    if (register) writers.add(writer);
-    return writer;
-}
-
-const writers = new Set<WatchlistWriter>();
-
-/**
- * For sign-out: waits (for up to `timeoutMs`) until every watchlist write
- * this page made has been sent, while the session still lets them through.
- */
-export async function flushWatchlistWrites(timeoutMs = 3000): Promise<void> {
-    let timeout: ReturnType<typeof setTimeout> | undefined;
-    await Promise.race([
-        Promise.all([...writers].map((writer) => writer.idle())),
-        new Promise<void>((resolve) => { timeout = setTimeout(resolve, timeoutMs); }),
-    ]);
-    clearTimeout(timeout);
-}
-
-// ---------------------------------------------------------------------------
 // Requests
 // ---------------------------------------------------------------------------
 
-export class WatchlistRequestError extends Error {
-    constructor(readonly status: number, readonly code: string | null) {
-        super(`Watchlist request failed (${status}${code ? ` ${code}` : ''})`);
-    }
-}
-
-type Fetch = typeof fetch;
-
-async function request(fetchImpl: Fetch, path: string, init: RequestInit = {}): Promise<Response> {
-    const response = await fetchImpl(path, {
-        ...init,
-        headers: init.body ? { 'Content-Type': 'application/json' } : undefined,
-        credentials: 'same-origin',
-        cache: 'no-store',
-    });
-    if (!response.ok) {
-        const body = (await response.json().catch(() => null)) as { code?: unknown } | null;
-        throw new WatchlistRequestError(response.status, typeof body?.code === 'string' ? body.code : null);
-    }
-    return response;
-}
-
 export async function fetchAccountWatchlist(fetchImpl: Fetch = fetch): Promise<AccountWatchlist> {
-    const response = await request(fetchImpl, '/api/research/watchlist');
+    const response = await accountRequest(fetchImpl, '/api/research/watchlist');
     const body = (await response.json()) as { data?: Partial<AccountWatchlist> };
     return {
         items: Array.isArray(body.data?.items) ? body.data.items : [],
@@ -326,50 +172,10 @@ export async function fetchAccountWatchlist(fetchImpl: Fetch = fetch): Promise<A
     };
 }
 
-/** Saves one item; keepalive, so a write made just before leaving the page still arrives. */
 export async function sendWatchWrite(id: string, write: WatchWrite, order: WatchWriteOrder, fetchImpl: Fetch = fetch): Promise<void> {
-    await request(fetchImpl, `/api/research/watchlist/${encodeURIComponent(id)}`, {
-        method: 'PUT',
-        body: JSON.stringify({ item: write.item, order }),
-        keepalive: true,
-    });
+    await sendRecordWrite(fetchImpl, `/api/research/watchlist/${encodeURIComponent(id)}`,
+        { kind: 'put', body: { item: write.item } }, order);
 }
-
-/** A page ID for write order: a UUID, or random hex where the browser has none. */
-export function newWriteSession(): string {
-    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID();
-    return Array.from({ length: 32 }, () => Math.floor(Math.random() * 16).toString(16)).join('');
-}
-
-const encoder = new TextEncoder();
-
-/**
- * Splits `items` into batches whose JSON body stays under `maxBytes` (UTF-8,
- * escapes included) and `maxCount` items. An item too big for any batch on
- * its own goes alone; the route refuses it, and the rest still move.
- */
-export function batchBySize<T>(items: readonly T[], { maxBytes, maxCount }: { maxBytes: number; maxCount: number }): T[][] {
-    const envelope = encoder.encode('{"items":[]}').length;
-    const batches: T[][] = [];
-    let batch: T[] = [];
-    let bytes = envelope;
-    for (const item of items) {
-        const size = encoder.encode(JSON.stringify(item)).length;
-        // A comma before every item but the first.
-        if (batch.length > 0 && (bytes + 1 + size > maxBytes || batch.length >= maxCount)) {
-            batches.push(batch);
-            batch = [];
-            bytes = envelope;
-        }
-        bytes += (batch.length > 0 ? 1 : 0) + size;
-        batch.push(item);
-    }
-    if (batch.length > 0) batches.push(batch);
-    return batches;
-}
-
-// Under the import route's 1 MiB limit, with room to spare.
-const IMPORT_MAX_BYTES = 900 * 1024;
 
 /** Sends `items` in batches that the server orders as one list. */
 export async function importAccountWatchlist(
@@ -377,18 +183,8 @@ export async function importAccountWatchlist(
     fetchImpl: Fetch = fetch,
     startedAt: number = Date.now(),
 ): Promise<void> {
-    let first = 0;
-    // Room for the batch's position fields beside its items.
-    for (const batch of batchBySize(items, { maxBytes: IMPORT_MAX_BYTES - 64, maxCount: WATCHLIST_IMPORT_MAX_ITEMS })) {
-        await request(fetchImpl, '/api/research/watchlist/import', {
-            method: 'POST',
-            body: JSON.stringify({ items: batch, first, startedAt }),
-        });
-        first += batch.length;
-    }
+    await importInBatches(fetchImpl, '/api/research/watchlist/import', items, WATCHLIST_IMPORT_MAX_ITEMS, startedAt);
 }
-
-const imports = new Map<string, Promise<void>>();
 
 /**
  * Sends the list this browser kept under `key` to the account, once per page
@@ -413,9 +209,7 @@ export function importBrowserWatchlist(
         onShortened?: () => void;
     },
 ): Promise<void> {
-    const running = imports.get(key);
-    if (running) return running;
-    const run = (async () => {
+    return importOnce(key, async () => {
         const local = loadWatchlist(storage, key);
         if (!local) return;
         const { items, shortened } = watchlistImportItems(local, examples, now);
@@ -430,8 +224,5 @@ export function importBrowserWatchlist(
             // full list stays where it was.
         }
         if (shortened) onShortened?.();
-    })();
-    imports.set(key, run);
-    run.catch(() => imports.delete(key));
-    return run;
+    });
 }

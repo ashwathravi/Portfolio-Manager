@@ -2,17 +2,25 @@ import { test, expect, type Page } from '@playwright/test';
 import { gotoAppPage, reloadAppPage, selectAppTab } from './helpers/app';
 import { signInAsFreshUser } from './helpers/users';
 
-// With a database the watchlist is kept in the account (launch item i38).
+// With a database the watchlist and journal are kept in the account
+// (launch item i38).
 const databaseAuthEnabled = Boolean(process.env.CI || process.env.E2E_DATABASE_AUTH === '1');
 
-/** Resolves once a watchlist save containing `text` has landed; at once when the list is kept in the browser. */
-async function watchlistSaved(page: Page, text: string) {
+/**
+ * Resolves once a save to `collection` containing `text` has landed; at once
+ * when research data is kept in the browser.
+ */
+async function savedTo(page: Page, collection: 'watchlist' | 'journal', text: string) {
     if (!databaseAuthEnabled) return;
     await page.waitForResponse((response) =>
-        response.url().includes('/api/research/watchlist/')
+        response.url().includes(`/api/research/${collection}/`)
         && response.request().method() === 'PUT'
         && (response.request().postData() ?? '').includes(text)
         && response.ok());
+}
+
+function watchlistSaved(page: Page, text: string) {
+    return savedTo(page, 'watchlist', text);
 }
 
 test.describe('Research page', () => {
@@ -401,8 +409,18 @@ test.describe('Research watchlist', () => {
 });
 
 test.describe('Research journal', () => {
-    test('selecting an entry shows its rationale beside the linked thesis', async ({ page }) => {
+    // Changes are saved to the account, so each test has one of its own,
+    // and wait for its journal to load.
+    test.beforeEach(async ({ context, page }) => {
+        await signInAsFreshUser(context);
+        const loaded = databaseAuthEnabled
+            ? page.waitForResponse((response) => response.url().endsWith('/api/research/journal') && response.ok())
+            : Promise.resolve();
         await gotoAppPage(page, '/research?tab=journal');
+        await loaded;
+    });
+
+    test('selecting an entry shows its rationale beside the linked thesis', async ({ page }) => {
         await expect(page.getByText(/coming in Phase/)).toHaveCount(0);
         const list = page.locator('.pm-research-list');
         await list.getByRole('button', { name: /Reduced position by 25 shares/ }).click();
@@ -410,5 +428,61 @@ test.describe('Research journal', () => {
         await expect(pane.getByRole('heading', { level: 2 })).toHaveText('Reduced position by 25 shares');
         await expect(pane.getByRole('region', { name: 'Rationale at the time' })).toBeVisible();
         await expect(pane.getByRole('region', { name: 'Linked thesis' })).toBeVisible();
+    });
+
+    test('the entry form stops at what the account keeps', async ({ page }) => {
+        await page.getByRole('button', { name: 'New entry' }).click();
+        const dialog = page.getByRole('dialog');
+        await expect(dialog.getByPlaceholder('AAPL')).toHaveAttribute('maxlength', '20');
+        await expect(dialog.getByPlaceholder('e.g. Opened position with 20 shares')).toHaveAttribute('maxlength', '500');
+        await expect(dialog.getByPlaceholder('Why are you making this decision?')).toHaveAttribute('maxlength', '5000');
+    });
+
+    test('a new entry is saved and is still there after a reload', async ({ page }) => {
+        await page.getByRole('button', { name: 'New entry' }).click();
+        const dialog = page.getByRole('dialog');
+        await dialog.getByPlaceholder('AAPL').fill('amd');
+        await dialog.getByPlaceholder('e.g. Opened position with 20 shares').fill('Opened a starter position');
+        await dialog.getByPlaceholder('Why are you making this decision?').fill('Data-centre GPUs gaining share');
+        const saved = savedTo(page, 'journal', 'Opened a starter position');
+        await dialog.getByRole('button', { name: 'Add Entry' }).click();
+        const list = page.locator('.pm-research-list');
+        await expect(list.getByRole('button', { name: /Opened a starter position/ })).toBeVisible();
+        await saved;
+
+        await reloadAppPage(page);
+        const entry = list.getByRole('button', { name: /Opened a starter position/ });
+        await expect(entry).toBeVisible();
+        await expect(entry).toContainText('AMD');
+    });
+
+    test('an edited entry keeps the change after a reload', async ({ page }) => {
+        const list = page.locator('.pm-research-list');
+        await list.getByRole('button', { name: /Maintaining position through earnings/ }).click();
+        await page.locator('.pm-research-pane').getByRole('button', { name: 'Edit' }).click();
+        const dialog = page.getByRole('dialog');
+        await dialog.getByPlaceholder('e.g. Opened position with 20 shares').fill('Trimmed ahead of earnings');
+        const saved = savedTo(page, 'journal', 'Trimmed ahead of earnings');
+        await dialog.getByRole('button', { name: 'Save Changes' }).click();
+        await expect(list.getByRole('button', { name: /Trimmed ahead of earnings/ })).toBeVisible();
+        await saved;
+
+        await reloadAppPage(page);
+        await expect(list.getByRole('button', { name: /Trimmed ahead of earnings/ })).toBeVisible();
+        await expect(list.getByRole('button', { name: /Maintaining position through earnings/ })).toHaveCount(0);
+    });
+
+    test('a deleted entry stays deleted after a reload', async ({ page }) => {
+        const list = page.locator('.pm-research-list');
+        await expect(list.getByRole('button', { name: /Increased position by 50 shares/ })).toBeVisible();
+        page.once('dialog', (dialog) => dialog.accept());
+        const saved = savedTo(page, 'journal', '"dismissed":true');
+        await page.getByRole('button', { name: 'Delete journal entry for AAPL' }).click();
+        await expect(list.getByRole('button', { name: /Increased position by 50 shares/ })).toHaveCount(0);
+        await saved;
+
+        await reloadAppPage(page);
+        await expect(list.getByRole('button', { name: /Reduced position by 25 shares/ })).toBeVisible();
+        await expect(list.getByRole('button', { name: /Increased position by 50 shares/ })).toHaveCount(0);
     });
 });

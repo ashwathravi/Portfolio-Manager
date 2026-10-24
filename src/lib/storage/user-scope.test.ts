@@ -53,6 +53,15 @@ describe("storage scope", () => {
 });
 
 describe("readUserValue and writeUserValue", () => {
+    test("writeUserValue says whether the value was stored", () => {
+        const map = new Map<string, string>();
+        const storage = { getItem: (k: string) => map.get(k) ?? null, setItem: (k: string, v: string) => void map.set(k, v), removeItem: (k: string) => void map.delete(k) };
+        assert.equal(writeUserValue(storage, "pm-ask-v1", "mine", "user-a"), true);
+        const full = { ...storage, setItem: () => { throw new Error("QuotaExceededError"); } };
+        assert.equal(writeUserValue(full, "pm-ask-v1", "mine", "user-a"), false);
+        assert.equal(writeUserValue(null, "pm-ask-v1", "mine", "user-a"), false);
+    });
+
     test("keep each user's value apart", () => {
         const storage = new FakeStorage();
         writeUserValue(storage, "pm-ask-v1", "a's history", "user-a");

@@ -120,6 +120,13 @@
       "when": 1792822963026,
       "tag": "0016_watchlist_items",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1792823208413,
+      "tag": "0017_journal_entries",
+      "breakpoints": true
     }
   ]
 }
