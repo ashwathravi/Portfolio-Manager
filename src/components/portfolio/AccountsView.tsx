@@ -1,11 +1,13 @@
 import Link from "next/link";
 import type { AccountRow, AccountsSummary } from "@/lib/portfolio/accounts";
 import { formatPct, formatShortDate, formatUsd } from "@/lib/format";
+import { AccountRowActions, NewAccountButton } from "./AccountControls";
 
 /**
  * Portfolio › Accounts. Every figure comes from the user's portfolios in
- * the database; with none, the page says so and points at the two ways to
- * add data instead of showing example accounts.
+ * the database; with none, the page says so and points at the ways to add
+ * data instead of showing example accounts. Accounts are added, edited and
+ * deleted here (launch item i41).
  */
 export function AccountsView({ rows, summary }: { rows: AccountRow[]; summary: AccountsSummary }) {
     if (rows.length === 0) {
@@ -14,12 +16,13 @@ export function AccountsView({ rows, summary }: { rows: AccountRow[]; summary: A
                 <section className="pm-card pm-empty-card" data-testid="accounts-empty">
                     <h2>No accounts yet</h2>
                     <p>
-                        Accounts appear here once you connect a brokerage or import positions. Each
-                        account&apos;s value, cash, and positions come straight from your data.
+                        Accounts appear here once you connect a brokerage, import positions, or add one
+                        yourself. Each account&apos;s value, cash, and positions come straight from your data.
                     </p>
                     <div className="pm-empty-actions">
                         <Link href="/settings#accounts" className="pm-btn pm-btn-primary">Connect an account</Link>
                         <Link href="/portfolios/holdings" className="pm-btn pm-btn-ghost">Import a CSV</Link>
+                        <NewAccountButton variant="ghost" />
                     </div>
                 </section>
             </div>
@@ -29,6 +32,9 @@ export function AccountsView({ rows, summary }: { rows: AccountRow[]; summary: A
     return (
         <div className="pm-page" data-testid="accounts-view">
             <section className="pm-card pm-card-stack">
+                <div className="pm-accounts-actions">
+                    <NewAccountButton />
+                </div>
                 <dl className="pm-metric-strip" data-testid="accounts-summary">
                     <div><dt>Total value</dt><dd>{formatUsd(summary.totalUsd)}</dd></div>
                     <div><dt>Cash</dt><dd>{formatUsd(summary.cashUsd)}</dd></div>
@@ -47,6 +53,7 @@ export function AccountsView({ rows, summary }: { rows: AccountRow[]; summary: A
                                 <th scope="col" className="num">Positions</th>
                                 <th scope="col">Share</th>
                                 <th scope="col">Updated</th>
+                                <th scope="col" aria-label="Actions" />
                             </tr>
                         </thead>
                         <tbody>
@@ -69,6 +76,11 @@ export function AccountsView({ rows, summary }: { rows: AccountRow[]; summary: A
                                         </span>
                                     </td>
                                     <td>{formatShortDate(r.updatedAt)}</td>
+                                    <td>
+                                        <AccountRowActions
+                                            account={{ id: r.id, name: r.name, description: r.description, cashUsd: r.cashUsd, positions: r.positions }}
+                                        />
+                                    </td>
                                 </tr>
                             ))}
                         </tbody>
