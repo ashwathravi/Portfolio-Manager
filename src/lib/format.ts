@@ -15,6 +15,16 @@ export function formatUsd(value: number, opts: { signed?: boolean; decimals?: nu
     return `${sign}$${abs}`;
 }
 
+/**
+ * An amount in its own currency: formatUsd for USD, otherwise the figure
+ * with its ISO code after it ("1,234.50 CAD"), never a $ that reads as USD.
+ */
+export function formatMoney(value: number, currency: string, opts: { signed?: boolean; decimals?: number } = {}): string {
+    if (currency === 'USD') return formatUsd(value, opts);
+    const usd = formatUsd(value, opts);
+    return usd === '—' ? usd : `${usd.replace('$', '')} ${currency}`;
+}
+
 export function formatPct(value: number | null | undefined, opts: { signed?: boolean; decimals?: number } = {}): string {
     const { signed = false, decimals = 1 } = opts;
     if (value === null || value === undefined || !Number.isFinite(value)) return '—';

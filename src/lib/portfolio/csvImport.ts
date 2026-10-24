@@ -49,11 +49,11 @@ const HEADER_ALIASES: Record<'symbol' | 'quantity' | 'avgCost' | 'costBasis' | '
 const CORE_POSITION = /^(spaxx|fdrxx|core)\*\*$/i;
 const SUMMARY_SYMBOL = /^(pending|pending activity|account total|total|--)$/i;
 
-function normalizeHeader(h: string): string {
+export function normalizeHeader(h: string): string {
     return h.trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
-interface CsvRecord {
+export interface CsvRecord {
     cells: string[];
     /** First physical line of the complete record. */
     line: number;
@@ -61,7 +61,7 @@ interface CsvRecord {
 }
 
 /** Read record boundaries only outside quoted fields, preserving embedded CR/LF. */
-function readCsvRecords(text: string): CsvRecord[] {
+export function readCsvRecords(text: string): CsvRecord[] {
     const records: CsvRecord[] = [];
     let cells: string[] = [];
     let field = '';
@@ -162,7 +162,7 @@ function isNoteRow(cells: string[], symbolColumn: number): boolean {
  * omit empty trailing fields. Extra non-empty cells mean the columns have
  * shifted, so the record is rejected (null).
  */
-function fitToHeader(cells: string[], width: number): string[] | null {
+export function fitToHeader(cells: string[], width: number): string[] | null {
     let end = cells.length;
     while (end > width && !cells[end - 1]) end--;
     if (end > width && width > 0) return null;

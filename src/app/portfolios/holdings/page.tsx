@@ -74,8 +74,10 @@ async function HoldingsContent() {
         const qty = Number(h.quantity) || 0;
         const avg = Number(h.avgCost) || 0;
         const live = liveQuotes[h.symbol.toUpperCase()];
-        const last = live?.price ?? Number(h.currentPrice ?? 0) ?? 0;
-        const marketValue = h.marketValue ?? qty * last;
+        // No live quote and nothing stored: no price, valued at cost.
+        const stored = h.currentPrice != null && h.currentPrice > 0 ? h.currentPrice : null;
+        const last = live?.price ?? stored;
+        const marketValue = h.marketValue ?? qty * (last ?? avg);
         const holdingDays = Math.max(
             0,
             Math.round((now - new Date(h.createdAt).getTime()) / (1000 * 60 * 60 * 24)),

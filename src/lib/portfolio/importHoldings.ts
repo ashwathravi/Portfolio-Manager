@@ -26,16 +26,33 @@ export interface ImportResult {
  * foreign id is a 404 with nothing written); a new account is created for
  * them otherwise. Rows for symbols already held replace those positions;
  * other positions are untouched.
+ *
+ * `prices` (upper-case symbol → last price, from the price store) gives
+ * the rows it covers a stored price, so an imported position shows its
+ * worth straight away instead of $0. No market value is stored with it:
+ * readers value positions at quantity × the newest price they have, and a
+ * stored value would hold them at today's. A new row without a price gets
+ * none, and readers value it at cost; a replaced row without one keeps the
+ * price it had.
  */
-export async function importHoldings(userId: string, body: PortfolioImportBody): Promise<ImportResult> {
-    return db.transaction(async (tx) => {
+export async function importHoldings(
+    userId: string,
+    body: PortfolioImportBody,
+    prices: Readonly<Record<string, number>> = {},
+    database: typeof db = db,
+): Promise<ImportResult> {
+    const quote = (symbol: string): number | null => {
+        const price = prices[symbol.toUpperCase()];
+        return Number.isFinite(price) && price > 0 ? price : null;
+    };
+    return database.transaction(async (tx) => {
         let portfolioId: string;
         let createdPortfolio = false;
 
         if (body.portfolioId) {
             // FOR UPDATE serializes concurrent imports into the same account:
-            // the second waits, then sees the first one's rows, so a symbol is
-            // never inserted twice (there is no unique (portfolio, symbol) key).
+            // the second waits, then sees the first one's rows and updates them
+            // rather than tripping the unique (portfolio, symbol) key.
             const [owned] = await tx
                 .select({ id: portfolios.id })
                 .from(portfolios)
@@ -73,18 +90,23 @@ export async function importHoldings(userId: string, body: PortfolioImportBody):
                     name: r.name || r.symbol,
                     quantity: String(r.quantity),
                     avgCost: String(r.avgCost),
+                    currentPrice: quote(r.symbol),
+                    marketValue: null,
                 })),
             );
         }
         for (const p of plan) {
             if (p.kind !== 'update') continue;
+            const price = quote(p.row.symbol);
             await tx
                 .update(holdings)
                 .set({
                     quantity: String(p.row.quantity),
                     avgCost: String(p.row.avgCost),
-                    // Snapshot fields were computed for the old quantity; clear
-                    // them so readers fall back to quantity × price.
+                    // Snapshot fields were computed for the old quantity: keep
+                    // the stored price unless there's a newer one, and leave
+                    // the value to readers.
+                    ...(price != null ? { currentPrice: price } : {}),
                     marketValue: null,
                     allocation: null,
                     ...(p.row.name ? { name: p.row.name } : {}),
