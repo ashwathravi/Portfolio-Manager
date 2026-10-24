@@ -4,6 +4,7 @@ import {
     check,
     date,
     doublePrecision,
+    foreignKey,
     index,
     integer,
     jsonb,
@@ -528,6 +529,63 @@ export const userSettings = pgTable("user_settings", {
     settings: jsonb("settings").$type<Record<string, unknown>>().notNull(),
     updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),
 }, () => ({
+    serverOnlyNoClientAccess: serverOnlyNoClientAccessPolicy(),
+    appRuntimeAccess: appRuntimeAccessPolicy(),
+})).enableRLS();
+
+// ---------------------------------------------------------------------------
+// Valuation snapshots (launch item i42)
+// ---------------------------------------------------------------------------
+
+/**
+ * A portfolio's value at one session's close: holdings × close + cash.
+ * Written by the nightly "snapshots" job, only for a day after which nothing
+ * in the portfolio changed (src/lib/portfolio/valuation-snapshots.ts), so it
+ * records what the portfolio really held then. Returns (i49) and attribution
+ * (i50) read this history; it can't be rebuilt once holdings change.
+ */
+export const portfolioSnapshots = pgTable("portfolio_snapshots", {
+    portfolioId: uuid("portfolio_id")
+        .notNull()
+        .references(() => portfolios.id, { onDelete: "cascade" }),
+    // Eastern trading date of the close it is valued at.
+    date: date("date", { mode: "string" }).notNull(),
+    holdingsValue: doublePrecision("holdings_value").notNull(),
+    cash: doublePrecision("cash").notNull(),
+    totalValue: doublePrecision("total_value").notNull(),
+    costBasis: doublePrecision("cost_basis").notNull(),
+    positions: integer("positions").notNull(),
+    // Held symbols with no recent close: left out of holdings_value, so the
+    // snapshot is partial. The job recomputes partial snapshots while it can.
+    unpriced: text("unpriced").array().notNull().default(sql`'{}'::text[]`),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => ({
+    pk: primaryKey({ columns: [table.portfolioId, table.date] }),
+    dateIdx: index("portfolio_snapshots_date_idx").on(table.date),
+    serverOnlyNoClientAccess: serverOnlyNoClientAccessPolicy(),
+    appRuntimeAccess: appRuntimeAccessPolicy(),
+})).enableRLS();
+
+/** Each position in a snapshot, one row per symbol (holdings of one symbol are combined). */
+export const portfolioSnapshotPositions = pgTable("portfolio_snapshot_positions", {
+    portfolioId: uuid("portfolio_id").notNull(),
+    date: date("date", { mode: "string" }).notNull(),
+    symbol: text("symbol").notNull(),
+    quantity: numeric("quantity").notNull(),
+    costBasis: doublePrecision("cost_basis").notNull(),
+    // Null when unpriced; otherwise the close it was valued at and its date
+    // (the session's, or the last one before it if the stock didn't trade).
+    close: doublePrecision("close"),
+    closeDate: date("close_date", { mode: "string" }),
+    marketValue: doublePrecision("market_value"),
+}, (table) => ({
+    pk: primaryKey({ columns: [table.portfolioId, table.date, table.symbol] }),
+    snapshot: foreignKey({
+        name: "portfolio_snapshot_positions_snapshot_fk",
+        columns: [table.portfolioId, table.date],
+        foreignColumns: [portfolioSnapshots.portfolioId, portfolioSnapshots.date],
+    }).onDelete("cascade"),
     serverOnlyNoClientAccess: serverOnlyNoClientAccessPolicy(),
     appRuntimeAccess: appRuntimeAccessPolicy(),
 })).enableRLS();
