@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { TRANSACTION_TYPE_LABELS } from "@/lib/portfolio/transactions";
 import { parseTransactionsCsv, type TransactionParseResult } from "@/lib/portfolio/transactionsCsv";
-import { formatQty, formatShortDate, formatUsd } from "@/lib/format";
+import { formatMoney, formatQty, formatShortDate } from "@/lib/format";
 import type { TransactionAccountOption } from "./AddTransactionDialog";
 
 /**
@@ -93,7 +93,8 @@ export function ImportTransactionsDialog({ accounts }: { accounts: readonly Tran
                         <DialogTitle>Import transactions from CSV</DialogTitle>
                         <DialogDescription>
                             Use your broker&apos;s activity or history export. Atlas reads the date, the action (buy, sell,
-                            dividend, interest, deposit, withdrawal or fee), the symbol, quantity, price, amount and fees.
+                            dividend, interest, deposit, withdrawal or fee), the symbol, quantity, price, amount or value,
+                            fees and currency.
                             Transactions already imported are skipped.
                         </DialogDescription>
                     </DialogHeader>
@@ -142,9 +143,9 @@ export function ImportTransactionsDialog({ accounts }: { accounts: readonly Tran
                                                         <td>{TRANSACTION_TYPE_LABELS[r.type]}</td>
                                                         <td>{r.symbol ?? "—"}</td>
                                                         <td className="num">{r.quantity == null ? "—" : formatQty(r.quantity)}</td>
-                                                        <td className="num">{r.price == null ? "—" : formatUsd(r.price)}</td>
-                                                        <td className="num">{formatUsd(r.amount ?? (r.quantity ?? 0) * (r.price ?? 0))}</td>
-                                                        <td className="num">{r.fees == null ? "—" : formatUsd(r.fees)}</td>
+                                                        <td className="num">{r.price == null ? "—" : formatMoney(r.price, r.currency)}</td>
+                                                        <td className="num">{formatMoney(r.amount ?? (r.quantity ?? 0) * (r.price ?? 0), r.currency)}</td>
+                                                        <td className="num">{r.fees == null ? "—" : formatMoney(r.fees, r.currency)}</td>
                                                     </tr>
                                                 ))}
                                             </tbody>

@@ -163,5 +163,32 @@ describe('parseTransactionsCsv', () => {
         assert.deepEqual(rows.map((r) => r.symbol), ['VTI']);
         assert.equal(skipped, 1);
     });
+
+    test('regression: a gross Value column is the price before fees; only a net amount has them taken off', () => {
+        // The Codex finding on PR #154: Value=1000 with Fees=1 imported at $99.90.
+        const gross = parseTransactionsCsv('Date,Action,Symbol,Quantity,Value,Fees\n2026-03-05,Buy,AAPL,10,1000,1\n2026-03-06,Sell,AAPL,10,1000,1');
+        assert.deepEqual(gross.issues, []);
+        assert.deepEqual(gross.rows.map((r) => [r.type, r.price, r.amount, r.fees]), [['BUY', 100, null, 1], ['SELL', 100, null, 1]]);
+
+        // With both, the gross value gives the price and the net amount is kept as the cash.
+        const both = parseTransactionsCsv('Date,Action,Symbol,Quantity,Principal Amount,Net Amount,Commission\n2026-03-05,Buy,AAPL,10,1000,1001,1');
+        assert.deepEqual(both.rows.map((r) => [r.price, r.amount, r.fees]), [[100, 1001, 1]]);
+
+        // A cash transaction with only a Value column takes it as its amount.
+        const deposit = parseTransactionsCsv('Date,Action,Value\n2026-03-05,Deposit,500');
+        assert.deepEqual(deposit.rows.map((r) => [r.type, r.amount]), [['DEPOSIT', 500]]);
+    });
+
+    test('regression: a currency that isn\'t a code is an issue, not USD', () => {
+        // The Codex finding on PR #154: Currency=CA$ imported as a USD deposit.
+        const csv = 'Date,Action,Amount,Currency\n2026-03-05,Deposit,100,CA$\n2026-03-05,Deposit,100,Canadian Dollar\n2026-03-05,Deposit,100,cad\n2026-03-05,Deposit,100,\n2026-03-05,Deposit,100,--';
+        const { rows, issues } = parseTransactionsCsv(csv);
+        assert.deepEqual(issues.map((i) => [i.line, i.message]), [
+            [2, '“CA$” in currency is not a currency code, such as USD or CAD.'],
+            [3, '“Canadian Dollar” in currency is not a currency code, such as USD or CAD.'],
+        ]);
+        // An empty cell (or "--") is no currency given: USD.
+        assert.deepEqual(rows.map((r) => r.currency), ['CAD', 'USD', 'USD']);
+    });
 });
 

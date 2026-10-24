@@ -5,15 +5,16 @@ import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { Download, Repeat2, Trash2 } from "lucide-react";
 import { toast } from "sonner";
-import { computeChurnAnalysis } from "@/lib/risk-policy";
 import { exportToCsv } from "@/lib/exportCsv";
-import { formatQty, formatShortDate, formatUsd } from "@/lib/format";
+import { formatMoney, formatQty, formatShortDate, formatUsd } from "@/lib/format";
 import {
     activityAccounts,
+    activityChurn,
     filterActivity,
     summarizeActivity,
     type ActivityRow,
     type ActivitySide,
+    type MoneyAmount,
 } from "@/lib/portfolio/activity";
 import { AddTransactionDialog, type TransactionAccountOption } from "./AddTransactionDialog";
 import { ImportTransactionsDialog } from "./ImportTransactionsDialog";
@@ -31,6 +32,12 @@ const SIDES: ReadonlyArray<{ key: "ALL" | ActivitySide; label: string }> = [
     { key: "BUY", label: "Buys" },
     { key: "SELL", label: "Sells" },
 ];
+
+/** A total per currency, "$1,200 + 300 CAD"; nothing is $0. */
+function formatTotals(totals: readonly MoneyAmount[]): string {
+    if (totals.length === 0) return formatUsd(0, { decimals: 0 });
+    return totals.map((t) => formatMoney(t.amount, t.currency, { decimals: 0 })).join(" + ");
+}
 
 /** Adding and importing need an account to put the transactions in. */
 function AddControls({ accounts }: { accounts: readonly TransactionAccountOption[] }) {
@@ -82,27 +89,11 @@ export function ActivityPageClient({
     const [highChurnOnly, setHighChurnOnly] = useState(false);
 
     const accounts = useMemo(() => activityAccounts(rows), [rows]);
-    const churn = useMemo(
-        () =>
-            computeChurnAnalysis(
-                rows
-                    .filter((r) => r.side === "BUY" || r.side === "SELL")
-                    .map((r) => ({
-                        id: r.id,
-                        date: r.date,
-                        type: r.side.toLowerCase(),
-                        symbol: r.symbol,
-                        quantity: r.quantity,
-                        price: r.price,
-                        amount: r.value,
-                        account: r.account,
-                    })),
-            ),
-        [rows],
-    );
-    const topChurn = churn.rows.find((r) => r.status !== "inside") ?? null;
+    // Per currency, so turnover is never CAD and USD added together.
+    const churn = useMemo(() => activityChurn(rows), [rows]);
+    const topChurn = churn.find((r) => r.status !== "inside") ?? null;
     const churnSymbols = useMemo(
-        () => churn.rows.filter((r) => r.status !== "inside").map((r) => r.symbol),
+        () => churn.filter((r) => r.status !== "inside").map((r) => r.symbol),
         [churn],
     );
 
@@ -140,7 +131,7 @@ export function ActivityPageClient({
                         <p className="pm-callout-body">{topChurn.recommendation}</p>
                         <p className="pm-callout-body">
                             {topChurn.symbol}: score {topChurn.churnScore} · {topChurn.tradeCount} trades ·{" "}
-                            {formatUsd(topChurn.turnoverUsd, { decimals: 0 })} turnover
+                            {formatMoney(topChurn.turnoverUsd, topChurn.currency, { decimals: 0 })} turnover
                         </p>
                     </div>
                     <button
@@ -159,8 +150,8 @@ export function ActivityPageClient({
             <section className="pm-card pm-card-stack">
                 <dl className="pm-metric-strip" data-testid="activity-summary">
                     <div><dt>Transactions</dt><dd>{summary.count}</dd></div>
-                    <div><dt>Bought</dt><dd>{formatUsd(summary.boughtUsd, { decimals: 0 })}</dd></div>
-                    <div><dt>Sold</dt><dd>{formatUsd(summary.soldUsd, { decimals: 0 })}</dd></div>
+                    <div><dt>Bought</dt><dd data-testid="activity-bought">{formatTotals(summary.bought)}</dd></div>
+                    <div><dt>Sold</dt><dd data-testid="activity-sold">{formatTotals(summary.sold)}</dd></div>
                     <div><dt>Accounts</dt><dd>{summary.accounts}</dd></div>
                 </dl>
 
@@ -264,12 +255,9 @@ export function ActivityPageClient({
                                         </td>
                                         <td><span className="pm-side" data-side={r.side}>{r.side}</span></td>
                                         <td className="num">{formatQty(r.quantity)}</td>
-                                        <td className="num">{r.price === null ? "—" : formatUsd(r.price)}</td>
-                                        <td className="num">
-                                            {formatUsd(r.value)}
-                                            {r.currency !== "USD" && <span className="pm-card-subtitle"> {r.currency}</span>}
-                                        </td>
-                                        <td className="num">{r.fees == null ? "—" : formatUsd(r.fees)}</td>
+                                        <td className="num">{r.price === null ? "—" : formatMoney(r.price, r.currency)}</td>
+                                        <td className="num">{formatMoney(r.value, r.currency)}</td>
+                                        <td className="num">{r.fees == null ? "—" : formatMoney(r.fees, r.currency)}</td>
                                         <td>{r.account}</td>
                                         <td className="pm-card-subtitle">{r.notes ?? ""}</td>
                                         <td><DeleteTransactionButton row={r} /></td>

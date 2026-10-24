@@ -131,6 +131,28 @@ test.describe('Portfolio › Activity — recording transactions', () => {
         await expect(activityRow(page, 'ADVANCED MICRO DEVICES')).toHaveCount(1);
     });
 
+    test('a trade in another currency stays in it: its row, and Bought totalled apart from dollars', async ({ page }) => {
+        // Codex findings on PR #154: CAD added into the dollar totals, and a
+        // gross Value column had the fees taken off it.
+        await page.getByRole('button', { name: 'Import CSV' }).click();
+        const dialog = page.getByTestId('transactions-import-dialog');
+        const unreadable = 'Date,Action,Symbol,Quantity,Value,Currency\n2026-03-05,Buy,SHOP,10,1000,CA$';
+        await dialog.getByLabel('CSV file').setInputFiles({ name: 'cad.csv', mimeType: 'text/csv', buffer: Buffer.from(unreadable) });
+        await expect(dialog.getByRole('list', { name: 'Rows not imported' })).toContainText('Line 2: “CA$” in currency is not a currency code');
+
+        const cad = 'Date,Action,Symbol,Security Description,Quantity,Value,Fees,Currency\n2026-03-05,Buy,SHOP,SHOPIFY INC CAD,10,1000,1,CAD';
+        await dialog.getByLabel('CSV file').setInputFiles({ name: 'cad.csv', mimeType: 'text/csv', buffer: Buffer.from(cad) });
+        await dialog.getByRole('button', { name: 'Import 1 transaction' }).click();
+        await expect(dialog).toBeHidden();
+
+        const row = activityRow(page, 'SHOPIFY INC CAD');
+        await expect(row).toContainText('100.00 CAD');
+        await expect(row).toContainText('1,000.00 CAD');
+        await expect(row).toContainText('1.00 CAD');
+        // The fixture user's buys are in dollars; the CAD buy is added beside them.
+        await expect(page.getByTestId('activity-bought')).toHaveText(/^\$[\d,]+ \+ 1,000 CAD$/);
+    });
+
     test("a CSV with rows it can't read lists them and imports nothing", async ({ page }) => {
         await page.getByRole('button', { name: 'Import CSV' }).click();
         const dialog = page.getByTestId('transactions-import-dialog');

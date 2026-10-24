@@ -1,6 +1,6 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert';
-import { formatPct, formatQty, formatShortDate, formatUsd } from './format';
+import { formatMoney, formatPct, formatQty, formatShortDate, formatUsd } from './format';
 
 describe('format', () => {
     test('formatUsd uses thousands separators and a true minus sign', () => {
@@ -17,6 +17,14 @@ describe('format', () => {
 
     test('formatUsd renders a dash for non-finite input', () => {
         assert.strictEqual(formatUsd(Number.NaN), '—');
+    });
+
+    test('formatMoney is formatUsd for USD, and the amount with its code otherwise', () => {
+        assert.strictEqual(formatMoney(1234.5, 'USD'), '$1,234.50');
+        assert.strictEqual(formatMoney(1234.5, 'CAD'), '1,234.50 CAD');
+        assert.strictEqual(formatMoney(-1234.5, 'EUR', { decimals: 0 }), '−1,235 EUR');
+        assert.strictEqual(formatMoney(10, 'CAD', { signed: true }), '+10.00 CAD');
+        assert.strictEqual(formatMoney(Number.NaN, 'CAD'), '—');
     });
 
     test('formatPct handles sign, decimals, and missing values', () => {

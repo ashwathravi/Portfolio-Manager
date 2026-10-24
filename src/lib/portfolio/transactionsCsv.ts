@@ -44,7 +44,10 @@ const HEADER_ALIASES = {
     symbol: ['symbol', 'ticker', 'sym', 'security symbol'],
     quantity: ['quantity', 'qty', 'shares', 'units'],
     price: ['price', 'price ($)', 'share price', 'price per share', 'unit price'],
-    amount: ['amount', 'amount ($)', 'net amount', 'total amount', 'value', 'total'],
+    // The cash that moved: a buy's includes its fees, a sell's is after them.
+    amount: ['amount', 'amount ($)', 'net amount', 'total amount', 'total'],
+    // Quantity × price, before fees.
+    gross: ['value', 'gross amount', 'principal amount', 'principal', 'trade value'],
     fees: ['fees', 'fee', 'fees ($)', 'commission', 'commissions', 'commission ($)', 'fees & comm', 'fees & commissions'],
     id: ['transaction id', 'reference', 'reference number', 'ref', 'confirmation', 'confirmation number', 'id'],
     currency: ['currency', 'ccy'],
@@ -123,7 +126,7 @@ export function parseTransactionsCsv(text: string): TransactionParseResult {
     const col = Object.fromEntries((Object.keys(HEADER_ALIASES) as Column[]).map((key) => [key, findColumn(headers, key)])) as Record<Column, number>;
     // Commission and fees can be columns of their own: they add up.
     const feeColumns = headers.flatMap((h, i) => ((HEADER_ALIASES.fees as readonly string[]).includes(h) ? [i] : []));
-    if (col.amount < 0 && (col.quantity < 0 || col.price < 0)) {
+    if (col.amount < 0 && col.gross < 0 && (col.quantity < 0 || col.price < 0)) {
         return {
             rows: [],
             issues: [{ line: records[headerIndex].line, message: 'Add an Amount column, or Quantity and Price columns, so each transaction has a value.' }],
@@ -161,7 +164,7 @@ export function parseTransactionsCsv(text: string): TransactionParseResult {
             // transaction would have. (A security named "... Total ..." in
             // a dated row is a transaction.)
             const total = SUMMARY.test(cell('date')) || SUMMARY.test(cell('action')) || SUMMARY.test((record.cells[0] ?? '').trim());
-            const hasData = [cell('symbol'), cell('quantity'), cell('price'), cell('amount')].some(Boolean);
+            const hasData = [cell('symbol'), cell('quantity'), cell('price'), cell('amount'), cell('gross')].some(Boolean);
             if (total || !hasData) {
                 skipped++;
                 continue;
@@ -199,10 +202,17 @@ export function parseTransactionsCsv(text: string): TransactionParseResult {
         const quantity = numberIn(cell('quantity'), headers[col.quantity] ?? 'quantity');
         const price = numberIn(cell('price'), headers[col.price] ?? 'price');
         const amount = numberIn(cell('amount'), headers[col.amount] ?? 'amount');
+        const grossValue = numberIn(cell('gross'), headers[col.gross] ?? 'value');
         const feeValues = feeColumns.map((i) => numberIn(cells[i] ?? '', headers[i])).filter((n): n is number => n != null);
         const fees = feeValues.length > 0 ? feeValues.reduce((sum, n) => sum + n, 0) : null;
         if (unreadable.length > 0) {
             issues.push({ line: lineNo, message: `${unreadable.join(', ')} ${unreadable.length === 1 ? 'is' : 'are'} not a number.` });
+            continue;
+        }
+        // No currency given is USD; one given that isn't a code is an issue.
+        const currency = currencyOf(cell('currency'));
+        if (currency == null) {
+            issues.push({ line: lineNo, message: `“${cell('currency')}” in ${headers[col.currency]} is not a currency code, such as USD or CAD.` });
             continue;
         }
         // Room for one more, checked before adding it.
@@ -216,10 +226,10 @@ export function parseTransactionsCsv(text: string): TransactionParseResult {
                 issues.push({ line: lineNo, message: `${symbol}: a ${type === 'BUY' ? 'buy' : 'sell'} needs a quantity.` });
                 continue;
             }
-            // A price from the file, or the amount over the quantity. The
-            // amount is the net cash: a buy's includes its fees and a sell's
-            // is after them, so they come out before dividing.
-            const gross = amount == null ? null : type === 'BUY' ? amount - (fees ?? 0) : amount + (fees ?? 0);
+            // A price from the file, or the value before fees over the
+            // quantity: a gross column as it is, or the net amount with the
+            // fees taken back out (a buy's includes them, a sell's is after).
+            const gross = grossValue ?? (amount == null ? null : type === 'BUY' ? amount - (fees ?? 0) : amount + (fees ?? 0));
             const unit = price ?? (gross != null && gross > 0 ? gross / quantity : null);
             if (unit == null) {
                 issues.push({ line: lineNo, message: `${symbol}: a ${type === 'BUY' ? 'buy' : 'sell'} needs a price or an amount.` });
@@ -229,12 +239,13 @@ export function parseTransactionsCsv(text: string): TransactionParseResult {
                 type, date, symbol, quantity: round(quantity, 6), price: round(unit, 6),
                 amount: amount != null && amount > 0 ? round(amount, 2) : null,
                 fees: fees ? round(fees, 2) : null,
-                currency: currencyOf(cell('currency')),
+                currency,
                 notes: noteOf(cell('description')),
                 ...(cell('id') ? { externalId: cell('id') } : {}),
             });
         } else {
-            if (!amount) {
+            const cash = amount ?? grossValue;
+            if (!cash) {
                 issues.push({ line: lineNo, message: `${type.charAt(0)}${type.slice(1).toLowerCase()} on ${date} has no amount.` });
                 continue;
             }
@@ -242,9 +253,9 @@ export function parseTransactionsCsv(text: string): TransactionParseResult {
                 type, date, symbol: type === 'DIVIDEND' ? symbol : symbol ?? null,
                 quantity: type === 'DIVIDEND' && quantity ? round(quantity, 6) : null,
                 price: null,
-                amount: round(amount, 2),
+                amount: round(cash, 2),
                 fees: fees ? round(fees, 2) : null,
-                currency: currencyOf(cell('currency')),
+                currency,
                 notes: noteOf(cell('description')),
                 ...(cell('id') ? { externalId: cell('id') } : {}),
             });
@@ -263,9 +274,11 @@ function noteOf(raw: string): string | null {
     return note || null;
 }
 
-function currencyOf(raw: string): string {
+/** An ISO code, USD for an empty cell (or "--", "n/a"), or null for anything else. */
+function currencyOf(raw: string): string | null {
     const code = raw.trim().toUpperCase();
-    return /^[A-Z]{3}$/.test(code) ? code : 'USD';
+    if (!code || /^(--|N\/?A)$/.test(code)) return 'USD';
+    return /^[A-Z]{3}$/.test(code) ? code : null;
 }
 
 function round(n: number, places: number): number {
