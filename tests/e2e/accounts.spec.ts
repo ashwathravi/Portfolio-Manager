@@ -97,6 +97,32 @@ test.describe('Portfolio › Accounts — managing accounts', () => {
         await expect(dialog.getByTestId('account-form-error')).toHaveText('Input contains invalid characters (< or >)');
     });
 
+    test('a name already in use, in any case, is refused by the form, a rename and an import', async ({ page }) => {
+        await page.getByRole('button', { name: 'New account' }).click();
+        const dialog = await fillAccount(page, { name: ' main portfolio ' });
+        await dialog.getByRole('button', { name: 'Add account' }).click();
+        await expect(dialog.getByTestId('account-form-error')).toHaveText('You already have an account named main portfolio.');
+        await expect(dialog).toBeVisible();
+
+        const created = await page.request.post('/api/portfolios', { data: { name: 'Taxable' } });
+        expect(created.status()).toBe(201);
+        const { id } = (await created.json()).data;
+        const taken = await page.request.patch(`/api/portfolios/${id}`, { data: { name: 'GROWTH PORTFOLIO' } });
+        expect(taken.status()).toBe(409);
+        expect((await taken.json()).code).toBe('DUPLICATE_ACCOUNT_NAME');
+        // Its own name, recased, and a cash change that resends it are fine.
+        expect((await page.request.patch(`/api/portfolios/${id}`, { data: { name: 'TAXABLE' } })).status()).toBe(200);
+        expect((await page.request.patch(`/api/portfolios/${id}`, { data: { name: 'TAXABLE', cashBalance: 5 } })).status()).toBe(200);
+
+        const before = (await (await page.request.get('/api/portfolios/count')).json()).count;
+        const imported = await page.request.post('/api/portfolio/import', {
+            data: { newPortfolioName: 'Main Portfolio', rows: [{ symbol: 'MSFT', quantity: 1, avgCost: 1 }] },
+        });
+        expect(imported.status()).toBe(409);
+        expect((await imported.json()).code).toBe('DUPLICATE_ACCOUNT_NAME');
+        expect((await (await page.request.get('/api/portfolios/count')).json()).count).toBe(before);
+    });
+
     test('deleting an account takes its positions with it, after asking', async ({ page }) => {
         const dialogs: string[] = [];
         page.on('dialog', (dialog) => {

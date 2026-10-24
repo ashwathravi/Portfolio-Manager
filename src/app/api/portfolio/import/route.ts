@@ -6,6 +6,8 @@
  *
  * Body:     { portfolioId?: uuid, newPortfolioName?: string, rows: ImportRow[] }
  * Response: { data: { portfolioId, createdPortfolio, insert, update, unchanged } }
+ * Errors:   400 INVALID_IMPORT; 404 PORTFOLIO_NOT_FOUND; 409 DUPLICATE_ACCOUNT_NAME
+ *           or ACCOUNT_LIMIT (a new account, checked as creating one); 413 IMPORT_TOO_LARGE
  */
 
 import { NextResponse } from 'next/server';
@@ -15,6 +17,7 @@ import { apiError, internalServerError, logApiEvent } from '@/lib/api/security';
 import { requestIdFrom } from '@/lib/observability/request-id';
 import { requireSessionApiUserScope } from '@/lib/api/session-security';
 import { ImportAccessError, importHoldings } from '@/lib/portfolio/importHoldings';
+import { AccountLimitError, DuplicateAccountNameError, MAX_ACCOUNTS_PER_USER } from '@/lib/portfolio/manage';
 import { loadQuotes } from '@/lib/services/market-data-service';
 import { portfolioImportSchema } from '@/lib/validators/portfolio-import';
 
@@ -57,6 +60,12 @@ export async function POST(request: Request) {
     } catch (err) {
         if (err instanceof ImportAccessError) {
             return apiError('Portfolio not found', 'PORTFOLIO_NOT_FOUND', 404);
+        }
+        if (err instanceof DuplicateAccountNameError) {
+            return apiError(`You already have an account named ${err.accountName}.`, 'DUPLICATE_ACCOUNT_NAME', 409);
+        }
+        if (err instanceof AccountLimitError) {
+            return apiError(`You can have at most ${MAX_ACCOUNTS_PER_USER} accounts.`, 'ACCOUNT_LIMIT', 409);
         }
         return internalServerError(err, 'Unable to import holdings.', 'PORTFOLIO_IMPORT_FAILED');
     }

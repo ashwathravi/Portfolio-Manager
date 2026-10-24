@@ -5,7 +5,9 @@
  * optionally a description and a starting cash balance.
  *
  * Body:     { name, description?, cashBalance? }
- * Response: 201 { data: { id, name, description, cashBalance } }; 400 INVALID_PORTFOLIO
+ * Response: 201 { data: { id, name, description, cashBalance } }; 400 INVALID_PORTFOLIO;
+ *           409 DUPLICATE_ACCOUNT_NAME (another account has the name, ignoring case)
+ *           or ACCOUNT_LIMIT (the user has MAX_ACCOUNTS_PER_USER already)
  */
 
 import { NextResponse } from 'next/server';
@@ -13,7 +15,7 @@ import { NextResponse } from 'next/server';
 import { readJsonBody } from '@/lib/api/body';
 import { apiError, internalServerError } from '@/lib/api/security';
 import { requireSessionApiUserScope } from '@/lib/api/session-security';
-import { createPortfolio } from '@/lib/portfolio/manage';
+import { AccountLimitError, createPortfolio, DuplicateAccountNameError, MAX_ACCOUNTS_PER_USER } from '@/lib/portfolio/manage';
 import { portfolioCreateSchema } from '@/lib/validators/portfolio';
 
 export const dynamic = 'force-dynamic';
@@ -35,6 +37,12 @@ export async function POST(request: Request) {
         const data = await createPortfolio(auth.context.userId, parsed.data);
         return NextResponse.json({ data }, { status: 201 });
     } catch (err) {
+        if (err instanceof DuplicateAccountNameError) {
+            return apiError(`You already have an account named ${err.accountName}.`, 'DUPLICATE_ACCOUNT_NAME', 409);
+        }
+        if (err instanceof AccountLimitError) {
+            return apiError(`You can have at most ${MAX_ACCOUNTS_PER_USER} accounts.`, 'ACCOUNT_LIMIT', 409);
+        }
         return internalServerError(err, 'Unable to create the account.', 'PORTFOLIO_CREATE_FAILED');
     }
 }
