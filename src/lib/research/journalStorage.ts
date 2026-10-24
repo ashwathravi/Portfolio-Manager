@@ -3,9 +3,10 @@ import { currentStorageScope, readUserValue, writeUserValue } from '@/lib/storag
 import type { JournalEntry } from './journal';
 
 /**
- * localStorage-backed persistence for decision-journal entries until they
- * move to Postgres (launch item i38), one copy per signed-in user (i39).
- * Mirrors the shape used for theses so future migration is straightforward.
+ * localStorage-backed persistence for decision-journal entries, one copy per
+ * signed-in user (i39). Used when the app has no database; with one, the
+ * journal lives in the account (i38) and this copy is sent there once, then
+ * removed (`journalAccount.ts`).
  */
 
 type JournalStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;

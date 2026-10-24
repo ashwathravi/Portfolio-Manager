@@ -271,6 +271,9 @@ describe("API proxy security", () => {
             ["/api/research/watchlist", "GET"],
             ["/api/research/watchlist/import", "POST"],
             ["/api/research/watchlist/w-coin", "PUT"],
+            ["/api/research/journal", "GET"],
+            ["/api/research/journal/import", "POST"],
+            ["/api/research/journal/seed-journal-1", "PUT"],
             ["/api/alpha-radar/refresh", "POST"],
             ["/api/alpha-radar/filers", "POST"],
             ["/api/alpha-radar/filers/00000000-0000-4000-8000-000000000001", "PATCH"],
@@ -326,6 +329,10 @@ describe("API proxy security", () => {
             ["/api/research/watchlist/w-coin/extra", "PUT"],
             ["/api/research/watchlist/w-coin", "DELETE"],
             ["/api/research/watchlist/import", "PUT"],
+            ["/api/research/journal", "DELETE"],
+            ["/api/research/journal/import", "PUT"],
+            ["/api/research/journal/seed-journal-1", "POST"],
+            ["/api/research/journal/seed-journal-1", "DELETE"],
         ] as const) {
             const response = await handleVerifiedRequest(apiRequest({}, pathname, null, [], method));
             assert.equal(response.status, 401, `${method} ${pathname} was delegated`);

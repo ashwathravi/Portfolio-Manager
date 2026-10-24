@@ -26,6 +26,7 @@ import type {
     JournalOutcome,
 } from '@/lib/research/journal';
 import type { Thesis } from '@/lib/research/thesis';
+import { JOURNAL_ENTRY_LIMITS } from '@/lib/validators/journal';
 
 interface JournalFormData {
     date: string;
@@ -66,7 +67,8 @@ function toFormData(entry: JournalEntry): JournalFormData {
 interface NewJournalEntryModalProps {
     open: boolean;
     onOpenChange: (open: boolean) => void;
-    onSubmit: (draft: JournalDraft) => void;
+    /** Returns false when the entry couldn't be saved; the modal then stays open. */
+    onSubmit: (draft: JournalDraft) => boolean | void;
     /** When provided, the modal operates in edit mode. */
     editing?: JournalEntry | null;
     /** Active + archived theses to offer in the linked-thesis dropdown. */
@@ -110,7 +112,7 @@ export function NewJournalEntryModal({
             toast.error('Ticker, decision, and rationale are required.');
             return;
         }
-        onSubmit({
+        const saved = onSubmit({
             date: form.date,
             type: form.type,
             ticker: form.ticker,
@@ -119,6 +121,7 @@ export function NewJournalEntryModal({
             outcome: form.outcome,
             thesisId: form.thesisId || undefined,
         });
+        if (saved === false) return;
         onOpenChange(false);
         toast.success(editing ? 'Journal entry updated.' : 'Journal entry added.');
     };
@@ -163,6 +166,7 @@ export function NewJournalEntryModal({
                             <label className="text-sm font-medium">Ticker *</label>
                             <Input
                                 placeholder="AAPL"
+                                maxLength={JOURNAL_ENTRY_LIMITS.ticker}
                                 value={form.ticker}
                                 onChange={(e) => set('ticker')(e.target.value.toUpperCase())}
                             />
@@ -192,6 +196,7 @@ export function NewJournalEntryModal({
                         <label className="text-sm font-medium">Decision *</label>
                         <Input
                             placeholder="e.g. Opened position with 20 shares"
+                            maxLength={JOURNAL_ENTRY_LIMITS.decision}
                             value={form.decision}
                             onChange={(e) => set('decision')(e.target.value)}
                         />
@@ -201,6 +206,7 @@ export function NewJournalEntryModal({
                         <label className="text-sm font-medium">Rationale *</label>
                         <Textarea
                             placeholder="Why are you making this decision?"
+                            maxLength={JOURNAL_ENTRY_LIMITS.rationale}
                             value={form.rationale}
                             onChange={(e) => set('rationale')(e.target.value)}
                             rows={4}

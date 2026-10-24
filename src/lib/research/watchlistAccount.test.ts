@@ -4,13 +4,10 @@ import assert from 'node:assert/strict';
 import type { WatchItemInput } from '@/lib/validators/watchlist';
 
 import { seedWatchlist, type WatchItem } from './watchlist';
+import { AccountRequestError } from './accountWrites';
 import {
-    WatchlistRequestError,
     applyWatchWrite,
-    batchBySize,
-    createWatchlistWriter,
     fetchAccountWatchlist,
-    flushWatchlistWrites,
     importAccountWatchlist,
     importBrowserWatchlist,
     mergeAccountWatchlist,
@@ -194,207 +191,6 @@ describe('watchlistImportItems', () => {
     });
 });
 
-describe('createWatchlistWriter', () => {
-    function deferred() {
-        let resolve!: () => void;
-        let reject!: (error: unknown) => void;
-        const promise = new Promise<void>((res, rej) => { resolve = res; reject = rej; });
-        return { promise, resolve, reject };
-    }
-    const flush = () => new Promise((resolve) => setImmediate(resolve));
-
-    test('shows a write as pending until it is saved', async () => {
-        const sent = deferred();
-        const saved: string[] = [];
-        const writer = createWatchlistWriter({ send: () => sent.promise, onSaved: (id) => saved.push(id), onFailed: () => assert.fail('no failure') });
-        let changes = 0;
-        writer.subscribe(() => { changes += 1; });
-        const before = writer.pending();
-
-        writer.write('w-nvda-a', { kind: 'put', item: NVDA });
-        assert.notEqual(writer.pending(), before);
-        assert.deepEqual([...writer.pending().keys()], ['w-nvda-a']);
-
-        sent.resolve();
-        await flush();
-        assert.deepEqual(saved, ['w-nvda-a']);
-        assert.equal(writer.pending().size, 0);
-        assert.equal(changes, 2);
-    });
-
-    test("sends one item's writes one at a time, and only the latest of those waiting", async () => {
-        const calls: { id: string; write: WatchWrite; done: ReturnType<typeof deferred> }[] = [];
-        const saved: WatchWrite[] = [];
-        const writer = createWatchlistWriter({
-            send: (id, write) => {
-                const done = deferred();
-                calls.push({ id, write, done });
-                return done.promise;
-            },
-            onSaved: (_id, write) => saved.push(write),
-            onFailed: () => assert.fail('no failure'),
-        });
-
-        writer.write('w-nvda-a', { kind: 'put', item: { ...NVDA, notes: '1' } });
-        writer.write('w-nvda-a', { kind: 'put', item: { ...NVDA, notes: '2' } });
-        writer.write('w-nvda-a', { kind: 'put', item: { ...NVDA, notes: '3' } });
-        writer.write('w-amd-b', { kind: 'put', item: { ...AMD, notes: 'AMD', dismissed: true } });
-        // Another item's write doesn't wait for this one.
-        assert.deepEqual(calls.map((c) => c.id), ['w-nvda-a', 'w-amd-b']);
-
-        calls[0].done.resolve();
-        await flush();
-        // The first save is out of date, so nothing is reported yet.
-        assert.equal(saved.length, 0);
-        assert.equal(calls.length, 3);
-        assert.equal(calls[2].write.item.notes, '3');
-        assert.equal(writer.pending().get('w-nvda-a')?.kind, 'put');
-
-        calls[2].done.resolve();
-        calls[1].done.resolve();
-        await flush();
-        assert.deepEqual(saved.map((w) => w.item.notes), ['3', 'AMD']);
-        assert.equal(writer.pending().size, 0);
-    });
-
-    test('a closing page sends the writes waiting behind one in flight, at once', async () => {
-        const sent: string[] = [];
-        const first = deferred();
-        const writer = createWatchlistWriter({
-            send: (_id, write) => {
-                sent.push(write.item.notes);
-                return sent.length === 1 ? first.promise : Promise.resolve();
-            },
-            onSaved: () => {},
-            onFailed: () => assert.fail('no failure'),
-        });
-        writer.write('w-nvda-a', { kind: 'put', item: { ...NVDA, notes: 'target' } });
-        writer.write('w-nvda-a', { kind: 'put', item: { ...NVDA, notes: 'target and notes' } });
-        writer.write('w-amd-b', { kind: 'put', item: { ...AMD, notes: 'AMD', dismissed: true } });
-        await flush();
-        assert.deepEqual(sent, ['target', 'AMD']);
-
-        writer.sendWaiting();
-        // Only the write that was waiting; the removal was already sent.
-        assert.deepEqual(sent, ['target', 'AMD', 'target and notes']);
-        first.resolve();
-        await flush();
-        assert.equal(writer.pending().size, 0);
-    });
-
-    test('regression: every write is numbered in the order it was made, so a late one loses', async () => {
-        // The Codex finding on PR #147: the write sent on close could be
-        // overtaken by the older one still in flight.
-        const orders: { notes: string; session: string; seq: number }[] = [];
-        const first = deferred();
-        const writer = createWatchlistWriter({
-            session: 'page-0001',
-            send: (_id, write, order) => {
-                orders.push({ notes: write.item.notes, ...order });
-                return orders.length === 1 ? first.promise : Promise.resolve();
-            },
-            onSaved: () => {},
-            onFailed: () => assert.fail('no failure'),
-        });
-        assert.equal(writer.session, 'page-0001');
-        writer.write('w-nvda-a', { kind: 'put', item: { ...NVDA, notes: 'older' } });
-        writer.write('w-amd-b', { kind: 'put', item: { ...AMD, notes: 'other' } });
-        writer.write('w-nvda-a', { kind: 'put', item: { ...NVDA, notes: 'newer' } });
-        writer.sendWaiting();
-        first.resolve();
-        await flush();
-
-        assert.deepEqual(orders.map((o) => [o.notes, o.seq]), [['older', 1], ['other', 2], ['newer', 3], ['newer', 3]]);
-        assert.ok(orders.every((o) => o.session === 'page-0001'));
-    });
-
-    test('idle resolves once every write has been sent, saved or not', async () => {
-        const first = deferred();
-        const second = deferred();
-        const writer = createWatchlistWriter({
-            send: (id) => (id === 'w-nvda-a' ? first.promise : second.promise),
-            onSaved: () => {},
-            onFailed: () => {},
-        });
-        await writer.idle();
-        writer.write('w-nvda-a', { kind: 'put', item: NVDA });
-        writer.write('w-amd-b', { kind: 'put', item: AMD });
-        let idle = false;
-        void writer.idle().then(() => { idle = true; });
-        first.resolve();
-        await flush();
-        assert.equal(idle, false);
-        second.reject(new Error('offline'));
-        await flush();
-        assert.equal(idle, true);
-    });
-
-    test("regression: sign-out waits for this page's watchlist writes, for a while at most", async () => {
-        // The Codex finding on PR #147: a write still queued at sign-out
-        // was sent after the session had gone, and refused.
-        const sent = deferred();
-        const writer = createWatchlistWriter({ send: () => sent.promise, onSaved: () => {}, onFailed: () => {}, register: true });
-        writer.write('w-nvda-a', { kind: 'put', item: NVDA });
-        let flushed = false;
-        const flushing = flushWatchlistWrites(1000).then(() => { flushed = true; });
-        await flush();
-        assert.equal(flushed, false);
-        sent.resolve();
-        await flushing;
-        assert.equal(flushed, true);
-
-        // A write that never finishes doesn't hold sign-out up.
-        const slow = deferred();
-        const stuck = createWatchlistWriter({ send: () => slow.promise, onSaved: () => {}, onFailed: () => {}, register: true });
-        stuck.write('w-amd-b', { kind: 'put', item: AMD });
-        const started = Date.now();
-        await flushWatchlistWrites(50);
-        assert.ok(Date.now() - started < 1000);
-        // Done, so it doesn't hold up later flushes.
-        slow.resolve();
-        await stuck.idle();
-    });
-
-    test("regression: writers made on the server aren't kept for sign-out", async () => {
-        // The Codex finding on PR #147: every server render made a writer,
-        // and the sign-out registry kept each one (and its query client).
-        assert.equal(typeof window, 'undefined');
-        const neverDone = createWatchlistWriter({ send: () => new Promise<void>(() => {}), onSaved: () => {}, onFailed: () => {} });
-        neverDone.write('w-nvda-a', { kind: 'put', item: NVDA });
-        // Not registered, so the flush doesn't wait on it: it returns before its timeout.
-        const started = Date.now();
-        await flushWatchlistWrites(5_000);
-        assert.ok(Date.now() - started < 1_000);
-    });
-
-    test('a failed write is dropped and reported; a newer one is still sent', async () => {
-        const failures: unknown[] = [];
-        const saved: string[] = [];
-        let call = 0;
-        const error = new Error('offline');
-        const writer = createWatchlistWriter({
-            send: async () => {
-                call += 1;
-                if (call !== 3) throw error;
-            },
-            onSaved: (id) => saved.push(id),
-            onFailed: (_id, _write, err) => failures.push(err),
-        });
-
-        writer.write('w-nvda-a', { kind: 'put', item: NVDA });
-        await flush();
-        assert.deepEqual(failures, [error]);
-        assert.equal(writer.pending().size, 0);
-
-        // Failed, but superseded before it finished: only the newer one counts.
-        writer.write('w-amd-b', { kind: 'put', item: AMD });
-        writer.write('w-amd-b', { kind: 'put', item: { ...AMD, notes: 'newer' } });
-        await flush();
-        assert.deepEqual(saved, ['w-amd-b']);
-        assert.deepEqual(failures, [error]);
-    });
-});
-
 describe('requests', () => {
     function recorder(responses: Response[]) {
         const calls: { url: string; init: RequestInit }[] = [];
@@ -416,13 +212,13 @@ describe('requests', () => {
     test('a refused request says why', async () => {
         const { fetchImpl } = recorder([Response.json({ error: 'dup', code: 'DUPLICATE_TICKER' }, { status: 409 })]);
         await assert.rejects(sendWatchWrite('w-nvda-a', { kind: 'put', item: NVDA }, ORDER, fetchImpl), (error: unknown) => {
-            assert.ok(error instanceof WatchlistRequestError);
+            assert.ok(error instanceof AccountRequestError);
             assert.equal(error.status, 409);
             assert.equal(error.code, 'DUPLICATE_TICKER');
             return true;
         });
         const { fetchImpl: down } = recorder([new Response('<html>', { status: 502 })]);
-        await assert.rejects(fetchAccountWatchlist(down), (error: unknown) => error instanceof WatchlistRequestError && error.code === null);
+        await assert.rejects(fetchAccountWatchlist(down), (error: unknown) => error instanceof AccountRequestError && error.code === null);
     });
 
     test('saves and removals are both a keepalive PUT, in order', async () => {
@@ -549,29 +345,5 @@ describe('importBrowserWatchlist', () => {
         const fetchImpl = (async () => assert.fail('nothing to send')) as unknown as typeof fetch;
         await importBrowserWatchlist('atlas:research:watchlist:user-3', { storage: { getItem: () => null, setItem: () => {}, removeItem: () => {} }, examples: EXAMPLES, now: NOW, fetchImpl });
         await importBrowserWatchlist('atlas:research:watchlist:user-4', { storage: null, examples: EXAMPLES, now: NOW, fetchImpl });
-    });
-});
-
-describe('batchBySize', () => {
-    test('keeps each batch under the byte and count limits, in order', () => {
-        const items = Array.from({ length: 10 }, (_, i) => ({ i, text: 'x'.repeat(100) }));
-        const batches = batchBySize(items, { maxBytes: 400, maxCount: 100 });
-        assert.deepEqual(batches.flat(), items);
-        for (const batch of batches) assert.ok(new TextEncoder().encode(JSON.stringify({ items: batch })).length <= 400);
-        assert.deepEqual(batchBySize(items, { maxBytes: 1e6, maxCount: 4 }).map((b) => b.length), [4, 4, 2]);
-    });
-
-    test('counts UTF-8 bytes and JSON escapes, not characters', () => {
-        const wide = { text: '株'.repeat(100) }; // 300 bytes in UTF-8
-        const escaped = { text: '\u0001'.repeat(100) }; // 600 bytes once escaped
-        assert.deepEqual(batchBySize([wide, wide], { maxBytes: 500, maxCount: 10 }).map((b) => b.length), [1, 1]);
-        assert.deepEqual(batchBySize([escaped, escaped], { maxBytes: 1000, maxCount: 10 }).map((b) => b.length), [1, 1]);
-    });
-
-    test('an item too big on its own goes alone; nothing is dropped', () => {
-        const big = { text: 'x'.repeat(1000) };
-        const small = { text: 'y' };
-        assert.deepEqual(batchBySize([small, big, small], { maxBytes: 100, maxCount: 10 }), [[small], [big], [small]]);
-        assert.deepEqual(batchBySize([], { maxBytes: 100, maxCount: 10 }), []);
     });
 });

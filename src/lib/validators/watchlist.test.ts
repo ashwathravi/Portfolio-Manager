@@ -150,17 +150,4 @@ describe('write order', () => {
         assert.equal(watchItemPutSchema.safeParse(wide).success, true);
         assert.ok(new TextEncoder().encode(JSON.stringify(wide)).length <= WATCH_ITEM_PUT_MAX_BYTES);
     });
-
-    test('the session is a page ID and seq a whole number from 1', () => {
-        const put = (o: unknown) => watchItemPutSchema.safeParse({ item: ITEM, order: o });
-        assert.equal(put({ ...order, session: 'abcd1234' }).success, true);
-        assert.equal(put({ ...order, session: 'short' }).error?.issues[0]?.message, 'session must be a page ID');
-        assert.equal(put({ ...order, session: 'NOT-LOWER-CASE' }).error?.issues[0]?.message, 'session must be a page ID');
-        assert.equal(put({ ...order, session: 'a'.repeat(65) }).success, false);
-        assert.equal(put({ ...order, seq: Number.MAX_SAFE_INTEGER }).success, true);
-        assert.equal(put({ ...order, seq: 0 }).error?.issues[0]?.message, 'seq must be at least 1');
-        assert.equal(put({ ...order, seq: 1.5 }).error?.issues[0]?.message, 'seq must be a whole number');
-        assert.equal(put({ ...order, seq: Number.MAX_SAFE_INTEGER + 2 }).success, false);
-        assert.equal(put({ ...order, extra: 1 }).success, false);
-    });
 });
