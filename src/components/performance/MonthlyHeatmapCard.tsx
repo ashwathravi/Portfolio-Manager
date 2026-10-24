@@ -1,13 +1,15 @@
 "use client";
 
 import { useMemo, type CSSProperties } from "react";
-import type { MonthlyValuation } from "@/lib/performance/periodSummary";
+import { monthlyReturns, type DatedValue } from "@/lib/performance/periodSummary";
 
 /**
  * Phase 4 (AR-77) Monthly return heatmap.
  *
  * Year × 12-month grid of month-over-month returns, plus a rightmost "YR"
  * column that chain-links the year's monthly returns into a single number.
+ * A first month the series starts partway through is measured from its
+ * first value (the cell's title says from when).
  * Intensity scales with `|ret| / maxAbs` so the hottest and coldest months
  * pop while middling ones fade. Green for positive, red for negative —
  * both use the existing `--pm-success` / `--pm-danger` tokens via
@@ -34,31 +36,28 @@ const TINT_MIN = 0.12;
 const TINT_MAX = 0.82;
 
 export interface MonthlyHeatmapCardProps {
-    portfolio: MonthlyValuation[];
+    portfolio: DatedValue[];
 }
 
 interface ComputedHeatmap {
     years: number[];
     byYear: Map<number, Array<number | null>>;
+    partial: Map<string, string>;
     yearTotals: Map<number, number>;
     maxAbs: number;
 }
 
 export function MonthlyHeatmapCard({ portfolio }: MonthlyHeatmapCardProps) {
-    const { years, byYear, yearTotals, maxAbs } = useMemo<ComputedHeatmap>(() => {
-        const sorted = [...portfolio].sort((a, b) =>
-            a.year === b.year ? a.month - b.month : a.year - b.year,
-        );
+    const { years, byYear, partial, yearTotals, maxAbs } = useMemo<ComputedHeatmap>(() => {
         const byYear = new Map<number, Array<number | null>>();
-        for (let i = 1; i < sorted.length; i++) {
-            const prev = sorted[i - 1].value;
-            const curr = sorted[i];
-            const ret = prev === 0 ? 0 : (curr.value - prev) / prev;
+        const partial = new Map<string, string>();
+        for (const curr of monthlyReturns(portfolio)) {
             if (!byYear.has(curr.year)) {
                 byYear.set(curr.year, new Array<number | null>(12).fill(null));
             }
             const row = byYear.get(curr.year);
-            if (row) row[curr.month] = ret;
+            if (row) row[curr.month] = curr.return;
+            if (curr.from) partial.set(`${curr.year}-${curr.month}`, curr.from);
         }
         const years = Array.from(byYear.keys()).sort((a, b) => a - b);
         const yearTotals = new Map<number, number>();
@@ -77,7 +76,7 @@ export function MonthlyHeatmapCard({ portfolio }: MonthlyHeatmapCardProps) {
             }
         }
         const maxAbs = allRets.length > 0 ? Math.max(...allRets) : 0.0001;
-        return { years, byYear, yearTotals, maxAbs };
+        return { years, byYear, partial, yearTotals, maxAbs };
     }, [portfolio]);
 
     return (
@@ -118,7 +117,7 @@ export function MonthlyHeatmapCard({ portfolio }: MonthlyHeatmapCardProps) {
                                             title={
                                                 ret == null
                                                     ? `${MONTHS[m]} ${y}: no data`
-                                                    : `${MONTHS[m]} ${y}: ${fmtLongPct(ret)}`
+                                                    : `${MONTHS[m]} ${y}${partial.has(`${y}-${m}`) ? ` (from ${partial.get(`${y}-${m}`)})` : ""}: ${fmtLongPct(ret)}`
                                             }
                                         >
                                             {ret == null ? "" : fmtShortPct(ret)}

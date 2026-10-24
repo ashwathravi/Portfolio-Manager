@@ -1396,6 +1396,8 @@
   transition: background 120ms ease, color 120ms ease;
 }
 .pm-seg-pill-btn:hover { color: var(--pm-fg); }
+.pm-seg-pill-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.pm-seg-pill-btn:disabled:hover { color: var(--pm-fg-subtle); }
 .pm-seg-pill-btn[aria-checked="true"] {
   background: var(--pm-card);
   color: var(--pm-fg);
@@ -2594,6 +2596,21 @@
 
 .pm-perf-equity-card {
   gap: 16px;
+}
+
+.pm-perf-history-bar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.pm-perf-history-note {
+  flex: 1 1 320px;
+  min-width: 0;
+  margin: 0;
+  font-size: 13px;
+  color: var(--pm-fg-muted);
 }
 
 .pm-perf-equity-head {

@@ -1,32 +1,74 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert';
 import {
+    DAILY,
     calendarDaysBetween,
     computePeriodMetrics,
     computeRiskSnapshot,
-    type MonthlyValuation,
+    measuresRisk,
+    minusMonths,
+    monthlyReturns,
+    periodStartTarget,
+    sliceForPeriod,
+    type DatedValue,
 } from './periodSummary.ts';
 
-function monthly(values: readonly number[], startYear = 2025, startMonth = 0): MonthlyValuation[] {
+/** Month-end observations starting at `startMonth` (0 = Jan) of `startYear`. */
+function monthly(values: readonly number[], startYear = 2025, startMonth = 0): DatedValue[] {
     return values.map((value, i) => {
         const year = startYear + Math.floor((startMonth + i) / 12);
         const month = (startMonth + i) % 12;
-        return { year, month, value };
+        const day = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+        return { date: `${year}-${String(month + 1).padStart(2, '0')}-${day}`, value };
     });
 }
 
 describe('calendarDaysBetween', () => {
-    test('returns zero for same month/year', () => {
-        assert.strictEqual(
-            calendarDaysBetween({ year: 2026, month: 3, value: 0 }, { year: 2026, month: 3, value: 0 }),
-            0,
-        );
+    test('returns zero for the same date', () => {
+        assert.strictEqual(calendarDaysBetween({ date: '2026-04-30', value: 0 }, { date: '2026-04-30', value: 0 }), 0);
     });
 
-    test('counts the span between first of each month', () => {
-        // Jan 1 2026 -> Feb 1 2026 = 31 days.
-        const days = calendarDaysBetween({ year: 2026, month: 0, value: 0 }, { year: 2026, month: 1, value: 0 });
-        assert.strictEqual(days, 31);
+    test('counts calendar days', () => {
+        assert.strictEqual(calendarDaysBetween({ date: '2026-01-31', value: 0 }, { date: '2026-02-28', value: 0 }), 28);
+        assert.strictEqual(calendarDaysBetween({ date: '2026-10-16', value: 0 }, { date: '2026-10-19', value: 0 }), 3);
+    });
+});
+
+describe('period start dates', () => {
+    test('a month end maps to the earlier month end; other days are clamped', () => {
+        assert.strictEqual(minusMonths('2026-09-30', 1), '2026-08-31');
+        assert.strictEqual(minusMonths('2026-03-31', 1), '2026-02-28');
+        assert.strictEqual(minusMonths('2026-03-30', 1), '2026-02-28');
+        assert.strictEqual(minusMonths('2026-10-22', 1), '2026-09-22');
+        assert.strictEqual(minusMonths('2026-01-15', 3), '2025-10-15');
+        assert.strictEqual(minusMonths('2026-02-28', 12), '2025-02-28');
+        assert.strictEqual(minusMonths('2024-02-29', 12), '2023-02-28');
+    });
+
+    test('YTD starts at the prior year end; ALL has no start', () => {
+        assert.strictEqual(periodStartTarget('2026-10-22', 'YTD'), '2025-12-31');
+        assert.strictEqual(periodStartTarget('2026-10-22', '3Y'), '2023-10-22');
+        assert.strictEqual(periodStartTarget('2026-10-22', 'ALL'), null);
+    });
+
+    test('a daily series is measured from the last session on or before the start', () => {
+        const daily: DatedValue[] = [
+            { date: '2026-09-18', value: 100 }, // Fri
+            { date: '2026-09-21', value: 101 }, // Mon
+            { date: '2026-10-21', value: 105 },
+            { date: '2026-10-22', value: 106 },
+        ];
+        // 1M back from Thu Oct 22 is Tue Sep 22: the last session on or before it is Sep 21.
+        const { points, covered } = sliceForPeriod(daily, '1M');
+        assert.strictEqual(covered, true);
+        assert.strictEqual(points[0].date, '2026-09-21');
+    });
+
+    test('a series shorter than the period comes back whole, not covered', () => {
+        const short = monthly([100, 110, 120], 2026, 6);
+        assert.deepStrictEqual(sliceForPeriod(short, '6M'), { points: short, covered: false });
+        assert.deepStrictEqual(sliceForPeriod(short, 'ALL'), { points: short, covered: true });
+        assert.strictEqual(sliceForPeriod(short.slice(0, 1), 'ALL').covered, false);
     });
 });
 
@@ -54,8 +96,8 @@ describe('computePeriodMetrics', () => {
 
     test('alpha = portfolio - benchmark', () => {
         const [one] = computePeriodMetrics(portfolio, benchmark, ['1M']);
-        const expectedAlpha = one.return - one.benchmark;
-        assert.ok(Math.abs(one.alpha - expectedAlpha) < 1e-12);
+        assert.ok(one.alpha !== null && one.benchmark !== null);
+        assert.ok(Math.abs(one.alpha - (one.return - one.benchmark)) < 1e-12);
     });
 
     test('YTD slice starts at December of the prior year', () => {
@@ -65,11 +107,59 @@ describe('computePeriodMetrics', () => {
         assert.ok(Math.abs(ytd.return - (135 / 130 - 1)) < 1e-9);
     });
 
+    test('periods longer than the series are flagged and cover the whole series', () => {
+        const short = monthly([100, 105, 110], 2025, 10); // Nov 25 – Jan 26
+        const [sixMonths] = computePeriodMetrics(short, short, ['6M']);
+        assert.strictEqual(sixMonths.covered, false);
+        assert.strictEqual(sixMonths.start, '2025-11-30');
+        assert.ok(Math.abs(sixMonths.return - 0.1) < 1e-9);
+        const [oneMonth] = computePeriodMetrics(short, short, ['1M']);
+        assert.strictEqual(oneMonth.covered, true);
+    });
+
+    test('the benchmark is measured over the same dates, or null without them', () => {
+        const [all] = computePeriodMetrics(portfolio, benchmark.slice(1), ['ALL']);
+        assert.strictEqual(all.benchmark, null);
+        assert.strictEqual(all.alpha, null);
+        const [oneMonth] = computePeriodMetrics(portfolio, benchmark.slice(1), ['1M']);
+        assert.ok(oneMonth.benchmark !== null && Math.abs(oneMonth.benchmark - (122 / 118 - 1)) < 1e-9);
+    });
+
+    test('daily series annualize with 252 sessions', () => {
+        const daily: DatedValue[] = [
+            { date: '2026-09-21', value: 100 },
+            { date: '2026-10-20', value: 101 },
+            { date: '2026-10-21', value: 100 },
+            { date: '2026-10-22', value: 102 },
+        ];
+        const [monthlyScale] = computePeriodMetrics(daily, daily, ['ALL']);
+        const [dailyScale] = computePeriodMetrics(daily, daily, ['ALL'], { periodsPerYear: DAILY });
+        assert.ok(monthlyScale.volatility !== null && dailyScale.volatility !== null);
+        assert.ok(Math.abs(dailyScale.volatility / monthlyScale.volatility - Math.sqrt(252 / 12)) < 1e-9);
+    });
+
+    test('regression: risk needs three returns over four weeks, not a Sharpe of 123 from two days', () => {
+        const days: DatedValue[] = [
+            { date: '2026-10-20', value: 100 },
+            { date: '2026-10-21', value: 104.1 },
+            { date: '2026-10-22', value: 109.3 },
+        ];
+        const [all] = computePeriodMetrics(days, days, ['ALL'], { periodsPerYear: DAILY });
+        assert.strictEqual(all.volatility, null);
+        assert.strictEqual(all.sharpe, null);
+        assert.ok(Math.abs(all.return - 0.093) < 1e-9);
+        assert.strictEqual(measuresRisk(days), false);
+        // Three returns, but over two days.
+        assert.strictEqual(measuresRisk([...days, { date: '2026-10-23', value: 110 }]), false);
+        assert.strictEqual(measuresRisk(monthly([100, 101, 102, 103])), true);
+        assert.strictEqual(measuresRisk(monthly([100, 101])), false);
+    });
+
     test('returns zero metrics when series has <2 points', () => {
         const metrics = computePeriodMetrics(monthly([100]), monthly([100]), ['1M']);
         assert.strictEqual(metrics[0].return, 0);
-        assert.strictEqual(metrics[0].sharpe, 0);
-        assert.strictEqual(metrics[0].volatility, 0);
+        assert.strictEqual(metrics[0].sharpe, null);
+        assert.strictEqual(metrics[0].volatility, null);
     });
 
     test('is order-independent (sorts inputs)', () => {
@@ -127,5 +217,30 @@ describe('computeRiskSnapshot', () => {
         const values = [100, 102, 101, 103, 105];
         const snapshot = computeRiskSnapshot(monthly(values), monthly(values));
         assert.ok(Number.isFinite(snapshot.sortinoRatio) && snapshot.sortinoRatio > 0);
+    });
+});
+
+describe('monthlyReturns', () => {
+    test('month ends: one return per month after the first', () => {
+        const returns = monthlyReturns(monthly([100, 110, 99], 2025, 10));
+        assert.deepStrictEqual(returns.map((r) => [r.year, r.month, r.from]), [[2025, 11, undefined], [2026, 0, undefined]]);
+        assert.ok(Math.abs(returns[0].return - 0.1) < 1e-12);
+        assert.ok(Math.abs(returns[1].return + 0.1) < 1e-12);
+    });
+
+    test('daily closes: each month from the last close of the month before; a mid-month start is partial', () => {
+        const returns = monthlyReturns([
+            { date: '2026-09-14', value: 100 },
+            { date: '2026-09-30', value: 105 },
+            { date: '2026-10-01', value: 104 },
+            { date: '2026-10-22', value: 110.25 },
+        ]);
+        assert.deepStrictEqual(returns.map((r) => [r.month, r.from]), [[8, '2026-09-14'], [9, undefined]]);
+        assert.ok(Math.abs(returns[0].return - 0.05) < 1e-12);
+        assert.ok(Math.abs(returns[1].return - 0.05) < 1e-12);
+    });
+
+    test('fewer than two observations have no months', () => {
+        assert.deepStrictEqual(monthlyReturns([{ date: '2026-10-22', value: 100 }]), []);
     });
 });

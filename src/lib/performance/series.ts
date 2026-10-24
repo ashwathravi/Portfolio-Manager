@@ -1,4 +1,4 @@
-import type { MonthlyValuation } from './periodSummary';
+import type { DatedValue } from './periodSummary';
 
 /**
  * Monthly equity curve used on the performance deep-dive page. Until a live
@@ -49,15 +49,21 @@ export function buildMonthlySamples(now: number): Array<{ year: number; month: n
 }
 
 export interface ExampleMonthlySeries {
-    portfolio: MonthlyValuation[];
-    benchmark: MonthlyValuation[];
+    portfolio: DatedValue[];
+    benchmark: DatedValue[];
+}
+
+/** The last day of `month` (0 = Jan) as YYYY-MM-DD. */
+export function monthEndDate(year: number, month: number): string {
+    const day = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+    return `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 }
 
 let monthlySeriesCache: { monthIndex: number; series: ExampleMonthlySeries } | null = null;
 
 /**
- * Example portfolio and S&P 500 monthly values ending at the last complete
- * month before `now`. Memoised per UTC month, so callers get the same
+ * Example portfolio and S&P 500 month-end values ending at the last
+ * complete month before `now`. Memoised per UTC month, so callers get the same
  * arrays all month; a long-running server process moves to the new month
  * instead of rendering the month it loaded this module, which made the
  * server render and hydration disagree.
@@ -70,8 +76,8 @@ export function getExampleMonthlySeries(now: number = Date.now()): ExampleMonthl
         monthlySeriesCache = {
             monthIndex,
             series: {
-                portfolio: samples.map((s) => ({ year: s.year, month: s.month, value: s.account })),
-                benchmark: samples.map((s) => ({ year: s.year, month: s.month, value: s.benchmark })),
+                portfolio: samples.map((s) => ({ date: monthEndDate(s.year, s.month), value: s.account })),
+                benchmark: samples.map((s) => ({ date: monthEndDate(s.year, s.month), value: s.benchmark })),
             },
         };
     }
