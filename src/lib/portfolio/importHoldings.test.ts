@@ -79,4 +79,14 @@ describe("importHoldings", () => {
             assert.equal(row?.marketValue, null, symbol);
         }
     });
+
+    test("regression: a held position without a new quote keeps its stored price", async () => {
+        // The Codex finding on PR #153: updating AAPL's quantity with no
+        // quote for it cleared its price, so it was valued at cost.
+        const { database, updated } = fakeDatabase();
+        await importHoldings(USER, body, { MSFT: 410 }, database);
+        assert.equal(updated.length, 1);
+        assert.ok(!("currentPrice" in updated[0]!), "the stored price is left as it is");
+        assert.equal(updated[0]?.marketValue, null);
+    });
 });
