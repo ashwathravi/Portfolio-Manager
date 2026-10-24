@@ -26,7 +26,18 @@ export interface AccountRecordsOptions<Stored, W extends object> {
 
 const writers = new WeakMap<QueryClient, Map<string, AccountWriter<object>>>();
 
-function writerFor<Stored, W extends object>(queryClient: QueryClient, options: AccountRecordsOptions<Stored, W>): AccountWriter<W> {
+/**
+ * The writer for `options.queryKey` on this query client, made once and
+ * shared by every component that shows those records. A saved write is
+ * applied to the query's data (and the data read again if a read that may
+ * not include it is in flight); a failed one is reported with `notify` and
+ * the data read again.
+ */
+export function accountWriterFor<Stored, W extends object>(
+    queryClient: QueryClient,
+    options: Pick<AccountRecordsOptions<Stored, W>, 'queryKey' | 'send' | 'apply' | 'failedMessage'>,
+    notify: (message: string) => void = (message) => { toast.error(message); },
+): AccountWriter<W> {
     let byKey = writers.get(queryClient);
     if (!byKey) {
         byKey = new Map();
@@ -47,7 +58,7 @@ function writerFor<Stored, W extends object>(queryClient: QueryClient, options: 
             if (queryClient.isFetching({ queryKey }) > 0) void queryClient.invalidateQueries({ queryKey });
         },
         onFailed: (_id, write, error) => {
-            toast.error(options.failedMessage(write, error));
+            notify(options.failedMessage(write, error));
             // The change is undone; show what the account has.
             void queryClient.invalidateQueries({ queryKey });
         },
@@ -62,7 +73,7 @@ const NO_WRITES: ReadonlyMap<string, unknown> = new Map();
 
 export function useAccountRecords<Stored, W extends object>(options: AccountRecordsOptions<Stored, W>) {
     const queryClient = useQueryClient();
-    const writer = writerFor(queryClient, options);
+    const writer = accountWriterFor(queryClient, options);
     const query = useQuery({
         queryKey: options.queryKey,
         queryFn: options.load,

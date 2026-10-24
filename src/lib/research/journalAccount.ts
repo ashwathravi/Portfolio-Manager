@@ -193,8 +193,11 @@ export function importBrowserJournal(
         await importInBatches(fetchImpl, '/api/research/journal/import', items, JOURNAL_IMPORT_MAX_ENTRIES);
         // Text the account couldn't take stays in this browser, under a key
         // of its own, rather than being lost.
-        if (shortened) writeUserValue(storage, JOURNAL_FULL_COPY_KEY, JSON.stringify({ version: 1, entries: local }), scope);
-        removeUserValue(storage, JOURNAL_STORAGE_KEY, scope);
+        // The browser's journal goes only once its full text is kept: if the
+        // copy can't be written (a full quota), the journal itself stays, and
+        // the next load tries again.
+        const kept = !shortened || writeUserValue(storage, JOURNAL_FULL_COPY_KEY, JSON.stringify({ version: 1, entries: local }), scope);
+        if (kept) removeUserValue(storage, JOURNAL_STORAGE_KEY, scope);
         if (shortened) onShortened?.();
     });
 }

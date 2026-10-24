@@ -208,6 +208,27 @@ describe('importBrowserJournal', () => {
         assert.deepEqual(JSON.parse(map.get(`${JOURNAL_FULL_COPY_KEY}:user-6`) ?? 'null'), { version: 1, entries: [long] });
     });
 
+    test('regression: keeps the journal when its full-text copy cannot be stored', async () => {
+        // The Codex finding on PR #149: a full quota dropped the copy, and
+        // the journal was removed anyway, losing the text cut on import.
+        const long = { ...mine, rationale: 'r'.repeat(6000) };
+        const { map, storage } = storageWith('atlas:research:journal:user-7', [long]);
+        const full = {
+            ...storage,
+            setItem: (k: string, v: string) => {
+                if (k.includes('full-copy')) throw new Error('QuotaExceededError');
+                storage.setItem(k, v);
+            },
+        };
+        let told = 0;
+        const fetchImpl = (async () => new Response(null, { status: 204 })) as unknown as typeof fetch;
+        await importBrowserJournal('user-7', { storage: full, examples: EXAMPLES, now: NOW, fetchImpl, onShortened: () => { told += 1; } });
+        assert.equal(map.has('atlas:research:journal:user-7'), true);
+        assert.equal(map.has(`${JOURNAL_FULL_COPY_KEY}:user-7`), false);
+        // The full text is still in this browser, under the journal's own key.
+        assert.equal(told, 1);
+    });
+
     test('keeps the copy when the send fails', async () => {
         const { map, storage } = storageWith('atlas:research:journal:user-2', [mine]);
         const fetchImpl = (async () => Response.json({ code: 'JOURNAL_IMPORT_FAILED' }, { status: 500 })) as unknown as typeof fetch;
