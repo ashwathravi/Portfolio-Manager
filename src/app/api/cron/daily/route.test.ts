@@ -37,8 +37,8 @@ describe("GET /api/cron/daily", () => {
         }
     });
 
-    test("runs the session cleanup, then the price ingest, with room for its budget", () => {
-        assert.deepEqual(DAILY_JOBS.map((job) => job.name), ["expired-sessions", "prices"]);
+    test("runs the session cleanup, the price ingest, then the snapshots valued at those prices, with room for the budget", () => {
+        assert.deepEqual(DAILY_JOBS.map((job) => job.name), ["expired-sessions", "prices", "snapshots"]);
         assert.equal(maxDuration, 300);
     });
 });
