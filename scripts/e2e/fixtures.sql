@@ -81,3 +81,57 @@ VALUES
   ('IBM', (now() AT TIME ZONE 'America/New_York')::date - 1, 200, 202, 198, 200, 1000, 'e2e'),
   ('IBM', (now() AT TIME ZONE 'America/New_York')::date, 200, 206, 199, 205, 1000, 'e2e')
 ON CONFLICT (symbol, date) DO NOTHING;
+
+-- Valuation history for user A (launch item i49), on fixed past sessions so
+-- Performance › Returns has known numbers. Main holds 100 KO and 1,000 cash,
+-- Growth 50 PG; on Oct 1 Main moves 500 of cash to Growth, which must not
+-- count as a return. Dividend Income has no history. Nobody holds KO or PG
+-- today, so the bars don't price any current holding. SPY and QQQ have a
+-- close on every date; IWM and DIA have none, so they aren't offered.
+--   All accounts: 14,500 -> 15,100 -> 15,850, +9.31% (no money came in)
+--   Main:  +8.57% (KO +10% on 7,000, then flat), value 7,000 -> 7,100
+--   Growth: +10.00% (PG +10% on Oct 1), value 7,500 -> 8,750
+--   S&P 500 (SPY) +3.02%, NASDAQ-100 (QQQ) +5.00%
+INSERT INTO securities (symbol, name, history_start_date)
+VALUES
+  ('KO', 'The Coca-Cola Company', '2026-08-31'),
+  ('PG', 'Procter & Gamble', '2026-08-31'),
+  ('SPY', 'SPDR S&P 500 ETF Trust', '2026-08-31'),
+  ('QQQ', 'Invesco QQQ Trust', '2026-08-31')
+ON CONFLICT (symbol) DO NOTHING;
+
+INSERT INTO price_bars (symbol, date, open, high, low, close, volume, source)
+VALUES
+  ('KO', '2026-08-31', 60, 60, 60, 60, 1000, 'e2e'),
+  ('KO', '2026-09-30', 66, 66, 66, 66, 1000, 'e2e'),
+  ('KO', '2026-10-01', 66, 66, 66, 66, 1000, 'e2e'),
+  ('PG', '2026-08-31', 150, 150, 150, 150, 1000, 'e2e'),
+  ('PG', '2026-09-30', 150, 150, 150, 150, 1000, 'e2e'),
+  ('PG', '2026-10-01', 165, 165, 165, 165, 1000, 'e2e'),
+  ('SPY', '2026-08-31', 500, 500, 500, 500, 1000, 'e2e'),
+  ('SPY', '2026-09-30', 510, 510, 510, 510, 1000, 'e2e'),
+  ('SPY', '2026-10-01', 515.1, 515.1, 515.1, 515.1, 1000, 'e2e'),
+  ('QQQ', '2026-08-31', 400, 400, 400, 400, 1000, 'e2e'),
+  ('QQQ', '2026-09-30', 420, 420, 420, 420, 1000, 'e2e'),
+  ('QQQ', '2026-10-01', 420, 420, 420, 420, 1000, 'e2e')
+ON CONFLICT (symbol, date) DO NOTHING;
+
+INSERT INTO portfolio_snapshots (portfolio_id, date, holdings_value, cash, total_value, cost_basis, positions)
+VALUES
+  ('00000000-0000-4000-8000-000000000001', '2026-08-31', 6000, 1000, 7000, 5500, 1),
+  ('00000000-0000-4000-8000-000000000001', '2026-09-30', 6600, 1000, 7600, 5500, 1),
+  ('00000000-0000-4000-8000-000000000001', '2026-10-01', 6600, 500, 7100, 5500, 1),
+  ('00000000-0000-4000-8000-000000000002', '2026-08-31', 7500, 0, 7500, 7000, 1),
+  ('00000000-0000-4000-8000-000000000002', '2026-09-30', 7500, 0, 7500, 7000, 1),
+  ('00000000-0000-4000-8000-000000000002', '2026-10-01', 8250, 500, 8750, 7000, 1)
+ON CONFLICT (portfolio_id, date) DO NOTHING;
+
+INSERT INTO portfolio_snapshot_positions (portfolio_id, date, symbol, quantity, cost_basis, close, close_date, market_value)
+VALUES
+  ('00000000-0000-4000-8000-000000000001', '2026-08-31', 'KO', 100, 5500, 60, '2026-08-31', 6000),
+  ('00000000-0000-4000-8000-000000000001', '2026-09-30', 'KO', 100, 5500, 66, '2026-09-30', 6600),
+  ('00000000-0000-4000-8000-000000000001', '2026-10-01', 'KO', 100, 5500, 66, '2026-10-01', 6600),
+  ('00000000-0000-4000-8000-000000000002', '2026-08-31', 'PG', 50, 7000, 150, '2026-08-31', 7500),
+  ('00000000-0000-4000-8000-000000000002', '2026-09-30', 'PG', 50, 7000, 150, '2026-09-30', 7500),
+  ('00000000-0000-4000-8000-000000000002', '2026-10-01', 'PG', 50, 7000, 165, '2026-10-01', 8250)
+ON CONFLICT (portfolio_id, date, symbol) DO NOTHING;

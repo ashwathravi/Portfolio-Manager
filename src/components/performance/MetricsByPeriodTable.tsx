@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 import {
     computePeriodMetrics,
-    type MonthlyValuation,
+    type DatedValue,
     type PeriodKey,
 } from "@/lib/performance/periodSummary";
 
@@ -13,24 +13,32 @@ import {
  * One row per period, driven by `computePeriodMetrics`. Columns:
  *   Period · Return · Bench · Alpha · Vol · Sharpe · Max DD
  *
- * All percentages are colored by sign. Keeping the table stateless makes
- * it trivial to embed inside any deep-dive card later.
+ * All percentages are colored by sign. A period the history doesn't reach
+ * back to shows dashes rather than the shorter span's numbers, and so does
+ * a benchmark without a value at the period's ends, and volatility and
+ * Sharpe over too few returns to mean anything. Keeping the table
+ * stateless makes it trivial to embed inside any deep-dive card later.
  */
 
 const PERIODS: readonly PeriodKey[] = ["1M", "3M", "6M", "YTD", "1Y", "ALL"];
 
 export interface MetricsByPeriodTableProps {
-    portfolio: MonthlyValuation[];
-    benchmark: MonthlyValuation[];
+    portfolio: DatedValue[];
+    benchmark: DatedValue[];
+    /** Observations per year: 12 for month ends, 252 for daily closes. */
+    periodsPerYear: number;
 }
+
+const DASH = "—";
 
 export function MetricsByPeriodTable({
     portfolio,
     benchmark,
+    periodsPerYear,
 }: MetricsByPeriodTableProps) {
     const rows = useMemo(
-        () => computePeriodMetrics(portfolio, benchmark, PERIODS),
-        [portfolio, benchmark],
+        () => computePeriodMetrics(portfolio, benchmark, PERIODS, { periodsPerYear }),
+        [portfolio, benchmark, periodsPerYear],
     );
 
     return (
@@ -57,27 +65,38 @@ export function MetricsByPeriodTable({
                     </tr>
                 </thead>
                 <tbody>
-                    {rows.map((r) => (
-                        <tr key={r.period}>
-                            <td style={{ fontWeight: 600 }}>{r.period}</td>
-                            <td
-                                className={`num ${r.return < 0 ? "pm-num-neg" : "pm-num-pos"}`}
-                            >
-                                {fmtPct(r.return)}
-                            </td>
-                            <td className="num" style={{ color: "var(--pm-fg-subtle)" }}>
-                                {fmtPct(r.benchmark)}
-                            </td>
-                            <td
-                                className={`num ${r.alpha < 0 ? "pm-num-neg" : "pm-num-pos"}`}
-                            >
-                                {fmtPct(r.alpha)}
-                            </td>
-                            <td className="num">{fmtPct(r.volatility)}</td>
-                            <td className="num">{r.sharpe.toFixed(2)}</td>
-                            <td className="num pm-num-neg">{fmtPct(r.maxDrawdown)}</td>
-                        </tr>
-                    ))}
+                    {rows.map((r) =>
+                        r.covered ? (
+                            <tr key={r.period}>
+                                <td style={{ fontWeight: 600 }}>{r.period}</td>
+                                <td
+                                    className={`num ${r.return < 0 ? "pm-num-neg" : "pm-num-pos"}`}
+                                >
+                                    {fmtPct(r.return)}
+                                </td>
+                                <td className="num" style={{ color: "var(--pm-fg-subtle)" }}>
+                                    {r.benchmark === null ? DASH : fmtPct(r.benchmark)}
+                                </td>
+                                <td
+                                    className={`num ${r.alpha === null ? "" : r.alpha < 0 ? "pm-num-neg" : "pm-num-pos"}`}
+                                >
+                                    {r.alpha === null ? DASH : fmtPct(r.alpha)}
+                                </td>
+                                <td className="num">{r.volatility === null ? DASH : fmtPct(r.volatility)}</td>
+                                <td className="num">{r.sharpe === null ? DASH : r.sharpe.toFixed(2)}</td>
+                                <td className="num pm-num-neg">{fmtPct(r.maxDrawdown)}</td>
+                            </tr>
+                        ) : (
+                            <tr key={r.period} title={`Less than ${r.period} of history`}>
+                                <td style={{ fontWeight: 600 }}>{r.period}</td>
+                                {Array.from({ length: 6 }, (_, i) => (
+                                    <td key={i} className="num" style={{ color: "var(--pm-fg-subtle)" }}>
+                                        {DASH}
+                                    </td>
+                                ))}
+                            </tr>
+                        ),
+                    )}
                 </tbody>
             </table>
         </section>

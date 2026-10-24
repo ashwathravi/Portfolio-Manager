@@ -119,15 +119,25 @@ test('calculateSparklinePoints - returns empty string for only non-finite values
     assert.strictEqual(calculateSparklinePoints([NaN, Infinity, -Infinity]), '');
 });
 
-test('monthAxisLabels - regression: labels come from the data, not fixed Jan…Dec slots', async () => {
-    const { monthAxisLabels } = await import('./charts');
-    const months = Array.from({ length: 13 }, (_, i) => ({ year: 2025 + Math.floor((9 + i) / 12), month: (9 + i) % 12 }));
-    assert.deepStrictEqual(monthAxisLabels(months), ['Oct 25', 'Jan 26', 'Apr 26', 'Jul 26', 'Oct 26']);
+test('dateAxisLabels - regression: labels come from the data, not fixed Jan…Dec slots', async () => {
+    const { dateAxisLabels } = await import('./charts');
+    const months = Array.from({ length: 13 }, (_, i) => {
+        const year = 2025 + Math.floor((9 + i) / 12);
+        const month = (9 + i) % 12;
+        return { date: `${year}-${String(month + 1).padStart(2, '0')}-28` };
+    });
+    assert.deepStrictEqual(dateAxisLabels(months), ['Oct 25', 'Jan 26', 'Apr 26', 'Jul 26', 'Oct 26']);
 });
 
-test('monthAxisLabels - short and empty series', async () => {
-    const { monthAxisLabels } = await import('./charts');
-    assert.deepStrictEqual(monthAxisLabels([]), []);
-    assert.deepStrictEqual(monthAxisLabels([{ year: 2026, month: 0 }]), ['Jan 26']);
-    assert.deepStrictEqual(monthAxisLabels([{ year: 2026, month: 0 }, { year: 2026, month: 1 }]), ['Jan 26', 'Feb 26']);
+test('dateAxisLabels - a short window is labelled by day', async () => {
+    const { dateAxisLabels } = await import('./charts');
+    const days = ['2026-10-05', '2026-10-06', '2026-10-07', '2026-10-08', '2026-10-09'].map((date) => ({ date }));
+    assert.deepStrictEqual(dateAxisLabels(days, 3), ['Oct 5', 'Oct 7', 'Oct 9']);
+});
+
+test('dateAxisLabels - short and empty series', async () => {
+    const { dateAxisLabels } = await import('./charts');
+    assert.deepStrictEqual(dateAxisLabels([]), []);
+    assert.deepStrictEqual(dateAxisLabels([{ date: '2026-01-31' }]), ['Jan 31']);
+    assert.deepStrictEqual(dateAxisLabels([{ date: '2026-01-31' }, { date: '2026-02-28' }]), ['Jan 31', 'Feb 28']);
 });
