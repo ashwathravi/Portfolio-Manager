@@ -62,6 +62,22 @@ test.describe('Portfolio › Holdings', () => {
         await expect(bucketFilter).toHaveValue('active');
     });
 
+    test('with holdings: sector chips are the sectors held, from the securities master', async ({ page }) => {
+        test.skip(!(await hasHoldings(page)), 'no holdings in this database');
+        const dbMode = Boolean(process.env.CI || process.env.E2E_DATABASE_AUTH === '1');
+        test.skip(!dbMode, 'reference data comes from the E2E database fixtures');
+        const sectors = page.getByRole('radiogroup', { name: 'Filter by sector' });
+        // Largest first. AMZN's industry code (catalog retail) makes it
+        // Consumer; the old ticker map called it Tech.
+        await expect(sectors.getByRole('radio')).toHaveText(['All', 'Tech', 'Auto', 'Consumer']);
+        await sectors.getByRole('radio', { name: 'Consumer' }).click();
+        const table = page.getByTestId('holdings-table');
+        await expect(table.getByText('AMZN', { exact: true })).toBeVisible();
+        await expect(table.getByText('AAPL', { exact: true })).toHaveCount(0);
+        // The reference name, over the name the position was imported with.
+        await expect(table.getByText('Amazon.Com Inc', { exact: true })).toBeVisible();
+    });
+
     test('with holdings: the LEAPS ledger is tagged as sample data', async ({ page }) => {
         test.skip(!(await hasHoldings(page)), 'no holdings in this database');
         const ledger = page.getByTestId('options-risk-ledger');

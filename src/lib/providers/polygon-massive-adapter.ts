@@ -24,6 +24,7 @@ import {
   lastCompletedSession,
   previousTradingDay,
 } from '@/lib/markets/market-hours';
+import type { TickerReference } from '@/lib/markets/security-profile';
 import type {
   Fundamentals,
   MarketDataProvider,
@@ -125,6 +126,9 @@ interface PolygonTickerDetail {
   market_cap?: number;
   primary_exchange?: string;
   type?: string;
+  active?: boolean;
+  currency_name?: string;
+  sic_code?: string;
   sic_description?: string;
   homepage_url?: string;
 }
@@ -453,6 +457,37 @@ export class PolygonMassiveAdapter implements MarketDataProvider {
     }
 
     return this.mapTickerDetailToFundamentals(data.results);
+  }
+
+  /**
+   * One ticker's reference data (name, security type, SIC industry code),
+   * for the securities master (launch item i34): the same endpoint as
+   * fundamentals. Null when Massive doesn't know the ticker (404).
+   */
+  async getTickerReference(symbol: string): Promise<TickerReference | null> {
+    this.assertConfigured();
+    const sym = validateSymbol(symbol).toUpperCase();
+    const url = `${this.baseUrl}/v3/reference/tickers/${encodeURIComponent(sym)}?apiKey=${this.apiKey}`;
+    let data: PolygonTickerDetailResponse;
+    try {
+      data = await this.fetchWithRetry<PolygonTickerDetailResponse>(url);
+    } catch (error) {
+      if (error instanceof PolygonApiError && error.status === 404) return null;
+      throw error;
+    }
+    const d = data.results;
+    if (!d) return null;
+    const text = (value: unknown) => (typeof value === 'string' && value.trim() ? value.trim() : null);
+    return {
+      symbol: sym,
+      name: text(d.name),
+      type: text(d.type),
+      primaryExchange: text(d.primary_exchange),
+      active: d.active !== false,
+      currency: text(d.currency_name),
+      sicCode: text(d.sic_code),
+      sicDescription: text(d.sic_description),
+    };
   }
 
   async searchSymbol(query: string): Promise<SymbolResult[]> {

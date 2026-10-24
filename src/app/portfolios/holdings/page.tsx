@@ -9,6 +9,8 @@ import { DataUnavailableNotice } from "@/components/data-display/DataUnavailable
 import { ImportHoldingsDialog, type ImportAccountOption } from "@/components/holdings/ImportHoldingsDialog";
 import HoldingsLoading from "./loading";
 import { DEFAULT_OPTION_RISK_POSITIONS } from "@/lib/risk-policy";
+import { getSecurityProfiles } from "@/lib/markets/price-store";
+import { holdingName, loadSecurityProfiles } from "@/lib/markets/security-profile";
 
 /**
  * Phase 4 (AR-74) Holdings page.
@@ -65,7 +67,11 @@ async function HoldingsContent() {
 
     // Warm the quote cache so the initial paint has correct prices; without
     // market data the stored prices stand.
-    const liveQuotes = await loadQuotes(dbHoldings.map((h) => h.symbol));
+    const [liveQuotes, profiles] = await Promise.all([
+        loadQuotes(dbHoldings.map((h) => h.symbol)),
+        // Names and sectors from the securities master (launch item i34).
+        loadSecurityProfiles(dbHoldings.map((h) => h.symbol), getSecurityProfiles),
+    ]);
 
     // Server component: holding age is intentionally request-time derived.
     // eslint-disable-next-line react-hooks/purity
@@ -82,10 +88,13 @@ async function HoldingsContent() {
             0,
             Math.round((now - new Date(h.createdAt).getTime()) / (1000 * 60 * 60 * 24)),
         );
+        const profile = profiles.get(h.symbol.toUpperCase());
         return {
             id: h.id,
             symbol: h.symbol,
-            name: h.name,
+            name: holdingName(h.symbol, h.name, profile),
+            // Without reference data yet, the client falls back to sectorFor().
+            ...(profile?.sector ? { sector: profile.sector } : {}),
             quantity: qty,
             avgCost: avg,
             currentPrice: last,
