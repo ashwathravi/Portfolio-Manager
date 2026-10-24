@@ -1,12 +1,14 @@
 "use client";
 
-import { monthAxisLabels } from "@/lib/charts";
+import { dateAxisLabels } from "@/lib/charts";
 import { useMemo, useState } from "react";
 import { AreaChart, type AreaChartRange } from "@/components/charts";
 import {
     computePeriodMetrics,
     computeRiskSnapshot,
-    type MonthlyValuation,
+    measuresRisk,
+    sliceForPeriod,
+    type DatedValue,
     type PeriodKey,
 } from "@/lib/performance/periodSummary";
 
@@ -14,13 +16,14 @@ import {
  * Phase 4 (AR-75) Equity curve card.
  *
  * Renders the hero chart for the Performance page:
- *   - Time-range segmented control (1M / 3M / 6M / YTD / 1Y / 3Y / ALL)
- *   - Benchmark dropdown (S&P 500, NDX, Russell 2000, Custom)
+ *   - Time-range segmented control (1M / 3M / 6M / YTD / 1Y / 3Y / ALL);
+ *     a range the history doesn't reach back to is disabled
+ *   - Benchmark dropdown (the benchmarks passed in; none hides it)
  *   - Portfolio + benchmark lines normalized to 100 at period start so the
  *     comparison stays meaningful across benchmarks with different scales.
- *   - Six readouts along the bottom: TWR, Bench, Alpha, Sharpe, Sortino,
- *     Max DD. All numbers come from `computePeriodMetrics` + `computeRiskSnapshot`
- *     so the chart and cells are internally consistent.
+ *   - Readouts: TWR, benchmark and alpha in the hero; Sharpe, Sortino and
+ *     Max DD along the bottom. All numbers come from `computePeriodMetrics`
+ *     + `computeRiskSnapshot`, so the chart and cells are internally consistent.
  */
 
 export type EquityRange = Extract<
@@ -31,69 +34,69 @@ export type EquityRange = Extract<
 export interface Benchmark {
     key: string;
     label: string;
-    series: MonthlyValuation[];
+    /** Values on the portfolio's dates. */
+    series: DatedValue[];
 }
 
 export interface EquityCurveCardProps {
-    portfolio: MonthlyValuation[];
+    portfolio: DatedValue[];
     benchmarks: Benchmark[];
+    /** Observations per year: 12 for month ends, 252 for daily closes. */
+    periodsPerYear: number;
 }
 
 const RANGES: readonly EquityRange[] = ["1M", "3M", "6M", "YTD", "1Y", "3Y", "ALL"];
-const EMPTY_BENCHMARK_SERIES: MonthlyValuation[] = [];
+const EMPTY_BENCHMARK_SERIES: DatedValue[] = [];
 
-// Our synthetic monthly series covers ~15 months. 3Y collapses to ALL for now.
-const PERIOD_FOR_RANGE: Record<EquityRange, PeriodKey> = {
-    "1M": "1M",
-    "3M": "3M",
-    "6M": "6M",
-    "YTD": "YTD",
-    "1Y": "1Y",
-    "3Y": "ALL",
-    "ALL": "ALL",
-};
-
-export function EquityCurveCard({ portfolio, benchmarks }: EquityCurveCardProps) {
-    const [range, setRange] = useState<EquityRange>("1Y");
+export function EquityCurveCard({ portfolio, benchmarks, periodsPerYear }: EquityCurveCardProps) {
+    const sorted = useMemo(
+        () => [...portfolio].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0)),
+        [portfolio],
+    );
+    const covered = useMemo(
+        () => new Set(RANGES.filter((r) => sliceForPeriod(sorted, r as PeriodKey).covered)),
+        [sorted],
+    );
+    const [range, setRange] = useState<EquityRange>(() => (covered.has("1Y") ? "1Y" : "ALL"));
     const [benchKey, setBenchKey] = useState(benchmarks[0]?.key ?? "");
 
     const activeBench =
         benchmarks.find((b) => b.key === benchKey) ?? benchmarks[0] ?? null;
     const benchSeries = activeBench?.series ?? EMPTY_BENCHMARK_SERIES;
 
-    const periodKey = PERIOD_FOR_RANGE[range];
+    const periodKey: PeriodKey = range;
 
-    // Slice both series for the selected period. We replicate the slice
-    // logic from periodSummary.ts here because the private helper isn't
-    // exported — keeping it local lets us rescale the chart independently.
+    // Slice the portfolio for the selected period, and the benchmark to the
+    // same dates, so the chart rescales independently of the readouts.
     const { slicePortfolio, sliceBench } = useMemo(() => {
-        const wanted = wantedMonthsForPeriod(periodKey, portfolio);
-        const pStart = Math.max(0, portfolio.length - 1 - wanted);
-        const bStart = Math.max(0, benchSeries.length - 1 - wanted);
+        const { points } = sliceForPeriod(sorted, periodKey);
+        const start = points[0]?.date ?? "";
         return {
-            slicePortfolio: portfolio.slice(pStart),
-            sliceBench: benchSeries.slice(bStart),
+            slicePortfolio: points,
+            sliceBench: benchSeries.filter((b) => b.date >= start),
         };
-    }, [portfolio, benchSeries, periodKey]);
+    }, [sorted, benchSeries, periodKey]);
 
     // TWR / bench / alpha / sharpe / max DD for the period come from the
     // calculation engine. Sortino comes from the risk snapshot over the same
     // slice so it's consistent with the visible chart.
     const readouts = useMemo(() => {
-        const [metric] = computePeriodMetrics(portfolio, benchSeries, [periodKey]);
-        const risk = computeRiskSnapshot(slicePortfolio, sliceBench);
+        const [metric] = computePeriodMetrics(sorted, benchSeries, [periodKey], { periodsPerYear });
+        const risk = computeRiskSnapshot(slicePortfolio, sliceBench, { periodsPerYear });
         return {
             twr: metric?.return ?? 0,
-            bench: metric?.benchmark ?? 0,
-            alpha: metric?.alpha ?? 0,
-            sharpe: metric?.sharpe ?? 0,
-            sortino: risk.sortinoRatio,
+            bench: metric?.benchmark ?? null,
+            alpha: metric?.alpha ?? null,
+            start: metric?.start ?? null,
+            sharpe: metric?.sharpe ?? null,
+            sortino: measuresRisk(slicePortfolio) ? risk.sortinoRatio : null,
             maxDd: metric?.maxDrawdown ?? 0,
         };
-    }, [portfolio, benchSeries, slicePortfolio, sliceBench, periodKey]);
+    }, [sorted, benchSeries, slicePortfolio, sliceBench, periodKey, periodsPerYear]);
 
     const portfolioNormalized = normalizeTo100(slicePortfolio.map((p) => p.value));
     const benchNormalized = normalizeTo100(sliceBench.map((p) => p.value));
+    const windowLabel = range === "ALL" && readouts.start ? `since ${fmtDate(readouts.start)}` : range;
 
     return (
         <section className="pm-card pm-card-stack pm-perf-equity-card">
@@ -105,7 +108,10 @@ export function EquityCurveCard({ portfolio, benchmarks }: EquityCurveCardProps)
                             {fmtPct(readouts.twr)}
                         </span>
                         <span className="pm-perf-hero-sub">
-                            time-weighted, {range} · {activeBench?.label ?? "benchmark"} {fmtPct(readouts.bench)} · alpha {fmtPct(readouts.alpha)}
+                            time-weighted, {windowLabel}
+                            {activeBench && readouts.bench !== null && readouts.alpha !== null
+                                ? ` · ${activeBench.label} ${fmtPct(readouts.bench)} · alpha ${fmtPct(readouts.alpha)}`
+                                : ""}
                         </span>
                     </p>
                 </div>
@@ -122,43 +128,47 @@ export function EquityCurveCard({ portfolio, benchmarks }: EquityCurveCardProps)
                                 role="radio"
                                 aria-checked={range === r}
                                 className="pm-seg-pill-btn"
+                                disabled={!covered.has(r) && r !== "ALL"}
+                                title={!covered.has(r) && r !== "ALL" ? `Less than ${r} of history` : undefined}
                                 onClick={() => setRange(r)}
                             >
                                 {r}
                             </button>
                         ))}
                     </div>
-                    <label className="pm-perf-bench-select">
-                        <span className="pm-perf-bench-label">Benchmark</span>
-                        <select
-                            className="pm-sort-select"
-                            value={benchKey}
-                            onChange={(e) => setBenchKey(e.target.value)}
-                        >
-                            {benchmarks.map((b) => (
-                                <option key={b.key} value={b.key}>
-                                    {b.label}
-                                </option>
-                            ))}
-                        </select>
-                    </label>
+                    {benchmarks.length > 0 && (
+                        <label className="pm-perf-bench-select">
+                            <span className="pm-perf-bench-label">Benchmark</span>
+                            <select
+                                className="pm-sort-select"
+                                value={activeBench?.key ?? ""}
+                                onChange={(e) => setBenchKey(e.target.value)}
+                            >
+                                {benchmarks.map((b) => (
+                                    <option key={b.key} value={b.key}>
+                                        {b.label}
+                                    </option>
+                                ))}
+                            </select>
+                        </label>
+                    )}
                 </div>
             </header>
 
             <AreaChart
                 data={portfolioNormalized}
-                benchmark={benchNormalized}
+                benchmark={benchNormalized.length === portfolioNormalized.length ? benchNormalized : undefined}
                 range={range}
-                xLabels={monthAxisLabels(slicePortfolio)}
+                xLabels={dateAxisLabels(slicePortfolio)}
                 height={260}
-                ariaLabel={`Equity curve vs ${activeBench?.label ?? "benchmark"} over ${range}`}
+                ariaLabel={`Equity curve${activeBench ? ` vs ${activeBench.label}` : ""} over ${windowLabel}`}
             />
 
             {/* TWR, benchmark, and alpha lead the card above; the strip keeps
                 the risk figures. */}
             <div className="pm-perf-readouts">
-                <Readout label="Sharpe" value={fmtRatio(readouts.sharpe)} />
-                <Readout label="Sortino" value={fmtRatio(readouts.sortino)} />
+                <Readout label="Sharpe" value={readouts.sharpe === null ? "—" : fmtRatio(readouts.sharpe)} />
+                <Readout label="Sortino" value={readouts.sortino === null ? "—" : fmtRatio(readouts.sortino)} />
                 <Readout label="Max DD" value={fmtPct(readouts.maxDd)} tone="neg" />
             </div>
         </section>
@@ -209,31 +219,18 @@ function fmtRatio(x: number): string {
     return x.toFixed(2);
 }
 
+/** "Aug 31, 2026" for a YYYY-MM-DD date, the same on server and client. */
+function fmtDate(date: string): string {
+    return new Date(`${date}T12:00:00Z`).toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+        timeZone: "UTC",
+    });
+}
+
 function signTone(x: number): "pos" | "neg" | undefined {
     if (x > 0) return "pos";
     if (x < 0) return "neg";
     return undefined;
-}
-
-function wantedMonthsForPeriod(
-    p: PeriodKey,
-    series: readonly MonthlyValuation[],
-): number {
-    if (series.length === 0) return 0;
-    const last = series[series.length - 1];
-    switch (p) {
-        case "1M":
-            return 1;
-        case "3M":
-            return 3;
-        case "6M":
-            return 6;
-        case "1Y":
-            return 12;
-        case "YTD":
-            return last.month + 1;
-        case "ALL":
-        default:
-            return series.length - 1;
-    }
 }

@@ -82,18 +82,25 @@ export function calculateSparklinePoints(data: number[], width: number = 80, hei
 const SHORT_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 /**
- * Evenly spaced x-axis labels taken from the series' own months (e.g.
- * "Oct 25", "Jan 26" …) so the axis always matches the data — fixed
- * "Jan … Dec" slots mislabel any window that isn't a calendar year.
+ * Evenly spaced x-axis labels taken from the series' own dates so the axis
+ * always matches the data — fixed "Jan … Dec" slots mislabel any window
+ * that isn't a calendar year. Month and year ("Oct 25", "Jan 26" …) over
+ * four months or more; month and day ("Oct 6") for shorter windows.
  */
-export function monthAxisLabels(points: readonly { year: number; month: number }[], count = 5): string[] {
+export function dateAxisLabels(points: readonly { date: string }[], count = 5): string[] {
     if (points.length === 0) return [];
     const n = Math.min(count, points.length);
-    if (n === 1) return [`${SHORT_MONTHS[points[0].month]} ${String(points[0].year).slice(2)}`];
+    const first = Date.parse(`${points[0].date}T00:00:00Z`);
+    const last = Date.parse(`${points[points.length - 1].date}T00:00:00Z`);
+    const short = last - first < 120 * 86_400_000;
+    const label = (date: string) => {
+        const [year, month, day] = date.split('-').map(Number);
+        return short ? `${SHORT_MONTHS[month - 1]} ${day}` : `${SHORT_MONTHS[month - 1]} ${String(year).slice(2)}`;
+    };
+    if (n === 1) return [label(points[0].date)];
     const out: string[] = [];
     for (let i = 0; i < n; i++) {
-        const p = points[Math.round((i * (points.length - 1)) / (n - 1))];
-        out.push(`${SHORT_MONTHS[p.month]} ${String(p.year).slice(2)}`);
+        out.push(label(points[Math.round((i * (points.length - 1)) / (n - 1))].date));
     }
     return out;
 }

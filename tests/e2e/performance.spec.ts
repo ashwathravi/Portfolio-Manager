@@ -1,6 +1,8 @@
 import { readFile } from 'node:fs/promises';
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
+import { gotoAppPage } from './helpers/app';
 import { userKey } from './helpers/storage';
+import { signInAsFreshUser } from './helpers/users';
 
 /**
  * Performance tests.
@@ -16,10 +18,20 @@ import { userKey } from './helpers/storage';
  *
  * The only page title is the Topbar h1 ("Performance"); the duplicated
  * in-body "Performance analytics" header was removed in the design review.
+ *
+ * Returns shows the user's own history once their accounts have nightly
+ * valuations (fixture user A, see scripts/e2e/fixtures.sql), and the
+ * labelled example series before that.
  */
 
+const dbMode = Boolean(process.env.CI || process.env.E2E_DATABASE_AUTH === '1');
+
 test.describe('Performance › Returns', () => {
-    test.beforeEach(async ({ page }) => {
+    // A fresh copy of fixture user A has A's accounts but none of its
+    // history, so it sees the example series. Without database sessions
+    // nobody has history.
+    test.beforeEach(async ({ context, page }) => {
+        await signInAsFreshUser(context);
         await page.goto('/performance');
     });
 
@@ -46,6 +58,7 @@ test.describe('Performance › Returns', () => {
 
     test('labels its example data', async ({ page }) => {
         await expect(page.getByTestId('sample-data-notice')).toBeVisible();
+        await expect(page.getByTestId('return-history-note')).toHaveCount(0);
     });
 
     test('Export CSV is enabled and downloads monthly returns', async ({ page }) => {
@@ -75,6 +88,126 @@ test.describe('Performance › Returns', () => {
 
         await page.clock.setSystemTime(Date.UTC(loadedAt.getUTCFullYear(), loadedAt.getUTCMonth() + 1, 1, 0, 1));
         expect(await exportedLastMonth()).toBe(expected);
+    });
+});
+
+const MAIN = '00000000-0000-4000-8000-000000000001';
+const GROWTH = '00000000-0000-4000-8000-000000000002';
+const DIVIDEND = '00000000-0000-4000-8000-000000000003';
+
+test.describe('Performance › Returns from your history', () => {
+    test.skip(!dbMode, 'requires the database-auth E2E mode');
+
+    const hero = (page: Page) => page.getByTestId('performance-hero');
+    const accountSelect = (page: Page) => page.getByRole('combobox', { name: 'Account', exact: true });
+
+    test('shows all accounts\' time-weighted return against the S&P 500, not example data', async ({ page }) => {
+        await gotoAppPage(page, '/performance');
+        await expect(page.getByTestId('sample-data-notice')).toHaveCount(0);
+        await expect(hero(page)).toContainText('+9.31%');
+        await expect(hero(page)).toContainText('time-weighted, since Aug 31, 2026 · S&P 500 +3.02% · alpha +6.29%');
+        await expect(page.getByTestId('return-history-note')).toContainText(
+            'All accounts: 3 closing valuations, Aug 31, 2026 to Oct 1, 2026.',
+        );
+        for (const title of [/^Equity curve$/i, /^Metrics by period$/i, /^Monthly return heatmap$/i]) {
+            await expect(page.locator('h2.pm-card-title', { hasText: title })).toBeVisible();
+        }
+    });
+
+    test('offers the benchmarks with a close on every date, and switches between them', async ({ page }) => {
+        await gotoAppPage(page, '/performance');
+        const benchmark = page.getByLabel('Benchmark');
+        await expect(benchmark.locator('option')).toHaveText(['S&P 500', 'NASDAQ-100']);
+        await benchmark.selectOption({ label: 'NASDAQ-100' });
+        await expect(hero(page)).toContainText('NASDAQ-100 +5.00% · alpha +4.31%');
+    });
+
+    test('ranges the history doesn\'t reach back to are disabled, and periods show dashes', async ({ page }) => {
+        await gotoAppPage(page, '/performance');
+        const ranges = page.getByRole('radiogroup', { name: 'Time range' });
+        await expect(ranges.getByRole('radio', { name: 'ALL' })).toHaveAttribute('aria-checked', 'true');
+        await expect(ranges.getByRole('radio', { name: '1M' })).toBeEnabled();
+        for (const range of ['3M', '6M', 'YTD', '1Y', '3Y']) {
+            await expect(ranges.getByRole('radio', { name: range })).toBeDisabled();
+        }
+        const table = page.locator('section', { has: page.locator('h2', { hasText: 'Metrics by period' }) });
+        const oneMonth = table.locator('tr', { has: page.locator('td', { hasText: /^1M$/ }) }).locator('td');
+        await expect(oneMonth.nth(1)).toHaveText('+9.31%');
+        // Two returns are too few for volatility and Sharpe to mean anything.
+        await expect(oneMonth.nth(4)).toHaveText('—');
+        await expect(oneMonth.nth(5)).toHaveText('—');
+        await expect(table.locator('tr', { has: page.locator('td', { hasText: /^3M$/ }) }).locator('td').nth(1)).toHaveText('—');
+    });
+
+    test('the heatmap shows each month\'s return, starring a month so far', async ({ page }) => {
+        await gotoAppPage(page, '/performance');
+        await expect(page.locator('.pm-heatmap td[title^="Sep 2026:"]')).toHaveText('+4.1');
+        // October so far (to Oct 1) is starred and explained.
+        await expect(page.locator('.pm-heatmap td[title^="Oct 2026 (to Oct 1):"]')).toHaveText('+5.0*');
+        await expect(page.getByTestId('heatmap-partial-note')).toBeVisible();
+        await expect(page.locator('.pm-heatmap td[title^="Aug 2026:"]')).toHaveText('');
+    });
+
+    test('switches to one account through the URL', async ({ page }) => {
+        await gotoAppPage(page, '/performance');
+        await expect(accountSelect(page).locator('option')).toHaveText([
+            'All accounts', 'Dividend Income', 'Growth Portfolio', 'Main Portfolio',
+        ]);
+        await accountSelect(page).selectOption({ label: 'Main Portfolio' });
+        await expect(page).toHaveURL(new RegExp(`/performance\\?account=${MAIN}$`));
+        await expect(hero(page)).toContainText('+8.57%');
+        await expect(page.getByTestId('return-history-note')).toContainText('Main Portfolio: 3 closing valuations');
+        await expect(accountSelect(page)).toHaveValue(MAIN);
+    });
+
+    test('regression: moving money between your own accounts isn\'t a return', async ({ page }) => {
+        // Main moved 500 of cash to Growth on Oct 1: Main's value fell and
+        // Growth's rose by it, but neither return moved with the money.
+        await gotoAppPage(page, `/performance?account=${MAIN}`);
+        await expect(hero(page)).toContainText('+8.57%');
+        await gotoAppPage(page, `/performance?account=${GROWTH}`);
+        await expect(hero(page)).toContainText('+10.00%');
+    });
+
+    test('an account without history says so', async ({ page }) => {
+        await gotoAppPage(page, `/performance?account=${DIVIDEND}`);
+        await expect(page.getByTestId('return-history-empty')).toContainText('No history for this account yet');
+        await expect(page.getByTestId('sample-data-notice')).toHaveCount(0);
+        await expect(accountSelect(page)).toHaveValue(DIVIDEND);
+    });
+
+    test('Export CSV downloads the daily history shown', async ({ page }) => {
+        await gotoAppPage(page, `/performance?account=${MAIN}`);
+        const [download] = await Promise.all([
+            page.waitForEvent('download'),
+            page.getByRole('button', { name: 'Export CSV' }).click(),
+        ]);
+        expect(download.suggestedFilename()).toBe('atlas-daily-returns.csv');
+        const csv = (await readFile(await download.path(), 'utf8')).trim().split('\n');
+        expect(csv).toEqual([
+            'date,account,account_value,return_pct,cumulative_return_pct,benchmark,benchmark_close,benchmark_cumulative_return_pct',
+            '2026-08-31,Main Portfolio,7000,,0,S&P 500 (SPY),500,0',
+            '2026-09-30,Main Portfolio,7600,8.5714,8.57,S&P 500 (SPY),510,2',
+            '2026-10-01,Main Portfolio,7100,0,8.57,S&P 500 (SPY),515.1,3.02',
+        ]);
+    });
+
+    test('another user sees none of it, even by account ID', async ({ context, page }) => {
+        await context.clearCookies();
+        await context.addCookies([{
+            name: 'authjs.session-token',
+            value: 'e2e-session-user-b',
+            domain: 'localhost',
+            path: '/',
+            httpOnly: true,
+            secure: false,
+            sameSite: 'Lax',
+        }]);
+        await gotoAppPage(page, `/performance?account=${MAIN}`);
+        await expect(page.getByTestId('sample-data-notice')).toBeVisible();
+        await expect(page.getByTestId('return-history-note')).toHaveCount(0);
+        await expect(accountSelect(page)).toHaveCount(0);
+        await expect(hero(page)).not.toContainText('+8.57%');
     });
 });
 

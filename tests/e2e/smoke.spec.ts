@@ -165,8 +165,11 @@ test.describe('Market data without a provider key', () => {
         const batch = await page.request.get('/api/market-data/quotes?symbols=AAPL,SPY');
         const single = await page.request.get('/api/market-data/quote?symbol=AAPL');
         if (dbMode) {
+            // SPY has stored closes in the fixtures (return history); AAPL has none.
             expect(batch.status()).toBe(200);
-            expect(await batch.json()).toEqual({ data: [] });
+            const { data } = await batch.json();
+            expect(data.map((quote: { symbol: string }) => quote.symbol)).toEqual(['SPY']);
+            expect(data[0].price).toBe(515.1);
             expect(single.status()).toBe(404);
             expect(await single.json()).toEqual({ error: 'No price for AAPL yet.', code: 'QUOTE_UNAVAILABLE' });
         } else {

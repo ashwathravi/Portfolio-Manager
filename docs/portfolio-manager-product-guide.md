@@ -241,6 +241,8 @@ Risk Policy Engine uses trade history to detect churn, reopened positions, short
 
 Open **Performance** for returns and behavior context.
 
+**Returns** measures your own history once your accounts have nightly valuations: the first is recorded at the market close after you add holdings, and returns start from the next one. Pick **All accounts** or one account at the top (the choice is in the page address, so it can be bookmarked). The return is time-weighted: money you add, withdraw or move between your accounts doesn't count as a gain or a loss. It's a price return, like the S&P 500, NASDAQ-100, Russell 2000 and Dow ETFs it's compared with, so dividends aren't included, and a trade's gain on the day you make it counts from the next close. Ranges and periods longer than your history are disabled or shown as dashes, and volatility and Sharpe wait for at least three returns over four weeks. **Export CSV** downloads each day's value and return beside the benchmark. Until there is any history, Returns shows labelled example data (or an empty state with example data turned off).
+
 Use it to:
 
 - Review equity curve.
