@@ -12,18 +12,30 @@
  * changed gets no snapshot; nothing records what it held then.
  *
  * A holding without a close at most STALE_CLOSE_DAYS old is left out of the
- * value and listed as `unpriced`; such a partial snapshot is recomputed on
- * later runs (a new symbol's history usually arrives a night later). Values
- * are in dollars, so price-store split adjustments don't change them.
+ * value and listed as `unpriced`. One valued at an earlier day's close (the
+ * session's own is missing) is provisional. Either way the snapshot isn't
+ * complete and is recomputed on later runs, so a close that arrives late
+ * (a new symbol's history, a recovered bar) replaces the stand-in.
  *
- * Writes to a portfolio or its holdings must bump updated_at for this rule
- * to hold (importHoldings does).
+ * Stored closes are split-adjusted, so a holding must be on the same share
+ * scale: snapshots wait until the latest price run has reconciled held
+ * positions with splits through the newest stored close (`holdingSplits` in
+ * its job_runs detail). A portfolio still holding a position from before a
+ * split that couldn't be applied (`unadjusted`) is skipped until it is
+ * re-imported. Values are in dollars, so adjusted pairs of quantity and
+ * close value the same.
+ *
+ * The state is read in one repeatable-read transaction, so an import that
+ * commits mid-run is either entirely seen or entirely not. Writes to a
+ * portfolio or its holdings must bump updated_at for the last-change rule to
+ * hold (importHoldings does).
  */
 
-import { and, asc, eq, gte, inArray, lte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, lte, sql } from "drizzle-orm";
 
 import { db } from "@/db";
-import { holdings, portfolios, portfolioSnapshotPositions, portfolioSnapshots, priceBars } from "@/db/schema";
+import { holdings, jobRuns, portfolios, portfolioSnapshotPositions, portfolioSnapshots, priceBars } from "@/db/schema";
+import { splitTakesEffectAt } from "@/lib/portfolio/split-adjustments";
 import { previousTradingDay } from "@/lib/markets/market-hours";
 import { getLatestBarDate } from "@/lib/markets/price-store";
 import { sessionCloseTime } from "@/lib/markets/stored-quote-provider";
@@ -40,6 +52,8 @@ export interface PositionInput {
     symbol: string;
     quantity: number;
     avgCost: number;
+    /** When the holding last changed (split readiness compares it with split dates). */
+    updatedAt?: Date;
 }
 
 export interface StoredClose {
@@ -184,7 +198,7 @@ export function valueSnapshot(
  * changed. Deliberately not user-scoped: the nightly job values every
  * portfolio and returns nothing to a user.
  */
-export function buildPortfolioStatesQuery(database: Database = db) {
+export function buildPortfolioStatesQuery(database: Pick<Database, "select"> = db) {
     return database
         .select({
             portfolioId: portfolios.id,
@@ -198,11 +212,17 @@ export function buildPortfolioStatesQuery(database: Database = db) {
         .groupBy(portfolios.id);
 }
 
-export function buildPositionsQuery(portfolioIds: string[], database: Database = db) {
+/** Every holding (the job values all portfolios). */
+export function buildPositionsQuery(database: Pick<Database, "select"> = db) {
     return database
-        .select({ portfolioId: holdings.portfolioId, symbol: holdings.symbol, quantity: holdings.quantity, avgCost: holdings.avgCost })
-        .from(holdings)
-        .where(inArray(holdings.portfolioId, portfolioIds));
+        .select({
+            portfolioId: holdings.portfolioId,
+            symbol: holdings.symbol,
+            quantity: holdings.quantity,
+            avgCost: holdings.avgCost,
+            updatedAt: holdings.updatedAt,
+        })
+        .from(holdings);
 }
 
 export function buildClosesBetweenQuery(symbols: string[], from: string, to: string, database: Database = db) {
@@ -213,7 +233,11 @@ export function buildClosesBetweenQuery(symbols: string[], from: string, to: str
         .orderBy(asc(priceBars.symbol), asc(priceBars.date));
 }
 
-/** Sessions from `from` on that already have a complete (fully priced) snapshot. */
+/**
+ * Sessions from `from` on that already have a complete snapshot: every
+ * position priced, at that session's own close. One valued at an earlier
+ * close is provisional and is recomputed.
+ */
 export function buildCompleteDaysQuery(portfolioIds: string[], from: string, database: Database = db) {
     return database
         .select({ portfolioId: portfolioSnapshots.portfolioId, date: portfolioSnapshots.date })
@@ -222,7 +246,18 @@ export function buildCompleteDaysQuery(portfolioIds: string[], from: string, dat
             inArray(portfolioSnapshots.portfolioId, portfolioIds),
             gte(portfolioSnapshots.date, from),
             sql`cardinality(${portfolioSnapshots.unpriced}) = 0`,
+            sql`not exists (select 1 from ${portfolioSnapshotPositions} where ${portfolioSnapshotPositions.portfolioId} = ${portfolioSnapshots.portfolioId} and ${portfolioSnapshotPositions.date} = ${portfolioSnapshots.date} and ${portfolioSnapshotPositions.closeDate} is distinct from ${portfolioSnapshots.date})`,
         ));
+}
+
+/** The newest successful price run that checked held positions against splits. */
+export function buildLatestHoldingSplitsQuery(database: Database = db) {
+    return database
+        .select({ holdingSplits: sql<unknown>`${jobRuns.detail} -> 'holdingSplits'` })
+        .from(jobRuns)
+        .where(and(eq(jobRuns.job, "prices"), eq(jobRuns.status, "succeeded"), sql`${jobRuns.detail} ? 'holdingSplits'`))
+        .orderBy(desc(jobRuns.startedAt))
+        .limit(1);
 }
 
 export function buildUpsertSnapshotsQuery(portfolioId: string, snapshots: readonly SnapshotValue[], database: Pick<Database, "insert"> = db) {
@@ -325,11 +360,63 @@ export async function listUserSnapshots(
 // The nightly job
 // ---------------------------------------------------------------------------
 
+/**
+ * Whether held positions are on the same split scale as the stored closes
+ * through `latest`, from the latest price run's `holdingSplits` detail
+ * (price-ingest.ts). Ready when that check succeeded through `latest`, or
+ * had nothing to check; its `unadjusted` splits come back so the portfolios
+ * still holding a position from before one can wait.
+ */
+export type SplitReadiness =
+    | { ready: true; unadjusted: Array<{ symbol: string; executionDate: string | null }> }
+    | { ready: false; reason: string };
+
+export function splitReadiness(holdingSplits: unknown, latest: string): SplitReadiness {
+    if (!holdingSplits || typeof holdingSplits !== "object") {
+        return { ready: false, reason: "held positions haven't been checked against splits yet" };
+    }
+    const check = holdingSplits as { to?: unknown; skipped?: unknown; unadjusted?: unknown };
+    if (typeof check.skipped === "string") {
+        return check.skipped === "nothing held" || check.skipped === "up to date"
+            ? { ready: true, unadjusted: [] }
+            : { ready: false, reason: `the holdings split check didn't run: ${check.skipped}` };
+    }
+    if (typeof check.to !== "string" || check.to < latest) {
+        return { ready: false, reason: "held positions haven't been checked against splits through the latest close" };
+    }
+    const unadjusted = Array.isArray(check.unadjusted)
+        ? check.unadjusted.flatMap((entry: unknown) => {
+            // An entry without a date (an older run's format) holds back every position in the stock.
+            if (typeof entry === "string") return [{ symbol: entry.toUpperCase(), executionDate: null }];
+            const split = entry as { symbol?: unknown; executionDate?: unknown } | null;
+            return split && typeof split.symbol === "string"
+                ? [{ symbol: split.symbol.toUpperCase(), executionDate: typeof split.executionDate === "string" ? split.executionDate : null }]
+                : [];
+        })
+        : [];
+    return { ready: true, unadjusted };
+}
+
+/** A position still on the old share scale: last updated before a split that couldn't be applied. */
+export function awaitsSplit(
+    position: PositionInput,
+    unadjusted: ReadonlyArray<{ symbol: string; executionDate: string | null }>,
+): boolean {
+    const symbol = position.symbol.trim().toUpperCase();
+    return unadjusted.some((split) =>
+        split.symbol === symbol
+        && (split.executionDate === null
+            || !position.updatedAt
+            || position.updatedAt.getTime() < splitTakesEffectAt(split.executionDate).getTime()));
+}
+
 /** The database calls the job makes; Postgres in production, a fake in tests. */
 export interface SnapshotStore {
     latestCloseDate(): Promise<string | null>;
-    portfolioStates(): Promise<Array<{ portfolioId: string; cash: number; lastChange: Date }>>;
-    positions(portfolioIds: string[]): Promise<Map<string, PositionInput[]>>;
+    /** The latest successful price run's `holdingSplits` detail, or undefined. */
+    latestHoldingSplits(): Promise<unknown>;
+    /** Every portfolio with its cash, last change and positions, read as one consistent snapshot. */
+    portfolios(): Promise<Array<{ portfolioId: string; cash: number; lastChange: Date; positions: PositionInput[] }>>;
     closes(symbols: string[], from: string, to: string): Promise<Map<string, StoredClose[]>>;
     completeDays(portfolioIds: string[], from: string): Promise<Map<string, Set<string>>>;
     write(portfolioId: string, snapshots: readonly SnapshotValue[]): Promise<void>;
@@ -338,23 +425,27 @@ export interface SnapshotStore {
 export function createSnapshotStore(database: Database = db): SnapshotStore {
     return {
         latestCloseDate: () => getLatestBarDate(database),
-        async portfolioStates() {
-            return (await buildPortfolioStatesQuery(database)).map((row) => ({
-                portfolioId: row.portfolioId,
-                cash: row.cash ?? 0,
-                lastChange: row.lastChange,
-            }));
+        async latestHoldingSplits() {
+            const [row] = await buildLatestHoldingSplitsQuery(database);
+            return row?.holdingSplits ?? undefined;
         },
-        async positions(portfolioIds) {
+        // One repeatable-read transaction: an import committing meanwhile is
+        // seen whole (new holdings and the timestamp that guards them) or not at all.
+        portfolios: () => database.transaction(async (tx) => {
+            const states = await buildPortfolioStatesQuery(tx);
             const byPortfolio = new Map<string, PositionInput[]>();
-            if (portfolioIds.length === 0) return byPortfolio;
-            for (const row of await buildPositionsQuery(portfolioIds, database)) {
+            for (const row of await buildPositionsQuery(tx)) {
                 const list = byPortfolio.get(row.portfolioId) ?? [];
-                list.push({ symbol: row.symbol, quantity: Number(row.quantity), avgCost: Number(row.avgCost) });
+                list.push({ symbol: row.symbol, quantity: Number(row.quantity), avgCost: Number(row.avgCost), updatedAt: row.updatedAt });
                 byPortfolio.set(row.portfolioId, list);
             }
-            return byPortfolio;
-        },
+            return states.map((state) => ({
+                portfolioId: state.portfolioId,
+                cash: state.cash ?? 0,
+                lastChange: state.lastChange,
+                positions: byPortfolio.get(state.portfolioId) ?? [],
+            }));
+        }, { isolationLevel: "repeatable read", accessMode: "read only" }),
         async closes(symbols, from, to) {
             const bySymbol = new Map<string, StoredClose[]>();
             if (symbols.length === 0) return bySymbol;
@@ -385,47 +476,60 @@ export type SnapshotJobDetail =
         /** The newest stored close: the latest session a snapshot can be valued at. */
         latest: string;
         portfolios: number;
-        /** Snapshots written (new days, and partial ones recomputed). */
+        /** Snapshots written (new days, and incomplete ones recomputed). */
         written: number;
-        /** Of those, how many still have unpriced holdings. */
+        /** Of those, how many have unpriced holdings. */
         partial: number;
+        /** Of those, how many value a holding at an earlier day's close (recomputed later). */
+        provisional: number;
         /** Portfolios that changed after the latest close: nothing to record until the next session. */
         changedSinceClose: number;
+        /** Portfolios holding a position from before a split that couldn't be applied: re-import them. */
+        waitingForSplits: number;
     };
 
-/** Records every portfolio's missing or partial snapshots; see the module comment. */
+/** Records every portfolio's missing or incomplete snapshots; see the module comment. */
 export async function recordValuationSnapshots({
     store = createSnapshotStore(),
     max = MAX_SNAPSHOT_DAYS,
 }: { store?: SnapshotStore; max?: number } = {}): Promise<SnapshotJobDetail> {
     const latest = await store.latestCloseDate();
     if (!latest) return { skipped: "no closes stored yet" };
-    const states = await store.portfolioStates();
-    if (states.length === 0) return { latest, portfolios: 0, written: 0, partial: 0, changedSinceClose: 0 };
+    // Nothing is written until positions and closes are on the same split
+    // scale; the days are filled in by the first run where they are.
+    const readiness = splitReadiness(await store.latestHoldingSplits(), latest);
+    if (!readiness.ready) return { skipped: readiness.reason };
 
+    const all = await store.portfolios();
+    const empty = { latest, portfolios: all.length, written: 0, partial: 0, provisional: 0, changedSinceClose: 0, waitingForSplits: 0 };
+    if (all.length === 0) return empty;
+
+    const waiting = all.filter((portfolio) => portfolio.positions.some((position) => awaitsSplit(position, readiness.unadjusted)));
+    const ready = all.filter((portfolio) => !waiting.includes(portfolio));
     const from = windowStart(latest, max);
-    const complete = await store.completeDays(states.map((state) => state.portfolioId), from);
-    const plans = states.map((state) => ({
-        ...state,
-        days: snapshotDays({ latest, lastChange: state.lastChange, complete: complete.get(state.portfolioId) ?? new Set(), max }),
+    const complete = await store.completeDays(ready.map((portfolio) => portfolio.portfolioId), from);
+    const plans = ready.map((portfolio) => ({
+        ...portfolio,
+        days: snapshotDays({ latest, lastChange: portfolio.lastChange, complete: complete.get(portfolio.portfolioId) ?? new Set(), max }),
     }));
     const changedSinceClose = plans.filter((plan) => sessionClosedAt(latest).getTime() < plan.lastChange.getTime()).length;
     const due = plans.filter((plan) => plan.days.length > 0);
-    if (due.length === 0) return { latest, portfolios: states.length, written: 0, partial: 0, changedSinceClose };
+    if (due.length === 0) return { ...empty, changedSinceClose, waitingForSplits: waiting.length };
 
-    const positions = await store.positions(due.map((plan) => plan.portfolioId));
-    const symbols = [...new Set([...positions.values()].flat().map((position) => position.symbol.trim().toUpperCase()))].sort();
+    const symbols = [...new Set(due.flatMap((plan) => plan.positions.map((position) => position.symbol.trim().toUpperCase())))].sort();
     const earliest = due.map((plan) => plan.days[0]).sort()[0];
     const closes = await store.closes(symbols, minusCalendarDays(earliest, STALE_CLOSE_DAYS), latest);
 
     let written = 0;
     let partial = 0;
+    let provisional = 0;
     for (const plan of due) {
-        const held = positions.get(plan.portfolioId) ?? [];
-        const snapshots = plan.days.map((day) => valueSnapshot(day, held, closes, plan.cash));
+        const snapshots = plan.days.map((day) => valueSnapshot(day, plan.positions, closes, plan.cash));
         await store.write(plan.portfolioId, snapshots);
         written += snapshots.length;
         partial += snapshots.filter((snapshot) => snapshot.unpriced.length > 0).length;
+        provisional += snapshots.filter((snapshot) =>
+            snapshot.positions.some((position) => position.closeDate !== null && position.closeDate !== snapshot.date)).length;
     }
-    return { latest, portfolios: states.length, written, partial, changedSinceClose };
+    return { latest, portfolios: all.length, written, partial, provisional, changedSinceClose, waitingForSplits: waiting.length };
 }
