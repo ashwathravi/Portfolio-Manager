@@ -2,15 +2,96 @@
  * Creating, changing and deleting the user's accounts (launch item i41).
  * Every query is scoped to the user's ID, which the API routes take from
  * the session: another user's account reads as not found.
+ *
+ * Names are unique per user, ignoring case and surrounding spaces, so the
+ * pages that list accounts by name (the import's account picker, the
+ * Returns switcher) can tell them apart; a user has at most
+ * MAX_ACCOUNTS_PER_USER, since the nightly snapshot job values every one.
+ * Both are checked under a per-user advisory lock held to the end of the
+ * write's transaction, so two requests can't race past them. Creating,
+ * renaming and the CSV import's new account all go through
+ * `checkAccountName`.
  */
 
-import { and, eq, sql } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 
 import { db } from "@/db";
 import { portfolios } from "@/db/schema";
 import type { PortfolioCreateBody, PortfolioUpdateBody } from "@/lib/validators/portfolio";
 
 type Database = typeof db;
+type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
+
+export const MAX_ACCOUNTS_PER_USER = 50;
+
+export class DuplicateAccountNameError extends Error {
+    constructor(readonly accountName: string) {
+        super(`An account named ${accountName} already exists`);
+        this.name = "DuplicateAccountNameError";
+    }
+}
+
+export class AccountLimitError extends Error {
+    constructor() {
+        super(`At most ${MAX_ACCOUNTS_PER_USER} accounts`);
+        this.name = "AccountLimitError";
+    }
+}
+
+/** Account names compare without case or surrounding spaces. */
+export function sameAccountName(a: string, b: string): boolean {
+    return a.trim().toLocaleLowerCase("en-US") === b.trim().toLocaleLowerCase("en-US");
+}
+
+/** Waits for, then holds to the end of the transaction, the lock on one user's account writes. */
+export function buildLockUserAccountsQuery(userId: string, database: Pick<Database, "execute"> = db) {
+    return database.execute(sql`select pg_advisory_xact_lock(hashtext(${`atlas:accounts:${userId}`}))`);
+}
+
+export function buildUserAccountNamesQuery(userId: string, database: Pick<Database, "select"> = db) {
+    return database
+        .select({ id: portfolios.id, name: portfolios.name })
+        .from(portfolios)
+        .where(eq(portfolios.userId, userId))
+        .orderBy(asc(portfolios.name), asc(portfolios.id));
+}
+
+export type AccountNameCheck = "ok" | "not-found" | "duplicate" | "limit";
+
+/**
+ * Whether the user may give `name` to an account: a new one (`accountId`
+ * null), refused past the limit, or one of theirs ("not-found" otherwise).
+ * Keeping an account's own name, in any case, is always fine, so an
+ * account that already shares a name can still be edited; any other
+ * account's name is a duplicate.
+ */
+export function accountNameCheck(
+    accounts: ReadonlyArray<{ id: string; name: string }>,
+    name: string,
+    accountId: string | null,
+): AccountNameCheck {
+    if (accountId === null) {
+        if (accounts.length >= MAX_ACCOUNTS_PER_USER) return "limit";
+    } else {
+        const current = accounts.find((a) => a.id === accountId);
+        if (!current) return "not-found";
+        if (sameAccountName(current.name, name)) return "ok";
+    }
+    return accounts.some((a) => a.id !== accountId && sameAccountName(a.name, name)) ? "duplicate" : "ok";
+}
+
+/**
+ * Inside `tx`: takes the user's lock, then applies `accountNameCheck`,
+ * throwing for a duplicate name or the limit. False when `accountId` isn't
+ * one of the user's.
+ */
+export async function checkAccountName(tx: Transaction, userId: string, name: string, accountId: string | null): Promise<boolean> {
+    await buildLockUserAccountsQuery(userId, tx);
+    const check = accountNameCheck(await buildUserAccountNamesQuery(userId, tx), name, accountId);
+    if (check === "limit") throw new AccountLimitError();
+    if (check === "duplicate") throw new DuplicateAccountNameError(name);
+    return check === "ok";
+}
 
 export interface ManagedPortfolio {
     id: string;
@@ -30,7 +111,7 @@ function toManaged(row: { id: string; name: string; description: string | null; 
     return { ...row, cashBalance: row.cashBalance ?? 0 };
 }
 
-export function buildCreatePortfolioQuery(userId: string, body: PortfolioCreateBody, database: Database = db) {
+export function buildCreatePortfolioQuery(userId: string, body: PortfolioCreateBody, database: Pick<Database, "insert"> = db) {
     return database
         .insert(portfolios)
         .values({
@@ -44,8 +125,11 @@ export function buildCreatePortfolioQuery(userId: string, body: PortfolioCreateB
 }
 
 export async function createPortfolio(userId: string, body: PortfolioCreateBody, database: Database = db): Promise<ManagedPortfolio> {
-    const [row] = await buildCreatePortfolioQuery(userId, body, database);
-    return toManaged(row);
+    return database.transaction(async (tx) => {
+        await checkAccountName(tx, userId, body.name, null);
+        const [row] = await buildCreatePortfolioQuery(userId, body, tx);
+        return toManaged(row);
+    });
 }
 
 /**
@@ -54,7 +138,7 @@ export async function createPortfolio(userId: string, body: PortfolioCreateBody,
  * change of cash moves it; a new name or description, or the same cash
  * again, leaves it where it was.
  */
-export function buildUpdatePortfolioQuery(userId: string, id: string, body: PortfolioUpdateBody, now: Date, database: Database = db) {
+export function buildUpdatePortfolioQuery(userId: string, id: string, body: PortfolioUpdateBody, now: Date, database: Pick<Database, "update"> = db) {
     return database
         .update(portfolios)
         .set({
@@ -78,8 +162,15 @@ export async function updatePortfolio(
     body: PortfolioUpdateBody,
     { now = new Date(), database = db }: { now?: Date; database?: Database } = {},
 ): Promise<ManagedPortfolio | null> {
-    const [row] = await buildUpdatePortfolioQuery(userId, id, body, now, database);
-    return row ? toManaged(row) : null;
+    if (body.name === undefined) {
+        const [row] = await buildUpdatePortfolioQuery(userId, id, body, now, database);
+        return row ? toManaged(row) : null;
+    }
+    return database.transaction(async (tx) => {
+        if (!(await checkAccountName(tx, userId, body.name!, id))) return null;
+        const [row] = await buildUpdatePortfolioQuery(userId, id, body, now, tx);
+        return row ? toManaged(row) : null;
+    });
 }
 
 export function buildDeletePortfolioQuery(userId: string, id: string, database: Database = db) {

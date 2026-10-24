@@ -7,7 +7,8 @@
  *
  * PATCH body: { name?, description?, cashBalance? } (at least one)
  * Responses:  PATCH 200 { data: { id, name, description, cashBalance } }; DELETE 204;
- *             400 INVALID_PORTFOLIO; 404 PORTFOLIO_NOT_FOUND
+ *             400 INVALID_PORTFOLIO; 404 PORTFOLIO_NOT_FOUND;
+ *             409 DUPLICATE_ACCOUNT_NAME (a rename to another account's name, ignoring case)
  */
 
 import { NextResponse } from 'next/server';
@@ -16,7 +17,7 @@ import { z } from 'zod';
 import { readJsonBody } from '@/lib/api/body';
 import { apiError, internalServerError } from '@/lib/api/security';
 import { requireSessionApiUserScope } from '@/lib/api/session-security';
-import { deletePortfolio, updatePortfolio } from '@/lib/portfolio/manage';
+import { deletePortfolio, DuplicateAccountNameError, updatePortfolio } from '@/lib/portfolio/manage';
 import { portfolioUpdateSchema } from '@/lib/validators/portfolio';
 
 export const dynamic = 'force-dynamic';
@@ -49,6 +50,9 @@ export async function PATCH(request: Request, { params }: Params) {
         const data = await updatePortfolio(auth.context.userId, id, parsed.data);
         return data ? NextResponse.json({ data }) : notFound();
     } catch (err) {
+        if (err instanceof DuplicateAccountNameError) {
+            return apiError(`You already have an account named ${err.accountName}.`, 'DUPLICATE_ACCOUNT_NAME', 409);
+        }
         return internalServerError(err, 'Unable to change the account.', 'PORTFOLIO_UPDATE_FAILED');
     }
 }

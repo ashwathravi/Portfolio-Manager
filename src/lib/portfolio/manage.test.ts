@@ -1,7 +1,18 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
+import type { SQL } from "drizzle-orm";
+import { PgDialect } from "drizzle-orm/pg-core";
 
-import { buildCreatePortfolioQuery, buildDeletePortfolioQuery, buildUpdatePortfolioQuery } from "./manage";
+import {
+    accountNameCheck,
+    buildCreatePortfolioQuery,
+    buildDeletePortfolioQuery,
+    buildLockUserAccountsQuery,
+    buildUpdatePortfolioQuery,
+    buildUserAccountNamesQuery,
+    MAX_ACCOUNTS_PER_USER,
+    sameAccountName,
+} from "./manage";
 
 const USER = "00000000-0000-4000-8000-00000000a001";
 const ID = "0b9d3c1e-6a3c-4c7e-9f3a-2f4d8a1b2c3d";
@@ -50,5 +61,63 @@ describe("account queries", () => {
         const { sql, params } = buildDeletePortfolioQuery(USER, ID).toSQL();
         assert.match(sql, /^delete from "portfolios" where \("portfolios"\."id" = \$1 and "portfolios"\."user_id" = \$2\) returning "id"$/i);
         assert.deepEqual(params, [ID, USER]);
+    });
+});
+
+describe("account names and the account limit", () => {
+    const accounts = [
+        { id: "p-main", name: "Main Portfolio" },
+        { id: "p-ira", name: "Roth IRA" },
+    ];
+
+    test("names compare without case or surrounding spaces", () => {
+        assert.equal(sameAccountName("Brokerage", " brokerage "), true);
+        assert.equal(sameAccountName("Roth IRA", "ROTH IRA"), true);
+        assert.equal(sameAccountName("Roth IRA", "Roth  IRA"), false);
+    });
+
+    test("a new account can't take a name in use, in any case", () => {
+        assert.equal(accountNameCheck(accounts, "Joint", null), "ok");
+        assert.equal(accountNameCheck(accounts, "  roth ira ", null), "duplicate");
+    });
+
+    test("a rename can't take another account's name, but can keep or recase its own", () => {
+        assert.equal(accountNameCheck(accounts, "Roth IRA", "p-main"), "duplicate");
+        assert.equal(accountNameCheck(accounts, "Main Portfolio", "p-main"), "ok");
+        assert.equal(accountNameCheck(accounts, "MAIN portfolio", "p-main"), "ok");
+        assert.equal(accountNameCheck(accounts, "Taxable", "p-main"), "ok");
+    });
+
+    test("regression: an account that already shares a name can still be edited", () => {
+        // Names weren't checked before this, so two accounts may share one;
+        // the edit form sends the name with every change of cash.
+        const twins = [{ id: "a", name: "Brokerage" }, { id: "b", name: "brokerage" }];
+        assert.equal(accountNameCheck(twins, "Brokerage", "a"), "ok");
+        assert.equal(accountNameCheck(twins, "Brokerage", "b"), "ok");
+    });
+
+    test("an account that isn't the user's is not found, whatever the name", () => {
+        assert.equal(accountNameCheck(accounts, "Roth IRA", "someone-elses"), "not-found");
+    });
+
+    test("a new account past the limit is refused; renames don't count", () => {
+        const full = Array.from({ length: MAX_ACCOUNTS_PER_USER }, (_, i) => ({ id: `p${i}`, name: `Account ${i}` }));
+        assert.equal(accountNameCheck(full, "One more", null), "limit");
+        assert.equal(accountNameCheck(full.slice(1), "One more", null), "ok");
+        assert.equal(accountNameCheck(full, "Renamed", "p0"), "ok");
+    });
+
+    test("the lock and the names are the user's own", () => {
+        const names = buildUserAccountNamesQuery(USER).toSQL();
+        assert.match(names.sql, /^select "id", "name" from "portfolios" where "portfolios"\."user_id" = \$1 order by/);
+        assert.deepEqual(names.params, [USER]);
+
+        // The lock is taken on the transaction it's given, keyed by the user.
+        const taken: SQL[] = [];
+        void buildLockUserAccountsQuery(USER, { execute: (query: SQL) => (taken.push(query), Promise.resolve()) } as never);
+        assert.equal(taken.length, 1);
+        const lock = new PgDialect().sqlToQuery(taken[0]);
+        assert.equal(lock.sql, "select pg_advisory_xact_lock(hashtext($1))");
+        assert.deepEqual(lock.params, [`atlas:accounts:${USER}`]);
     });
 });

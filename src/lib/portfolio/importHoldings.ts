@@ -4,6 +4,7 @@ import { db } from '@/db';
 import { holdings, portfolios } from '@/db/schema';
 import type { PortfolioImportBody } from '@/lib/validators/portfolio-import';
 import { planHoldingsImport, summarizePlan } from './csvImport';
+import { checkAccountName } from './manage';
 
 export class ImportAccessError extends Error {
     constructor() {
@@ -24,8 +25,9 @@ export interface ImportResult {
  * Writes a validated CSV import for `userId` in one transaction. The target
  * account must belong to the user (checked inside the transaction, so a
  * foreign id is a 404 with nothing written); a new account is created for
- * them otherwise. Rows for symbols already held replace those positions;
- * other positions are untouched.
+ * them otherwise, under the same name and limit checks as creating one
+ * (`checkAccountName` in manage.ts). Rows for symbols already held replace
+ * those positions; other positions are untouched.
  *
  * `prices` (upper-case symbol → last price, from the price store) gives
  * the rows it covers a stored price, so an imported position shows its
@@ -62,6 +64,7 @@ export async function importHoldings(
             if (!owned) throw new ImportAccessError();
             portfolioId = owned.id;
         } else {
+            await checkAccountName(tx, userId, body.newPortfolioName!, null);
             const [created] = await tx
                 .insert(portfolios)
                 .values({ userId, name: body.newPortfolioName!, description: 'Imported from CSV' })
