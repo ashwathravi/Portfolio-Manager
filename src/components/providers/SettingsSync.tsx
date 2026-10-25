@@ -3,8 +3,9 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { toast } from 'sonner';
 
+import { InitialShowSampleData } from '@/lib/hooks/useShowSampleData';
 import type { ServerSettingsSnapshot } from '@/lib/settings/document';
-import { startSettings, syncSettings, type SettingsSyncHandle, type SyncNotices } from '@/lib/settings/sync';
+import { startSettings, storedShowSampleData, syncSettings, type SettingsSyncHandle, type SyncNotices } from '@/lib/settings/sync';
 
 const NOTICES: SyncNotices = {
     onReplaced: () => toast.info('Your settings were changed in another tab or device. Showing the latest.'),
@@ -20,10 +21,11 @@ const NOTICES: SyncNotices = {
  * It sits above every component that reads settings, the ThemeProvider
  * included, and fills the store during its first render, before they read.
  * One sync runs for the life of the page; a re-rendered layout
- * (router.refresh()) hands it the newer server snapshot.
+ * (router.refresh()) hands it the newer server snapshot. It also tells
+ * example-data cards the stored setting to render with before mount.
  */
 export function SettingsSync({ server, children }: { server: ServerSettingsSnapshot; children: ReactNode }) {
-    const [start] = useState(() => ({ server, plan: startSettings(server) }));
+    const [start] = useState(() => ({ server, plan: startSettings(server), showSampleData: storedShowSampleData(server) }));
     const sync = useRef<SettingsSyncHandle | null>(null);
 
     useEffect(() => {
@@ -39,5 +41,5 @@ export function SettingsSync({ server, children }: { server: ServerSettingsSnaps
         if (server !== start.server) sync.current?.rebase(server);
     }, [server, start]);
 
-    return children;
+    return <InitialShowSampleData.Provider value={start.showSampleData}>{children}</InitialShowSampleData.Provider>;
 }

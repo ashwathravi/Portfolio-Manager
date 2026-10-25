@@ -15,6 +15,7 @@ import {
     persistedSlicesChanged,
     planSettingsStart,
     readBrowserCopy,
+    storedShowSampleData,
     syncSettings,
     writeBrowserCopy,
     type BrowserCopy,
@@ -129,6 +130,29 @@ describe("planSettingsStart", () => {
         const browser = doc("Here");
         assert.deepEqual(planSettingsStart(UNAVAILABLE, copy(browser, { pending: true, baseUpdatedAt: T0 })), { document: browser, push: false, baseUpdatedAt: T0 });
         assert.deepEqual(planSettingsStart(UNAVAILABLE, null), { document: null, push: false, baseUpdatedAt: null });
+    });
+});
+
+describe("storedShowSampleData", () => {
+    const at = "2026-10-25T09:00:00.000Z";
+    const stored = (settings: SettingsDocument["settings"], version = SETTINGS_VERSION): ServerSettingsSnapshot =>
+        ({ status: "ok", document: { version, settings, updatedAt: at } });
+
+    test("is the user's stored setting, either way", () => {
+        assert.equal(storedShowSampleData(stored({ demo: { showSampleData: false } })), false);
+        assert.equal(storedShowSampleData(stored({ demo: { showSampleData: true } })), true);
+    });
+
+    test("regression: a new user's stored settings render without examples from the start", () => {
+        // What a first sign-in stores (NEW_USER_SETTINGS): the page used to
+        // render examples until it mounted, then hide them.
+        assert.equal(storedShowSampleData(stored({ demo: { showSampleData: false } }, 15)), false);
+    });
+
+    test("without stored settings, or without the server, it's the default", () => {
+        assert.equal(storedShowSampleData({ status: "ok", document: null }), true);
+        assert.equal(storedShowSampleData({ status: "unavailable" }), true);
+        assert.equal(storedShowSampleData(stored({})), true);
     });
 });
 

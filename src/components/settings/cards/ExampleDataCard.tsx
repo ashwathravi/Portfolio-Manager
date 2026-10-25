@@ -1,6 +1,7 @@
 "use client";
 
 import { FlaskConical } from "lucide-react";
+import { useShowSampleData } from "@/lib/hooks/useShowSampleData";
 import { useSettingsStore } from "@/lib/stores/settingsStore";
 
 /**
@@ -8,7 +9,7 @@ import { useSettingsStore } from "@/lib/stores/settingsStore";
  * tag; turning this off hides those cards so only your own data remains.
  */
 export function ExampleDataCard() {
-    const show = useSettingsStore((s) => s.demo?.showSampleData ?? true);
+    const show = useShowSampleData();
     const setShow = useSettingsStore((s) => s.setShowSampleData);
     return (
         <section className="pm-settings-card" aria-labelledby="pm-settings-example-head" data-testid="example-data-card">

@@ -231,6 +231,14 @@ export interface DemoSettings {
     showSampleData: boolean;
 }
 
+/**
+ * Example data without stored settings: shown. A first sign-in stores a
+ * new user's settings with it off (NEW_USER_SETTINGS in
+ * src/lib/settings/server.ts), so this is for users from before that, and
+ * for running without a database.
+ */
+export const DEFAULT_SHOW_SAMPLE_DATA = true;
+
 export interface SettingsState {
     // State slices
     profile: ProfileSettings;
@@ -413,7 +421,7 @@ const defaultRiskPolicy: RiskPolicySettings = {
     },
 };
 
-const defaultDemo: DemoSettings = { showSampleData: true };
+const defaultDemo: DemoSettings = { showSampleData: DEFAULT_SHOW_SAMPLE_DATA };
 
 // No example accounts: connected accounts only ever come from the user
 // (Plaid Link or manual entry). v15 strips the three demo rows older
