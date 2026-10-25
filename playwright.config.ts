@@ -67,6 +67,16 @@ const noSentry = {
     SENTRY_AUTH_TOKEN: '',
 };
 
+// The outage servers run `next dev` from an empty build directory every run.
+// Playwright ends a run by SIGKILLing its servers, so a dev server never saves
+// its Turbopack cache on the way out, while the chunks it wrote stay on disk
+// (Next keeps them for a week). A later run that started from what a killed
+// server left behind pushed hot updates to pages as they loaded, and the
+// outage pages reloaded in the middle of their checks, some in a loop.
+function freshDevServer(port: number, distDir: string): string {
+    return `rm -rf ${distDir} && npm run dev -- --port ${port}`;
+}
+
 export default defineConfig({
     testDir: './tests/e2e',
     fullyParallel: true,
@@ -133,7 +143,7 @@ export default defineConfig({
             // configured but unreachable (nothing listens on port 9). Local auth
             // bypass, because database sessions need the database. Its own build
             // directory, because Next allows one dev server per directory.
-            command: 'npm run dev -- --port 3100',
+            command: freshDevServer(3100, '.next/e2e-outage'),
             env: {
                 ...webServerEnv,
                 NEXT_DIST_DIR: '.next/e2e-outage',
@@ -159,7 +169,7 @@ export default defineConfig({
             // outage.spec.ts: DATABASE_URL holds Vercel's "[SENSITIVE]"
             // placeholder, as a build or runtime that never received the real
             // value would. That must read as "no database", not as an outage.
-            command: 'npm run dev -- --port 3200',
+            command: freshDevServer(3200, '.next/e2e-placeholder'),
             env: {
                 ...webServerEnv,
                 NEXT_DIST_DIR: '.next/e2e-placeholder',

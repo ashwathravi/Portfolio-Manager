@@ -430,6 +430,42 @@ describe('PolygonMassiveAdapter', () => {
       assert.deepEqual(results.map((r) => r.symbol), ['AAPL']);
     });
 
+    test('ticker reference data: name, type and industry code, or null for an unknown ticker', async () => {
+      const { fetch, calls } = fakeFetch((url) => {
+        if (url.includes('/v3/reference/tickers/AAPL')) {
+          return {
+            body: {
+              status: 'OK',
+              results: {
+                ticker: 'AAPL', name: 'Apple Inc.', type: 'CS', primary_exchange: 'XNAS', active: true,
+                currency_name: 'usd', sic_code: '3571', sic_description: 'ELECTRONIC COMPUTERS',
+              },
+            },
+          };
+        }
+        if (url.includes('/v3/reference/tickers/SPY')) {
+          return { body: { status: 'OK', results: { ticker: 'SPY', name: 'SPDR S&P 500 ETF Trust', type: 'ETF', sic_code: '  ' } } };
+        }
+        return { status: 404, body: { status: 'NOT_FOUND' } };
+      });
+      const provider = adapter(fetch);
+
+      assert.deepEqual(await provider.getTickerReference('aapl'), {
+        symbol: 'AAPL',
+        name: 'Apple Inc.',
+        type: 'CS',
+        primaryExchange: 'XNAS',
+        active: true,
+        currency: 'usd',
+        sicCode: '3571',
+        sicDescription: 'ELECTRONIC COMPUTERS',
+      });
+      assert.equal(calls[0], `${BASE}/v3/reference/tickers/AAPL?apiKey=${KEY}`);
+      const fund = await provider.getTickerReference('SPY');
+      assert.deepEqual([fund?.type, fund?.sicCode, fund?.primaryExchange, fund?.active], ['ETF', null, null, true]);
+      assert.equal(await provider.getTickerReference('ZZZZZ'), null);
+    });
+
     test('daily history counts the rows it had to leave out; charts get the same bars', async () => {
       const { fetch } = fakeFetch(() => ({
         body: {

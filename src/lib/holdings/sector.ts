@@ -1,23 +1,26 @@
 /**
- * Phase 4 (AR-74) ticker → sector fallback.
+ * Sectors, and the ticker → sector fallback.
  *
- * We don't have a sector column on the holdings table yet (would need a
- * fundamentals API or a static data load). In the meantime, this module
- * gives us the five sector buckets the Holdings filter row expects
- * ("Tech", "Consumer", "Auto", "Finance") plus a couple of extras so we
- * don't end up with everything in "Other".
- *
- * Callers that know the sector should just pass it in directly — this is
- * only the fallback.
+ * A held symbol's sector comes from the securities master (launch item
+ * i34): its industry code in the ticker reference data, mapped by
+ * security-profile.ts. This map covers well-known tickers only until the
+ * nightly job has fetched a symbol's reference data; callers that have a
+ * sector pass it in, and this is the fallback.
  */
 
 export const SECTOR_LABELS = [
     "Tech",
+    "Communication",
     "Consumer",
     "Auto",
     "Finance",
     "Healthcare",
+    "Industrials",
     "Energy",
+    "Materials",
+    "Real estate",
+    "Utilities",
+    "Funds",
     "Crypto",
     "Bonds",
     "Commodities",
@@ -98,6 +101,10 @@ const MAP: Record<string, Sector> = {
     GLD: "Commodities",
     SLV: "Commodities",
 };
+
+export function isSector(value: unknown): value is Sector {
+    return typeof value === "string" && (SECTOR_LABELS as readonly string[]).includes(value);
+}
 
 export function sectorFor(symbol: string | undefined | null): Sector {
     if (!symbol) return "Other";

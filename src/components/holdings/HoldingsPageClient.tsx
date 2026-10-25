@@ -130,6 +130,13 @@ export function HoldingsPageClient({
 
     const { rows, totalMV } = enriched;
 
+    // The sector chips: the sectors held, largest first.
+    const sectorChips = useMemo<Array<Sector | "All">>(() => {
+        const bySector = new Map<Sector, number>();
+        for (const r of rows) bySector.set(r.sector, (bySector.get(r.sector) ?? 0) + r.marketValue);
+        return ["All", ...[...bySector].sort((a, b) => b[1] - a[1]).map(([sector]) => sector)];
+    }, [rows]);
+
     // ---- Summary metrics (always over the full set, not the filtered view) ----
     const summary = useMemo(() => {
         const totalCostBasis = rows.reduce((s, r) => s + r.costBasis, 0);
@@ -262,6 +269,7 @@ export function HoldingsPageClient({
             )}
 
             <HoldingsFilterRow
+                sectors={sectorChips}
                 sectorFilter={sectorFilter}
                 onSectorChange={setSectorFilter}
                 bucketFilter={bucketFilter}

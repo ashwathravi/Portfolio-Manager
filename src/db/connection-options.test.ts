@@ -1,7 +1,10 @@
 import { describe, test } from "node:test";
 import assert from "node:assert";
+import postgres from "postgres";
 import {
     DATABASE_POOL_OPTIONS,
+    MAX_RECONNECT_BACKOFF_SECONDS,
+    databaseReconnectBackoff,
     isDatabaseConfigured,
     isLocalDatabaseUrl,
     resolveDatabaseSslMode,
@@ -97,5 +100,42 @@ describe("DATABASE_POOL_OPTIONS", () => {
         assert.ok(DATABASE_POOL_OPTIONS.max > 0 && DATABASE_POOL_OPTIONS.max <= 10);
         assert.ok(DATABASE_POOL_OPTIONS.idle_timeout > 0 && DATABASE_POOL_OPTIONS.idle_timeout <= 60);
         assert.ok(DATABASE_POOL_OPTIONS.max_lifetime >= DATABASE_POOL_OPTIONS.idle_timeout);
+    });
+
+    // With postgres.js's own backoff the eleventh query against an unreachable
+    // database waited about 5 s, and later ones up to 20 s (E2E outage pages
+    // timed out after a few renders).
+    test("keeps failing fast while the database is unreachable", async () => {
+        // Nothing listens on port 9, as for the E2E "database down" server.
+        const sql = postgres("postgres://outage:outage@127.0.0.1:9/outage", {
+            ...DATABASE_POOL_OPTIONS,
+            ssl: false,
+            connect_timeout: 10,
+        });
+        try {
+            for (let attempt = 1; attempt <= 12; attempt++) {
+                const started = performance.now();
+                await assert.rejects(sql`select 1`);
+                const elapsed = performance.now() - started;
+                assert.ok(elapsed < 1_500, `attempt ${attempt} took ${Math.round(elapsed)} ms`);
+            }
+        } finally {
+            await sql.end({ timeout: 0 });
+        }
+    });
+});
+
+describe("databaseReconnectBackoff", () => {
+    test("starts on postgres.js's curve", () => {
+        assert.strictEqual(databaseReconnectBackoff(1, () => 1), 0.03);
+        assert.strictEqual(databaseReconnectBackoff(2, () => 0), 0.045);
+    });
+
+    test("never waits more than a second, however many connects have failed", () => {
+        for (let retries = 0; retries <= 100; retries++) {
+            assert.ok(databaseReconnectBackoff(retries, () => 1) <= MAX_RECONNECT_BACKOFF_SECONDS);
+        }
+        assert.strictEqual(databaseReconnectBackoff(100, () => 1), 1);
+        assert.strictEqual(databaseReconnectBackoff(100, () => 0), 0.5);
     });
 });
