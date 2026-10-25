@@ -141,7 +141,11 @@ export default async function Today() {
       <TodayHeader />
 
       <div className="pm-today-top">
-        <TodayHero holdings={heroHoldings} cashTotal={cashTotal} />
+        <TodayHero
+          holdings={heroHoldings}
+          cashTotal={cashTotal}
+          accounts={allPortfolios.map((p) => ({ id: p.id, name: p.name }))}
+        />
         {/* Policy checks only mean something once there are holdings to check. */}
         <TodayTriage policyActions={allHoldings.length > 0 ? riskPolicySummary.nextActions : []} />
       </div>

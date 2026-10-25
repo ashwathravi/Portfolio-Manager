@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { userKey } from './helpers/storage';
 import { clickUntil, collectConsoleErrors, gotoAppPage, openPolicyChecks, reloadAppPage } from './helpers/app';
-import { signInAsFreshUser } from './helpers/users';
+import { signInAsFreshUser, signInAsNewUser } from './helpers/users';
 
 /**
  * Today (/) — formerly the Dashboard.
@@ -487,5 +487,91 @@ test.describe('Today › Net worth hero', () => {
         const change = page.getByTestId('today-change');
         await expect(change).toHaveText(/^\+\$[\d,]+\.\d{2} today on 1 of \d+ positions$/);
         await expect(change).not.toContainText('%');
+    });
+});
+
+// Launch item i43: a new user's Today walks them to an account with positions.
+test.describe('Today › First run', () => {
+    test.skip(!(process.env.CI || process.env.E2E_DATABASE_AUTH === '1'), 'needs the database-auth E2E mode');
+
+    const firstRun = (page: import('@playwright/test').Page) => page.getByTestId('first-run');
+    const steps = (page: import('@playwright/test').Page) => page.getByTestId('first-run-step');
+
+    test('from no accounts, to an account, to positions and a net worth', async ({ context, page }) => {
+        await signInAsNewUser(context);
+        await gotoAppPage(page, '/');
+        await expect(page.getByTestId('today-hero')).toHaveAttribute('data-empty', 'true');
+        await expect(steps(page)).toHaveCount(2);
+        await expect(steps(page).nth(0)).toHaveAttribute('data-done', 'false');
+        await expect(steps(page).nth(0)).toContainText('Add an account');
+        await expect(page.getByTestId('today-hero').getByRole('link', { name: 'Connect an account' })).toHaveAttribute('href', '/settings#accounts');
+
+        // 1. An account, with its cash.
+        await firstRun(page).getByRole('button', { name: 'New account' }).click();
+        const dialog = page.getByRole('dialog');
+        await dialog.getByLabel('Name').fill('Brokerage');
+        await dialog.getByLabel('Cash ($)').fill('1,000');
+        await dialog.getByRole('button', { name: 'Add account' }).click();
+        await expect(steps(page).nth(0)).toHaveAttribute('data-done', 'true');
+        await expect(steps(page).nth(0)).toContainText('1 account, $1,000.00 in cash.');
+
+        // 2. Positions from a broker's CSV, into that account.
+        await firstRun(page).getByRole('button', { name: 'Import CSV' }).click();
+        await page.getByLabel('CSV file').setInputFiles({
+            name: 'positions.csv',
+            mimeType: 'text/csv',
+            buffer: Buffer.from('Symbol,Description,Quantity,Average Cost\nZZQF,First Position Co,4,25\n'),
+        });
+        // Into the account just made, not a new one.
+        await expect(page.getByTestId('import-dialog').locator('select option:checked')).toHaveText('Brokerage');
+        await page.getByRole('button', { name: 'Import 1 position' }).click();
+        await expect(page.getByText('Imported 1 position: 1 new, 0 updated.')).toBeVisible();
+
+        // Done: the net worth (cash plus the position at cost) replaces the steps.
+        await expect(firstRun(page)).toHaveCount(0);
+        expect((await (await page.request.get('/api/portfolios/count')).json()).count).toBe(1);
+        await expect(page.getByTestId('today-hero')).not.toHaveAttribute('data-empty', 'true');
+        await expect(page.getByTestId('today-networth')).toHaveText('$1,100.00');
+    });
+
+    test('a new user starts with example data off, and can turn it on from the card', async ({ context, page }) => {
+        await signInAsNewUser(context, { firstSignIn: true });
+        await gotoAppPage(page, '/');
+        const examples = page.getByTestId('first-run-examples');
+        await expect(examples).toBeVisible();
+        await expect(page.getByTestId('today-examples')).toHaveCount(0);
+
+        // Still off after a reload, when this browser has its own copy too.
+        await reloadAppPage(page);
+        await expect(examples).toBeVisible();
+        await expect(page.getByTestId('today-examples')).toHaveCount(0);
+
+        await examples.getByRole('button', { name: 'Show example data' }).click();
+        await expect(page.getByTestId('today-examples')).toBeVisible();
+        await expect(examples).toHaveCount(0);
+    });
+
+    test('regression: the page arrives with the stored setting, so examples never flash in or out as it loads', async ({ context, page }) => {
+        // useShowSampleData rendered examples until the page mounted: a new
+        // user with them off got the example section in every page as it
+        // arrived, then lost it, and the "Show example data" prompt popped in.
+        await signInAsNewUser(context, { firstSignIn: true });
+        await gotoAppPage(page, '/');
+        const off = await (await page.request.get('/')).text();
+        expect(off).not.toContain('data-testid="today-examples"');
+        expect(off).toContain('data-testid="first-run-examples"');
+
+        // Turned on, they're in the page as it arrives, and the prompt isn't.
+        await page.getByTestId('first-run-examples').getByRole('button', { name: 'Show example data' }).click();
+        await expect(page.getByTestId('today-examples')).toBeVisible();
+        await expect.poll(async () => (await (await page.request.get('/')).text()).includes('data-testid="today-examples"')).toBe(true);
+        expect(await (await page.request.get('/')).text()).not.toContain('data-testid="first-run-examples"');
+    });
+
+    test('a user who already has settings keeps them: only a first sign-in turns examples off', async ({ context, page }) => {
+        await signInAsNewUser(context);
+        await gotoAppPage(page, '/');
+        await expect(page.getByTestId('first-run-examples')).toHaveCount(0);
+        await expect(page.getByTestId('today-examples')).toBeVisible();
     });
 });

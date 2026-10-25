@@ -21,6 +21,7 @@
 
 import { browserLocalStorage, readUserValue, removeUserValue, writeUserValue } from "@/lib/storage/user-scope";
 import {
+    DEFAULT_SHOW_SAMPLE_DATA,
     PERSISTED_SETTINGS_SLICES,
     SETTINGS_VERSION,
     defaultPersistedSettings,
@@ -133,6 +134,18 @@ export function applySettingsDocument(document: SettingsDocument): void {
     // migrateSettings edits what it's given; never the caller's copy.
     const migrated = migrateSettings(structuredClone(document.settings), document.version);
     useSettingsStore.setState({ ...defaultPersistedSettings(), ...normalizeSettings(migrated) });
+}
+
+/**
+ * Whether the user's stored settings show example data, read the way the
+ * store would load them (older documents migrated); the default without
+ * any. The server and the browser agree on it, so pages render with it
+ * before the store has started.
+ */
+export function storedShowSampleData(server: ServerSettingsSnapshot): boolean {
+    if (server.status !== "ok" || !server.document) return DEFAULT_SHOW_SAMPLE_DATA;
+    const migrated = migrateSettings(structuredClone(server.document.settings), server.document.version);
+    return normalizeSettings(migrated).demo?.showSampleData ?? DEFAULT_SHOW_SAMPLE_DATA;
 }
 
 export function persistedSlicesChanged(next: SettingsState, previous: SettingsState): boolean {

@@ -174,6 +174,15 @@ System:
 
 Use Dashboard first each day.
 
+### First run
+
+Before you have any positions, Today shows two steps in place of your net worth:
+
+1. **Add an account**: **New account** (a name and the cash it holds), or **Connect an account** for a brokerage. Once done, the step shows how many accounts and how much cash.
+2. **Add your positions**: **Import CSV** with your broker's positions export (symbol, quantity, and average cost or cost basis). You see what was read before anything is saved, and it goes into your account (or a new one).
+
+When the first positions are in, the steps give way to your net worth. A new sign-in starts with example data off, so every number is your own; **Show example data** on the card (or Settings) turns the labelled examples on to look around first.
+
 What to review:
 
 - Portfolio value and daily movement.

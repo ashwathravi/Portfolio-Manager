@@ -1,12 +1,13 @@
 "use client";
 
-import Link from "next/link";
 import { useMemo } from "react";
 import { useAutoRefreshQuotes } from "@/lib/hooks/useAutoRefreshQuotes";
 import { LiveDataIndicator } from "@/components/data-display/LiveDataIndicator";
 import { formatPct, formatUsd } from "@/lib/format";
 import { isTodaysQuote } from "@/lib/markets/quote-session";
 import { useEasternDate } from "@/lib/hooks/useEasternDate";
+import type { ImportAccountOption } from "@/components/holdings/ImportHoldingsDialog";
+import { FirstRunCard } from "./FirstRunCard";
 
 export interface TodayHeroHolding {
     symbol: string;
@@ -20,8 +21,19 @@ export interface TodayHeroHolding {
  * own holdings (live quotes when available), with invested / cash /
  * positions beneath. No illustrative sparklines or hardcoded deltas —
  * the old stat row showed "+1.2% vs last month" regardless of data.
+ * Without any positions it is the first-run card (FirstRunCard): the
+ * steps to an account with positions in it.
  */
-export function TodayHero({ holdings, cashTotal }: { holdings: TodayHeroHolding[]; cashTotal: number }) {
+export function TodayHero({
+    holdings,
+    cashTotal,
+    accounts,
+}: {
+    holdings: TodayHeroHolding[];
+    cashTotal: number;
+    /** The user's accounts, for the first-run steps and the CSV import. */
+    accounts: readonly ImportAccountOption[];
+}) {
     const symbols = useMemo(() => holdings.map((h) => h.symbol).filter(Boolean), [holdings]);
     const { quotes, isFetching, isError, refreshMs, refetch, lastUpdatedAt } = useAutoRefreshQuotes(symbols);
 
@@ -69,21 +81,7 @@ export function TodayHero({ holdings, cashTotal }: { holdings: TodayHeroHolding[
     );
     const changePct = netWorth - change > 0 ? (change / (netWorth - change)) * 100 : 0;
 
-    if (holdings.length === 0 && cashTotal === 0) {
-        return (
-            <section className="pm-card pm-empty-card pm-today-hero" data-testid="today-hero" data-empty="true">
-                <div className="pm-today-hero-emptyhead">
-                    <span className="pm-today-label">Net worth</span>
-                    {liveIndicator}
-                </div>
-                <h2>Connect an account to see your net worth</h2>
-                <p>Today shows your money first — net worth and today&apos;s change — then anything that needs your attention.</p>
-                <div className="pm-empty-actions">
-                    <Link href="/settings#accounts" className="pm-btn pm-btn-primary">Connect an account</Link>
-                </div>
-            </section>
-        );
-    }
+    if (holdings.length === 0) return <FirstRunCard accounts={accounts} cashTotal={cashTotal} />;
 
     return (
         <section className="pm-card pm-today-hero" data-testid="today-hero" aria-label="Net worth">

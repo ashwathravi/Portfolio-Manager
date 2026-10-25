@@ -10,7 +10,7 @@ import { db } from "@/db";
 import { isDatabaseConfigured } from "@/db/connection-options";
 import { userSettings } from "@/db/schema";
 
-import type { ServerSettingsSnapshot, SettingsDocument, StoredSettingsDocument } from "./document";
+import { SETTINGS_VERSION, type ServerSettingsSnapshot, type SettingsDocument, type StoredSettingsDocument } from "./document";
 
 type Database = typeof db;
 
@@ -25,7 +25,8 @@ export function buildLoadUserSettingsQuery(userId: string, database: Database = 
 /**
  * Saves `document` only if it was made on the stored version: the row's
  * `updated_at` must still be `baseUpdatedAt`, or, with no base, there must
- * be no row yet. Nor does it replace a document from a newer version of the
+ * be no row yet. They're compared to the millisecond, as far as the browser
+ * has the stamp: a row Postgres stamped (microseconds) still matches. Nor does it replace a document from a newer version of the
  * app (after a rollback) with an older shape. Returns no row when a check
  * fails.
  */
@@ -44,7 +45,10 @@ export function buildSaveUserSettingsQuery(
             set: { version: document.version, settings: document.settings, updatedAt: now },
             setWhere: baseUpdatedAt === null
                 ? sql`false`
-                : and(eq(userSettings.updatedAt, new Date(baseUpdatedAt)), lte(userSettings.version, document.version)),
+                : and(
+                    sql`date_trunc('milliseconds', ${userSettings.updatedAt}) = ${new Date(baseUpdatedAt).toISOString()}::timestamp`,
+                    lte(userSettings.version, document.version),
+                ),
         })
         .returning({ updatedAt: userSettings.updatedAt });
 }
@@ -90,5 +94,38 @@ export async function serverSettingsFor(
     } catch (error) {
         console.warn("Settings unavailable: reading user_settings failed.", error);
         return { status: "unavailable" };
+    }
+}
+
+/**
+ * A new user's first settings (launch item i43): example data off, so the
+ * app starts from their own numbers (empty until they add an account) and
+ * says how to turn examples on. Every other section keeps its defaults.
+ */
+export const NEW_USER_SETTINGS: SettingsDocument = {
+    version: SETTINGS_VERSION,
+    settings: { demo: { showSampleData: false } },
+};
+
+/**
+ * Stores the new-user settings, unless the user already has some. Stamped
+ * here, like every save, so the stamp is one the browser can hand back.
+ */
+export function buildSeedUserSettingsQuery(userId: string, database: Pick<Database, "insert"> = db, now: Date = new Date()) {
+    return database
+        .insert(userSettings)
+        .values({ userId, version: NEW_USER_SETTINGS.version, settings: NEW_USER_SETTINGS.settings, updatedAt: now })
+        .onConflictDoNothing({ target: userSettings.userId });
+}
+
+/**
+ * Run when Auth.js creates a user (their first sign-in). A failure is
+ * logged, never thrown: sign-in goes on, with the app's default settings.
+ */
+export async function seedNewUserSettings(userId: string, database: Database = db): Promise<void> {
+    try {
+        await buildSeedUserSettingsQuery(userId, database);
+    } catch (error) {
+        console.warn("New user's settings not stored: they start with the defaults.", error);
     }
 }
