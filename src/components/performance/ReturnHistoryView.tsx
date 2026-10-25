@@ -1,11 +1,11 @@
 "use client";
 
 import { useMemo } from "react";
-import { useRouter } from "next/navigation";
 import { DAILY } from "@/lib/performance/periodSummary";
 import type { ReturnHistory } from "@/lib/performance/return-history";
 import type { Benchmark } from "./EquityCurveCard";
 import { ReturnsCards } from "./PerformancePageClient";
+import { AccountSwitcher } from "./AccountSwitcher";
 
 /**
  * Performance › Returns from the user's own history (launch item i49): the
@@ -15,7 +15,6 @@ import { ReturnsCards } from "./PerformancePageClient";
  * export holds the same rows.
  */
 export function ReturnHistoryView({ history }: { history: ReturnHistory }) {
-    const router = useRouter();
     const { accounts, accountId, points, benchmarks } = history;
 
     // A step across missed sessions spans several: risk measures scale it back to one.
@@ -34,27 +33,7 @@ export function ReturnHistoryView({ history }: { history: ReturnHistory }) {
     return (
         <div className="pm-perf-stack">
             <div className="pm-perf-history-bar">
-                {accounts.length > 1 && (
-                    <label className="pm-perf-bench-select">
-                        <span className="pm-perf-bench-label">Account</span>
-                        <select
-                            className="pm-sort-select"
-                            aria-label="Account"
-                            value={accountId ?? ""}
-                            onChange={(e) => {
-                                const id = e.target.value;
-                                router.push(id ? `/performance?account=${encodeURIComponent(id)}` : "/performance", { scroll: false });
-                            }}
-                        >
-                            <option value="">All accounts</option>
-                            {accounts.map((a) => (
-                                <option key={a.id} value={a.id}>
-                                    {a.name}
-                                </option>
-                            ))}
-                        </select>
-                    </label>
-                )}
+                <AccountSwitcher accounts={accounts} accountId={accountId} path="/performance" />
                 {points.length >= 2 && (
                     <p className="pm-perf-history-note" data-testid="return-history-note">
                         {accountName}: {points.length} closing valuations, {fmtDate(points[0].date)} to{" "}

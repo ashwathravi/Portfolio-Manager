@@ -149,3 +149,62 @@ VALUES
   ('TSLA', 'Tesla, Inc. Common Stock', 'CS', 'XNAS', 'Auto', 'MOTOR VEHICLES & PASSENGER CAR BODIES', '3711', now()),
   ('AMZN', 'Amazon.Com Inc', 'CS', 'XNAS', 'Consumer', 'RETAIL-CATALOG & MAIL-ORDER HOUSES', '5961', now())
 ON CONFLICT (symbol) DO NOTHING;
+
+-- Attribution (launch item i50). KO and PG, in user A's valuation history,
+-- get their securities-master profiles (both Consumer). The eleven SPDR
+-- sector ETFs and SPY get three months of closes to Aug 28, 2026, SPY
+-- moving as a fixed blend of the sectors (Technology 32%, Consumer 16%, ...),
+-- so the S&P 500's sector weights can be estimated from them. On the
+-- valuation dates every sector ETF moves as SPY's closes from the Returns
+-- fixtures above (Aug 31, Sep 30, Oct 1): any blend fits those days, and
+-- the benchmark matches SPY's +3.02%. Expected for user A:
+--   All accounts: your return +9.3%, benchmark +3.0%, beat it by 6.3 pp;
+--   Consumer weight 93.2%, Cash 6.8%
+--   Main: your return +8.6%, Consumer weight 86.3%
+UPDATE securities SET type = 'CS', sector = 'Consumer', reference_updated_at = now() WHERE symbol IN ('KO', 'PG');
+
+INSERT INTO securities (symbol, name, type)
+VALUES
+  ('XLK', 'Technology Select Sector SPDR Fund', 'ETF'),
+  ('XLC', 'Communication Services Select Sector SPDR Fund', 'ETF'),
+  ('XLY', 'Consumer Discretionary Select Sector SPDR Fund', 'ETF'),
+  ('XLP', 'Consumer Staples Select Sector SPDR Fund', 'ETF'),
+  ('XLF', 'Financial Select Sector SPDR Fund', 'ETF'),
+  ('XLV', 'Health Care Select Sector SPDR Fund', 'ETF'),
+  ('XLI', 'Industrial Select Sector SPDR Fund', 'ETF'),
+  ('XLE', 'Energy Select Sector SPDR Fund', 'ETF'),
+  ('XLB', 'Materials Select Sector SPDR Fund', 'ETF'),
+  ('XLRE', 'Real Estate Select Sector SPDR Fund', 'ETF'),
+  ('XLU', 'Utilities Select Sector SPDR Fund', 'ETF')
+ON CONFLICT (symbol) DO NOTHING;
+
+WITH days AS (
+  SELECT d::date AS date, (row_number() OVER (ORDER BY d))::int AS t
+  FROM generate_series(date '2026-06-01', date '2026-08-28', interval '1 day') AS d
+  WHERE extract(isodow FROM d) < 6
+), etfs(symbol, i, w) AS (
+  VALUES ('XLK', 0, 0.32), ('XLC', 1, 0.10), ('XLY', 2, 0.10), ('XLP', 3, 0.06), ('XLF', 4, 0.13), ('XLV', 5, 0.10),
+         ('XLI', 6, 0.08), ('XLE', 7, 0.03), ('XLB', 8, 0.02), ('XLRE', 9, 0.02), ('XLU', 10, 0.04)
+), daily AS (
+  SELECT e.symbol, e.w, d.date, d.t,
+         CASE WHEN d.t = 1 THEN 0 ELSE 0.01 * sin(1.3 * d.t + e.i) + 0.003 * cos(0.7 * d.t * (e.i + 1)) END AS r
+  FROM etfs e CROSS JOIN days d
+), closes AS (
+  SELECT symbol, date, 100 * exp(sum(ln(1 + r)) OVER (PARTITION BY symbol ORDER BY t)) AS close FROM daily
+  UNION ALL
+  SELECT 'SPY', date, 500 * exp(sum(ln(1 + r)) OVER (ORDER BY t))
+  FROM (SELECT date, t, sum(w * r) AS r FROM daily GROUP BY date, t) AS spy
+)
+INSERT INTO price_bars (symbol, date, open, high, low, close, volume, source)
+SELECT symbol, date, close, close, close, close, 1000, 'e2e' FROM closes
+ON CONFLICT (symbol, date) DO NOTHING;
+
+INSERT INTO price_bars (symbol, date, open, high, low, close, volume, source)
+SELECT etf.symbol, spy.date, etf.close * spy.close / base.close, etf.close * spy.close / base.close,
+       etf.close * spy.close / base.close, etf.close * spy.close / base.close, 1000, 'e2e'
+FROM price_bars AS etf
+JOIN price_bars AS base ON base.symbol = 'SPY' AND base.date = '2026-08-28'
+JOIN price_bars AS spy ON spy.symbol = 'SPY' AND spy.date IN ('2026-08-31', '2026-09-30', '2026-10-01')
+WHERE etf.date = '2026-08-28'
+  AND etf.symbol IN ('XLK', 'XLC', 'XLY', 'XLP', 'XLF', 'XLV', 'XLI', 'XLE', 'XLB', 'XLRE', 'XLU')
+ON CONFLICT (symbol, date) DO NOTHING;

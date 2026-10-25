@@ -155,6 +155,40 @@ export async function buildReturnHistory(
 }
 
 /**
+ * The rows a history page reads: the user's accounts, all their snapshots,
+ * and the positions of the shown account's (or all of them). One
+ * repeatable-read transaction: a night's snapshot rewrite (totals and
+ * positions) is seen whole or not at all.
+ */
+export async function readHistoryRows(
+    userId: string,
+    accountId: string | null | undefined,
+    database: Database = db,
+): Promise<ReturnHistoryRows> {
+    return database.transaction(async (tx) => {
+        const accounts = await buildUserAccountsQuery(userId, tx);
+        const selected = accounts.find((account) => account.id === accountId)?.id;
+        const snapshots = await buildUserSnapshotsQuery(userId, {}, tx);
+        const positions = await buildUserSnapshotPositionsQuery(userId, { portfolioId: selected }, tx);
+        return { accounts, snapshots, positions };
+    }, { isolationLevel: "repeatable read", accessMode: "read only" });
+}
+
+/** Stored closes from the price store, oldest first per symbol. */
+export function storedClosesLoader(database: Database = db): ClosesLoader {
+    return async (symbols, from, to) => {
+        const closes = new Map<string, StoredClose[]>();
+        if (symbols.length === 0) return closes;
+        for (const row of await buildClosesBetweenQuery(symbols, from, to, database)) {
+            const list = closes.get(row.symbol) ?? [];
+            list.push({ date: row.date, close: row.close });
+            closes.set(row.symbol, list);
+        }
+        return closes;
+    };
+}
+
+/**
  * The user's return history, for one of their accounts or (`accountId`
  * null, unknown or not theirs) all of them together.
  */
@@ -163,23 +197,5 @@ export async function loadReturnHistory(
     { accountId }: { accountId?: string | null } = {},
     database: Database = db,
 ): Promise<ReturnHistory> {
-    // One repeatable-read transaction: a night's snapshot rewrite (totals
-    // and positions) is seen whole or not at all.
-    const rows = await database.transaction(async (tx) => {
-        const accounts = await buildUserAccountsQuery(userId, tx);
-        const selected = accounts.find((account) => account.id === accountId)?.id;
-        const snapshots = await buildUserSnapshotsQuery(userId, {}, tx);
-        const positions = await buildUserSnapshotPositionsQuery(userId, { portfolioId: selected }, tx);
-        return { accounts, snapshots, positions };
-    }, { isolationLevel: "repeatable read", accessMode: "read only" });
-
-    return buildReturnHistory(rows, accountId, async (symbols, from, to) => {
-        const closes = new Map<string, StoredClose[]>();
-        for (const row of await buildClosesBetweenQuery(symbols, from, to, database)) {
-            const list = closes.get(row.symbol) ?? [];
-            list.push({ date: row.date, close: row.close });
-            closes.set(row.symbol, list);
-        }
-        return closes;
-    });
+    return buildReturnHistory(await readHistoryRows(userId, accountId, database), accountId, storedClosesLoader(database));
 }

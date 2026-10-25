@@ -6,6 +6,7 @@ import {
     defaultAssetClassBreakdown,
     defaultSectorBreakdown,
     formatPp,
+    type AttributionSummary,
 } from "@/lib/performance/attribution";
 import { AttributionBarsCard } from "./AttributionBarsCard";
 import { AttributionTableCard } from "./AttributionTableCard";
@@ -19,7 +20,8 @@ import { SampleGate } from "@/components/data-display/SampleGate";
  * answer first, then the bars, then the full table.
  */
 export function AttributionPageClient() {
-    const headline = attributionHeadline(computeAttribution(defaultSectorBreakdown));
+    const sector = computeAttribution(defaultSectorBreakdown);
+    const assetClass = computeAttribution(defaultAssetClassBreakdown);
     return (
         <div className="pm-perf-stack">
             <SampleGate
@@ -34,23 +36,31 @@ export function AttributionPageClient() {
                     Attribution uses example sector weights and returns until account history is connected.
                 </SampleDataNotice>
 
-                <section className="pm-card pm-attr-lede" aria-label="Attribution summary" data-testid="attribution-lede">
-                    <p className="pm-attr-verdict">{headline.verdict}.</p>
-                    <p className="pm-card-subtitle">
-                        Mostly {headline.mainDriver.name} ({formatPp(headline.mainDriver.value)})
-                        {headline.biggestMove && (
-                            <>
-                                ; the biggest single move was {headline.biggestMove.name} in {headline.biggestMove.label} (
-                                {formatPp(headline.biggestMove.value)})
-                            </>
-                        )}
-                        . Allocation is what you chose to own, selection is how your picks did within each group.
-                    </p>
-                </section>
+                <AttributionLede summary={sector} />
 
-                <AttributionBarsCard sectors={defaultSectorBreakdown} assetClasses={defaultAssetClassBreakdown} />
-                <AttributionTableCard sectors={defaultSectorBreakdown} assetClasses={defaultAssetClassBreakdown} />
+                <AttributionBarsCard sector={sector} assetClass={assetClass} />
+                <AttributionTableCard sector={sector} assetClass={assetClass} />
             </SampleGate>
         </div>
+    );
+}
+
+/** The plain-language answer: did you beat the benchmark, and mostly how. */
+export function AttributionLede({ summary }: { summary: AttributionSummary }) {
+    const headline = attributionHeadline(summary);
+    return (
+        <section className="pm-card pm-attr-lede" aria-label="Attribution summary" data-testid="attribution-lede">
+            <p className="pm-attr-verdict">{headline.verdict}.</p>
+            <p className="pm-card-subtitle">
+                Mostly {headline.mainDriver.name} ({formatPp(headline.mainDriver.value)})
+                {headline.biggestMove && (
+                    <>
+                        ; the biggest single move was {headline.biggestMove.name} in {headline.biggestMove.label} (
+                        {formatPp(headline.biggestMove.value)})
+                    </>
+                )}
+                . Allocation is what you chose to own, selection is how your picks did within each group.
+            </p>
+        </section>
     );
 }

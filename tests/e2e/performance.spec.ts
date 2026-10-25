@@ -212,7 +212,9 @@ test.describe('Performance › Returns from your history', () => {
 });
 
 test.describe('Performance › Attribution', () => {
-    test.beforeEach(async ({ page }) => {
+    // A fresh copy of user A has none of A's history, so it sees the example breakdown.
+    test.beforeEach(async ({ context, page }) => {
+        await signInAsFreshUser(context);
         await page.goto('/performance/attribution');
     });
 
@@ -240,6 +242,69 @@ test.describe('Performance › Attribution', () => {
             await expect(assetClass).toHaveAttribute('aria-checked', 'true', { timeout: 1_000 });
         }).toPass({ timeout: 10_000 });
         await expect(table.locator('thead')).toContainText('Asset class');
+    });
+});
+
+// Launch item i50: attribution from user A's valuation history (scripts/e2e/fixtures.sql).
+test.describe('Performance › Attribution from your history', () => {
+    test.skip(!dbMode, 'requires the database-auth E2E mode');
+
+    const table = (page: Page) => page.getByTestId('attribution-table');
+    const row = (page: Page, label: string) => table(page).locator('tbody tr', { has: page.locator('th', { hasText: new RegExp(`^${label}$`) }) });
+
+    test('all accounts against the S&P 500 by sector, not example data', async ({ page }) => {
+        await gotoAppPage(page, '/performance/attribution');
+        await expect(page.getByTestId('sample-data-notice')).toHaveCount(0);
+        await expect(page.getByTestId('attribution-note')).toContainText('All accounts, Aug 31, 2026 to Oct 1, 2026, against the S&P 500 by sector');
+        await expect(page.getByTestId('attribution-lede')).toContainText('You beat the benchmark by 6.3 pp');
+        // The same return as Performance › Returns, against SPY's +3.02%.
+        await expect(table(page).locator('tfoot td').nth(1)).toHaveText('9.3%');
+        await expect(table(page).locator('tfoot td').nth(2)).toHaveText('3.0%');
+        await expect(row(page, 'Consumer').locator('td').first()).toHaveText('93.2%');
+        await expect(row(page, 'Cash').locator('td').first()).toHaveText('6.8%');
+        // The sectors the benchmark holds, and cash; not the empty "Funds and other".
+        await expect(table(page).locator('tbody tr')).toHaveCount(11);
+        await expect(row(page, 'Funds and other')).toHaveCount(0);
+    });
+
+    test('periods the history doesn\'t reach back to are disabled; asset class compares stocks with the index', async ({ page }) => {
+        await gotoAppPage(page, '/performance/attribution');
+        const periods = page.getByRole('radiogroup', { name: 'Period' });
+        await expect(periods.getByRole('radio', { name: 'ALL' })).toHaveAttribute('aria-checked', 'true');
+        await expect(periods.getByRole('radio', { name: '1M' })).toBeEnabled();
+        await expect(periods.getByRole('radio', { name: '3M' })).toBeDisabled();
+
+        await table(page).getByRole('radio', { name: 'Asset class' }).click();
+        await expect(row(page, 'Stocks').locator('td').nth(0)).toHaveText('93.2%');
+        await expect(row(page, 'Stocks').locator('td').nth(1)).toHaveText('100.0%');
+        await expect(row(page, 'Cash').locator('td').first()).toHaveText('6.8%');
+    });
+
+    test('one account through the URL, and an account without history says so', async ({ page }) => {
+        await gotoAppPage(page, `/performance/attribution?account=${MAIN}`);
+        await expect(page.getByRole('combobox', { name: 'Account', exact: true })).toHaveValue(MAIN);
+        await expect(page.getByTestId('attribution-note')).toContainText('Main Portfolio, Aug 31, 2026 to Oct 1, 2026');
+        await expect(table(page).locator('tfoot td').nth(1)).toHaveText('8.6%');
+        await expect(row(page, 'Consumer').locator('td').first()).toHaveText('86.3%');
+
+        await gotoAppPage(page, `/performance/attribution?account=${DIVIDEND}`);
+        await expect(page.getByTestId('attribution-empty')).toContainText('No history for this account yet');
+    });
+
+    test('another user sees none of it, even by account ID', async ({ context, page }) => {
+        await context.clearCookies();
+        await context.addCookies([{
+            name: 'authjs.session-token',
+            value: 'e2e-session-user-b',
+            domain: 'localhost',
+            path: '/',
+            httpOnly: true,
+            secure: false,
+            sameSite: 'Lax',
+        }]);
+        await gotoAppPage(page, `/performance/attribution?account=${MAIN}`);
+        await expect(page.getByTestId('sample-data-notice')).toBeVisible();
+        await expect(page.getByTestId('attribution-note')).toHaveCount(0);
     });
 });
 
