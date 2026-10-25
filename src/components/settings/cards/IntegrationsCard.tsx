@@ -1,9 +1,12 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
 import { Plus, Link2, CheckCircle2, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import { useSettingsStore } from "@/lib/stores/settingsStore";
+import { plaidSyncMessage, type SyncedAccountSummary } from "@/lib/plaid/sync-summary";
 import {
     connectedPlaidAccountMatchesDiscovered,
     plaidAccountToConnectedAccount,
@@ -117,7 +120,30 @@ async function readApiError(response: Response, fallback: string): Promise<strin
     }
 }
 
+/**
+ * Syncs a linked connection's investment accounts into portfolios (launch
+ * item i44). With `plaidAccountIds`, the accounts just picked after Link:
+ * those sync from now on, the rest of the connection's don't.
+ */
+async function syncPlaidConnection(itemId: string, plaidAccountIds?: readonly string[]): Promise<{ ok: boolean; message: string }> {
+    try {
+        const response = await fetch("/api/plaid/sync", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "same-origin",
+            body: JSON.stringify({ itemId, ...(plaidAccountIds ? { plaidAccountIds } : {}) }),
+        });
+        if (!response.ok) return { ok: false, message: await readApiError(response, "Couldn't sync the linked accounts. Try again.") };
+        const body = (await response.json()) as { data: { accounts: SyncedAccountSummary[]; overLimit?: string[] } };
+        return { ok: true, message: plaidSyncMessage(body.data.accounts, body.data.overLimit) };
+    } catch {
+        return { ok: false, message: "Couldn't reach Atlas to sync. Try again." };
+    }
+}
+
 export function IntegrationsCard() {
+    const router = useRouter();
+    const queryClient = useQueryClient();
     const accounts = useSettingsStore((s) => s.accounts);
     const syncAccount = useSettingsStore((s) => s.syncAccount);
     const reconnectAccount = useSettingsStore((s) => s.reconnectAccount);
@@ -131,6 +157,27 @@ export function IntegrationsCard() {
     const [plaidLinkToken, setPlaidLinkToken] = useState<PlaidLinkTokenResponse | null>(null);
     const [plaidExchange, setPlaidExchange] = useState<PlaidExchangeClientResponse | null>(null);
     const [selectedPlaidAccountIds, setSelectedPlaidAccountIds] = useState<string[]>([]);
+
+    /** After a sync: the pages' data, and the sidebar's account count. */
+    const refreshAfterSync = () => {
+        router.refresh();
+        void queryClient.invalidateQueries({ queryKey: ["portfolios"] });
+    };
+
+    const onSyncNow = async (id: string) => {
+        const account = accounts.find((candidate) => candidate.id === id);
+        if (account?.provider !== "plaid" || !account.plaidItemId) return onManage(id);
+        setBusyId(id);
+        const result = await syncPlaidConnection(account.plaidItemId);
+        setBusyId(null);
+        if (!result.ok) {
+            toast.error(result.message);
+            return;
+        }
+        syncAccount(id);
+        toast.success(result.message);
+        refreshAfterSync();
+    };
 
     const onManage = (id: string) => {
         setBusyId(id);
@@ -266,7 +313,7 @@ export function IntegrationsCard() {
         );
     };
 
-    const connectSelectedPlaidAccounts = () => {
+    const connectSelectedPlaidAccounts = async () => {
         if (!plaidExchange) return;
         setPlaidStatus("saving");
         const selected = new Set(selectedPlaidAccountIds);
@@ -292,6 +339,14 @@ export function IntegrationsCard() {
 
         connectPlaidAccounts(connectedAccounts);
         toast.success(`Connected ${connectedAccounts.length} Plaid account${connectedAccounts.length === 1 ? "" : "s"}`);
+        // Bring their holdings and transactions in now, not tonight.
+        const synced = await syncPlaidConnection(plaidExchange.itemId, [...selected]);
+        if (synced.ok) {
+            toast.success(synced.message);
+            refreshAfterSync();
+        } else {
+            toast.error(synced.message);
+        }
         setPlaidStatus("idle");
         setPlaidExchange(null);
         setPlaidLinkToken(null);
@@ -339,7 +394,7 @@ export function IntegrationsCard() {
                     setPlaidLinkToken(null);
                 }}
                 onRetry={startPlaidLink}
-                onConnect={connectSelectedPlaidAccounts}
+                onConnect={() => void connectSelectedPlaidAccounts()}
             />
 
             <div className="pm-integrations">
@@ -408,7 +463,7 @@ export function IntegrationsCard() {
                                     onClick={() =>
                                         needsReconnect
                                             ? onReconnect(a.id)
-                                            : onManage(a.id)
+                                            : void onSyncNow(a.id)
                                     }
                                     disabled={busy}
                                 >
@@ -416,7 +471,9 @@ export function IntegrationsCard() {
                                         ? "…"
                                         : needsReconnect
                                             ? "Reconnect"
-                                            : "Manage"}
+                                            : a.provider === "plaid"
+                                                ? "Sync now"
+                                                : "Manage"}
                                 </button>
                             </div>
                         );
@@ -511,7 +568,7 @@ function PlaidReviewPanel({
                     onClick={onConnect}
                     disabled={selectedCount === 0 || status === "saving"}
                 >
-                    Connect selected
+                    {status === "saving" ? "Bringing in holdings…" : "Connect selected"}
                 </button>
                 <button type="button" className="pm-integration-action" onClick={onCancel}>
                     Cancel

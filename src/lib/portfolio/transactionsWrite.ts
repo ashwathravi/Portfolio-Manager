@@ -22,7 +22,11 @@ export class AccountNotFoundError extends Error {
     }
 }
 
-function toRow(portfolioId: string, row: TransactionRow, source: "manual" | "csv", externalId: string | null) {
+/** Where a transaction came from: entered here, a CSV import, or a linked account (i44). */
+export type TransactionSource = "manual" | "csv" | "plaid";
+
+/** A transaction row as stored. */
+export function transactionValues(portfolioId: string, row: TransactionRow, source: TransactionSource, externalId: string | null) {
     return {
         portfolioId,
         type: row.type,
@@ -54,7 +58,7 @@ export async function addTransaction(userId: string, portfolioId: string, row: T
         await ownedAccount(tx, userId, portfolioId);
         const [inserted] = await tx
             .insert(transactions)
-            .values(toRow(portfolioId, row, "manual", row.externalId ?? null))
+            .values(transactionValues(portfolioId, row, "manual", row.externalId ?? null))
             .returning({ id: transactions.id });
         return inserted.id;
     });
@@ -100,7 +104,7 @@ export async function importTransactions(
         await ownedAccount(tx, userId, portfolioId);
         let inserted = 0;
         for (let start = 0; start < rows.length; start += ROWS_PER_INSERT) {
-            const values = rows.slice(start, start + ROWS_PER_INSERT).map((row, i) => toRow(portfolioId, row, "csv", ids[start + i]));
+            const values = rows.slice(start, start + ROWS_PER_INSERT).map((row, i) => transactionValues(portfolioId, row, "csv", ids[start + i]));
             const added = await tx.insert(transactions).values(values).onConflictDoNothing().returning({ id: transactions.id });
             inserted += added.length;
         }

@@ -16,10 +16,11 @@
 import { and, asc, eq, sql } from "drizzle-orm";
 
 import { db } from "@/db";
-import { portfolios } from "@/db/schema";
+import { plaidAccounts, portfolios } from "@/db/schema";
 import type { PortfolioCreateBody, PortfolioUpdateBody } from "@/lib/validators/portfolio";
 
 type Database = typeof db;
+type Executor = Database | Parameters<Parameters<Database["transaction"]>[0]>[0];
 type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 
 export const MAX_ACCOUNTS_PER_USER = 50;
@@ -173,18 +174,34 @@ export async function updatePortfolio(
     });
 }
 
-export function buildDeletePortfolioQuery(userId: string, id: string, database: Database = db) {
+export function buildDeletePortfolioQuery(userId: string, id: string, database: Executor = db) {
     return database
         .delete(portfolios)
         .where(and(eq(portfolios.id, id), eq(portfolios.userId, userId)))
-        .returning({ id: portfolios.id });
+        .returning({ id: portfolios.id, source: portfolios.source, externalAccountId: portfolios.externalAccountId });
+}
+
+/** A deleted linked account stays deleted: its Plaid account no longer syncs. */
+export function buildExcludeLinkedAccountQuery(userId: string, plaidAccountId: string, now: Date, database: Executor = db) {
+    return database
+        .update(plaidAccounts)
+        .set({ syncStatus: "excluded", updatedAt: now })
+        .where(and(eq(plaidAccounts.userId, userId), eq(plaidAccounts.plaidAccountId, plaidAccountId)));
 }
 
 /**
  * Deletes the account with its holdings, transactions and valuation
  * history (all cascade). False when the user has no account with that ID.
+ * A linked account's Plaid account stops syncing, or the next sync would
+ * bring it back.
  */
-export async function deletePortfolio(userId: string, id: string, database: Database = db): Promise<boolean> {
-    const rows = await buildDeletePortfolioQuery(userId, id, database);
-    return rows.length > 0;
+export async function deletePortfolio(userId: string, id: string, database: Database = db, now: Date = new Date()): Promise<boolean> {
+    return database.transaction(async (tx) => {
+        const [deleted] = await buildDeletePortfolioQuery(userId, id, tx);
+        if (!deleted) return false;
+        if (deleted.source === "plaid" && deleted.externalAccountId) {
+            await buildExcludeLinkedAccountQuery(userId, deleted.externalAccountId, now, tx);
+        }
+        return true;
+    });
 }

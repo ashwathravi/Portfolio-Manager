@@ -169,7 +169,11 @@ export const plaidAccounts = pgTable("plaid_accounts", {
     institutionName: text("institution_name"),
     capabilities: jsonb("capabilities").notNull(),
     verificationStatus: text("verification_status").notNull(),
-    syncStatus: text("sync_status").default("sync_ready").notNull(),
+    // "awaiting_selection" from Link until the user picks the accounts to
+    // connect, then "sync_ready" (synced into a portfolio) or "excluded"
+    // (left out, or its portfolio deleted). Only "sync_ready" is synced.
+    syncStatus: text("sync_status").default("awaiting_selection").notNull(),
+    // The last sync of its holdings and transactions; null before the first.
     lastSyncedAt: timestamp("last_synced_at"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
@@ -194,10 +198,19 @@ export const portfolios = pgTable("portfolios", {
     // Snapshot fields (denormalized for quick dashboard access)
     totalValue: doublePrecision("total_value").default(0),
     cashBalance: doublePrecision("cash_balance").default(0),
+    // Where the account comes from (decision D5): "manual" (added here or
+    // imported from a CSV) or "plaid", one portfolio per linked investment
+    // account, whose Plaid account_id is the external id. A sync replaces a
+    // linked account's holdings and cash, and upserts its transactions.
+    source: text("source").default("manual").notNull(),
+    externalAccountId: text("external_account_id"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (table) => ({
     userIdIdx: index("portfolios_user_id_idx").on(table.userId),
+    userExternalAccountIdx: uniqueIndex("portfolios_user_source_external_account_idx")
+        .on(table.userId, table.source, table.externalAccountId)
+        .where(sql`${table.externalAccountId} is not null`),
     serverOnlyNoClientAccess: serverOnlyNoClientAccessPolicy(),
     appRuntimeAccess: appRuntimeAccessPolicy(),
 })).enableRLS();

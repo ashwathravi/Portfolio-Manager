@@ -130,8 +130,8 @@ const drizzlePlaidTokenRegistryStore: PlaidTokenRegistryStore = {
                     institutionName: account.institution.name,
                     capabilities: [...account.capabilities],
                     verificationStatus: account.verificationStatus,
-                    syncStatus: "sync_ready",
-                    lastSyncedAt: input.now,
+                    // Synced once the user picks it (src/lib/plaid/sync.ts),
+                    // not because Link found it.
                     updatedAt: input.now,
                 })
                 .onConflictDoUpdate({
@@ -139,8 +139,8 @@ const drizzlePlaidTokenRegistryStore: PlaidTokenRegistryStore = {
                     set: {
                         plaidItemRecordId: item.id,
                         name: account.name,
-                    officialName: account.officialName ?? null,
-                    mask: account.mask || null,
+                        officialName: account.officialName ?? null,
+                        mask: account.mask || null,
                         type: account.type,
                         subtype: account.subtype,
                         currentBalance: Number.isFinite(account.currentBalance) ? String(account.currentBalance) : null,
@@ -149,8 +149,8 @@ const drizzlePlaidTokenRegistryStore: PlaidTokenRegistryStore = {
                         institutionName: account.institution.name,
                         capabilities: [...account.capabilities],
                         verificationStatus: account.verificationStatus,
-                        syncStatus: "sync_ready",
-                        lastSyncedAt: input.now,
+                        // Linking again keeps whether it was picked, and when
+                        // it last synced.
                         updatedAt: input.now,
                     },
                 });
