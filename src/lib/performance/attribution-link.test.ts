@@ -2,7 +2,7 @@ import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 
 import { computeAttribution } from "./attribution";
-import { carinoFactor, linkAttribution, type AttributionStep } from "./attribution-link";
+import { carinoFactor, linkAttribution, linkingProblem, type AttributionStep } from "./attribution-link";
 
 const near = (actual: number, expected: number, tolerance = 1e-9) =>
     assert.ok(Math.abs(actual - expected) < tolerance, `expected ${expected}, got ${actual}`);
@@ -91,5 +91,38 @@ describe("carinoFactor", () => {
     test("its limit when the returns are equal", () => {
         near(carinoFactor(0.05, 0.05), 1 / 1.05);
         near(carinoFactor(0.05, 0.02), (Math.log(1.05) - Math.log(1.02)) / 0.03);
+    });
+});
+
+describe("linkingProblem", () => {
+    const weights: Record<string, number> = { technology: 0.5, consumer: 0.5 };
+    const step = (consumer: [number, number], cash: number, bench: Record<string, number> | null): AttributionStep => ({
+        from: MON,
+        to: TUE,
+        sector: [
+            { key: "consumer", weight: consumer[0], return: consumer[1] },
+            { key: "cash", weight: cash, return: 0 },
+        ],
+        assetClass: [],
+        benchmarkSectorReturns: bench,
+    });
+
+    test("none when the steps can be linked", () => {
+        assert.equal(linkingProblem([step([1, 0.1], 0, { technology: 0.02, consumer: 0.04 })], weights), null);
+    });
+
+    test("regression: no step with sector prices is no comparison, not a match", () => {
+        // The Codex finding on PR #161: every step dropped, the page said
+        // "You matched the benchmark" from zeros.
+        assert.equal(linkingProblem([step([1, 0.1], 0, null), step([1, 0.2], 0, null)], weights), "no-steps");
+        assert.equal(linkingProblem([], weights), "no-steps");
+    });
+
+    test("regression: a step that lost everything or more can't be log-linked", () => {
+        // The Codex finding on PR #161: on margin (weight 2, cash −1) a −60%
+        // move is −120% of equity, and the linking factors were NaN.
+        assert.equal(linkingProblem([step([2, -0.6], -1, { technology: 0.02, consumer: 0.04 })], weights), "total-loss");
+        assert.equal(linkingProblem([step([1, -1], 0, { technology: 0.02, consumer: 0.04 })], weights), "total-loss");
+        assert.equal(linkingProblem([step([1, 0.1], 0, { technology: -1.2, consumer: -1 })], weights), "total-loss");
     });
 });

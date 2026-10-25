@@ -79,11 +79,55 @@ function logFactor(r: number): number {
     return Math.abs(r) < 1e-12 ? 1 : Math.log1p(r) / r;
 }
 
+/** One step's segments on a basis, each with its benchmark weight and return, and both totals. */
+function stepTotals(step: AttributionStep, basis: AttributionBasis, benchmarkWeights: Readonly<Record<string, number>>) {
+    const sectorReturns = step.benchmarkSectorReturns!;
+    const benchTotal = SECTOR_SEGMENTS.reduce((s, d) => s + (benchmarkWeights[d.key] ?? 0) * (sectorReturns[d.key] ?? 0), 0);
+    const segments = (basis === "sector" ? step.sector : step.assetClass).map((seg) => {
+        let wB: number;
+        let rB: number;
+        if (basis === "sector") {
+            wB = benchmarkWeights[seg.key] ?? 0;
+            rB = seg.key === "cash" ? 0 : seg.key in sectorReturns ? sectorReturns[seg.key] : benchTotal;
+        } else {
+            wB = seg.key === "stock" ? 1 : 0;
+            rB = seg.key === "cash" ? 0 : benchTotal;
+        }
+        return { ...seg, wB, rB };
+    });
+    const portTotal = segments.reduce((s, x) => s + x.weight * x.return, 0);
+    return { segments, portTotal, benchTotal };
+}
+
+export type LinkingProblem =
+    /** No step in the period has the benchmark's sector prices at both ends. */
+    | "no-steps"
+    /** A step lost all the accounts' value or more (a margin account): log-linking has no answer. */
+    | "total-loss";
+
+/**
+ * Why a period's steps can't be linked, or null when they can. Check it
+ * before linkAttribution, whose figures mean nothing otherwise.
+ */
+export function linkingProblem(
+    steps: readonly AttributionStep[],
+    benchmarkWeights: Readonly<Record<string, number>>,
+): LinkingProblem | null {
+    const usable = steps.filter((s) => s.benchmarkSectorReturns !== null);
+    if (usable.length === 0) return "no-steps";
+    for (const step of usable) {
+        const { portTotal, benchTotal } = stepTotals(step, "sector", benchmarkWeights);
+        if (!(portTotal > -1) || !(benchTotal > -1)) return "total-loss";
+    }
+    return null;
+}
+
 /**
  * The period's attribution on one basis from its steps: each step's BHB
  * effects, linked so they add up to the period's excess return. Weights
  * shown are the average over the steps; returns are each segment's steps
- * chained.
+ * chained. Callers check linkingProblem first: with no usable step, or a
+ * step that lost everything, the figures here are meaningless.
  */
 export function linkAttribution(
     steps: readonly AttributionStep[],
@@ -91,29 +135,11 @@ export function linkAttribution(
     benchmarkWeights: Readonly<Record<string, number>>,
 ): AttributionSummary {
     const definitions = basis === "sector" ? SECTOR_SEGMENTS : ASSET_CLASS_SEGMENTS;
-    const usable = steps.filter((s) => s.benchmarkSectorReturns !== null);
     type Acc = { weightSum: number; growth: number; benchGrowth: number; contribution: number; allocation: number; selection: number; interaction: number };
     const acc = new Map<string, Acc>(definitions.map((d) => [d.key, { weightSum: 0, growth: 1, benchGrowth: 1, contribution: 0, allocation: 0, selection: 0, interaction: 0 }]));
 
     // Per step: segment weights and returns on both sides, and the totals.
-    const perStep = usable.map((step) => {
-        const sectorReturns = step.benchmarkSectorReturns!;
-        const benchTotal = SECTOR_SEGMENTS.reduce((s, d) => s + (benchmarkWeights[d.key] ?? 0) * (sectorReturns[d.key] ?? 0), 0);
-        const segments = (basis === "sector" ? step.sector : step.assetClass).map((seg) => {
-            let wB: number;
-            let rB: number;
-            if (basis === "sector") {
-                wB = benchmarkWeights[seg.key] ?? 0;
-                rB = seg.key === "cash" ? 0 : seg.key in sectorReturns ? sectorReturns[seg.key] : benchTotal;
-            } else {
-                wB = seg.key === "stock" ? 1 : 0;
-                rB = seg.key === "cash" ? 0 : benchTotal;
-            }
-            return { ...seg, wB, rB };
-        });
-        const portTotal = segments.reduce((s, x) => s + x.weight * x.return, 0);
-        return { segments, portTotal, benchTotal };
-    });
+    const perStep = steps.filter((s) => s.benchmarkSectorReturns !== null).map((step) => stepTotals(step, basis, benchmarkWeights));
 
     const R = perStep.reduce((g, s) => g * (1 + s.portTotal), 1) - 1;
     const B = perStep.reduce((g, s) => g * (1 + s.benchTotal), 1) - 1;

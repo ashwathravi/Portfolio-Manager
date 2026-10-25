@@ -40,7 +40,10 @@ async function AttributionContent({ accountId }: { accountId: string | null }) {
             );
         }
     }
-    return history?.hasHistory ? <AttributionHistoryView history={history} /> : <AttributionPageClient />;
+    // Keyed by account: switching starts the period choice afresh.
+    return history?.hasHistory
+        ? <AttributionHistoryView key={history.accountId ?? "all"} history={history} />
+        : <AttributionPageClient />;
 }
 
 export default async function AttributionPage({

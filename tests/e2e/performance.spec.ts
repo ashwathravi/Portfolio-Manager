@@ -280,6 +280,18 @@ test.describe('Performance › Attribution from your history', () => {
         await expect(row(page, 'Cash').locator('td').first()).toHaveText('6.8%');
     });
 
+    test('regression: switching account starts the period choice afresh', async ({ page }) => {
+        // The Codex finding on PR #161: the chosen period carried over to an
+        // account whose history might not reach back to it.
+        await gotoAppPage(page, '/performance/attribution');
+        const periods = page.getByRole('radiogroup', { name: 'Period' });
+        await periods.getByRole('radio', { name: '1M' }).click();
+        await expect(periods.getByRole('radio', { name: '1M' })).toHaveAttribute('aria-checked', 'true');
+        await page.getByRole('combobox', { name: 'Account', exact: true }).selectOption({ label: 'Main Portfolio' });
+        await expect(page).toHaveURL(new RegExp(`account=${MAIN}$`));
+        await expect(periods.getByRole('radio', { name: 'ALL' })).toHaveAttribute('aria-checked', 'true');
+    });
+
     test('one account through the URL, and an account without history says so', async ({ page }) => {
         await gotoAppPage(page, `/performance/attribution?account=${MAIN}`);
         await expect(page.getByRole('combobox', { name: 'Account', exact: true })).toHaveValue(MAIN);
