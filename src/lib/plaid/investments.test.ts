@@ -9,6 +9,7 @@ import {
     fetchPlaidInvestmentTransactions,
     mapPlaidTransaction,
     transactionTypeForPlaid,
+    PlaidDeadlineError,
     type PlaidHolding,
     type PlaidInvestmentTransaction,
     type PlaidSecurity,
@@ -146,6 +147,18 @@ describe("Plaid investment transactions", () => {
         assert.deepEqual(mapPlaidTransaction(transaction({ type: "cash", subtype: "dividend", security_id: null }), undefined), { skipped: "no-symbol" });
     });
 
+    test("regression: a money market sweep's dividends keep its ticker; buying and selling it moves cash", () => {
+        // The Codex finding on PR #162: the fund's ticker was dropped, so its
+        // dividends were skipped. The holdings count it as cash, so its buys
+        // and sells are moves within cash, not trades.
+        const spaxx = security("spaxx", { type: "mutual fund", is_cash_equivalent: true });
+        const dividend = mapPlaidTransaction(transaction({ type: "cash", subtype: "dividend", amount: -3.21, quantity: 0, price: 0 }), spaxx);
+        assert.ok("row" in dividend);
+        assert.deepEqual([dividend.row.type, dividend.row.symbol, dividend.row.amount], ["DIVIDEND", "SPAXX", 3.21]);
+        assert.deepEqual(mapPlaidTransaction(transaction({ type: "buy", subtype: "dividend reinvestment" }), spaxx), { skipped: "cash-sweep" });
+        assert.deepEqual(mapPlaidTransaction(transaction({ type: "sell", subtype: "sell", quantity: -50 }), spaxx), { skipped: "cash-sweep" });
+    });
+
     test("regression: what Atlas doesn't record, or can't, is left out with a reason", () => {
         assert.deepEqual(mapPlaidTransaction(transaction({ type: "transfer", subtype: "transfer" }), security("aapl")), { skipped: "not-recorded" });
         assert.deepEqual(mapPlaidTransaction(transaction({ type: "cancel", subtype: null }), security("aapl")), { skipped: "not-recorded" });
@@ -221,6 +234,37 @@ describe("Plaid investments requests", () => {
             fetchPlaidInvestmentTransactions({ ...config, startDate: "2024-10-25", endDate: "2026-10-25", fetchImpl }),
             (error: unknown) => error instanceof PlaidApiError && error.errorCode === "PRODUCT_NOT_READY" && error.status === 400,
         );
+    });
+
+    test("regression: a deadline bounds each request and stops the paging", async () => {
+        // The Codex finding on PR #162: the nightly budget was only checked
+        // between connections, so one slow connection could take the run.
+        let now = 1_000;
+        const signals: (AbortSignal | null | undefined)[] = [];
+        const fetchImpl: PlaidFetch = async (_url, init) => {
+            signals.push(init.signal);
+            now += 40_000; // each page takes 40 s
+            return { ok: true, status: 200, json: async () => ({ investment_transactions: [transaction({})], securities: [], total_investment_transactions: 10 }) };
+        };
+        await assert.rejects(
+            fetchPlaidInvestmentTransactions({ ...config, startDate: "2024-10-25", endDate: "2026-10-25", fetchImpl, deadline: 61_000, clock: () => now }),
+            PlaidDeadlineError,
+        );
+        // Two pages fit in the minute, the third isn't asked for; each request
+        // carried a cancel signal.
+        assert.equal(signals.length, 2);
+        assert.ok(signals.every((signal) => signal instanceof AbortSignal));
+    });
+
+    test("a request cancelled at the deadline is the deadline, not Plaid failing", async () => {
+        const fetchImpl: PlaidFetch = async () => {
+            throw Object.assign(new Error("The operation was aborted due to timeout"), { name: "TimeoutError" });
+        };
+        await assert.rejects(fetchPlaidHoldings({ ...config, fetchImpl, deadline: Date.now() + 1_000 }), PlaidDeadlineError);
+        // Without a deadline, requests carry no cancel signal.
+        let signal: AbortSignal | null | undefined = null;
+        await fetchPlaidHoldings({ ...config, fetchImpl: async (_url, init) => { signal = init.signal; return { ok: true, status: 200, json: async () => ({ holdings: [], securities: [] }) }; } });
+        assert.equal(signal, undefined);
     });
 
     test("holdings in a shape Atlas doesn't read are refused, not half-read", async () => {

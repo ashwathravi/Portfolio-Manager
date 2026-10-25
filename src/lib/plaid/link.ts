@@ -297,15 +297,19 @@ export async function postPlaid({
     credentials,
     body,
     fetchImpl,
+    signal,
 }: {
     endpoint: string;
     environment: PlaidEnvironment;
     credentials: PlaidCredentials;
     body: Record<string, unknown>;
     fetchImpl: PlaidFetch;
+    /** Cancels the request: a caller's deadline. */
+    signal?: AbortSignal;
 }): Promise<unknown> {
     const response = await fetchImpl(`${plaidBaseUrl(environment)}${endpoint}`, {
         method: "POST",
+        signal,
         headers: {
             "Content-Type": "application/json",
         },

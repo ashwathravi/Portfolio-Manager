@@ -84,6 +84,35 @@ interface PlaidCall {
     accessToken: string;
     accountIds: readonly string[];
     fetchImpl?: PlaidFetch;
+    /** When to give up (ms since the epoch, by `clock`): no request runs past it. */
+    deadline?: number;
+    clock?: () => number;
+}
+
+/** Plaid ran past the caller's deadline; the sync stops and tries again next time. */
+export class PlaidDeadlineError extends Error {
+    constructor() {
+        super("Plaid took longer than this sync had");
+        this.name = "PlaidDeadlineError";
+    }
+}
+
+/** A request's cancel signal: whatever is left before the deadline. */
+function signalFor({ deadline, clock = Date.now }: Pick<PlaidCall, "deadline" | "clock">): AbortSignal | undefined {
+    if (deadline === undefined) return undefined;
+    const left = deadline - clock();
+    if (left <= 0) throw new PlaidDeadlineError();
+    return AbortSignal.timeout(left);
+}
+
+/** A cancelled request is the deadline passing, not Plaid failing. */
+async function withinDeadline<T>(request: () => Promise<T>): Promise<T> {
+    try {
+        return await request();
+    } catch (error) {
+        if (error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError")) throw new PlaidDeadlineError();
+        throw error;
+    }
 }
 
 function parse<T>(schema: z.ZodType<T>, payload: unknown, endpoint: string): T {
@@ -92,14 +121,15 @@ function parse<T>(schema: z.ZodType<T>, payload: unknown, endpoint: string): T {
     return result.data;
 }
 
-export async function fetchPlaidHoldings({ credentials, environment, accessToken, accountIds, fetchImpl = fetch }: PlaidCall) {
-    const payload = await postPlaid({
+export async function fetchPlaidHoldings({ credentials, environment, accessToken, accountIds, fetchImpl = fetch, deadline, clock }: PlaidCall) {
+    const payload = await withinDeadline(() => postPlaid({
         endpoint: "/investments/holdings/get",
         environment,
         credentials,
         fetchImpl,
+        signal: signalFor({ deadline, clock }),
         body: { access_token: accessToken, options: { account_ids: [...accountIds] } },
-    });
+    }));
     return parse(holdingsResponseSchema, payload, "/investments/holdings/get");
 }
 
@@ -112,22 +142,26 @@ export async function fetchPlaidInvestmentTransactions({
     startDate,
     endDate,
     fetchImpl = fetch,
+    deadline,
+    clock,
 }: PlaidCall & { startDate: string; endDate: string }) {
     const transactions: PlaidInvestmentTransaction[] = [];
     const securities = new Map<string, PlaidSecurity>();
     for (;;) {
-        const payload = await postPlaid({
+        // Each page within what's left: a long history can't outrun the deadline.
+        const payload = await withinDeadline(() => postPlaid({
             endpoint: "/investments/transactions/get",
             environment,
             credentials,
             fetchImpl,
+            signal: signalFor({ deadline, clock }),
             body: {
                 access_token: accessToken,
                 start_date: startDate,
                 end_date: endDate,
                 options: { account_ids: [...accountIds], count: PLAID_TRANSACTIONS_PAGE, offset: transactions.length },
             },
-        });
+        }));
         const page = parse(transactionsResponseSchema, payload, "/investments/transactions/get");
         transactions.push(...page.investment_transactions);
         for (const security of page.securities) securities.set(security.security_id, security);
@@ -270,7 +304,7 @@ const CASH_SUBTYPES: Readonly<Record<string, TransactionRow["type"]>> = {
     "margin expense": "FEE",
 };
 
-export type TransactionSkipReason = "not-recorded" | "no-symbol" | "other-currency" | "invalid";
+export type TransactionSkipReason = "not-recorded" | "no-symbol" | "other-currency" | "cash-sweep" | "invalid";
 
 export type MappedTransaction =
     | { row: TransactionRow & { externalId: string } }
@@ -300,8 +334,14 @@ export function mapPlaidTransaction(transaction: PlaidInvestmentTransaction, sec
     // Kept in its currency (CAD, EUR); an unofficial one (a coin) isn't a currency.
     if (transaction.unofficial_currency_code) return { skipped: "other-currency" };
 
-    const symbol = security?.ticker_symbol && !isCash(security) ? normalizeTicker(security.ticker_symbol) : null;
     const trade = type === "BUY" || type === "SELL";
+    // A cash equivalent with a ticker (a money market sweep, SPAXX) is cash
+    // in the holdings: buying or selling it moves cash within the account,
+    // not into a position, but its dividends are income from that fund.
+    const sweep = security?.is_cash_equivalent === true && security.type !== "cash";
+    if (sweep && trade) return { skipped: "cash-sweep" };
+    // Currency itself ("CUR:USD") has no ticker to keep.
+    const symbol = security?.ticker_symbol && security.type !== "cash" ? normalizeTicker(security.ticker_symbol) : null;
     if ((trade || type === "DIVIDEND") && !symbol) return { skipped: "no-symbol" };
 
     const quantity = transaction.quantity != null ? Math.abs(transaction.quantity) : null;

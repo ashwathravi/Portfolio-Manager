@@ -76,15 +76,17 @@ describe("account queries", () => {
         const run = async (deleted: Record<string, unknown> | undefined) => {
             const statements: string[] = [];
             const tx = {
+                execute: async () => { statements.push("lock"); },
                 delete: () => ({ where: () => ({ returning: async () => { statements.push("delete"); return deleted ? [deleted] : []; } }) }),
                 update: () => ({ set: () => ({ where: async () => { statements.push("exclude"); } }) }),
             };
             const database = { transaction: async (fn: (t: typeof tx) => Promise<unknown>) => fn(tx) } as unknown as Parameters<typeof deletePortfolio>[2];
             return { result: await deletePortfolio(USER, ID, database, NOW), statements };
         };
-        assert.deepEqual(await run({ id: ID, source: "plaid", externalAccountId: "plaid-acct-1" }), { result: true, statements: ["delete", "exclude"] });
-        assert.deepEqual(await run({ id: ID, source: "manual", externalAccountId: null }), { result: true, statements: ["delete"] });
-        assert.deepEqual(await run(undefined), { result: false, statements: ["delete"] });
+        // Under the account lock a sync's write takes too.
+        assert.deepEqual(await run({ id: ID, source: "plaid", externalAccountId: "plaid-acct-1" }), { result: true, statements: ["lock", "delete", "exclude"] });
+        assert.deepEqual(await run({ id: ID, source: "manual", externalAccountId: null }), { result: true, statements: ["lock", "delete"] });
+        assert.deepEqual(await run(undefined), { result: false, statements: ["lock", "delete"] });
     });
 });
 

@@ -167,8 +167,14 @@ export function IntegrationsCard() {
     const onSyncNow = async (id: string) => {
         const account = accounts.find((candidate) => candidate.id === id);
         if (account?.provider !== "plaid" || !account.plaidItemId) return onManage(id);
+        const itemId = account.plaidItemId;
         setBusyId(id);
-        const result = await syncPlaidConnection(account.plaidItemId);
+        // The accounts connected here on this connection are the user's pick:
+        // one linked before picks were kept on the server gets picked now.
+        const connected = accounts
+            .filter((candidate) => candidate.provider === "plaid" && candidate.plaidItemId === itemId && candidate.plaidAccountId)
+            .map((candidate) => candidate.plaidAccountId as string);
+        const result = await syncPlaidConnection(itemId, connected);
         setBusyId(null);
         if (!result.ok) {
             toast.error(result.message);

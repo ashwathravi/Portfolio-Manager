@@ -31,6 +31,7 @@ import {
     accountTransactions,
     fetchPlaidHoldings,
     fetchPlaidInvestmentTransactions,
+    PlaidDeadlineError,
     type AccountHoldings,
     type TransactionSkipReason,
 } from "./investments";
@@ -108,9 +109,13 @@ export function linkedPortfolioDescription(institutionName: string | null, mask:
 // ---------------------------------------------------------------------------
 
 /**
- * The user's pick from Link: these accounts of the item sync, the rest of
- * its accounts don't. Only the user's own, active item; returns how many
- * investment accounts will sync.
+ * The user's pick: these accounts of the item sync, the rest of its
+ * accounts don't. Sent after Link, and by "Sync now" with the accounts the
+ * user connected in Settings, so an account linked before picks existed
+ * can still be picked. Only accounts still waiting for a pick change: one
+ * already picked keeps syncing, and one excluded (a linked account the user
+ * deleted) stays excluded. Only the user's own, active item; returns how
+ * many of its investment accounts were picked now.
  */
 export async function selectPlaidAccounts(
     userId: string,
@@ -125,7 +130,11 @@ export async function selectPlaidAccounts(
             .where(and(eq(plaidItems.userId, userId), eq(plaidItems.plaidItemId, itemId), eq(plaidItems.status, "active"), isNull(plaidItems.revokedAt)))
             .limit(1);
         if (!item) throw new PlaidItemNotFoundError();
-        const ofItem = and(eq(plaidAccounts.userId, userId), eq(plaidAccounts.plaidItemRecordId, item.id));
+        const ofItem = and(
+            eq(plaidAccounts.userId, userId),
+            eq(plaidAccounts.plaidItemRecordId, item.id),
+            eq(plaidAccounts.syncStatus, "awaiting_selection"),
+        );
         const picked = plaidAccountIds.length > 0 ? inArray(plaidAccounts.plaidAccountId, [...plaidAccountIds]) : sql`false`;
         const selected = await tx
             .update(plaidAccounts)
@@ -203,24 +212,46 @@ export interface AccountSyncWritten {
 }
 
 /**
- * Writes one account's sync in a single transaction: its portfolio (made
- * the first time, under the user's account lock, with a name none of their
- * accounts has and within MAX_ACCOUNTS_PER_USER; the name and description
- * left as the user set them after), its positions and cash replaced, its
- * transactions upserted. Throws AccountLimitError for a new account past
- * the limit, writing nothing.
+ * Writes one account's sync in a single transaction, under the user's
+ * account lock (which deleting an account takes too): its portfolio (made
+ * the first time, with a name none of their accounts has and within
+ * MAX_ACCOUNTS_PER_USER; the name and description left as the user set them
+ * after), its positions and cash replaced, its transactions upserted.
+ *
+ * Null, writing nothing, when the account no longer syncs: deleted (or its
+ * pick undone) while Plaid was being asked. Throws AccountLimitError for a
+ * new account past the limit, writing nothing.
+ *
+ * The portfolio's and its holdings' updated_at move only when a position
+ * or the cash changes: the snapshot job (valuation-snapshots.ts) takes them
+ * as the last change, so a sync that finds nothing new mustn't look like one.
  */
-export async function writeAccountSync(input: AccountSyncWrite, database: Database = db): Promise<AccountSyncWritten> {
+export async function writeAccountSync(input: AccountSyncWrite, database: Database = db): Promise<AccountSyncWritten | null> {
     return database.transaction(async (tx) => {
         await buildLockUserAccountsQuery(input.userId, tx);
+        const [account] = await tx
+            .select({ syncStatus: plaidAccounts.syncStatus })
+            .from(plaidAccounts)
+            .where(and(eq(plaidAccounts.id, input.plaidAccountRecordId), eq(plaidAccounts.userId, input.userId)))
+            .limit(1);
+        if (account?.syncStatus !== "sync_ready") return null;
+
         const [existing] = await tx
-            .update(portfolios)
-            .set({ cashBalance: input.holdings.cashUsd, updatedAt: input.now })
+            .select({ id: portfolios.id, name: portfolios.name, cash: portfolios.cashBalance })
+            .from(portfolios)
             .where(and(eq(portfolios.userId, input.userId), eq(portfolios.source, "plaid"), eq(portfolios.externalAccountId, input.plaidAccountId)))
-            .returning({ id: portfolios.id, name: portfolios.name });
+            .limit(1);
         let portfolio: { id: string; name: string; created: boolean };
         if (existing) {
-            portfolio = { ...existing, created: false };
+            const positionsChanged = await replaceHoldings(tx, existing.id, input.holdings.positions, input.now);
+            const cashChanged = existing.cash !== input.holdings.cashUsd;
+            if (positionsChanged || cashChanged) {
+                await tx
+                    .update(portfolios)
+                    .set({ cashBalance: input.holdings.cashUsd, updatedAt: input.now })
+                    .where(and(eq(portfolios.id, existing.id), eq(portfolios.userId, input.userId)));
+            }
+            portfolio = { id: existing.id, name: existing.name, created: false };
         } else {
             const accounts = await buildUserAccountNamesQuery(input.userId, tx);
             if (accounts.length >= MAX_ACCOUNTS_PER_USER) throw new AccountLimitError();
@@ -237,15 +268,17 @@ export async function writeAccountSync(input: AccountSyncWrite, database: Databa
                 })
                 .returning({ id: portfolios.id, name: portfolios.name });
             portfolio = { ...created, created: true };
+            await replaceHoldings(tx, portfolio.id, input.holdings.positions, input.now);
         }
 
-        await replaceHoldings(tx, portfolio.id, input.holdings.positions, input.now);
         const written = input.transactions ? await upsertTransactions(tx, portfolio.id, input.transactions) : { added: 0, updated: 0 };
 
-        await tx
-            .update(plaidAccounts)
-            .set({ syncStatus: "sync_ready", lastSyncedAt: input.transactions ? input.now : undefined, updatedAt: input.now })
-            .where(and(eq(plaidAccounts.id, input.plaidAccountRecordId), eq(plaidAccounts.userId, input.userId)));
+        if (input.transactions) {
+            await tx
+                .update(plaidAccounts)
+                .set({ lastSyncedAt: input.now, updatedAt: input.now })
+                .where(and(eq(plaidAccounts.id, input.plaidAccountRecordId), eq(plaidAccounts.userId, input.userId)));
+        }
 
         return {
             portfolioId: portfolio.id,
@@ -258,15 +291,31 @@ export async function writeAccountSync(input: AccountSyncWrite, database: Databa
     });
 }
 
-async function replaceHoldings(tx: Executor, portfolioId: string, positions: AccountHoldings["positions"], now: Date) {
-    const symbols = positions.map((p) => p.symbol);
-    await tx
-        .delete(holdings)
-        .where(and(eq(holdings.portfolioId, portfolioId), symbols.length > 0 ? notInArray(holdings.symbol, symbols) : sql`true`));
-    if (positions.length === 0) return;
-    await tx
-        .insert(holdings)
-        .values(positions.map((p) => ({
+/**
+ * Replaces the portfolio's holdings with `positions`; true when a position
+ * was added, removed, or changed in quantity or cost. A holding's
+ * updated_at (also the stock split watermark) moves only when its quantity
+ * or cost does; a new price or name alone isn't a change in what's held.
+ */
+async function replaceHoldings(tx: Executor, portfolioId: string, positions: AccountHoldings["positions"], now: Date): Promise<boolean> {
+    const held = new Map(
+        (await tx
+            .select({ symbol: holdings.symbol, quantity: holdings.quantity, avgCost: holdings.avgCost, updatedAt: holdings.updatedAt })
+            .from(holdings)
+            .where(eq(holdings.portfolioId, portfolioId)))
+            .map((h) => [h.symbol, h]),
+    );
+    const symbols = new Set(positions.map((p) => p.symbol));
+    const removed = [...held.keys()].filter((symbol) => !symbols.has(symbol));
+    if (removed.length > 0) {
+        await tx.delete(holdings).where(and(eq(holdings.portfolioId, portfolioId), inArray(holdings.symbol, removed)));
+    }
+    let changed = removed.length > 0;
+    const rows = positions.map((p) => {
+        const before = held.get(p.symbol);
+        const same = before !== undefined && Number(before.quantity) === p.quantity && Number(before.avgCost) === p.avgCost;
+        if (!same) changed = true;
+        return {
             portfolioId,
             symbol: p.symbol,
             name: p.name,
@@ -276,20 +325,27 @@ async function replaceHoldings(tx: Executor, portfolioId: string, positions: Acc
             // Readers value positions at the newest price they have.
             marketValue: null,
             allocation: null,
-            updatedAt: now,
-        })))
-        .onConflictDoUpdate({
-            target: [holdings.portfolioId, holdings.symbol],
-            set: {
-                name: sql`excluded.name`,
-                quantity: sql`excluded.quantity`,
-                avgCost: sql`excluded.avg_cost`,
-                currentPrice: sql`excluded.current_price`,
-                marketValue: null,
-                allocation: null,
-                updatedAt: now,
-            },
-        });
+            updatedAt: same ? before.updatedAt : now,
+        };
+    });
+    if (rows.length > 0) {
+        await tx
+            .insert(holdings)
+            .values(rows)
+            .onConflictDoUpdate({
+                target: [holdings.portfolioId, holdings.symbol],
+                set: {
+                    name: sql`excluded.name`,
+                    quantity: sql`excluded.quantity`,
+                    avgCost: sql`excluded.avg_cost`,
+                    currentPrice: sql`excluded.current_price`,
+                    marketValue: null,
+                    allocation: null,
+                    updatedAt: sql`excluded.updated_at`,
+                },
+            });
+    }
+    return changed;
 }
 
 async function upsertTransactions(tx: Executor, portfolioId: string, rows: readonly (TransactionRow & { externalId: string })[]) {
@@ -343,7 +399,7 @@ export interface AccountSyncResult extends AccountSyncWritten {
 export type ItemSyncResult =
     /** `overLimit`: picked accounts not added, the user having the most accounts Atlas keeps. */
     | { itemId: string; status: "synced"; accounts: AccountSyncResult[]; overLimit: string[] }
-    | { itemId: string; status: "login-required" | "no-token" | "failed"; accounts: AccountSyncResult[]; error?: string };
+    | { itemId: string; status: "login-required" | "no-token" | "timed-out" | "failed"; accounts: AccountSyncResult[]; error?: string };
 
 export interface SyncDeps {
     config: PlaidConfig;
@@ -351,18 +407,26 @@ export interface SyncDeps {
     fetchImpl?: PlaidFetch;
     getAccessToken?: (itemId: string, userId: string) => Promise<string | undefined>;
     now?: Date;
+    /**
+     * When to stop asking Plaid (ms since the epoch, by `clock`): a request
+     * still waiting then is cancelled and the sync ends "timed-out". Plaid is
+     * asked everything before anything is written, so it writes nothing;
+     * the next sync tries again.
+     */
+    deadline?: number;
+    clock?: () => number;
 }
 
 /** Syncs the item's picked investment accounts; the user's own item only. */
 export async function syncPlaidItem(userId: string, itemId: string, deps: SyncDeps): Promise<ItemSyncResult> {
-    const { config, database = db, fetchImpl = fetch, getAccessToken = getPlaidAccessTokenForUser, now = new Date() } = deps;
+    const { config, database = db, fetchImpl = fetch, getAccessToken = getPlaidAccessTokenForUser, now = new Date(), deadline, clock } = deps;
     const { item, accounts } = await loadSyncTargets(userId, itemId, database);
     if (accounts.length === 0) return { itemId, status: "synced", accounts: [], overLimit: [] };
 
     const accessToken = await getAccessToken(itemId, userId);
     if (!accessToken) return { itemId, status: "no-token", accounts: [] };
 
-    const call = { ...config, accessToken, accountIds: accounts.map((a) => a.plaidAccountId), fetchImpl };
+    const call = { ...config, accessToken, accountIds: accounts.map((a) => a.plaidAccountId), fetchImpl, deadline, clock };
     try {
         const holdingsPayload = await fetchPlaidHoldings(call);
         let history: Awaited<ReturnType<typeof fetchPlaidInvestmentTransactions>> | null = null;
@@ -383,7 +447,7 @@ export async function syncPlaidItem(userId: string, itemId: string, deps: SyncDe
         for (const account of accounts) {
             const held = accountHoldings(account.plaidAccountId, holdingsPayload.holdings, holdingsPayload.securities);
             const activity = history ? accountTransactions(account.plaidAccountId, history.transactions, history.securities) : null;
-            let written: AccountSyncWritten;
+            let written: AccountSyncWritten | null;
             try {
                 written = await writeAccountSync({
                     userId,
@@ -401,6 +465,8 @@ export async function syncPlaidItem(userId: string, itemId: string, deps: SyncDe
                 overLimit.push(linkedPortfolioName(item.institutionName, account.name));
                 continue;
             }
+            // Deleted, or its pick undone, while Plaid was being asked.
+            if (!written) continue;
             results.push({
                 ...written,
                 plaidAccountId: account.plaidAccountId,
@@ -426,6 +492,7 @@ export async function syncPlaidItem(userId: string, itemId: string, deps: SyncDe
                 .where(and(eq(plaidItems.id, item.id), eq(plaidItems.userId, userId)));
             return { itemId, status: "login-required", accounts: [] };
         }
+        if (error instanceof PlaidDeadlineError) return { itemId, status: "timed-out", accounts: [] };
         return { itemId, status: "failed", accounts: [], error: error instanceof Error ? error.message : String(error) };
     }
 }
@@ -439,7 +506,9 @@ export const PLAID_JOB_BUDGET_MS = 30_000;
 
 /**
  * Syncs every active item with an account to sync, the longest unsynced
- * first, until the budget is spent; the rest go first tomorrow.
+ * first, until the budget is spent; the rest go first tomorrow. The budget
+ * bounds each request too, so one slow connection can't take the time the
+ * price backfill and snapshots after it need.
  */
 export async function syncAllPlaidItems({
     config = plaidConfigFromEnv(),
@@ -470,16 +539,17 @@ export async function syncAllPlaidItems({
         ))
         .orderBy(sql`${plaidItems.lastSuccessfulSyncAt} asc nulls first`);
 
-    const counts = { synced: 0, loginRequired: 0, noToken: 0, failed: 0, accounts: 0, positions: 0, transactionsAdded: 0 };
+    const counts = { synced: 0, loginRequired: 0, noToken: 0, timedOut: 0, failed: 0, accounts: 0, positions: 0, transactionsAdded: 0 };
     let done = 0;
     for (const { userId, itemId } of items) {
         if (clock() >= deadline) break;
-        const result = await syncPlaidItem(userId, itemId, { config, database, fetchImpl, getAccessToken, now: new Date(clock()) })
+        const result = await syncPlaidItem(userId, itemId, { config, database, fetchImpl, getAccessToken, now: new Date(clock()), deadline, clock })
             .catch((error: unknown): ItemSyncResult => ({ itemId, status: "failed", accounts: [], error: String(error) }));
         done++;
         if (result.status === "synced") counts.synced++;
         else if (result.status === "login-required") counts.loginRequired++;
         else if (result.status === "no-token") counts.noToken++;
+        else if (result.status === "timed-out") counts.timedOut++;
         else counts.failed++;
         counts.accounts += result.accounts.length;
         for (const account of result.accounts) {

@@ -193,10 +193,13 @@ export function buildExcludeLinkedAccountQuery(userId: string, plaidAccountId: s
  * Deletes the account with its holdings, transactions and valuation
  * history (all cascade). False when the user has no account with that ID.
  * A linked account's Plaid account stops syncing, or the next sync would
- * bring it back.
+ * bring it back; under the user's account lock, which a sync's write takes
+ * too, so a sync already asking Plaid finds it gone rather than writing it
+ * back.
  */
 export async function deletePortfolio(userId: string, id: string, database: Database = db, now: Date = new Date()): Promise<boolean> {
     return database.transaction(async (tx) => {
+        await buildLockUserAccountsQuery(userId, tx);
         const [deleted] = await buildDeletePortfolioQuery(userId, id, tx);
         if (!deleted) return false;
         if (deleted.source === "plaid" && deleted.externalAccountId) {

@@ -19,7 +19,8 @@ const DATABASE_URL = process.env.SCRIPTS_TEST_DATABASE_URL?.trim();
 const CONFIG = { credentials: { clientId: 'client', secret: 'secret' }, environment: 'sandbox' as const };
 const NOW = new Date('2026-10-25T22:30:00.000Z');
 
-type Handler = (body: Record<string, unknown>) => { status?: number; json: unknown };
+type Reply = { status?: number; json: unknown };
+type Handler = (body: Record<string, unknown>) => Reply | Promise<Reply>;
 
 /** A fake Plaid: one handler per endpoint, and the requests it was sent. */
 function fakePlaid(handlers: Record<string, Handler>) {
@@ -30,7 +31,7 @@ function fakePlaid(handlers: Record<string, Handler>) {
         requests.push({ endpoint, body });
         const handler = handlers[endpoint];
         if (!handler) throw new Error(`fake Plaid has no ${endpoint}`);
-        const { status = 200, json } = handler(body);
+        const { status = 200, json } = await handler(body);
         return { ok: status < 400, status, json: async () => json };
     };
     return { fetchImpl, requests };
@@ -121,6 +122,103 @@ describe('Plaid sync into portfolios', { skip: !DATABASE_URL && 'SCRIPTS_TEST_DA
             ['acc_a', 'sync_ready'], ['acc_b', 'excluded'], ['acc_c', 'awaiting_selection'],
         ]);
         await assert.rejects(selectPlaidAccounts('u-someone-else', 'item-pick', ['acc_a'], database), PlaidItemNotFoundError);
+
+        // A pick sent again ("Sync now" sends the accounts connected in
+        // Settings) changes only accounts still waiting: an excluded one
+        // stays excluded, a picked one stays picked.
+        assert.equal(await selectPlaidAccounts('u-pick', 'item-pick', ['acc_b'], database), 0);
+        assert.deepEqual((await statuses('u-pick')).map((r) => [r.id, r.status]), [
+            ['acc_a', 'sync_ready'], ['acc_b', 'excluded'], ['acc_c', 'excluded'],
+        ]);
+    });
+
+    test('regression: an account linked before picks were kept is picked by "Sync now"', async () => {
+        // The Codex finding on PR #162: migration 0022 puts such accounts back
+        // to waiting, and a sync without a pick synced nothing.
+        await linkedUser('u-old', 'item-old', [['acc_old', 'Individual', 'investment'], ['acc_other', 'Joint', 'investment']]);
+        const plaid = fakePlaid({
+            '/investments/holdings/get': holdingsOf('acc_old', [['sec_aapl', 2, 100, 150]]),
+            '/investments/transactions/get': transactionsOf('acc_old', []),
+        });
+        assert.deepEqual((await syncPlaidItem('u-old', 'item-old', deps(plaid.fetchImpl))).accounts, []);
+        assert.equal(await selectPlaidAccounts('u-old', 'item-old', ['acc_old'], database), 1);
+        const synced = await syncPlaidItem('u-old', 'item-old', deps(plaid.fetchImpl));
+        assert.deepEqual(synced.accounts.map((a) => [a.name, a.positions]), [['Fidelity Individual', 1]]);
+        assert.deepEqual((await statuses('u-old')).map((r) => [r.id, r.status]), [['acc_old', 'sync_ready'], ['acc_other', 'excluded']]);
+    });
+
+    test('regression: a sync that finds nothing new doesn\'t look like a change to the snapshot job', async () => {
+        // The Codex finding on PR #162: every sync moved updated_at, which
+        // the snapshot job takes as the last change, so a linked account
+        // synced each evening never got a snapshot.
+        await linkedUser('u-snap', 'item-snap', [['acc_snap', 'Individual', 'investment']]);
+        await selectPlaidAccounts('u-snap', 'item-snap', ['acc_snap'], database);
+        const run = async (rows: [string, number, number, number | null][], cash: number, at: string) => {
+            const plaid = fakePlaid({
+                '/investments/holdings/get': holdingsOf('acc_snap', rows, cash),
+                '/investments/transactions/get': transactionsOf('acc_snap', []),
+            });
+            assert.equal((await syncPlaidItem('u-snap', 'item-snap', deps(plaid.fetchImpl, new Date(at)))).status, 'synced');
+            const [p] = await sql<{ at: string }[]>`SELECT updated_at::text AS at FROM portfolios WHERE user_id = 'u-snap'`;
+            const h = await sql<{ symbol: string; at: string; price: number }[]>`
+                SELECT symbol, h.updated_at::text AS at, current_price AS price FROM holdings h JOIN portfolios p ON p.id = h.portfolio_id WHERE p.user_id = 'u-snap' ORDER BY symbol`;
+            return { portfolio: p.at, holdings: h.map((r) => [r.symbol, r.at, r.price]) };
+        };
+        const first = await run([['sec_aapl', 10, 100, 800], ['sec_vti', 1, 250, 200]], 50, '2026-10-20T22:30:00.000Z');
+        assert.deepEqual(first, { portfolio: '2026-10-20 22:30:00', holdings: [['AAPL', '2026-10-20 22:30:00', 100], ['VTI', '2026-10-20 22:30:00', 250]] });
+        // Same positions and cash, new prices: nothing moves but the prices.
+        assert.deepEqual(await run([['sec_aapl', 10, 104, 800], ['sec_vti', 1, 251, 200]], 50, '2026-10-21T22:30:00.000Z'),
+            { portfolio: '2026-10-20 22:30:00', holdings: [['AAPL', '2026-10-20 22:30:00', 104], ['VTI', '2026-10-20 22:30:00', 251]] });
+        // A changed quantity moves that holding and the portfolio.
+        assert.deepEqual(await run([['sec_aapl', 12, 104, 1000], ['sec_vti', 1, 251, 200]], 50, '2026-10-22T22:30:00.000Z'),
+            { portfolio: '2026-10-22 22:30:00', holdings: [['AAPL', '2026-10-22 22:30:00', 104], ['VTI', '2026-10-20 22:30:00', 251]] });
+        // A sold-out position leaves no holding to date it: the portfolio moves.
+        assert.deepEqual(await run([['sec_aapl', 12, 104, 1000]], 50, '2026-10-23T22:30:00.000Z'),
+            { portfolio: '2026-10-23 22:30:00', holdings: [['AAPL', '2026-10-22 22:30:00', 104]] });
+        // So does the cash alone.
+        assert.equal((await run([['sec_aapl', 12, 104, 1000]], 75, '2026-10-26T22:30:00.000Z')).portfolio, '2026-10-26 22:30:00');
+    });
+
+    test('regression: an account deleted while Plaid is answering stays deleted', async () => {
+        // The Codex finding on PR #162: the sync wrote it back and set it to
+        // sync again. Deleting and a sync's write share the account lock.
+        await linkedUser('u-race', 'item-race', [['acc_race', 'Individual', 'investment']]);
+        await selectPlaidAccounts('u-race', 'item-race', ['acc_race'], database);
+        const holdings = holdingsOf('acc_race', [['sec_aapl', 1, 100, 90]]);
+        await syncPlaidItem('u-race', 'item-race', deps(fakePlaid({ '/investments/holdings/get': holdings, '/investments/transactions/get': transactionsOf('acc_race', []) }).fetchImpl));
+        const [portfolio] = await sql<{ id: string }[]>`SELECT id FROM portfolios WHERE user_id = 'u-race'`;
+
+        const plaid = fakePlaid({
+            '/investments/holdings/get': holdings,
+            '/investments/transactions/get': async (body) => {
+                // The user deletes the account while the sync waits on Plaid.
+                assert.equal(await deletePortfolio('u-race', portfolio.id, database), true);
+                return transactionsOf('acc_race', [BUY])(body);
+            },
+        });
+        const result = await syncPlaidItem('u-race', 'item-race', deps(plaid.fetchImpl, new Date('2026-10-26T22:30:00.000Z')));
+        assert.deepEqual([result.status, result.accounts], ['synced', []]);
+        assert.equal((await sql`SELECT 1 FROM portfolios WHERE user_id = 'u-race'`).length, 0);
+        assert.deepEqual((await statuses('u-race')).map((r) => r.status), ['excluded']);
+    });
+
+    test('regression: a sync past its deadline stops, writing nothing', async () => {
+        // The Codex finding on PR #162: the nightly budget wasn't enforced
+        // inside a connection's sync.
+        await linkedUser('u-slow', 'item-slow', [['acc_slow', 'Individual', 'investment']]);
+        await selectPlaidAccounts('u-slow', 'item-slow', ['acc_slow'], database);
+        let now = NOW.getTime();
+        const plaid = fakePlaid({
+            '/investments/holdings/get': (body) => {
+                now += 45_000; // Plaid takes 45 s to answer
+                return holdingsOf('acc_slow', [['sec_aapl', 1, 100, 90]])(body);
+            },
+            '/investments/transactions/get': transactionsOf('acc_slow', []),
+        });
+        const result = await syncPlaidItem('u-slow', 'item-slow', { ...deps(plaid.fetchImpl), deadline: NOW.getTime() + 30_000, clock: () => now });
+        assert.equal(result.status, 'timed-out');
+        assert.ok(!plaid.requests.some((r) => r.endpoint === '/investments/transactions/get'));
+        assert.equal((await sql`SELECT 1 FROM portfolios WHERE user_id = 'u-slow'`).length, 0);
     });
 
     test('a sync makes the portfolio, replaces its holdings and cash, and upserts its transactions', async () => {
@@ -213,7 +311,7 @@ describe('Plaid sync into portfolios', { skip: !DATABASE_URL && 'SCRIPTS_TEST_DA
     });
 
     test('regression: a new linked account keeps names unique and the account limit, as manual ones do', async () => {
-        await linkedUser('u-names', 'item-names', [['acc_n1', 'Individual', 'investment'], ['acc_n2', 'Roth IRA', 'investment']]);
+        await linkedUser('u-names', 'item-names', [['acc_n1', 'Individual', 'investment']]);
         await selectPlaidAccounts('u-names', 'item-names', ['acc_n1'], database);
         // The user already has an account by that name, typed by hand.
         await sql`INSERT INTO portfolios (user_id, name) VALUES ('u-names', 'fidelity individual')`;
@@ -227,6 +325,10 @@ describe('Plaid sync into portfolios', { skip: !DATABASE_URL && 'SCRIPTS_TEST_DA
 
         // At the limit, a newly picked account isn't added; the linked one still syncs.
         await sql`INSERT INTO portfolios (user_id, name) SELECT 'u-names', 'Filler ' || n FROM generate_series(1, 48) AS n`;
+        // An account the connection gains later, picked then.
+        await sql`
+            INSERT INTO plaid_accounts (user_id, plaid_item_record_id, plaid_account_id, name, mask, type, subtype, capabilities, verification_status)
+            SELECT 'u-names', id, 'acc_n2', 'Roth IRA', '9876', 'investment', 'roth', '["holdings"]', 'automatically_verified' FROM plaid_items WHERE plaid_item_id = 'item-names'`;
         await selectPlaidAccounts('u-names', 'item-names', ['acc_n1', 'acc_n2'], database);
         const full = await syncPlaidItem('u-names', 'item-names', deps(plaid.fetchImpl));
         assert.equal(full.status, 'synced');
@@ -253,7 +355,10 @@ describe('Plaid sync into portfolios', { skip: !DATABASE_URL && 'SCRIPTS_TEST_DA
         const all = await nightly(60_000);
         assert.deepEqual([all.synced, all.loginRequired, all.remaining], [all.items, 0, 0]);
         const synced = plaid.requests.filter((r) => r.endpoint === '/investments/holdings/get').map((r) => (r.body.options as { account_ids: string[] }).account_ids[0]).sort();
-        assert.deepEqual(synced, ['acc_a', 'acc_brokerage', 'acc_n1', 'acc_new', 'acc_night']);
+        // The connections of the tests above too; never one waiting for a
+        // sign-in, nor a deleted account.
+        assert.ok(synced.includes('acc_night') && synced.includes('acc_brokerage'));
+        assert.ok(!synced.includes('acc_login') && !synced.includes('acc_race'));
 
         const [portfolio] = await sql<{ id: string }[]>`SELECT id FROM portfolios WHERE user_id = 'u-night'`;
         assert.equal(await deletePortfolio('u-night', portfolio.id, database), true);

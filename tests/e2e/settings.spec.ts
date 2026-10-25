@@ -228,11 +228,13 @@ test.describe('Settings page', () => {
         await expect(page.getByText("2 accounts: 9 positions and 120 new transactions. 1 holding without a ticker, or in another currency, wasn't brought in.")).toBeVisible();
         expect(syncRequests[0]).toEqual({ itemId: 'item-plaid-sandbox-investments', plaidAccountIds: ['plaid-growth-brokerage', 'plaid-roth-ira'] });
 
-        // "Sync now" syncs the connection again, and says why when it can't.
+        // "Sync now" syncs the connection again, with the accounts connected
+        // here as the pick (so one linked before picks were kept is picked),
+        // and says why when it can't.
         const growth = card.locator('.pm-integration-row').filter({ hasText: 'Plaid Growth Brokerage' });
         await growth.getByRole('button', { name: 'Sync now' }).click();
         await expect(page.getByText('Your bank wants you to sign in again before Atlas can sync this connection.')).toBeVisible();
-        expect(syncRequests[1]).toEqual({ itemId: 'item-plaid-sandbox-investments' });
+        expect(syncRequests[1]).toEqual({ itemId: 'item-plaid-sandbox-investments', plaidAccountIds: ['plaid-growth-brokerage', 'plaid-roth-ira'] });
     });
 
     test('legacy ?tab=notifications links land on the Notifications section', async ({ page }) => {

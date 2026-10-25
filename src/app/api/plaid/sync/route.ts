@@ -9,7 +9,8 @@
  * Body:     { itemId, plaidAccountIds? }
  * Response: 200 { data: { itemId, accounts: [...] } }; 400 INVALID_PLAID_SYNC;
  *           404 PLAID_ITEM_NOT_FOUND; 409 PLAID_LOGIN_REQUIRED or
- *           PLAID_TOKEN_MISSING; 502 PLAID_SYNC_FAILED; 503 PLAID_NOT_CONFIGURED
+ *           PLAID_TOKEN_MISSING; 502 PLAID_SYNC_FAILED; 503 PLAID_NOT_CONFIGURED;
+ *           504 PLAID_SYNC_TIMED_OUT
  */
 
 import { NextResponse } from "next/server";
@@ -49,7 +50,8 @@ export async function POST(request: Request) {
     const requestId = requestIdFrom(request.headers);
     try {
         if (plaidAccountIds) await selectPlaidAccounts(userId, itemId, plaidAccountIds);
-        const result = await syncPlaidItem(userId, itemId, { config });
+        // Within this function's time, with room left to answer.
+        const result = await syncPlaidItem(userId, itemId, { config, deadline: Date.now() + (maxDuration - 10) * 1000 });
         logApiEvent("plaid_sync_finished", {
             route: "/api/plaid/sync",
             requestId,
@@ -64,6 +66,9 @@ export async function POST(request: Request) {
             }
             if (result.status === "no-token") {
                 return apiError("This connection needs linking again before it can sync.", "PLAID_TOKEN_MISSING", 409);
+            }
+            if (result.status === "timed-out") {
+                return apiError("Your institution took too long to answer. Try again in a few minutes.", "PLAID_SYNC_TIMED_OUT", 504);
             }
             console.warn("Plaid sync failed.", result.error);
             return apiError("Plaid couldn't be reached for this connection. Try again later.", "PLAID_SYNC_FAILED", 502);
