@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
@@ -38,6 +38,9 @@ export function ImportHoldingsDialog({
     const [fileName, setFileName] = useState<string | null>(null);
     const [parsed, setParsed] = useState<ParseResult | null>(null);
     const [target, setTarget] = useState<string>(accounts[0]?.id ?? NEW_ACCOUNT);
+    // Whether the user picked the target: "New account…" picked by hand is
+    // kept, unlike the one the dialog starts on when there are no accounts.
+    const targetChosen = useRef(false);
     const [newName, setNewName] = useState("Imported account");
     const [submitting, setSubmitting] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -104,12 +107,13 @@ export function ImportHoldingsDialog({
                 onClick={() => {
                     // The accounts can change while the dialog is closed (one
                     // just created, one deleted): keep a target that still
-                    // exists, otherwise the first account.
-                    setTarget((current) =>
-                        current !== NEW_ACCOUNT && accounts.some((a) => a.id === current)
-                            ? current
-                            : accounts[0]?.id ?? NEW_ACCOUNT,
-                    );
+                    // exists, or a new account the user chose, otherwise the
+                    // first account.
+                    setTarget((current) => {
+                        if (current === NEW_ACCOUNT ? targetChosen.current : accounts.some((a) => a.id === current)) return current;
+                        targetChosen.current = false;
+                        return accounts[0]?.id ?? NEW_ACCOUNT;
+                    });
                     setOpen(true);
                 }}
             >
@@ -200,7 +204,14 @@ export function ImportHoldingsDialog({
                             <div className="pm-import-target">
                                 <label className="pm-exec-field">
                                     <span className="pm-exec-field-label">Import into</span>
-                                    <select className="pm-exec-input" value={target} onChange={(e) => setTarget(e.target.value)}>
+                                    <select
+                                        className="pm-exec-input"
+                                        value={target}
+                                        onChange={(e) => {
+                                            targetChosen.current = true;
+                                            setTarget(e.target.value);
+                                        }}
+                                    >
                                         {accounts.map((a) => (
                                             <option key={a.id} value={a.id}>
                                                 {a.name}
