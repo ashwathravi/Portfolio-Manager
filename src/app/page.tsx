@@ -22,6 +22,8 @@ import { loadQuotes } from '@/lib/services/market-data-service';
 import { buildDashboardPortfoliosQuery, buildUserTransactionsQuery } from '@/lib/portfolio-repository';
 import { toActivityRows, type TransactionRowInput } from '@/lib/portfolio/activity';
 import { toTodayActivity } from '@/lib/today/rows';
+import { getSecurityProfiles } from '@/lib/markets/price-store';
+import { holdingName, loadSecurityProfiles } from '@/lib/markets/security-profile';
 
 /**
  * Today (/).
@@ -63,7 +65,12 @@ export default async function Today() {
 
   // Warm quotes for the first paint; the hero keeps polling client-side.
   // Without market data the stored prices stand.
-  const liveQuotes = await loadQuotes(allPortfolios.flatMap((p) => p.holdings.map((h) => h.symbol)));
+  const heldSymbols = allPortfolios.flatMap((p) => p.holdings.map((h) => h.symbol));
+  const [liveQuotes, profiles] = await Promise.all([
+    loadQuotes(heldSymbols),
+    // Company names from the securities master (launch item i34).
+    loadSecurityProfiles(heldSymbols, getSecurityProfiles),
+  ]);
 
   const cashTotal = allPortfolios.reduce((s, p) => s + (p.cashBalance || 0), 0);
   const allHoldings = allPortfolios.flatMap((p) =>
@@ -76,6 +83,7 @@ export default async function Today() {
         id: h.id,
         portfolio: p.name,
         symbol: h.symbol,
+        name: holdingName(h.symbol, h.name, profiles.get(h.symbol.toUpperCase())),
         quantity,
         avgCost,
         currentPrice,
@@ -103,7 +111,7 @@ export default async function Today() {
   const topHoldingsRows: TopHoldingsRow[] = allHoldings.map((h) => ({
     id: h.id,
     symbol: h.symbol,
-    name: resolveName(h.symbol),
+    name: h.name,
     quantity: h.quantity,
     avgCost: h.avgCost,
     currentPrice: h.currentPrice,
@@ -114,7 +122,7 @@ export default async function Today() {
     holdings: allHoldings.map((h) => ({
       id: h.id,
       symbol: h.symbol,
-      name: resolveName(h.symbol),
+      name: h.name,
       quantity: h.quantity,
       avgCost: h.avgCost,
       currentPrice: h.currentPrice,
@@ -175,37 +183,5 @@ export default async function Today() {
       </SampleGate>
     </div>
   );
-}
-
-// ---------------------------------------------------------------------------
-// Static lookups
-// ---------------------------------------------------------------------------
-
-/**
- * Rough ticker → company name map. Used by the Top Holdings card when the
- * backend doesn't supply a name. Keep it small; anything not in the map
- * falls back to the ticker itself (still readable).
- */
-const TICKER_NAMES: Record<string, string> = {
-  AAPL: 'Apple Inc.',
-  MSFT: 'Microsoft Corp.',
-  NVDA: 'NVIDIA Corp.',
-  GOOG: 'Alphabet Inc. (Class C)',
-  GOOGL: 'Alphabet Inc. (Class A)',
-  META: 'Meta Platforms',
-  AMZN: 'Amazon.com',
-  TSLA: 'Tesla, Inc.',
-  JPM: 'JPMorgan Chase',
-  BRK_B: 'Berkshire Hathaway B',
-  JNJ: 'Johnson & Johnson',
-  BND: 'Vanguard Total Bond',
-  VTI: 'Vanguard Total Stock',
-  VOO: 'Vanguard S&P 500',
-  SPY: 'SPDR S&P 500',
-  QQQ: 'Invesco QQQ',
-};
-
-function resolveName(symbol: string): string {
-  return TICKER_NAMES[symbol.toUpperCase()] ?? symbol;
 }
 

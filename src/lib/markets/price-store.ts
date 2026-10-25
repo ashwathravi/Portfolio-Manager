@@ -17,7 +17,9 @@ import { and, asc, count, desc, eq, exists, gte, inArray, isNotNull, isNull, lt,
 
 import { db } from "@/db";
 import { priceBars, securities } from "@/db/schema";
+import { isSector } from "@/lib/holdings/sector";
 import { tickerSchema } from "@/lib/validators/market-data";
+import { profileFromReference, type SecurityProfile, type TickerReference } from "./security-profile";
 
 type Database = typeof db;
 
@@ -565,4 +567,134 @@ export async function getBars(
     database: Database = db,
 ): Promise<PriceBarInput[]> {
     return buildBarsQuery(symbol, from, to, database);
+}
+
+// ---------------------------------------------------------------------------
+// Securities master (launch item i34): each tracked symbol's reference data
+// ---------------------------------------------------------------------------
+
+/** A symbol's reference data is fetched again after this long. */
+export const REFERENCE_MAX_AGE_MS = 90 * 24 * 60 * 60 * 1000;
+
+const needsReference = (staleBefore: Date) =>
+    or(isNull(securities.referenceUpdatedAt), lt(securities.referenceUpdatedAt, staleBefore));
+
+/**
+ * Tracked symbols whose reference data is missing or older than
+ * `staleBefore`: `priority` (held, benchmarks) first; within each group,
+ * never-failed before failed (least recently first, so a symbol that keeps
+ * failing can't hold the others back), then never fetched, then the oldest.
+ */
+export function buildSymbolsNeedingReferenceQuery(
+    limit: number,
+    priority: readonly string[],
+    staleBefore: Date,
+    database: Pick<Database, "select"> = db,
+) {
+    const first = priority.length > 0
+        ? [sql`case when ${inArray(securities.symbol, [...priority])} then 0 else 1 end`]
+        : [];
+    return database
+        .select({ symbol: securities.symbol })
+        .from(securities)
+        .where(needsReference(staleBefore))
+        .orderBy(
+            ...first,
+            sql`${securities.referenceAttemptedAt} asc nulls first`,
+            sql`${securities.referenceUpdatedAt} asc nulls first`,
+            asc(securities.createdAt),
+            asc(securities.symbol),
+        )
+        .limit(limit);
+}
+
+/** Records a reference fetch that failed, so the symbol rotates behind untried ones. */
+export function buildMarkReferenceAttemptedQuery(symbol: string, at: Date, database: Pick<Database, "update"> = db) {
+    return database
+        .update(securities)
+        .set({ referenceAttemptedAt: at, updatedAt: at })
+        .where(eq(securities.symbol, symbol));
+}
+
+export function buildSymbolsNeedingReferenceCountQuery(staleBefore: Date, database: Pick<Database, "select"> = db) {
+    return database.select({ count: count() }).from(securities).where(needsReference(staleBefore));
+}
+
+/**
+ * Stores a symbol's reference data, or, for a ticker the provider doesn't
+ * know (`reference` null), only when it was looked for: it isn't asked
+ * about again until REFERENCE_MAX_AGE_MS has passed.
+ */
+export function buildSaveReferenceQuery(
+    symbol: string,
+    reference: TickerReference | null,
+    at: Date,
+    database: Pick<Database, "update"> = db,
+) {
+    const profile = reference ? profileFromReference(reference) : null;
+    return database
+        .update(securities)
+        .set(profile && reference
+            ? {
+                name: profile.name,
+                type: profile.type,
+                primaryExchange: reference.primaryExchange,
+                ...(reference.currency ? { currency: reference.currency.toUpperCase() } : {}),
+                sector: profile.sector,
+                industry: profile.industry,
+                sicCode: reference.sicCode,
+                referenceUpdatedAt: at,
+                referenceAttemptedAt: null,
+                updatedAt: at,
+            }
+            : { referenceUpdatedAt: at, referenceAttemptedAt: null, updatedAt: at })
+        .where(eq(securities.symbol, symbol));
+}
+
+/** The stored profiles of `symbols` that have reference data. */
+export function buildSecurityProfilesQuery(symbols: readonly string[], database: Pick<Database, "select"> = db) {
+    return database
+        .select({
+            symbol: securities.symbol,
+            name: securities.name,
+            type: securities.type,
+            sector: securities.sector,
+            industry: securities.industry,
+        })
+        .from(securities)
+        .where(and(inArray(securities.symbol, [...symbols]), isNotNull(securities.referenceUpdatedAt)));
+}
+
+export async function listSymbolsNeedingReference(
+    limit: number,
+    priority: readonly string[],
+    staleBefore: Date,
+    database: Database = db,
+): Promise<string[]> {
+    return (await buildSymbolsNeedingReferenceQuery(limit, priority, staleBefore, database)).map((row) => row.symbol);
+}
+
+export async function countSymbolsNeedingReference(staleBefore: Date, database: Database = db): Promise<number> {
+    const [row] = await buildSymbolsNeedingReferenceCountQuery(staleBefore, database);
+    return row?.count ?? 0;
+}
+
+export async function saveReference(symbol: string, reference: TickerReference | null, at: Date, database: Database = db): Promise<void> {
+    await buildSaveReferenceQuery(symbol, reference, at, database);
+}
+
+export async function markReferenceAttempted(symbol: string, at: Date, database: Database = db): Promise<void> {
+    await buildMarkReferenceAttemptedQuery(symbol, at, database);
+}
+
+/**
+ * Each symbol's stored profile, by upper-case symbol; symbols without
+ * reference data yet are left out. A sector that isn't one of the app's
+ * (stored by an older mapping) reads as none.
+ */
+export async function getSecurityProfiles(symbols: Iterable<string>, database: Database = db): Promise<Map<string, SecurityProfile>> {
+    const normalized = normalizeSymbols(symbols);
+    if (!normalized.length) return new Map();
+    const rows = await buildSecurityProfilesQuery(normalized, database);
+    return new Map(rows.map((row) => [row.symbol, { ...row, sector: isSector(row.sector) ? row.sector : null }]));
 }

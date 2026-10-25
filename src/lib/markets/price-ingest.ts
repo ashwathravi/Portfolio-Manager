@@ -20,7 +20,15 @@
  *    back in the history queue before any day is stored, since the newest
  *    stored day is the next run's bookmark: a failed check or reset stores
  *    nothing, and the next run asks about the same days again.
- * 3. Backfill two years of history for symbols that don't have it yet, one
+ * 3. Fetch reference data (name, security type, industry code: the
+ *    securities master, launch item i34) for symbols that have none or
+ *    whose copy is over 90 days old, held symbols and benchmarks first, at
+ *    most MAX_REFERENCE_PER_RUN a run so the history backfill keeps most of
+ *    the budget. A ticker Massive doesn't know is recorded as looked for and
+ *    asked about again only when that copy would be stale. A fetch that
+ *    fails is retried on later runs, behind symbols not yet tried, so one
+ *    that keeps failing can't hold the others back.
+ * 4. Backfill two years of history for symbols that don't have it yet, one
  *    aggregates call per symbol, while the run's time budget lasts: held
  *    symbols and benchmarks first, and a looked-up symbol only once a daily
  *    file has priced it (a made-up ticker never costs a call). A
@@ -64,23 +72,29 @@ import {
     type SplitEvent,
 } from "@/lib/providers/polygon-massive-adapter";
 import type { OHLC } from "@/types/market-data";
+import type { TickerReference } from "./security-profile";
 
 import { getEasternParts, lastCompletedSession, nextTradingDay, previousTradingDay } from "./market-hours";
 import {
     clearSplitHistories,
     countSymbolsNeedingHistory,
+    countSymbolsNeedingReference,
     getLatestBarDate,
     hasStoredBars,
     isValidBar,
     listSymbolsNeedingHistory,
+    listSymbolsNeedingReference,
     listTrackedSymbols,
     markHistoryAttempted,
+    markReferenceAttempted,
     markHistoryLoaded,
     normalizeSymbols,
     pruneUnpricedSecurities,
+    REFERENCE_MAX_AGE_MS,
     replaceHistory,
     resetHistory,
     resetUnpricedHistories,
+    saveReference,
     selectTrackedBars,
     trackSecurities,
     upsertBars,
@@ -110,6 +124,8 @@ export const CALL_ALLOWANCE_MS = 10_000;
 export const RATE_LIMIT_WAIT_MS = 15_000;
 /** More symbols than one run's budget can fetch, so the budget is what stops it. */
 const BACKFILL_BATCH = 50;
+/** Reference fetches a run: a new holding's sector arrives within a few nights, and backfill keeps the rest. */
+export const MAX_REFERENCE_PER_RUN = 5;
 /** Held tickers per holdings-split request (they go in the URL). */
 const HOLDING_SPLITS_BATCH = 200;
 /** How long a looked-up symbol may go without a bar before it stops being tracked. */
@@ -123,6 +139,8 @@ export interface PriceIngestAdapter {
     getDailyHistory(symbol: string, range: string): Promise<{ bars: OHLC[]; unreadable: number }>;
     /** Splits between two dates, all stocks or only `tickers`. */
     getSplits(from: string, to: string, tickers?: readonly string[]): Promise<SplitEvent[]>;
+    /** A ticker's reference data; null when the provider doesn't know it. */
+    getTickerReference(symbol: string): Promise<TickerReference | null>;
 }
 
 /** The database calls the ingest makes; the price store in production. */
@@ -163,6 +181,13 @@ export interface PriceIngestStore {
     hasBars(symbol: string): Promise<boolean>;
     /** Re-queues loaded symbols with no bar at all (an empty backfill); returns those re-queued. */
     resetUnpricedHistories(symbols: string[]): Promise<string[]>;
+    /** Tracked symbols with no reference data, or data older than `staleBefore`: `priority` first. */
+    listSymbolsNeedingReference(limit: number, priority: readonly string[], staleBefore: Date): Promise<string[]>;
+    countSymbolsNeedingReference(staleBefore: Date): Promise<number>;
+    /** Stores a symbol's reference data; null records a ticker the provider doesn't know. */
+    saveReference(symbol: string, reference: TickerReference | null, at: Date): Promise<void>;
+    /** Records a failed fetch, so the symbol goes behind untried ones next run. */
+    markReferenceAttempted(symbol: string, at: Date): Promise<void>;
 }
 
 export interface IngestPricesOptions {
@@ -205,6 +230,12 @@ export type PriceIngestDetail = {
     /** Symbols still waiting for history after this run. */
     backfillQueue?: number;
     /**
+     * Reference data fetched this run (`updated`), tickers the provider
+     * doesn't know (`unknown`), failures (left for the next run), and how
+     * many symbols still need it.
+     */
+    reference?: { updated: string[]; unknown: string[]; errors: Array<{ symbol: string; error: string }>; queue: number };
+    /**
      * The split check for this run's catch-up days: the tracked stocks that
      * split on them, put back in the history queue (`reset`) before any day
      * was stored, or why there was no check.
@@ -217,7 +248,7 @@ export type PriceIngestDetail = {
      * (`unadjusted`: re-import those), or why there was no check.
      */
     holdingSplits?: ({ from: string; to: string } & Partial<HoldingSplitOutcome>) | { skipped: string };
-    stopped?: { catchUp?: IngestStopReason; backfill?: IngestStopReason };
+    stopped?: { catchUp?: IngestStopReason; reference?: IngestStopReason; backfill?: IngestStopReason };
     /** Provider calls made. */
     calls?: number;
 };
@@ -341,6 +372,10 @@ export function createPriceIngestStore(database: Database = db): PriceIngestStor
         listHeldSince: () => listHeldSince(database),
         hasBars: (symbol) => hasStoredBars(symbol, database),
         resetUnpricedHistories: (symbols) => resetUnpricedHistories(symbols, database),
+        listSymbolsNeedingReference: (limit, priority, staleBefore) => listSymbolsNeedingReference(limit, priority, staleBefore, database),
+        countSymbolsNeedingReference: (staleBefore) => countSymbolsNeedingReference(staleBefore, database),
+        saveReference: (symbol, reference, at) => saveReference(symbol, reference, at, database),
+        markReferenceAttempted: (symbol, at) => markReferenceAttempted(symbol, at, database),
     };
 }
 
@@ -527,14 +562,41 @@ export async function ingestDailyPrices({
     // so one about to be priced isn't dropped) stop being tracked.
     const pruned = await store.pruneUnpricedSecurities(priority, new Date(now().getTime() - UNPRICED_GRACE_MS));
 
-    // 3. Backfill history, up to the newest day the daily files have covered.
+    // 3. Reference data for symbols without it (or with a stale copy), a few a run.
+    const staleBefore = new Date(now().getTime() - REFERENCE_MAX_AGE_MS);
+    const reference: NonNullable<PriceIngestDetail["reference"]> = { updated: [], unknown: [], errors: [], queue: 0 };
+    if (stopped.catchUp === "rate-limited" || stopped.catchUp === "budget") {
+        stopped.reference = stopped.catchUp;
+    } else {
+        for (const symbol of await store.listSymbolsNeedingReference(MAX_REFERENCE_PER_RUN, priority, staleBefore)) {
+            let answer: { value: TickerReference | null } | { stopped: IngestStopReason };
+            try {
+                answer = await paced(() => adapter.getTickerReference(symbol));
+            } catch (error) {
+                // Left for a later run, behind symbols not yet tried.
+                reference.errors.push({ symbol, error: summarizeError(error) });
+                await store.markReferenceAttempted(symbol, now());
+                continue;
+            }
+            if ("stopped" in answer) {
+                stopped.reference = answer.stopped;
+                break;
+            }
+            await store.saveReference(symbol, answer.value, now());
+            (answer.value ? reference.updated : reference.unknown).push(symbol);
+        }
+    }
+    reference.queue = await store.countSymbolsNeedingReference(staleBefore);
+
+    // 4. Backfill history, up to the newest day the daily files have covered.
     // With nothing stored at all, the day before the session: the session
     // itself will come from its daily file.
     const historyThrough = latestAfter ?? previousTradingDay(session);
     const backfilled: NonNullable<PriceIngestDetail["backfilled"]> = [];
     const backfillErrors: NonNullable<PriceIngestDetail["backfillErrors"]> = [];
-    if (stopped.catchUp === "rate-limited" || stopped.catchUp === "budget") {
-        stopped.backfill = stopped.catchUp;
+    const ended = stopped.reference ?? stopped.catchUp;
+    if (ended === "rate-limited" || ended === "budget") {
+        stopped.backfill = ended;
     } else {
         for (const symbol of await store.listSymbolsNeedingHistory(BACKFILL_BATCH, priority)) {
             let history: OHLC[];
@@ -602,6 +664,7 @@ export async function ingestDailyPrices({
         backfilled,
         backfillErrors,
         backfillQueue: await store.countSymbolsNeedingHistory(priority),
+        reference,
         splits,
         stopped,
         calls: pacer.calls,

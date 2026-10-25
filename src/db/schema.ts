@@ -464,9 +464,18 @@ export const securities = pgTable("securities", {
     primaryExchange: text("primary_exchange"),
     currency: text("currency").default("USD").notNull(),
     active: boolean("active").default(true).notNull(),
+    // From the ticker reference data (launch item i34): the app's sector,
+    // mapped from the SIC industry code (kept, so the mapping can change
+    // without fetching again), and the code's description as the industry.
     sector: text("sector"),
     industry: text("industry"),
+    sicCode: text("sic_code"),
+    // When the reference data was last fetched (or found missing); null
+    // until the nightly job has fetched it.
     referenceUpdatedAt: timestamp("reference_updated_at"),
+    // The last fetch that failed (a provider error), so the queue takes
+    // never-tried symbols first and failures rotate behind them.
+    referenceAttemptedAt: timestamp("reference_attempted_at"),
     // Null until the history backfill has run; then the earliest date it covers.
     historyStartDate: date("history_start_date", { mode: "string" }),
     // The last backfill attempt that left the symbol queued (an error, or no

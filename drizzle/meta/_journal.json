@@ -148,6 +148,13 @@
       "when": 1792857564341,
       "tag": "0020_transactions_fees_currency_source",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1792882470119,
+      "tag": "0021_securities_reference",
+      "breakpoints": true
     }
   ]
 }

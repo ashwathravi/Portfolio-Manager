@@ -135,3 +135,17 @@ VALUES
   ('00000000-0000-4000-8000-000000000002', '2026-09-30', 'PG', 50, 7000, 150, '2026-09-30', 7500),
   ('00000000-0000-4000-8000-000000000002', '2026-10-01', 'PG', 50, 7000, 165, '2026-10-01', 8250)
 ON CONFLICT (portfolio_id, date, symbol) DO NOTHING;
+
+-- Reference data for user A's holdings (the securities master, launch item
+-- i34), as the nightly job stores it: sector from the SIC code. AMZN's code
+-- is catalog retail, so it's Consumer, where the old ticker map said Tech.
+-- No bars: these stay unpriced.
+INSERT INTO securities (symbol, name, type, primary_exchange, sector, industry, sic_code, reference_updated_at)
+VALUES
+  ('AAPL', 'Apple Inc.', 'CS', 'XNAS', 'Tech', 'ELECTRONIC COMPUTERS', '3571', now()),
+  ('MSFT', 'Microsoft Corp', 'CS', 'XNAS', 'Tech', 'SERVICES-PREPACKAGED SOFTWARE', '7372', now()),
+  ('NVDA', 'Nvidia Corp', 'CS', 'XNAS', 'Tech', 'SEMICONDUCTORS & RELATED DEVICES', '3674', now()),
+  ('GOOGL', 'Alphabet Inc. Class A', 'CS', 'XNAS', 'Tech', 'SERVICES-COMPUTER PROGRAMMING, DATA PROCESSING, ETC.', '7370', now()),
+  ('TSLA', 'Tesla, Inc. Common Stock', 'CS', 'XNAS', 'Auto', 'MOTOR VEHICLES & PASSENGER CAR BODIES', '3711', now()),
+  ('AMZN', 'Amazon.Com Inc', 'CS', 'XNAS', 'Consumer', 'RETAIL-CATALOG & MAIL-ORDER HOUSES', '5961', now())
+ON CONFLICT (symbol) DO NOTHING;
