@@ -41,11 +41,21 @@ describe("user settings queries", () => {
         const { sql, params } = buildSaveUserSettingsQuery(USER, document, base, NOW).toSQL();
 
         assert.match(sql, /insert into "user_settings" \("user_id", "version", "settings", "updated_at"\)/i);
-        assert.match(sql, /on conflict \("user_id"\) do update set "version" = \$\d+, "settings" = \$\d+, "updated_at" = \$\d+ where \("user_settings"\."updated_at" = \$\d+ and "user_settings"\."version" <= \$\d+\)/i);
+        assert.match(sql, /on conflict \("user_id"\) do update set "version" = \$\d+, "settings" = \$\d+, "updated_at" = \$\d+ where \(date_trunc\('milliseconds', "user_settings"\."updated_at"\) = \$\d+::timestamp and "user_settings"\."version" <= \$\d+\)/i);
         assert.match(sql, /returning "updated_at"/i);
         assert.ok(params.includes(USER));
         assert.ok(params.includes(JSON.stringify(document.settings)));
         assert.ok(params.includes(NOW.toISOString()));
+        assert.ok(params.includes(base));
+    });
+
+    test("regression: the stored version is compared to the millisecond, as the browser has it", () => {
+        // A row stamped by Postgres (now(), microseconds) never equalled the
+        // version the browser sent back (a Date: milliseconds), so a new
+        // user's every settings change was refused as a conflict and undone.
+        const base = "2026-10-25T14:13:12.123Z";
+        const { sql, params } = buildSaveUserSettingsQuery(USER, { version: 15, settings: {} }, base, NOW).toSQL();
+        assert.match(sql, /date_trunc\('milliseconds', "user_settings"\."updated_at"\) = \$\d+::timestamp/);
         assert.ok(params.includes(base));
     });
 
@@ -122,10 +132,10 @@ describe("new users' settings", () => {
         assert.deepEqual(normalizeSettings(NEW_USER_SETTINGS.settings).demo, { showSampleData: false });
     });
 
-    test("stored only if the user has none yet", () => {
-        const { sql, params } = buildSeedUserSettingsQuery("user-new").toSQL();
-        assert.match(sql, /^insert into "user_settings" \("user_id", "version", "settings", "updated_at"\) values \(\$1, \$2, \$3, default\) on conflict \("user_id"\) do nothing$/);
-        assert.deepEqual(params.slice(0, 2), ["user-new", SETTINGS_VERSION]);
+    test("stored only if the user has none yet, stamped to the millisecond like every save", () => {
+        const { sql, params } = buildSeedUserSettingsQuery("user-new", undefined, NOW).toSQL();
+        assert.match(sql, /^insert into "user_settings" \("user_id", "version", "settings", "updated_at"\) values \(\$1, \$2, \$3, \$4\) on conflict \("user_id"\) do nothing$/);
+        assert.deepEqual(params, ["user-new", SETTINGS_VERSION, JSON.stringify(NEW_USER_SETTINGS.settings), NOW.toISOString()]);
     });
 
     test("a failure doesn't stop sign-in", async () => {
