@@ -53,7 +53,7 @@ The Playwright config (`playwright.config.ts`) starts its own servers (on 3000, 
 
 **Tests that change settings, the watchlist, the journal or theses sign in as a fresh user.** These are stored per user on the server (`user_settings`, `watchlist_items`, `journal_entries`, `theses`), so a test that changes them as fixture user A would change them for every test after it. Call `signInAsFreshUser(context)` from `tests/e2e/helpers/users.ts` first: it creates a copy of user A (same portfolios, holdings and transactions) with settings of its own. Without database sessions it does nothing, since each test's browser storage is already its own.
 
-**E2E never touches real services.** A server Playwright starts gets `DATABASE_URL=""` unless the shell exports one, empty Upstash variables, an empty `POLYGON_API_KEY` and no Sentry DSN, so neither `.env.local`'s database, the shared Redis, the market-data provider nor Sentry is used.
+**E2E never touches real services.** A server Playwright starts gets `DATABASE_URL=""` unless the shell exports one, empty Upstash variables, an empty `POLYGON_API_KEY` and no Sentry DSN, so neither `.env.local`'s database, the shared Redis, the market-data provider nor Sentry is used. Without a usable `DATABASE_URL` (missing, or Vercel's `"[SENSITIVE]"` placeholder) the app connects to no database at all, not even `PGHOST` or `localhost:5432`: every query rejects at once with `DatabaseNotConfiguredError` (`src/db/unconfigured-client.ts`), and pages show their empty states.
 
 ### Local database
 
