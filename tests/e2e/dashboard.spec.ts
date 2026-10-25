@@ -541,6 +541,11 @@ test.describe('Today › First run', () => {
         await expect(examples).toBeVisible();
         await expect(page.getByTestId('today-examples')).toHaveCount(0);
 
+        // Still off after a reload, when this browser has its own copy too.
+        await reloadAppPage(page);
+        await expect(examples).toBeVisible();
+        await expect(page.getByTestId('today-examples')).toHaveCount(0);
+
         await examples.getByRole('button', { name: 'Show example data' }).click();
         await expect(page.getByTestId('today-examples')).toBeVisible();
         await expect(examples).toHaveCount(0);
