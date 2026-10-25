@@ -9,7 +9,8 @@
  * Body:     { itemId, plaidAccountIds? }
  * Response: 200 { data: { itemId, accounts: [...] } }; 400 INVALID_PLAID_SYNC;
  *           404 PLAID_ITEM_NOT_FOUND; 409 PLAID_LOGIN_REQUIRED or
- *           PLAID_TOKEN_MISSING; 502 PLAID_SYNC_FAILED; 503 PLAID_NOT_CONFIGURED;
+ *           PLAID_TOKEN_MISSING; 502 PLAID_SYNC_FAILED; 503 PLAID_NOT_CONFIGURED or
+ *           PLAID_CONNECTIONS_NOT_STORED;
  *           504 PLAID_SYNC_TIMED_OUT
  */
 
@@ -20,6 +21,7 @@ import { readJsonBody } from "@/lib/api/body";
 import { apiError, internalServerError, logApiEvent } from "@/lib/api/security";
 import { requireSessionApiUserScope } from "@/lib/api/session-security";
 import { requestIdFrom } from "@/lib/observability/request-id";
+import { plaidConnectionsInDatabase } from "@/lib/plaid/server-token-vault";
 import { PlaidItemNotFoundError, plaidConfigFromEnv, selectPlaidAccounts, syncPlaidItem } from "@/lib/plaid/sync";
 import { plaidSyncSchema } from "@/lib/validators/plaid-sync";
 
@@ -36,6 +38,15 @@ export async function POST(request: Request) {
     const config = plaidConfigFromEnv();
     if (!config || !isDatabaseConfigured()) {
         return apiError("Linked accounts can't sync here: Plaid isn't set up.", "PLAID_NOT_CONFIGURED", 503);
+    }
+    // In local development the token vault can be a file or memory, which
+    // keeps no connection to sync (production always uses the database).
+    if (!plaidConnectionsInDatabase()) {
+        return apiError(
+            "Linked accounts can't sync here: Plaid connections aren't kept in the database (set PLAID_TOKEN_STORAGE=postgres).",
+            "PLAID_CONNECTIONS_NOT_STORED",
+            503,
+        );
     }
 
     const body = await readJsonBody(request, MAX_BODY_BYTES);

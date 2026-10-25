@@ -426,6 +426,15 @@ function readKeyVersion(): string {
     return process.env.PLAID_TOKEN_KEY_VERSION?.trim() || DEFAULT_KEY_VERSION;
 }
 
+/**
+ * Whether Plaid connections are kept in the database (plaid_items and
+ * plaid_accounts), as in production. Syncing them (launch item i44) needs
+ * it: the local file or memory vault keeps only the token.
+ */
+export function plaidConnectionsInDatabase(): boolean {
+    return shouldUsePostgresTokenRegistry() && plaidTokenRegistryStore.configured();
+}
+
 function shouldUsePostgresTokenRegistry(): boolean {
     return process.env.PLAID_TOKEN_STORAGE?.trim() === "postgres" || process.env.NODE_ENV === "production";
 }

@@ -144,9 +144,23 @@ describe("Plaid API routes", () => {
         assert.equal((await withoutDatabase.json()).code, "PLAID_NOT_CONFIGURED");
     });
 
+    test("regression: sync says why it can't when Plaid connections aren't kept in the database", async () => {
+        // The Codex finding on PR #162: the local file vault keeps only the
+        // token, so the sync looked for a connection that was never stored.
+        configurePlaidEnv();
+        process.env.DATABASE_URL = "postgres://atlas_app:pw@db.example.invalid:6543/postgres";
+        const response = await syncPlaid(authorizedRequest("/api/plaid/sync", { itemId: "item-route" }));
+        assert.equal(response.status, 503);
+        assert.deepEqual(await response.json(), {
+            error: "Linked accounts can't sync here: Plaid connections aren't kept in the database (set PLAID_TOKEN_STORAGE=postgres).",
+            code: "PLAID_CONNECTIONS_NOT_STORED",
+        });
+    });
+
     test("sync refuses a request that isn't one, before touching the database", async () => {
         configurePlaidEnv();
         process.env.DATABASE_URL = "postgres://atlas_app:pw@db.example.invalid:6543/postgres";
+        process.env.PLAID_TOKEN_STORAGE = "postgres";
         for (const body of [{}, { itemId: "has space" }, { itemId: "item-route", plaidAccountIds: "acc" }, { itemId: "item-route", accessToken: "x" }]) {
             const response = await syncPlaid(authorizedRequest("/api/plaid/sync", body));
             assert.equal(response.status, 400, JSON.stringify(body));

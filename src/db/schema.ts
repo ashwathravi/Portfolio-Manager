@@ -139,6 +139,9 @@ export const plaidItems = pgTable("plaid_items", {
     accessTokenAuthTag: text("access_token_auth_tag").notNull(),
     keyVersion: text("key_version").default("v1").notNull(),
     lastSuccessfulSyncAt: timestamp("last_successful_sync_at"),
+    // When a sync of it last started, finished or not: the nightly job takes
+    // the least recently tried first, so a slow connection can't keep its turn.
+    lastSyncAttemptAt: timestamp("last_sync_attempt_at"),
     revokedAt: timestamp("revoked_at"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
@@ -173,8 +176,12 @@ export const plaidAccounts = pgTable("plaid_accounts", {
     // connect, then "sync_ready" (synced into a portfolio) or "excluded"
     // (left out, or its portfolio deleted). Only "sync_ready" is synced.
     syncStatus: text("sync_status").default("awaiting_selection").notNull(),
-    // The last sync of its holdings and transactions; null before the first.
+    // When the sync that last brought in its transactions started; null
+    // before the first (the next sync then reads two years).
     lastSyncedAt: timestamp("last_synced_at"),
+    // When the sync that last wrote its holdings started: an older sync
+    // finishing later (the nightly job and "Sync now" overlapping) is dropped.
+    holdingsSyncedAt: timestamp("holdings_synced_at"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (table) => ({

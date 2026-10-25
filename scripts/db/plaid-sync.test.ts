@@ -202,6 +202,26 @@ describe('Plaid sync into portfolios', { skip: !DATABASE_URL && 'SCRIPTS_TEST_DA
         assert.deepEqual((await statuses('u-race')).map((r) => r.status), ['excluded']);
     });
 
+    test('regression: an older sync finishing after a newer one doesn\'t replace what it wrote', async () => {
+        // The Codex finding on PR #162: the nightly job and "Sync now"
+        // overlapping, the one that started first could write last.
+        await linkedUser('u-overlap', 'item-overlap', [['acc_overlap', 'Individual', 'investment']]);
+        await selectPlaidAccounts('u-overlap', 'item-overlap', ['acc_overlap'], database);
+        const sync = (quantity: number, at: string) => syncPlaidItem('u-overlap', 'item-overlap', deps(fakePlaid({
+            '/investments/holdings/get': holdingsOf('acc_overlap', [['sec_aapl', quantity, 100, quantity * 90]]),
+            '/investments/transactions/get': transactionsOf('acc_overlap', []),
+        }).fetchImpl, new Date(at)));
+        // The newer sync (started 22:31) writes first; the older (22:30) after.
+        assert.equal((await sync(7, '2026-10-27T22:31:00.000Z')).accounts.length, 1);
+        assert.deepEqual((await sync(5, '2026-10-27T22:30:00.000Z')).accounts, []);
+        const [held] = await sql<{ quantity: number }[]>`
+            SELECT h.quantity::float AS quantity FROM holdings h JOIN portfolios p ON p.id = h.portfolio_id WHERE p.user_id = 'u-overlap'`;
+        assert.equal(held.quantity, 7);
+        const [account] = await sql<{ holdings: string; history: string }[]>`
+            SELECT holdings_synced_at::text AS holdings, last_synced_at::text AS history FROM plaid_accounts WHERE plaid_account_id = 'acc_overlap'`;
+        assert.deepEqual({ ...account }, { holdings: '2026-10-27 22:31:00', history: '2026-10-27 22:31:00' });
+    });
+
     test('regression: a sync past its deadline stops, writing nothing', async () => {
         // The Codex finding on PR #162: the nightly budget wasn't enforced
         // inside a connection's sync.
@@ -219,6 +239,29 @@ describe('Plaid sync into portfolios', { skip: !DATABASE_URL && 'SCRIPTS_TEST_DA
         assert.equal(result.status, 'timed-out');
         assert.ok(!plaid.requests.some((r) => r.endpoint === '/investments/transactions/get'));
         assert.equal((await sql`SELECT 1 FROM portfolios WHERE user_id = 'u-slow'`).length, 0);
+        // Tried, though it didn't finish: the nightly job takes others first next time.
+        const [item] = await sql<{ tried: boolean; synced: string | null }[]>`
+            SELECT last_sync_attempt_at = ${NOW.toISOString()}::timestamp AS tried, last_successful_sync_at::text AS synced FROM plaid_items WHERE plaid_item_id = 'item-slow'`;
+        assert.deepEqual({ ...item }, { tried: true, synced: null });
+    });
+
+    test('regression: the nightly job takes the least recently tried connection first, not the least recently synced', async () => {
+        // The Codex finding on PR #162: a connection that kept running out of
+        // time never synced, so it stayed first and took every night's turn.
+        await linkedUser('u-rot-a', 'item-rot-a', [['acc_rot_a', 'Individual', 'investment']]);
+        await linkedUser('u-rot-b', 'item-rot-b', [['acc_rot_b', 'Individual', 'investment']]);
+        await selectPlaidAccounts('u-rot-a', 'item-rot-a', ['acc_rot_a'], database);
+        await selectPlaidAccounts('u-rot-b', 'item-rot-b', ['acc_rot_b'], database);
+        // B never synced, but was tried last night; A synced a while ago.
+        await sql`UPDATE plaid_items SET last_sync_attempt_at = '2026-10-24 22:30', last_successful_sync_at = NULL WHERE plaid_item_id = 'item-rot-b'`;
+        await sql`UPDATE plaid_items SET last_sync_attempt_at = '2026-10-01 22:30', last_successful_sync_at = '2026-10-01 22:30' WHERE plaid_item_id = 'item-rot-a'`;
+        const plaid = fakePlaid({
+            '/investments/holdings/get': (body) => holdingsOf(((body.options as { account_ids: string[] }).account_ids)[0], [['sec_aapl', 1, 100, 90]])(body),
+            '/investments/transactions/get': (body) => transactionsOf(((body.options as { account_ids: string[] }).account_ids)[0], [])(body),
+        });
+        await syncAllPlaidItems({ config: CONFIG, budgetMs: 60_000, database, fetchImpl: plaid.fetchImpl, getAccessToken: async () => 'access-sandbox-1', clock: () => NOW.getTime() });
+        const order = plaid.requests.filter((r) => r.endpoint === '/investments/holdings/get').map((r) => (r.body.options as { account_ids: string[] }).account_ids[0]);
+        assert.ok(order.indexOf('acc_rot_a') < order.indexOf('acc_rot_b'), order.join(','));
     });
 
     test('a sync makes the portfolio, replaces its holdings and cash, and upserts its transactions', async () => {

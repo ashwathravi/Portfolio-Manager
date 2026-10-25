@@ -1,5 +1,5 @@
 {
-  "id": "ea04730d-2b20-4ca9-93b2-8776aa14c35a",
+  "id": "78cb2071-296a-4baf-9ca9-64ccb0b4f9ee",
   "prevId": "75e08f62-dcd4-4772-8280-c840f3b4bd7a",
   "version": "7",
   "dialect": "postgresql",
@@ -2411,6 +2411,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "holdings_synced_at": {
+          "name": "holdings_synced_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp",
@@ -2604,6 +2610,12 @@
         },
         "last_successful_sync_at": {
           "name": "last_successful_sync_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_sync_attempt_at": {
+          "name": "last_sync_attempt_at",
           "type": "timestamp",
           "primaryKey": false,
           "notNull": false

@@ -141,7 +141,7 @@ Production Plaid token storage:
 - Store Plaid access tokens in Postgres as encrypted token rows scoped by authenticated `user_id` and internal Plaid item id.
 - Encrypt tokens before database write with an application key from the production secrets manager or KMS-backed secret. Track key version on each token row for rotation.
 - Keep displayable account metadata separate from encrypted token material. Client responses may include account names, masks, institution metadata, and sync state, but never access tokens, public tokens, or encrypted token blobs.
-- Set `PLAID_TOKEN_STORAGE=postgres` in production so Plaid connections write to the durable registry. Leave it unset in local development to keep the encrypted file vault behavior.
+- Set `PLAID_TOKEN_STORAGE=postgres` in production so Plaid connections write to the durable registry. Leave it unset in local development to keep the encrypted file vault behavior; set it locally too to sync linked accounts into portfolios, since the file vault keeps only the token, not the connection (`POST /api/plaid/sync` answers 503 `PLAID_CONNECTIONS_NOT_STORED` without it).
 - Use `PLAID_TOKEN_KEY_VERSION` during operator-managed key rotation; rotate by re-encrypting registry rows under the new key version before disabling the old key.
 
 Supabase Data API posture:
@@ -446,7 +446,7 @@ For Plaid:
 
 The app stores account metadata in settings. Plaid access tokens stay server-side.
 
-For local sandbox testing, configure `PLAID_TOKEN_ENCRYPTION_KEY` before connecting accounts if you want Plaid access tokens to survive a dev-server restart.
+For local sandbox testing, configure `PLAID_TOKEN_ENCRYPTION_KEY` before connecting accounts if you want Plaid access tokens to survive a dev-server restart, and `PLAID_TOKEN_STORAGE=postgres` to sync the linked accounts' holdings and transactions into portfolios.
 
 ### Bucket Policy
 

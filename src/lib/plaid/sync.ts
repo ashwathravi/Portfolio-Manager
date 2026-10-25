@@ -218,8 +218,10 @@ export interface AccountSyncWritten {
  * MAX_ACCOUNTS_PER_USER; the name and description left as the user set them
  * after), its positions and cash replaced, its transactions upserted.
  *
- * Null, writing nothing, when the account no longer syncs: deleted (or its
- * pick undone) while Plaid was being asked. Throws AccountLimitError for a
+ * Null, writing nothing, when the account no longer syncs (deleted, or its
+ * pick undone, while Plaid was being asked) or a sync that started later
+ * has written it already (the nightly job and "Sync now" overlapping): an
+ * older answer never replaces a newer one. Throws AccountLimitError for a
  * new account past the limit, writing nothing.
  *
  * The portfolio's and its holdings' updated_at move only when a position
@@ -230,11 +232,12 @@ export async function writeAccountSync(input: AccountSyncWrite, database: Databa
     return database.transaction(async (tx) => {
         await buildLockUserAccountsQuery(input.userId, tx);
         const [account] = await tx
-            .select({ syncStatus: plaidAccounts.syncStatus })
+            .select({ syncStatus: plaidAccounts.syncStatus, holdingsSyncedAt: plaidAccounts.holdingsSyncedAt })
             .from(plaidAccounts)
             .where(and(eq(plaidAccounts.id, input.plaidAccountRecordId), eq(plaidAccounts.userId, input.userId)))
             .limit(1);
         if (account?.syncStatus !== "sync_ready") return null;
+        if (account.holdingsSyncedAt && account.holdingsSyncedAt.getTime() > input.now.getTime()) return null;
 
         const [existing] = await tx
             .select({ id: portfolios.id, name: portfolios.name, cash: portfolios.cashBalance })
@@ -273,12 +276,15 @@ export async function writeAccountSync(input: AccountSyncWrite, database: Databa
 
         const written = input.transactions ? await upsertTransactions(tx, portfolio.id, input.transactions) : { added: 0, updated: 0 };
 
-        if (input.transactions) {
-            await tx
-                .update(plaidAccounts)
-                .set({ lastSyncedAt: input.now, updatedAt: input.now })
-                .where(and(eq(plaidAccounts.id, input.plaidAccountRecordId), eq(plaidAccounts.userId, input.userId)));
-        }
+        await tx
+            .update(plaidAccounts)
+            .set({
+                holdingsSyncedAt: input.now,
+                // Only once its history came in: until then the next sync reads two years.
+                lastSyncedAt: input.transactions ? input.now : undefined,
+                updatedAt: input.now,
+            })
+            .where(and(eq(plaidAccounts.id, input.plaidAccountRecordId), eq(plaidAccounts.userId, input.userId)));
 
         return {
             portfolioId: portfolio.id,
@@ -422,6 +428,11 @@ export async function syncPlaidItem(userId: string, itemId: string, deps: SyncDe
     const { config, database = db, fetchImpl = fetch, getAccessToken = getPlaidAccessTokenForUser, now = new Date(), deadline, clock } = deps;
     const { item, accounts } = await loadSyncTargets(userId, itemId, database);
     if (accounts.length === 0) return { itemId, status: "synced", accounts: [], overLimit: [] };
+    // Tried now, however it ends: the nightly job takes the least recently tried first.
+    await database
+        .update(plaidItems)
+        .set({ lastSyncAttemptAt: now })
+        .where(and(eq(plaidItems.id, item.id), eq(plaidItems.userId, userId)));
 
     const accessToken = await getAccessToken(itemId, userId);
     if (!accessToken) return { itemId, status: "no-token", accounts: [] };
@@ -505,10 +516,12 @@ export async function syncPlaidItem(userId: string, itemId: string, deps: SyncDe
 export const PLAID_JOB_BUDGET_MS = 30_000;
 
 /**
- * Syncs every active item with an account to sync, the longest unsynced
- * first, until the budget is spent; the rest go first tomorrow. The budget
- * bounds each request too, so one slow connection can't take the time the
- * price backfill and snapshots after it need.
+ * Syncs every active item with an account to sync, the least recently
+ * tried first, until the budget is spent: the rest go first tomorrow, and
+ * a connection that keeps running out of time goes to the back rather than
+ * taking every night's turn. The budget bounds each request too, so one
+ * slow connection can't take the time the price backfill and snapshots
+ * after it need.
  */
 export async function syncAllPlaidItems({
     config = plaidConfigFromEnv(),
@@ -528,7 +541,12 @@ export async function syncAllPlaidItems({
     if (!config) return { skipped: "PLAID_NOT_CONFIGURED" };
     const deadline = clock() + budgetMs;
     const items = await database
-        .selectDistinct({ userId: plaidItems.userId, itemId: plaidItems.plaidItemId, lastSync: plaidItems.lastSuccessfulSyncAt })
+        .selectDistinct({
+            userId: plaidItems.userId,
+            itemId: plaidItems.plaidItemId,
+            lastAttempt: plaidItems.lastSyncAttemptAt,
+            lastSync: plaidItems.lastSuccessfulSyncAt,
+        })
         .from(plaidItems)
         .innerJoin(plaidAccounts, eq(plaidAccounts.plaidItemRecordId, plaidItems.id))
         .where(and(
@@ -537,7 +555,7 @@ export async function syncAllPlaidItems({
             eq(plaidAccounts.syncStatus, "sync_ready"),
             eq(plaidAccounts.type, "investment"),
         ))
-        .orderBy(sql`${plaidItems.lastSuccessfulSyncAt} asc nulls first`);
+        .orderBy(sql`${plaidItems.lastSyncAttemptAt} asc nulls first`, sql`${plaidItems.lastSuccessfulSyncAt} asc nulls first`);
 
     const counts = { synced: 0, loginRequired: 0, noToken: 0, timedOut: 0, failed: 0, accounts: 0, positions: 0, transactionsAdded: 0 };
     let done = 0;
