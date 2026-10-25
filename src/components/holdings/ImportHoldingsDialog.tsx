@@ -98,7 +98,21 @@ export function ImportHoldingsDialog({
 
     return (
         <>
-            <button type="button" className={triggerClassName} onClick={() => setOpen(true)}>
+            <button
+                type="button"
+                className={triggerClassName}
+                onClick={() => {
+                    // The accounts can change while the dialog is closed (one
+                    // just created, one deleted): keep a target that still
+                    // exists, otherwise the first account.
+                    setTarget((current) =>
+                        current !== NEW_ACCOUNT && accounts.some((a) => a.id === current)
+                            ? current
+                            : accounts[0]?.id ?? NEW_ACCOUNT,
+                    );
+                    setOpen(true);
+                }}
+            >
                 Import CSV
             </button>
             <Dialog

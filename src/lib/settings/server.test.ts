@@ -3,7 +3,17 @@ import assert from "node:assert/strict";
 
 import type { db } from "@/db";
 
-import { buildLoadUserSettingsQuery, buildSaveUserSettingsQuery, saveUserSettings, serverSettingsFor } from "./server";
+import {
+    buildLoadUserSettingsQuery,
+    buildSaveUserSettingsQuery,
+    buildSeedUserSettingsQuery,
+    NEW_USER_SETTINGS,
+    saveUserSettings,
+    seedNewUserSettings,
+    serverSettingsFor,
+} from "./server";
+import { SETTINGS_VERSION } from "./document";
+import { normalizeSettings } from "@/lib/stores/settingsStore";
 
 const USER = "00000000-0000-4000-8000-00000000a001";
 const NOW = new Date("2026-10-19T08:00:00.000Z");
@@ -102,5 +112,30 @@ describe("saveUserSettings", () => {
             status: "conflict",
             current: { version: 15, settings: { demo: { showSampleData: false } }, updatedAt: later.toISOString() },
         });
+    });
+});
+
+describe("new users' settings", () => {
+    test("example data starts off; nothing else is set", () => {
+        assert.deepEqual(NEW_USER_SETTINGS, { version: SETTINGS_VERSION, settings: { demo: { showSampleData: false } } });
+        // The stored section is one the store reads back as is.
+        assert.deepEqual(normalizeSettings(NEW_USER_SETTINGS.settings).demo, { showSampleData: false });
+    });
+
+    test("stored only if the user has none yet", () => {
+        const { sql, params } = buildSeedUserSettingsQuery("user-new").toSQL();
+        assert.match(sql, /^insert into "user_settings" \("user_id", "version", "settings", "updated_at"\) values \(\$1, \$2, \$3, default\) on conflict \("user_id"\) do nothing$/);
+        assert.deepEqual(params.slice(0, 2), ["user-new", SETTINGS_VERSION]);
+    });
+
+    test("a failure doesn't stop sign-in", async () => {
+        const original = console.warn;
+        console.warn = () => {};
+        try {
+            const failing = { insert: () => { throw new Error("connection refused"); } } as never;
+            await seedNewUserSettings("user-new", failing);
+        } finally {
+            console.warn = original;
+        }
     });
 });
