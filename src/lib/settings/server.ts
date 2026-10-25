@@ -25,7 +25,8 @@ export function buildLoadUserSettingsQuery(userId: string, database: Database = 
 /**
  * Saves `document` only if it was made on the stored version: the row's
  * `updated_at` must still be `baseUpdatedAt`, or, with no base, there must
- * be no row yet. Nor does it replace a document from a newer version of the
+ * be no row yet. They're compared to the millisecond, as far as the browser
+ * has the stamp: a row Postgres stamped (microseconds) still matches. Nor does it replace a document from a newer version of the
  * app (after a rollback) with an older shape. Returns no row when a check
  * fails.
  */
@@ -44,7 +45,10 @@ export function buildSaveUserSettingsQuery(
             set: { version: document.version, settings: document.settings, updatedAt: now },
             setWhere: baseUpdatedAt === null
                 ? sql`false`
-                : and(eq(userSettings.updatedAt, new Date(baseUpdatedAt)), lte(userSettings.version, document.version)),
+                : and(
+                    sql`date_trunc('milliseconds', ${userSettings.updatedAt}) = ${new Date(baseUpdatedAt).toISOString()}::timestamp`,
+                    lte(userSettings.version, document.version),
+                ),
         })
         .returning({ updatedAt: userSettings.updatedAt });
 }
@@ -103,11 +107,14 @@ export const NEW_USER_SETTINGS: SettingsDocument = {
     settings: { demo: { showSampleData: false } },
 };
 
-/** Stores the new-user settings, unless the user already has some. */
-export function buildSeedUserSettingsQuery(userId: string, database: Pick<Database, "insert"> = db) {
+/**
+ * Stores the new-user settings, unless the user already has some. Stamped
+ * here, like every save, so the stamp is one the browser can hand back.
+ */
+export function buildSeedUserSettingsQuery(userId: string, database: Pick<Database, "insert"> = db, now: Date = new Date()) {
     return database
         .insert(userSettings)
-        .values({ userId, version: NEW_USER_SETTINGS.version, settings: NEW_USER_SETTINGS.settings })
+        .values({ userId, version: NEW_USER_SETTINGS.version, settings: NEW_USER_SETTINGS.settings, updatedAt: now })
         .onConflictDoNothing({ target: userSettings.userId });
 }
 

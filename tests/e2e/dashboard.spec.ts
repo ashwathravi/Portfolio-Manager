@@ -551,6 +551,23 @@ test.describe('Today › First run', () => {
         await expect(examples).toHaveCount(0);
     });
 
+    test('regression: the page arrives with the stored setting, so examples never flash in or out as it loads', async ({ context, page }) => {
+        // useShowSampleData rendered examples until the page mounted: a new
+        // user with them off got the example section in every page as it
+        // arrived, then lost it, and the "Show example data" prompt popped in.
+        await signInAsNewUser(context, { firstSignIn: true });
+        await gotoAppPage(page, '/');
+        const off = await (await page.request.get('/')).text();
+        expect(off).not.toContain('data-testid="today-examples"');
+        expect(off).toContain('data-testid="first-run-examples"');
+
+        // Turned on, they're in the page as it arrives, and the prompt isn't.
+        await page.getByTestId('first-run-examples').getByRole('button', { name: 'Show example data' }).click();
+        await expect(page.getByTestId('today-examples')).toBeVisible();
+        await expect.poll(async () => (await (await page.request.get('/')).text()).includes('data-testid="today-examples"')).toBe(true);
+        expect(await (await page.request.get('/')).text()).not.toContain('data-testid="first-run-examples"');
+    });
+
     test('a user who already has settings keeps them: only a first sign-in turns examples off', async ({ context, page }) => {
         await signInAsNewUser(context);
         await gotoAppPage(page, '/');
