@@ -12,6 +12,7 @@ import {
 } from "@/db/schema";
 import { isGoogleProfileAllowed, isSessionEmailAllowed } from "@/lib/auth/access";
 import { SESSION_MAX_AGE_SECONDS, SESSION_UPDATE_AGE_SECONDS } from "@/lib/auth/session-policy";
+import { seedNewUserSettings } from "@/lib/settings/server";
 
 type AuthAdapterSchema = NonNullable<Parameters<typeof DrizzleAdapter<typeof db>>[1]>;
 
@@ -43,6 +44,13 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             },
         }),
     ],
+    events: {
+        // First sign-in (launch item i43): a new user starts with example
+        // data off, on their own (empty) numbers.
+        async createUser({ user }) {
+            if (user.id) await seedNewUserSettings(user.id);
+        },
+    },
     callbacks: {
         async signIn({ account, profile }) {
             if (account?.provider !== "google") return false;

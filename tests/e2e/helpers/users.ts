@@ -63,6 +63,43 @@ export async function signInAsFreshUser(context: BrowserContext): Promise<string
             WHERE p.user_id = ${FIXTURE_USER_ID}`;
     });
 
+    await setSessionCookie(context, sessionToken);
+    return id;
+}
+
+/**
+ * Signs `context` in as a brand-new user: no accounts, nothing else. With
+ * `firstSignIn`, also the settings a real first sign-in stores (example data
+ * off: NEW_USER_SETTINGS in src/lib/settings/server.ts; an older version
+ * stamp is migrated forward like any stored document). Returns the user's
+ * ID; null without database sessions, where there is no such user.
+ */
+export async function signInAsNewUser(context: BrowserContext, { firstSignIn = false } = {}): Promise<string | null> {
+    if (!databaseAuthEnabled) return null;
+
+    const id = randomUUID();
+    const sessionToken = `e2e-session-${id}`;
+    const sql = database();
+    await sql.begin(async (transaction) => {
+        const tx = transaction as unknown as typeof sql;
+        await tx`
+            INSERT INTO auth_users (id, name, email, email_verified)
+            VALUES (${id}, 'E2E New User', ${`e2e-${id}@example.test`}, now())`;
+        await tx`
+            INSERT INTO auth_sessions (session_token, user_id, expires)
+            VALUES (${sessionToken}, ${id}, '2099-01-01T00:00:00Z')`;
+        if (firstSignIn) {
+            await tx`
+                INSERT INTO user_settings (user_id, version, settings)
+                VALUES (${id}, 15, ${sql.json({ demo: { showSampleData: false } })})`;
+        }
+    });
+
+    await setSessionCookie(context, sessionToken);
+    return id;
+}
+
+async function setSessionCookie(context: BrowserContext, sessionToken: string) {
     // Leave open pages first: every signed-in response sets the session
     // cookie again, so a request still on its way would bring user A back.
     for (const open of context.pages()) await open.goto('about:blank');
@@ -76,5 +113,4 @@ export async function signInAsFreshUser(context: BrowserContext): Promise<string
         secure: false,
         sameSite: 'Lax',
     }]);
-    return id;
 }

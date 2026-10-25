@@ -457,6 +457,19 @@
   align-content: start;
 }
 .pm-today-hero[data-empty="true"] { display: flex; }
+/* First run (launch item i43): the steps to a first account with positions. */
+.pm-first-run-steps { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 14px; width: 100%; }
+.pm-first-run-steps > li { display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 12px; align-items: start; padding-top: 14px; border-top: 1px solid var(--pm-border); }
+.pm-first-run-mark {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; border-radius: 999px;
+  border: 1px solid var(--pm-border-strong); font-size: 12px; font-weight: 600; color: var(--pm-fg-muted);
+}
+.pm-first-run-steps > li[data-done="true"] .pm-first-run-mark { border-color: var(--pm-success); background: color-mix(in oklab, var(--pm-success) 14%, transparent); color: var(--pm-success); }
+.pm-first-run-body { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.pm-first-run-body h3 { margin: 0; font-size: 14px; font-weight: 600; color: var(--pm-fg); }
+.pm-first-run-body a:not(.pm-btn) { color: var(--pm-accent); }
+.pm-first-run-examples { font-size: 13px; color: var(--pm-fg-muted); }
 .pm-today-hero-main { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .pm-today-label { font-size: 12px; font-weight: 500; color: var(--pm-fg-subtle); }
 .pm-today-networth {

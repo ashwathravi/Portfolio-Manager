@@ -174,6 +174,22 @@ async function openImport(page: Page, csv = SAMPLE_CSV) {
 }
 
 test.describe('Holdings › Import CSV', () => {
+    test('regression: a new account picked for the import is kept after Cancel and reopening', async ({ page }) => {
+        // The Codex finding on PR #159: reopening switched the target to the
+        // first account, with the preview still ready to import into it.
+        await gotoAppPage(page, '/portfolios/holdings');
+        test.skip((await page.getByTestId('holdings-empty').count()) > 0, 'needs an existing account to choose instead');
+        await openImport(page, SAMPLE_CSV.replace('BAD TICKER,Nope,1,1\n', ''));
+        const target = page.getByTestId('import-dialog').getByRole('combobox');
+        await target.selectOption({ label: 'New account…' });
+        await page.getByTestId('import-dialog').getByRole('button', { name: 'Cancel' }).click();
+        await expect(page.getByTestId('import-dialog')).toBeHidden();
+
+        await page.getByRole('button', { name: 'Import CSV' }).first().click();
+        await expect(page.getByTestId('import-dialog')).toBeVisible();
+        await expect(page.getByTestId('import-dialog').locator('select option:checked')).toHaveText('New account…');
+    });
+
     test('previews what was read, flags rows it could not read, and skips totals', async ({ page }) => {
         await gotoAppPage(page, '/portfolios/holdings');
         await openImport(page);
