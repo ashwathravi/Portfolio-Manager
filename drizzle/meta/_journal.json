@@ -155,6 +155,13 @@
       "when": 1792882470119,
       "tag": "0021_securities_reference",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1792946045910,
+      "tag": "0022_plaid_linked_portfolios",
+      "breakpoints": true
     }
   ]
 }

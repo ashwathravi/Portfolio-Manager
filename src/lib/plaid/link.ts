@@ -272,21 +272,44 @@ function normalizeFingerprintPart(value: string | undefined): string {
     return value?.trim().toLowerCase() ?? "";
 }
 
-async function postPlaid({
+/**
+ * A Plaid API error, with Plaid's own code ("PRODUCT_NOT_READY",
+ * "ITEM_LOGIN_REQUIRED", …) so a caller can tell a wait from a failure.
+ * The message is Plaid's, never the request (which carries the secret).
+ */
+export class PlaidApiError extends Error {
+    readonly status: number;
+    readonly errorType: string | undefined;
+    readonly errorCode: string | undefined;
+
+    constructor(message: string, { status, errorType, errorCode }: { status: number; errorType?: string; errorCode?: string }) {
+        super(message);
+        this.name = "PlaidApiError";
+        this.status = status;
+        this.errorType = errorType;
+        this.errorCode = errorCode;
+    }
+}
+
+export async function postPlaid({
     endpoint,
     environment,
     credentials,
     body,
     fetchImpl,
+    signal,
 }: {
     endpoint: string;
     environment: PlaidEnvironment;
     credentials: PlaidCredentials;
     body: Record<string, unknown>;
     fetchImpl: PlaidFetch;
+    /** Cancels the request: a caller's deadline. */
+    signal?: AbortSignal;
 }): Promise<unknown> {
     const response = await fetchImpl(`${plaidBaseUrl(environment)}${endpoint}`, {
         method: "POST",
+        signal,
         headers: {
             "Content-Type": "application/json",
         },
@@ -302,7 +325,11 @@ async function postPlaid({
         const message = readOptionalString(error, "error_message")
             ?? readOptionalString(error, "display_message")
             ?? `Plaid request failed with status ${response.status}`;
-        throw new Error(message);
+        throw new PlaidApiError(message, {
+            status: response.status,
+            errorType: readOptionalString(error, "error_type"),
+            errorCode: readOptionalString(error, "error_code"),
+        });
     }
     return payload;
 }
@@ -365,7 +392,7 @@ function normalizeClientUserId(value: string): string {
     return normalized;
 }
 
-function assertCredentials(credentials: PlaidCredentials): void {
+export function assertCredentials(credentials: PlaidCredentials): void {
     if (!credentials.clientId.trim() || !credentials.secret.trim()) {
         throw new Error("PLAID_CLIENT_ID and PLAID_SECRET are required");
     }
@@ -400,13 +427,13 @@ function normalizeVerificationStatus(
     return "automatically_verified";
 }
 
-function asRecord(value: unknown): Record<string, unknown> {
+export function asRecord(value: unknown): Record<string, unknown> {
     return value && typeof value === "object" && !Array.isArray(value)
         ? value as Record<string, unknown>
         : {};
 }
 
-function readString(record: Record<string, unknown>, key: string): string {
+export function readString(record: Record<string, unknown>, key: string): string {
     const value = readOptionalString(record, key);
     if (value == null) {
         throw new Error(`Plaid response missing ${key}`);
@@ -414,17 +441,17 @@ function readString(record: Record<string, unknown>, key: string): string {
     return value;
 }
 
-function readOptionalString(record: Record<string, unknown>, key: string): string | undefined {
+export function readOptionalString(record: Record<string, unknown>, key: string): string | undefined {
     const value = record[key];
     return typeof value === "string" ? value : undefined;
 }
 
-function readNumber(record: Record<string, unknown>, key: string): number {
+export function readNumber(record: Record<string, unknown>, key: string): number {
     const value = record[key];
     return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
-function readArray(record: Record<string, unknown>, key: string): unknown[] {
+export function readArray(record: Record<string, unknown>, key: string): unknown[] {
     const value = record[key];
     return Array.isArray(value) ? value : [];
 }

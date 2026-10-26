@@ -130,8 +130,8 @@ const drizzlePlaidTokenRegistryStore: PlaidTokenRegistryStore = {
                     institutionName: account.institution.name,
                     capabilities: [...account.capabilities],
                     verificationStatus: account.verificationStatus,
-                    syncStatus: "sync_ready",
-                    lastSyncedAt: input.now,
+                    // Synced once the user picks it (src/lib/plaid/sync.ts),
+                    // not because Link found it.
                     updatedAt: input.now,
                 })
                 .onConflictDoUpdate({
@@ -139,8 +139,8 @@ const drizzlePlaidTokenRegistryStore: PlaidTokenRegistryStore = {
                     set: {
                         plaidItemRecordId: item.id,
                         name: account.name,
-                    officialName: account.officialName ?? null,
-                    mask: account.mask || null,
+                        officialName: account.officialName ?? null,
+                        mask: account.mask || null,
                         type: account.type,
                         subtype: account.subtype,
                         currentBalance: Number.isFinite(account.currentBalance) ? String(account.currentBalance) : null,
@@ -149,8 +149,8 @@ const drizzlePlaidTokenRegistryStore: PlaidTokenRegistryStore = {
                         institutionName: account.institution.name,
                         capabilities: [...account.capabilities],
                         verificationStatus: account.verificationStatus,
-                        syncStatus: "sync_ready",
-                        lastSyncedAt: input.now,
+                        // Linking again keeps whether it was picked, and when
+                        // it last synced.
                         updatedAt: input.now,
                     },
                 });
@@ -424,6 +424,15 @@ function readEncryptionSecret(): string | undefined {
 
 function readKeyVersion(): string {
     return process.env.PLAID_TOKEN_KEY_VERSION?.trim() || DEFAULT_KEY_VERSION;
+}
+
+/**
+ * Whether Plaid connections are kept in the database (plaid_items and
+ * plaid_accounts), as in production. Syncing them (launch item i44) needs
+ * it: the local file or memory vault keeps only the token.
+ */
+export function plaidConnectionsInDatabase(): boolean {
+    return shouldUsePostgresTokenRegistry() && plaidTokenRegistryStore.configured();
 }
 
 function shouldUsePostgresTokenRegistry(): boolean {

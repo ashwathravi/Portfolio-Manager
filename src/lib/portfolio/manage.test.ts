@@ -7,6 +7,8 @@ import {
     accountNameCheck,
     buildCreatePortfolioQuery,
     buildDeletePortfolioQuery,
+    buildExcludeLinkedAccountQuery,
+    deletePortfolio,
     buildLockUserAccountsQuery,
     buildUpdatePortfolioQuery,
     buildUserAccountNamesQuery,
@@ -59,8 +61,32 @@ describe("account queries", () => {
 
     test("delete removes only the user's own account and says whether it did", () => {
         const { sql, params } = buildDeletePortfolioQuery(USER, ID).toSQL();
-        assert.match(sql, /^delete from "portfolios" where \("portfolios"\."id" = \$1 and "portfolios"\."user_id" = \$2\) returning "id"$/i);
+        assert.match(sql, /^delete from "portfolios" where \("portfolios"\."id" = \$1 and "portfolios"\."user_id" = \$2\) returning "id", "source", "external_account_id"$/i);
         assert.deepEqual(params, [ID, USER]);
+    });
+
+    test("regression: a deleted linked account's Plaid account stops syncing, the user's own only", () => {
+        // Otherwise the next sync (launch item i44) would bring it back.
+        const { sql, params } = buildExcludeLinkedAccountQuery(USER, "plaid-acct-1", NOW).toSQL();
+        assert.match(sql, /^update "plaid_accounts" set "sync_status" = \$1, "updated_at" = \$2 where \("plaid_accounts"\."user_id" = \$3 and "plaid_accounts"\."plaid_account_id" = \$4\)$/i);
+        assert.deepEqual(params, ["excluded", NOW.toISOString(), USER, "plaid-acct-1"]);
+    });
+
+    test("delete excludes the Plaid account only for a linked account", async () => {
+        const run = async (deleted: Record<string, unknown> | undefined) => {
+            const statements: string[] = [];
+            const tx = {
+                execute: async () => { statements.push("lock"); },
+                delete: () => ({ where: () => ({ returning: async () => { statements.push("delete"); return deleted ? [deleted] : []; } }) }),
+                update: () => ({ set: () => ({ where: async () => { statements.push("exclude"); } }) }),
+            };
+            const database = { transaction: async (fn: (t: typeof tx) => Promise<unknown>) => fn(tx) } as unknown as Parameters<typeof deletePortfolio>[2];
+            return { result: await deletePortfolio(USER, ID, database, NOW), statements };
+        };
+        // Under the account lock a sync's write takes too.
+        assert.deepEqual(await run({ id: ID, source: "plaid", externalAccountId: "plaid-acct-1" }), { result: true, statements: ["lock", "delete", "exclude"] });
+        assert.deepEqual(await run({ id: ID, source: "manual", externalAccountId: null }), { result: true, statements: ["lock", "delete"] });
+        assert.deepEqual(await run(undefined), { result: false, statements: ["lock", "delete"] });
     });
 });
 
