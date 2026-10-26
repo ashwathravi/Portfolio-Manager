@@ -7,7 +7,9 @@
 import { and, asc, eq } from "drizzle-orm";
 
 import { db } from "@/db";
+import { isDatabaseConfigured } from "@/db/connection-options";
 import { portfolios, portfolioSnapshotPositions } from "@/db/schema";
+import { loggableError } from "@/lib/observability/loggable-error";
 import {
     buildClosesBetweenQuery,
     buildUserSnapshotsQuery,
@@ -198,4 +200,41 @@ export async function loadReturnHistory(
     database: Database = db,
 ): Promise<ReturnHistory> {
     return buildReturnHistory(await readHistoryRows(userId, accountId, database), accountId, storedClosesLoader(database));
+}
+
+export interface PageReturnHistory {
+    /** Null without a database to read it from, or when reading it failed. */
+    history: ReturnHistory | null;
+    /**
+     * True when a configured database failed to answer. The page shows an
+     * outage notice, so an outage never looks like "no history yet".
+     */
+    unavailable: boolean;
+}
+
+/**
+ * The return history for Performance › Returns. Without a configured database
+ * (local runs, Vercel's "[SENSITIVE]" placeholder) nothing is queried, since
+ * the client would fall back to localhost:5432; with one, a failure is an
+ * outage rather than a user without history.
+ */
+export async function loadPageReturnHistory(
+    userId: string,
+    { accountId }: { accountId?: string | null } = {},
+    {
+        databaseConfigured = isDatabaseConfigured(),
+        load = loadReturnHistory,
+    }: {
+        databaseConfigured?: boolean;
+        load?: (userId: string, options: { accountId?: string | null }) => Promise<ReturnHistory>;
+    } = {},
+): Promise<PageReturnHistory> {
+    if (!databaseConfigured) return { history: null, unavailable: false };
+    try {
+        return { history: await load(userId, { accountId }), unavailable: false };
+    } catch (error) {
+        // Logged during a render, so an AggregateError can't go to the console as is.
+        console.error("Return history fetch failed — showing the outage notice.", loggableError(error));
+        return { history: null, unavailable: true };
+    }
 }
