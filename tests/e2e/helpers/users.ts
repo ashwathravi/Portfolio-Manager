@@ -10,7 +10,8 @@ import { E2E_STORAGE_SCOPE } from './storage';
 // user A. Such tests sign in as a fresh user instead: a copy of user A with
 // the same portfolios, holdings and transactions, and settings of its own.
 
-const databaseAuthEnabled = Boolean(process.env.CI || process.env.E2E_DATABASE_AUTH === '1');
+/** Signed in with database sessions (CI, test:e2e:local): settings are saved to the server. */
+export const databaseAuthEnabled = Boolean(process.env.CI || process.env.E2E_DATABASE_AUTH === '1');
 const FIXTURE_USER_ID = E2E_STORAGE_SCOPE;
 
 let client: ReturnType<typeof postgres> | null = null;

@@ -348,7 +348,9 @@ export function stress_test(
     const result = runStressScenario({
         holdings: stressHoldings(ctx),
         cashTotal: cashTotal(ctx),
-        scenario: findStressScenario(args.scenarioId),
+        // Ask answers from the example portfolio, whose employer stock is
+        // GOOG; launch item i56 moves it to the user's own.
+        scenario: findStressScenario(args.scenarioId, ['GOOG', 'GOOGL']),
     });
 
     const rows: AskRow[] = [

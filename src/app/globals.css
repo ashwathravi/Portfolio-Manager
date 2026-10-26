@@ -6215,6 +6215,61 @@
   align-self: flex-start;
 }
 
+.pm-bucket-holdings {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.pm-bucket-holding-list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pm-bucket-holding-row {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr) 52px minmax(150px, 200px);
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.pm-bucket-holding-symbol {
+  color: var(--pm-fg);
+  font-family: var(--pm-font-mono, monospace);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.pm-bucket-holding-name {
+  overflow: hidden;
+  color: var(--pm-fg-muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pm-bucket-holding-pct {
+  color: var(--pm-fg-subtle);
+  font-family: var(--pm-font-mono, monospace);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+@media (max-width: 640px) {
+  .pm-bucket-holding-row {
+    grid-template-columns: 56px minmax(0, 1fr) 48px;
+  }
+
+  .pm-bucket-holding-row .pm-settings-select {
+    grid-column: 1 / -1;
+  }
+}
+
 /* --- employer-stock de-risking card ------------------------------- */
 
 .pm-employer-plan-card-body {

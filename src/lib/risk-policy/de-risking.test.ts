@@ -5,7 +5,11 @@ import {
     DEFAULT_EMPLOYER_STOCK_DERISKING_PLAN,
     computeEmployerStockDeRisking,
     computeTrimAmountToTarget,
+    employerStockName,
 } from "./de-risking";
+
+/** The plan of a user who named GOOG and GOOGL as their employer's. */
+const GOOG_PLAN = { ...DEFAULT_EMPLOYER_STOCK_DERISKING_PLAN, symbols: ["GOOG", "GOOGL"] };
 
 describe("risk policy / employer-stock de-risking", () => {
     test("computes GOOG dollars and shares required to reach target allocations", () => {
@@ -28,7 +32,7 @@ describe("risk policy / employer-stock de-risking", () => {
             ],
             portfolioValue: 1_890_000,
             plan: {
-                ...DEFAULT_EMPLOYER_STOCK_DERISKING_PLAN,
+                ...GOOG_PLAN,
                 state: "active",
                 targetAllocationPct: 20,
                 intermediateTargetPct: 25,
@@ -55,6 +59,7 @@ describe("risk policy / employer-stock de-risking", () => {
         const summary = computeEmployerStockDeRisking({
             holdings: [{ symbol: "VTI", marketValue: 100_000 }],
             portfolioValue: 100_000,
+            plan: GOOG_PLAN,
             asOf: "2026-05-16",
         });
 
@@ -64,12 +69,32 @@ describe("risk policy / employer-stock de-risking", () => {
         assert.deepEqual(summary.schedule, []);
     });
 
+    test("regression: no employer stock is assumed until the user names it", () => {
+        assert.deepEqual(DEFAULT_EMPLOYER_STOCK_DERISKING_PLAN.symbols, []);
+        const summary = computeEmployerStockDeRisking({
+            holdings: [{ symbol: "GOOG", marketValue: 900_000, quantity: 5_000, currentPrice: 180 }],
+            portfolioValue: 1_000_000,
+            plan: { ...DEFAULT_EMPLOYER_STOCK_DERISKING_PLAN, state: "active", nextActionDate: "2026-05-01" },
+            asOf: "2026-05-16",
+        });
+
+        assert.equal(summary.currentValueUsd, 0);
+        assert.deepEqual(summary.missingSymbols, []);
+        assert.deepEqual(summary.schedule, []);
+        assert.equal(summary.nextAction?.label, "Review employer stock de-risking plan");
+    });
+
+    test("names the employer stock by its first ticker", () => {
+        assert.equal(employerStockName(["goog", "GOOGL"]), "GOOG");
+        assert.equal(employerStockName([]), "employer stock");
+    });
+
     test("returns inside policy when target is already reached", () => {
         const summary = computeEmployerStockDeRisking({
             holdings: [{ symbol: "GOOGL", marketValue: 50_000, quantity: 100, currentPrice: 500 }],
             portfolioValue: 500_000,
             plan: {
-                ...DEFAULT_EMPLOYER_STOCK_DERISKING_PLAN,
+                ...GOOG_PLAN,
                 targetAllocationPct: 20,
                 intermediateTargetPct: 25,
             },
@@ -85,7 +110,7 @@ describe("risk policy / employer-stock de-risking", () => {
             holdings: [{ symbol: "GOOG", marketValue: 600_000, quantity: 3_000, currentPrice: 200 }],
             portfolioValue: 1_000_000,
             plan: {
-                ...DEFAULT_EMPLOYER_STOCK_DERISKING_PLAN,
+                ...GOOG_PLAN,
                 state: "active",
                 targetAllocationPct: 25,
                 intermediateTargetPct: 30,

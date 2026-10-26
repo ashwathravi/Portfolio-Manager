@@ -6,8 +6,11 @@ import type { PlaidDiscoveredAccount } from '@/lib/plaid/types';
 import {
     DEFAULT_CASH_DEPLOYMENT_RULE,
     DEFAULT_EMPLOYER_STOCK_DERISKING_PLAN,
+    MAX_BUCKET_ASSIGNMENTS,
     SELL_DISCIPLINE_TRIGGER_TYPES,
     computeRiskPolicyDashboard,
+    parseEmployerTickers,
+    withBucketChoice,
     reactivateSellDisciplineRule,
     resolveSellDisciplineRule,
     snoozeSellDisciplineRule,
@@ -223,6 +226,18 @@ const ACTIONS: ReadonlyArray<readonly [string, () => void]> = [
         })),
     })],
     ['updateRiskPolicy: theme caps', () => store().updateRiskPolicy({ themeCaps: { consumer_tech: 30, unknown: 0 } })],
+    ['updateRiskPolicy: bucket choices as BucketPolicyCard makes them', () => {
+        const held = ['BRK.B', 'BTC-USD', 'VTI'];
+        let assignments = store().riskPolicy.bucketAssignments;
+        assignments = withBucketChoice(assignments, 'brk.b', 'core', held);
+        assignments = withBucketChoice(assignments, 'BTC-USD', 'speculative', held);
+        assignments = withBucketChoice(assignments, 'VTI', 'cash_reserve', held);
+        assignments = withBucketChoice(assignments, 'VTI', null, held);
+        store().updateRiskPolicy({ bucketAssignments: assignments });
+    }],
+    ['updateRiskPolicy: employer tickers as EmployerStockPlanCard reads them', () => store().updateRiskPolicy({
+        employerStockPlan: { ...store().riskPolicy.employerStockPlan, symbols: parseEmployerTickers('goog, googl, brk.b; $$$') },
+    })],
     ['updateRiskPolicy: cash jobs and deployment as CashJobsCard edits them', () => {
         store().updateRiskPolicy({
             cashJobs: [
@@ -331,6 +346,7 @@ describe('settings slice schemas', () => {
         function documentAt(version: number): Record<string, unknown> {
             const settings = overTheWire(defaultPersistedSettings()) as unknown as Record<string, Record<string, unknown>> & { accounts: unknown[] };
             const riskPolicy = settings.riskPolicy;
+            if (version < 16) delete riskPolicy.bucketAssignments;
             if (version < 15) {
                 delete settings.demo;
                 settings.preferences.defaultLandingPage = '/analytics';
@@ -444,8 +460,11 @@ describe('findSettingsIssue', () => {
             );
         });
 
-        test('no field has been added since the first saved version', () => {
+        test('only the fields added since may be left out: the bucket choices (v16)', () => {
             assert.equal(findSettingsIssue(withoutField(['appearance', 'accent']), older)?.message, 'settings.appearance.accent is missing');
+            const withoutChoices = withoutField(['riskPolicy', 'bucketAssignments']);
+            assert.equal(findSettingsIssue(withoutChoices, 15), null);
+            assert.equal(findSettingsIssue(withoutChoices, 16)?.message, 'settings.riskPolicy.bucketAssignments is missing');
         });
     });
 
@@ -534,6 +553,22 @@ describe('findSettingsIssue', () => {
             refuses(['riskPolicy', 'themeCaps', 'semiconductors'], 101, 'high');
         });
 
+        test('riskPolicy: bucket choices map tickers to a bucket the user can choose', () => {
+            accepts(['riskPolicy', 'bucketAssignments'], {}, { AAPL: 'core', 'BRK.B': 'active', 'BTC-USD': 'speculative', FNMA: 'special_situation', SGOV: 'cash_reserve' });
+            refuses(['riskPolicy', 'bucketAssignments', 'AAPL'], 'unassigned', 'crypto', 1);
+            refuses(['riskPolicy', 'bucketAssignments'], { aapl: 'core' }, { 'TOOLONGTICKER': 'core' }, { '': 'core' }, [], MISSING);
+            assert.equal(
+                issueFor(['riskPolicy', 'bucketAssignments', 'AAPL'], 'unassigned'),
+                'settings.riskPolicy.bucketAssignments.AAPL must be one of "core", "active", "speculative", "special_situation", "cash_reserve"',
+            );
+            const most = Object.fromEntries(Array.from({ length: MAX_BUCKET_ASSIGNMENTS }, (_, i) => [`T${i}`, 'core']));
+            accepts(['riskPolicy', 'bucketAssignments'], most);
+            assert.equal(
+                issueFor(['riskPolicy', 'bucketAssignments'], { ...most, EXTRA: 'core' }),
+                `settings.riskPolicy.bucketAssignments must hold at most ${MAX_BUCKET_ASSIGNMENTS} tickers`,
+            );
+        });
+
         test('riskPolicy: cash jobs and the deployment rule', () => {
             accepts(['riskPolicy', 'cashJobs'], [{ id: 'cash-tax_reserve', type: 'tax_reserve', label: 'Tax reserve', amount: 0, reviewBy: '2027-04-15' }]);
             refuses(['riskPolicy', 'cashJobs', 0], { id: 'cash-x', type: 'rainy_day', label: 'x', amount: 1 });
@@ -607,7 +642,7 @@ describe('sanitizeSettings', () => {
         const stored = withValue(defaultPersistedSettings(), ['riskPolicy', 'employerStockPlan', 'nextActionDate'], {});
         const today = (riskPolicy: PersistedSettings['riskPolicy']) => computeRiskPolicyDashboard({
             holdings: [{ symbol: 'GOOG', marketValue: 600_000, quantity: 3_000, currentPrice: 200, isEmployerStock: true }],
-            employerStockPlan: riskPolicy.employerStockPlan,
+            employerStockPlan: { ...riskPolicy.employerStockPlan, symbols: ['GOOG'] },
             asOf: new Date('2026-10-19T08:00:00.000Z'),
         });
         assert.throws(() => today(stored.riskPolicy), TypeError);
@@ -639,6 +674,16 @@ describe('sanitizeSettings', () => {
         });
         assert.deepStrictEqual(loaded.profile, baseline().profile);
         assert.deepStrictEqual(loaded.riskPolicy?.themeCaps, { semiconductors: 25 });
+    });
+
+    test('a bucket choice for no ticker, or for no bucket, goes; the others stay', () => {
+        const loaded = sanitize({
+            ...baseline(),
+            riskPolicy: { ...baseline().riskPolicy, bucketAssignments: { AAPL: 'core', aapl: 'core', TSLA: 'moonshot', VTI: 'unassigned' } },
+        });
+        assert.deepStrictEqual(loaded.riskPolicy?.bucketAssignments, { AAPL: 'core' });
+        const tooMany = Object.fromEntries(Array.from({ length: MAX_BUCKET_ASSIGNMENTS + 1 }, (_, i) => [`T${i}`, 'core']));
+        assert.deepStrictEqual(sanitize({ ...baseline(), riskPolicy: { ...baseline().riskPolicy, bucketAssignments: tooMany } }).riskPolicy?.bucketAssignments, {});
     });
 
     test('list items of the wrong kind, or without what identifies them, go; other required fields fall back', () => {

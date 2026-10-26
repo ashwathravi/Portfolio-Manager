@@ -1,6 +1,5 @@
 "use client";
 
-import { SampleTag } from "@/components/data-display/SampleTag";
 import { useMemo, useState } from "react";
 import { ShieldAlert } from "lucide-react";
 import {
@@ -14,11 +13,11 @@ import {
     type SellDisciplineAction,
     type SellDisciplineRule,
     type SellDisciplineTriggerType,
+    policyHoldings,
+    policyPortfolioValue,
 } from "@/lib/risk-policy";
-import { mockPortfolios } from "@/lib/mockData";
-import { getDefaultTheses } from "@/lib/research/thesis";
+import { usePolicyPortfolio } from "@/components/providers/PolicyPortfolioProvider";
 import { useSettingsStore } from "@/lib/stores/settingsStore";
-import { useRequestTime } from "@/components/providers/RequestTimeProvider";
 
 const ACTION_OPTIONS: SellDisciplineAction[] = [
     "trim",
@@ -29,44 +28,29 @@ const ACTION_OPTIONS: SellDisciplineAction[] = [
     "review",
 ];
 
-const SAMPLE_HOLDINGS = (mockPortfolios[0]?.holdings ?? []).map((holding) => ({
-    id: holding.id,
-    symbol: holding.ticker,
-    name: holding.name,
-    quantity: holding.quantity,
-    avgCost: holding.avgCost,
-    currentPrice: holding.currentPrice,
-    marketValue: holding.marketValue,
-    isEmployerStock: holding.ticker === "GOOG" || holding.ticker === "GOOGL",
-}));
-
-const SAMPLE_PORTFOLIO_VALUE = mockPortfolios[0]?.totalValue ?? SAMPLE_HOLDINGS.reduce(
-    (sum, holding) => sum + holding.marketValue,
-    0,
-);
-
 export function SellDisciplineCard() {
     const riskPolicy = useSettingsStore((s) => s.riskPolicy);
     const updateRiskPolicy = useSettingsStore((s) => s.updateRiskPolicy);
     const rules = riskPolicy.sellDisciplineRules;
+    // The preview: the user's own holdings and the theses they wrote.
+    const { portfolio } = usePolicyPortfolio();
     const [type, setType] = useState<SellDisciplineTriggerType>("allocation_cap");
-    const [symbol, setSymbol] = useState("AAPL");
+    const [symbol, setSymbol] = useState(() => portfolio.holdings[0]?.symbol.toUpperCase() ?? "");
     const [threshold, setThreshold] = useState("10");
     const [action, setAction] = useState<SellDisciplineAction>("trim");
     const [vestDate, setVestDate] = useState(new Date().toISOString().slice(0, 10));
     const [blockAdds, setBlockAdds] = useState(true);
     const [reasons, setReasons] = useState<Record<string, string>>({});
 
-    const theses = getDefaultTheses(useRequestTime());
     const summary = useMemo(
         () =>
             evaluateSellDiscipline({
                 rules,
-                holdings: SAMPLE_HOLDINGS,
-                theses,
-                portfolioValue: SAMPLE_PORTFOLIO_VALUE,
+                holdings: policyHoldings(portfolio.holdings, riskPolicy),
+                theses: portfolio.theses,
+                portfolioValue: policyPortfolioValue(portfolio),
             }),
-        [rules, theses],
+        [rules, portfolio, riskPolicy],
     );
     const taskByRuleId = useMemo(
         () => new Map(summary.tasks.map((task) => [task.ruleId, task])),
@@ -124,7 +108,6 @@ export function SellDisciplineCard() {
                         className="pm-settings-card-title"
                     >
                         Sell discipline
-                        <SampleTag label="Example preview" title="The preview runs your rule against example holdings until an account is connected." />
                     </h2>
                 </div>
                 <span className="pm-settings-card-sub">

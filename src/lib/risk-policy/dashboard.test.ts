@@ -1,6 +1,10 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { computeRiskPolicyDashboard } from "./dashboard";
+import { DEFAULT_EMPLOYER_STOCK_DERISKING_PLAN } from "./de-risking";
+
+/** A user who named GOOG and GOOGL as their employer's. */
+const GOOG_EMPLOYER = { ...DEFAULT_EMPLOYER_STOCK_DERISKING_PLAN, symbols: ["GOOG", "GOOGL"] };
 
 describe("computeRiskPolicyDashboard", () => {
     test("builds a multi-dimension dashboard with breached concentration and missing cash purpose", () => {
@@ -17,6 +21,7 @@ describe("computeRiskPolicyDashboard", () => {
                 { id: "t1", date: "2026-05-01", type: "buy", ticker: "NVDA", amount: -25_000 },
                 { id: "t2", date: "2026-05-08", type: "sell", ticker: "NVDA", amount: 15_000 },
             ],
+            employerStockPlan: GOOG_EMPLOYER,
             asOf: new Date("2026-05-15T00:00:00.000Z"),
         });
 
@@ -24,8 +29,8 @@ describe("computeRiskPolicyDashboard", () => {
         assert.strictEqual(summary.overallStatus, "breached");
         assert.strictEqual(summary.employerStockPlan.status, "breached");
         assert.ok(summary.employerStockPlan.sellToTargetUsd > 0);
-        assert.ok(summary.stressTests.some((result) => result.scenarioId === "goog_40_down"));
-        assert.ok(summary.stressTests.find((result) => result.scenarioId === "goog_40_down")!.totalImpactUsd < 0);
+        assert.ok(summary.stressTests.some((result) => result.scenarioId === "employer_40_down"));
+        assert.ok(summary.stressTests.find((result) => result.scenarioId === "employer_40_down")!.totalImpactUsd < 0);
         assert.deepStrictEqual(summary.sellDisciplineTasks, []);
 
         const singleName = summary.dimensions.find((dimension) => dimension.id === "single_name_concentration");
@@ -38,6 +43,7 @@ describe("computeRiskPolicyDashboard", () => {
         const employer = summary.dimensions.find((dimension) => dimension.id === "employer_stock_concentration");
         assert.ok(employer);
         assert.strictEqual(employer.status, "breached");
+        assert.strictEqual(employer.label, "Employer stock (GOOG, GOOGL)");
         assert.deepStrictEqual(employer.impactedSymbols, ["GOOG"]);
 
         const cash = summary.dimensions.find((dimension) => dimension.id === "cash_purpose_coverage");
@@ -52,6 +58,52 @@ describe("computeRiskPolicyDashboard", () => {
 
         assert.ok(summary.nextActions.length > 0);
         assert.ok(summary.nextActions.some((action) => action.href === "/portfolios/holdings"));
+    });
+
+    test("regression: GOOG is not employer stock until the user names it", () => {
+        const holdings = [
+            { id: "goog", symbol: "GOOG", marketValue: 900_000 },
+            { id: "vti", symbol: "VTI", marketValue: 100_000 },
+        ];
+        const unnamed = computeRiskPolicyDashboard({ holdings });
+        const employer = unnamed.dimensions.find((dimension) => dimension.id === "employer_stock_concentration")!;
+        assert.strictEqual(employer.status, "inside");
+        assert.strictEqual(employer.label, "Employer stock");
+        assert.strictEqual(employer.currentLabel, "None named");
+        assert.match(employer.nextAction, /name it in Settings/);
+        assert.ok(!unnamed.stressTests.some((result) => result.scenarioId.startsWith("employer_")));
+        assert.ok(!unnamed.nextActions.some((action) => action.id === "employer_stock_concentration"));
+
+        // Named, but held in none of the accounts: nothing to act on.
+        const notHeld = computeRiskPolicyDashboard({
+            holdings: [{ id: "vti", symbol: "VTI", marketValue: 100_000 }],
+            employerStockPlan: { ...DEFAULT_EMPLOYER_STOCK_DERISKING_PLAN, symbols: ["MSFT"] },
+        });
+        const msft = notHeld.dimensions.find((dimension) => dimension.id === "employer_stock_concentration")!;
+        assert.strictEqual(msft.status, "inside");
+        assert.strictEqual(msft.currentLabel, "Not held");
+
+        // Named: the same holding is checked as employer stock.
+        const named = computeRiskPolicyDashboard({ holdings, employerStockPlan: { ...DEFAULT_EMPLOYER_STOCK_DERISKING_PLAN, symbols: ["goog"] } });
+        const googEmployer = named.dimensions.find((dimension) => dimension.id === "employer_stock_concentration")!;
+        assert.strictEqual(googEmployer.status, "breached");
+        assert.strictEqual(googEmployer.currentPct, 90);
+        assert.strictEqual(named.stressTests[0].label, "GOOG -40%");
+    });
+
+    test("a holding is in the bucket the user chose, else the one its type suggests", () => {
+        const bucketOf = (summary: ReturnType<typeof computeRiskPolicyDashboard>, symbol: string) =>
+            summary.dimensions.find((dimension) => dimension.id === "special_situation_exposure")!.impactedSymbols.includes(symbol);
+        const summary = computeRiskPolicyDashboard({
+            holdings: [
+                { id: "xyz", symbol: "XYZ", marketValue: 50_000, defaultBucket: "active" },
+                { id: "abc", symbol: "ABC", marketValue: 50_000, defaultBucket: "core", policyBucket: "special_situation" },
+            ],
+        });
+        assert.strictEqual(bucketOf(summary, "ABC"), true);
+        assert.strictEqual(bucketOf(summary, "XYZ"), false);
+        const metadata = summary.dimensions.find((dimension) => dimension.id === "missing_policy_metadata")!;
+        assert.strictEqual(metadata.currentLabel, "2 holdings"); // neither has a theme
     });
 
     test("surfaces unknown holdings as missing policy metadata instead of safe exposure", () => {
@@ -189,7 +241,7 @@ describe("computeRiskPolicyDashboard", () => {
             ],
             employerStockPlan: {
                 id: "goog-derisk-v1",
-                label: "GOOG employer stock de-risking",
+                label: "Employer stock de-risking",
                 symbols: ["GOOG", "GOOGL"],
                 state: "active",
                 targetAllocationPct: 25,

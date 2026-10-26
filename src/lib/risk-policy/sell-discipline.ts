@@ -124,13 +124,13 @@ export const SELL_DISCIPLINE_TRIGGER_LABELS: Record<SellDisciplineTriggerType, s
 };
 
 export const DEFAULT_SELL_DISCIPLINE_RULES: readonly SellDisciplineRule[] = [
+    // Without a symbol it watches the employer stock the user named, if any.
     {
         id: "sell-goog-employer-cap",
         type: "allocation_cap",
-        label: "GOOG employer-stock trim band",
+        label: "Employer-stock trim band",
         action: "trim",
         state: "active",
-        symbol: "GOOG",
         thresholdPct: 25,
         noAdd: true,
     },
@@ -301,7 +301,8 @@ function evaluateRule({
             if (!rule.vestDate) return null;
             const vestDate = normalizeDate(rule.vestDate);
             if (vestDate.getTime() > asOf.getTime()) return null;
-            const symbol = normalizeSymbol(rule.symbol) || "GOOG";
+            const symbol = normalizeSymbol(rule.symbol) || holding?.symbol;
+            if (!symbol) return null;
             return task(rule, {
                 symbol,
                 thesisId: thesis?.id,
@@ -449,7 +450,8 @@ function findHolding(
 ): NormalizedSellHolding | undefined {
     const normalized = normalizeSymbol(symbol);
     if (normalized) return holdings.find((holding) => holding.symbol === normalized);
-    return holdings.find((holding) => holding.isEmployerStock) ?? holdings[0];
+    // A rule without a symbol is about the employer stock, when there is one.
+    return holdings.find((holding) => holding.isEmployerStock);
 }
 
 function findThesis(

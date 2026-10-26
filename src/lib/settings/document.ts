@@ -48,8 +48,12 @@
  *        for retired routes (/analytics, /portfolios) and removes
  *        the seeded example brokerage accounts; adds the `demo`
  *        slice (show/hide example data, default shown).
+ *   v16 — launch item i54: adds `riskPolicy.bucketAssignments`, the
+ *        bucket the user chose for each ticker. Existing users
+ *        migrate to none chosen, so every holding keeps the bucket
+ *        its type suggests.
  */
-export const SETTINGS_VERSION = 15;
+export const SETTINGS_VERSION = 16;
 
 /**
  * The version settings were first saved to the server at. A browser migrates

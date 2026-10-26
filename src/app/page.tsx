@@ -1,4 +1,4 @@
-import { EquityChartCard } from '@/components/dashboard/EquityChartCard';
+import { Suspense } from 'react';
 import { AllocationCard, type AllocationHolding } from '@/components/dashboard/AllocationCard';
 import { TopHoldingsCard, type TopHoldingsRow } from '@/components/dashboard/TopHoldingsCard';
 import { RecentActivityCard } from '@/components/dashboard/RecentActivityCard';
@@ -6,7 +6,6 @@ import { WatchlistCard } from '@/components/dashboard/WatchlistCard';
 import { PatternFeed } from '@/components/dashboard/PatternFeed';
 import { WeeklyReviewCard } from '@/components/dashboard/WeeklyReviewCard';
 import { AlphaRadarDashboardCard } from '@/components/dashboard/AlphaRadarDashboardCard';
-import type { RiskPolicyDashboardCardInput } from '@/components/dashboard/RiskPolicyDashboardCard';
 import { SampleDataNotice } from '@/components/data-display/SampleDataNotice';
 import { SampleGate } from '@/components/data-display/SampleGate';
 import { TodayHeader } from '@/components/today/TodayHeader';
@@ -14,7 +13,11 @@ import { TodayHero, type TodayHeroHolding } from '@/components/today/TodayHero';
 import { TodayTriage } from '@/components/today/TodayTriage';
 import { PolicyStrip } from '@/components/today/PolicyStrip';
 import { TodayTheses } from '@/components/today/TodayTheses';
-import { computeRiskPolicyDashboard } from '@/lib/risk-policy';
+import { TodayEquityCurve } from '@/components/today/TodayEquityCurve';
+import { evaluateRiskPolicy } from '@/lib/risk-policy';
+import { buildPolicyPortfolio, valueHolding } from '@/lib/risk-policy/portfolio';
+import { loadPolicyTheses, loadUserRiskPolicy } from '@/lib/risk-policy/server';
+import type { SellDisciplineThesis } from '@/lib/risk-policy/sell-discipline';
 import { loadDashboardPortfolios } from '@/lib/dashboard-portfolios';
 import { DataUnavailableNotice } from '@/components/data-display/DataUnavailableNotice';
 import { requirePageUserId } from '@/lib/auth/request-user';
@@ -24,6 +27,7 @@ import { toActivityRows, type TransactionRowInput } from '@/lib/portfolio/activi
 import { toTodayActivity } from '@/lib/today/rows';
 import { getSecurityProfiles } from '@/lib/markets/price-store';
 import { holdingName, loadSecurityProfiles } from '@/lib/markets/security-profile';
+import { isDatabaseConfigured } from '@/db/connection-options';
 
 /**
  * Today (/).
@@ -33,12 +37,14 @@ import { holdingName, loadSecurityProfiles } from '@/lib/markets/security-profil
  *   2. Needs your attention — policy breaches, theses due for review, the
  *      weekly review. Each row links to where it gets resolved.
  *   3. A one-line risk-policy strip (full checks behind a disclosure).
- *   4. Holdings, allocation, and recent activity — all from the database.
+ *   4. The equity curve from nightly valuations, holdings, allocation, and
+ *      recent activity — all from the database.
  *   5. Review & research — example-data cards, labelled and hideable.
  *
  * Every figure in 1–4 comes from the user's portfolios and transactions;
- * the risk policy is computed from real holdings, cash, and trades only
- * (no example option positions or theses mixed in).
+ * the risk policy is the user's saved one, evaluated on their holdings,
+ * cash, trades and the theses they wrote (launch item i52), as Trade and
+ * the Settings previews evaluate it (no example data mixed in).
  */
 
 export const dynamic = 'force-dynamic';
@@ -66,41 +72,34 @@ export default async function Today() {
   // Warm quotes for the first paint; the hero keeps polling client-side.
   // Without market data the stored prices stand.
   const heldSymbols = allPortfolios.flatMap((p) => p.holdings.map((h) => h.symbol));
-  const [liveQuotes, profiles] = await Promise.all([
+  const [liveQuotes, profiles, theses, riskPolicy] = await Promise.all([
     loadQuotes(heldSymbols),
     // Company names from the securities master (launch item i34).
     loadSecurityProfiles(heldSymbols, getSecurityProfiles),
+    // The theses the user wrote, for the sell rules; none without a database.
+    isDatabaseConfigured()
+      ? loadPolicyTheses(userId).catch((e): SellDisciplineThesis[] => {
+        console.warn('Today: theses fetch failed — the sell rules see none.', e);
+        return [];
+      })
+      : [],
+    loadUserRiskPolicy(userId),
   ]);
 
   const cashTotal = allPortfolios.reduce((s, p) => s + (p.cashBalance || 0), 0);
   const allHoldings = allPortfolios.flatMap((p) =>
-    p.holdings.map((h) => {
-      const quantity = Number(h.quantity) || 0;
-      const avgCost = Number(h.avgCost) || 0;
-      const live = liveQuotes[h.symbol.toUpperCase()]?.price;
-      const currentPrice = Number(live ?? h.currentPrice ?? 0);
-      return {
-        id: h.id,
-        portfolio: p.name,
-        symbol: h.symbol,
-        name: holdingName(h.symbol, h.name, profiles.get(h.symbol.toUpperCase())),
-        quantity,
-        avgCost,
-        currentPrice,
-        // A live quote values it now; otherwise the stored value, then the
-        // stored price; without any price it counts at cost, as on Holdings
-        // and Accounts, rather than as nothing.
-        marketValue: live != null && live > 0
-          ? quantity * live
-          : Number(h.marketValue) || quantity * (currentPrice > 0 ? currentPrice : avgCost),
-      };
-    }),
+    p.holdings.map((h) => ({
+      id: h.id,
+      portfolio: p.name,
+      symbol: h.symbol,
+      name: holdingName(h.symbol, h.name, profiles.get(h.symbol.toUpperCase())),
+      ...valueHolding(h, liveQuotes[h.symbol.toUpperCase()]?.price),
+    })),
   );
 
   const heroHoldings: TodayHeroHolding[] = allHoldings
     .filter((h) => h.symbol)
     .map(({ symbol, quantity, currentPrice, marketValue }) => ({ symbol, quantity, currentPrice, marketValue }));
-  const netWorth = cashTotal + allHoldings.reduce((sum, h) => sum + h.marketValue, 0);
 
   const allocationHoldings: AllocationHolding[] = allHoldings.map((h) => ({
     symbol: h.symbol,
@@ -118,23 +117,16 @@ export default async function Today() {
     marketValue: h.marketValue,
   }));
 
-  const riskPolicyInput: RiskPolicyDashboardCardInput = {
-    holdings: allHoldings.map((h) => ({
-      id: h.id,
-      symbol: h.symbol,
-      name: h.name,
-      quantity: h.quantity,
-      avgCost: h.avgCost,
-      currentPrice: h.currentPrice,
-      marketValue: h.marketValue,
-      isEmployerStock: h.symbol === 'GOOG' || h.symbol === 'GOOGL',
-    })),
-    cashTotal,
-    trades: activity
-      .filter((a) => a.side === 'BUY' || a.side === 'SELL')
-      .map((a) => ({ id: a.id, date: a.date, type: a.side.toLowerCase(), ticker: a.symbol ?? undefined, quantity: a.quantity ?? undefined, amount: a.value })),
-  };
-  const riskPolicySummary = computeRiskPolicyDashboard(riskPolicyInput);
+  // The user's saved policy on their own portfolio, as every view evaluates it.
+  const policyPortfolio = buildPolicyPortfolio({
+    accounts: allPortfolios,
+    quotes: liveQuotes,
+    profiles,
+    activity,
+    theses,
+    asOf: new Date(),
+  });
+  const riskPolicySummary = evaluateRiskPolicy(policyPortfolio, riskPolicy);
 
   return (
     <div className="pm-dashboard-stack p-6">
@@ -150,7 +142,11 @@ export default async function Today() {
         <TodayTriage policyActions={allHoldings.length > 0 ? riskPolicySummary.nextActions : []} />
       </div>
 
-      {allHoldings.length > 0 && <PolicyStrip summary={riskPolicySummary} input={riskPolicyInput} />}
+      {allHoldings.length > 0 && <PolicyStrip summary={riskPolicySummary} portfolio={policyPortfolio} />}
+
+      <Suspense fallback={null}>
+        <TodayEquityCurve userId={userId} />
+      </Suspense>
 
       {allHoldings.length > 0 && (
         <div className="pm-grid-2-63">
@@ -169,20 +165,17 @@ export default async function Today() {
           <header className="pm-today-section-head">
             <h2 id="pm-today-examples-head" className="pm-today-section-title">Review &amp; research</h2>
             <SampleDataNotice>
-              The weekly review, equity curve, patterns, theses, and Alpha Radar below use example data.
+              The weekly review, patterns, theses, and Alpha Radar below use example data.
             </SampleDataNotice>
           </header>
           <div id="weekly-review">
             <WeeklyReviewCard />
           </div>
           <div className="pm-grid-2-63">
-            <EquityChartCard netWorth={netWorth || 250_000} seed={allHoldings.length} />
+            <PatternFeed />
             <TodayTheses limit={4} />
           </div>
-          <div className="pm-grid-2-63">
-            <PatternFeed />
-            <AlphaRadarDashboardCard />
-          </div>
+          <AlphaRadarDashboardCard />
         </section>
       </SampleGate>
     </div>

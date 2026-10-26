@@ -1,3 +1,5 @@
+import { assetClassFor } from "@/lib/markets/security-profile";
+
 export const POLICY_BUCKETS = [
     "core",
     "active",
@@ -30,8 +32,15 @@ export interface PolicyClassifiableHolding {
     symbol?: string | null;
     name?: string | null;
     marketValue: number;
+    /** The user's own choice (Settings › Bucket policy). */
     policyBucket?: PolicyBucketId | null;
     instrumentType?: string | null;
+    /**
+     * The bucket it starts in without a choice, from what the security is
+     * (`defaultPolicyBucket`); when left out, only the well-known tickers
+     * have one.
+     */
+    defaultBucket?: PolicyBucketId | null;
 }
 
 export interface PolicyBucketAssignment {
@@ -118,6 +127,7 @@ export const DEFAULT_BUCKET_POLICIES: readonly PolicyBucketPolicy[] = [
     { bucket: "unassigned", targetPct: 0, maxPct: 0 },
 ];
 
+/** Well-known tickers whose type alone would put them in the wrong bucket. */
 const FALLBACK_BUCKET_BY_SYMBOL: Record<string, PolicyBucketId> = {
     // Broad core exposure.
     VTI: "core",
@@ -184,8 +194,36 @@ export function policyBucketLabel(bucket: PolicyBucketId): string {
     return POLICY_BUCKET_META[bucket].label;
 }
 
+/**
+ * The bucket a holding starts in until the user chooses one: a well-known
+ * ticker's, otherwise by what the security is (from the securities master).
+ * Funds and bonds are core, single stocks active ideas, crypto and warrants
+ * speculative. Null when nothing says.
+ */
+export function defaultPolicyBucket(
+    symbol: string | null | undefined,
+    profile?: { type: string | null; sector: string | null } | null,
+): PolicyBucketId | null {
+    const known = FALLBACK_BUCKET_BY_SYMBOL[normalizeSymbol(symbol)];
+    if (known) return known;
+    if (!profile) return null;
+    if (profile.sector === "Crypto") return "speculative";
+    switch (assetClassFor(profile.type)) {
+        case "Fund":
+        case "Bond":
+            return "core";
+        case "Stock":
+        case "Preferred":
+            return "active";
+        case "Warrant or right":
+            return "speculative";
+        default:
+            return null;
+    }
+}
+
 export function resolvePolicyBucketAssignment(
-    holding: Pick<PolicyClassifiableHolding, "symbol" | "policyBucket" | "instrumentType">,
+    holding: Pick<PolicyClassifiableHolding, "symbol" | "policyBucket" | "instrumentType" | "defaultBucket">,
 ): PolicyBucketAssignment {
     if (isPolicyBucketId(holding.policyBucket) && holding.policyBucket !== "unassigned") {
         return { bucket: holding.policyBucket, source: "explicit" };
@@ -199,9 +237,11 @@ export function resolvePolicyBucketAssignment(
         return { bucket: "cash_reserve", source: "instrument" };
     }
 
-    const symbol = normalizeSymbol(holding.symbol);
-    if (symbol && FALLBACK_BUCKET_BY_SYMBOL[symbol]) {
-        return { bucket: FALLBACK_BUCKET_BY_SYMBOL[symbol], source: "fallback" };
+    const fallback = holding.defaultBucket !== undefined
+        ? holding.defaultBucket
+        : defaultPolicyBucket(holding.symbol);
+    if (isPolicyBucketId(fallback) && fallback !== "unassigned") {
+        return { bucket: fallback, source: "fallback" };
     }
 
     return { bucket: "unassigned", source: "missing" };

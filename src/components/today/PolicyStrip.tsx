@@ -1,10 +1,7 @@
 "use client";
 
-import type { RiskPolicyDashboardSummary } from "@/lib/risk-policy";
-import {
-    RiskPolicyDashboardCard,
-    type RiskPolicyDashboardCardInput,
-} from "@/components/dashboard/RiskPolicyDashboardCard";
+import type { PolicyPortfolio, RiskPolicyDashboardSummary } from "@/lib/risk-policy";
+import { RiskPolicyDashboardCard } from "@/components/dashboard/RiskPolicyDashboardCard";
 
 /**
  * One-line risk-policy summary with the full check grid behind a
@@ -12,7 +9,7 @@ import {
  * and pushed the user's money below the fold; breaches already surface in
  * "Needs your attention".
  */
-export function PolicyStrip({ summary, input }: { summary: RiskPolicyDashboardSummary; input: RiskPolicyDashboardCardInput }) {
+export function PolicyStrip({ summary, portfolio }: { summary: RiskPolicyDashboardSummary; portfolio: PolicyPortfolio }) {
     const { breached, watch, missing_data: missing, inside } = summary.statusCounts;
     const parts = [
         breached ? `${breached} breached` : null,
@@ -28,7 +25,7 @@ export function PolicyStrip({ summary, input }: { summary: RiskPolicyDashboardSu
                 <span className="pm-policy-strip-toggle">Show all checks</span>
             </summary>
             <div className="pm-policy-strip-body">
-                <RiskPolicyDashboardCard summary={summary} input={input} />
+                <RiskPolicyDashboardCard summary={summary} portfolio={portfolio} />
             </div>
         </details>
     );

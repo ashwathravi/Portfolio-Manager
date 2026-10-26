@@ -4,33 +4,23 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import { ArrowUpRight, ShieldAlert } from "lucide-react";
 import {
-    computeRiskPolicyDashboard,
+    evaluateRiskPolicy,
     SELL_DISCIPLINE_ACTION_LABELS,
-    type OptionRiskPosition,
     type EmployerStockDeRiskingSummary,
-    type RiskPolicyDashboardHolding,
-    type RiskPolicyDashboardTrade,
+    type PolicyPortfolio,
     RiskPolicyDashboardSummary,
     RiskPolicyDimension,
     RiskPolicyDimensionStatus,
     RiskPolicyNextAction,
     type SellDisciplineTask,
-    type SellDisciplineThesis,
     type StressScenarioResult,
 } from "@/lib/risk-policy";
 import { useSettingsStore } from "@/lib/stores/settingsStore";
 
-export interface RiskPolicyDashboardCardInput {
-    holdings: RiskPolicyDashboardHolding[];
-    cashTotal: number;
-    trades?: RiskPolicyDashboardTrade[];
-    optionPositions?: OptionRiskPosition[];
-    theses?: SellDisciplineThesis[];
-}
-
 export interface RiskPolicyDashboardCardProps {
     summary: RiskPolicyDashboardSummary;
-    input?: RiskPolicyDashboardCardInput;
+    /** The user's portfolio: with it, the checks follow the policy as it's edited. */
+    portfolio?: PolicyPortfolio;
 }
 
 const STATUS_LABELS: Record<RiskPolicyDimensionStatus, string> = {
@@ -42,35 +32,13 @@ const STATUS_LABELS: Record<RiskPolicyDimensionStatus, string> = {
 
 export function RiskPolicyDashboardCard({
     summary: initialSummary,
-    input,
+    portfolio,
 }: RiskPolicyDashboardCardProps) {
     const riskPolicy = useSettingsStore((s) => s.riskPolicy);
-    const summary = useMemo(() => {
-        if (!input) return initialSummary;
-        const churnPolicy = riskPolicy.churnPolicy ?? {
-            windowDays: 90,
-            watchRepeatSymbols: 1,
-            breachRepeatSymbols: 3,
-        };
-
-        return computeRiskPolicyDashboard({
-            ...input,
-            bucketPolicies: riskPolicy.bucketPolicies,
-            themeCaps: riskPolicy.themeCaps,
-            cashJobs: riskPolicy.cashJobs,
-            cashDeploymentRule: riskPolicy.cashDeploymentRule,
-            employerStockPlan: riskPolicy.employerStockPlan,
-            optionPositions: input.optionPositions,
-            optionsRiskPolicy: riskPolicy.optionsRiskPolicy,
-            sellDisciplineRules: riskPolicy.sellDisciplineRules,
-            theses: input.theses,
-            options: {
-                churnWindowDays: churnPolicy.windowDays,
-                churnWatchRepeatSymbols: churnPolicy.watchRepeatSymbols,
-                churnBreachRepeatSymbols: churnPolicy.breachRepeatSymbols,
-            },
-        });
-    }, [initialSummary, input, riskPolicy]);
+    const summary = useMemo(
+        () => (portfolio ? evaluateRiskPolicy(portfolio, riskPolicy) : initialSummary),
+        [initialSummary, portfolio, riskPolicy],
+    );
     const headline = buildHeadline(summary);
 
     return (

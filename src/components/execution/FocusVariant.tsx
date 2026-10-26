@@ -24,7 +24,7 @@ import {
     SEED_ORDERS,
 } from "@/lib/execution/seed";
 import {
-    DEFAULT_OPTION_RISK_POSITIONS,
+    employerSymbols,
     evaluateSellDiscipline,
     evaluatePreTradeRiskPolicy,
     evaluateOptionOrderPolicy,
@@ -34,11 +34,13 @@ import {
     type OptionContractType,
     type OptionPolicyIssue,
     type SellDisciplineTask,
+    policyHoldings,
+    policyPortfolioValue,
 } from "@/lib/risk-policy";
-import { mockPortfolios } from "@/lib/mockData";
-import { getDefaultTheses } from "@/lib/research/thesis";
+import { isSeedThesis } from "@/lib/research/thesis";
+import { useThesisStore } from "@/lib/research/useThesisStore";
 import { useSettingsStore } from "@/lib/stores/settingsStore";
-import { useRequestTime } from "@/components/providers/RequestTimeProvider";
+import { usePolicyPortfolio } from "@/components/providers/PolicyPortfolioProvider";
 import type {
     Order,
     OrderInstrumentType,
@@ -116,20 +118,6 @@ const OPTION_CONTRACT_LABELS: Record<OptionContractType, string> = {
 
 const OPTION_CONTRACT_MULTIPLIER = 100;
 const EXECUTION_NAV_USD = 250_000;
-const EXECUTION_POLICY_PORTFOLIO_VALUE = mockPortfolios[0]?.totalValue ?? EXECUTION_NAV_USD;
-const EXECUTION_RISK_POLICY_HOLDINGS = (mockPortfolios[0]?.holdings ?? []).map((holding) => ({
-    id: holding.id,
-    symbol: holding.ticker,
-    name: holding.name,
-    quantity: holding.quantity,
-    avgCost: holding.avgCost,
-    currentPrice: holding.currentPrice,
-    marketValue: holding.marketValue,
-    isEmployerStock: holding.ticker === "GOOG" || holding.ticker === "GOOGL",
-    policyBucket: holding.policyBucket,
-    themeWeights: holding.themeWeights,
-}));
-
 const TIF_OPTIONS: TimeInForce[] = ["day", "gtc", "ioc", "fok"];
 const TIF_LABELS: Record<TimeInForce, string> = {
     day: "DAY",
@@ -282,6 +270,17 @@ function OrderForm({ onSubmit }: OrderFormProps) {
     const riskPolicy = useSettingsStore((s) => s.riskPolicy);
     const optionsRiskPolicy = riskPolicy.optionsRiskPolicy;
     const sellDisciplineRules = riskPolicy.sellDisciplineRules;
+    // The risk policy checks the order against the user's own holdings and
+    // the theses they wrote (launch item i54); prices and buying power are
+    // still examples until a brokerage is connected.
+    const { portfolio: policyPortfolio } = usePolicyPortfolio();
+    const policyHoldingRows = useMemo(
+        () => policyHoldings(policyPortfolio.holdings, riskPolicy),
+        [policyPortfolio.holdings, riskPolicy],
+    );
+    const policyValue = policyPortfolioValue(policyPortfolio);
+    const policyEmployerSymbols = useMemo(() => employerSymbols(riskPolicy), [riskPolicy]);
+    const { theses } = useThesisStore();
     // AR-109: JournalPlus pre-trade rationale. When `rationaleRequired`
     // is on, submit is gated on a completed rationale panel.
     const rationaleRequired = useSettingsStore(
@@ -446,16 +445,18 @@ function OrderForm({ onSubmit }: OrderFormProps) {
                 quantity,
                 premium: price,
                 side,
-                totalPortfolioValue: EXECUTION_NAV_USD,
-                liquidNetWorth: EXECUTION_NAV_USD,
+                totalPortfolioValue: policyValue,
+                liquidNetWorth: policyValue,
                 linkedThesisId: rationaleDraft.thesisId,
                 maxLossAcknowledged,
                 whatMustBeTrueByExpiry,
                 plannedExitRule,
-                existingPositions: DEFAULT_OPTION_RISK_POSITIONS,
+                // No options feed yet: no option positions, rather than example ones.
+                existingPositions: [],
                 policy: optionsRiskPolicy,
             }),
         [
+            policyValue,
             isOptionOrder,
             tickerUpper,
             optionContractType,
@@ -475,30 +476,29 @@ function OrderForm({ onSubmit }: OrderFormProps) {
         () => buildOptionGuardrails(isOptionOrder, optionOrderPolicy.checks),
         [isOptionOrder, optionOrderPolicy.checks],
     );
-    const defaultTheses = getDefaultTheses(useRequestTime());
     const sellDisciplineSummary = useMemo(
         () =>
             evaluateSellDiscipline({
                 rules: sellDisciplineRules,
-                holdings: EXECUTION_RISK_POLICY_HOLDINGS,
-                theses: defaultTheses,
-                portfolioValue: EXECUTION_POLICY_PORTFOLIO_VALUE,
+                holdings: policyHoldingRows,
+                theses: theses.filter((thesis) => !isSeedThesis(thesis)),
+                portfolioValue: policyValue,
             }),
-        [sellDisciplineRules, defaultTheses],
+        [sellDisciplineRules, policyHoldingRows, theses, policyValue],
     );
     const sellDisciplineGuardrail = useMemo(
         () => buildSellDisciplineGuardrail(side, tickerUpper, sellDisciplineSummary.tasks),
         [side, tickerUpper, sellDisciplineSummary.tasks],
     );
     const selectedThesis = useMemo(
-        () => defaultTheses.find((thesis) => thesis.id === rationaleDraft.thesisId),
-        [defaultTheses, rationaleDraft.thesisId],
+        () => theses.find((thesis) => thesis.id === rationaleDraft.thesisId),
+        [theses, rationaleDraft.thesisId],
     );
     const riskPolicyImpact = useMemo(
         () =>
             evaluatePreTradeRiskPolicy({
-                holdings: EXECUTION_RISK_POLICY_HOLDINGS,
-                portfolioValue: EXECUTION_POLICY_PORTFOLIO_VALUE,
+                holdings: policyHoldingRows,
+                portfolioValue: policyValue,
                 trade: {
                     ticker: tickerUpper,
                     side,
@@ -510,14 +510,18 @@ function OrderForm({ onSubmit }: OrderFormProps) {
                     linkedThesisId: rationaleDraft.thesisId,
                     thesisUpdatedAt: selectedThesis?.dateUpdated,
                 },
-                existingOptionPositions: DEFAULT_OPTION_RISK_POSITIONS,
+                existingOptionPositions: [],
                 bucketPolicies: riskPolicy.bucketPolicies,
                 themeCaps: riskPolicy.themeCaps,
                 optionsRiskPolicy,
                 maxSinglePositionPct: guardrailPrefs.concentrationCapPct,
                 overrideReason: riskPolicyOverrideReason,
+                employerSymbols: policyEmployerSymbols,
             }),
         [
+            policyHoldingRows,
+            policyValue,
+            policyEmployerSymbols,
             tickerUpper,
             side,
             quantity,

@@ -92,6 +92,7 @@ describe("pre-trade risk policy evaluator", () => {
                 thesisUpdatedAt: "2026-05-01",
             },
             themeCaps: { employer_linked_wealth: 15 },
+            employerSymbols: ["GOOG", "GOOGL"],
             asOf: "2026-05-15",
         });
 
@@ -99,6 +100,35 @@ describe("pre-trade risk policy evaluator", () => {
         assert.ok(employer);
         assert.match(employer.message, /Employer-linked wealth/);
         assert.equal(employer.decision, "override_required");
+    });
+
+    test("regression: without employer tickers named, a GOOG add is not an employer-stock add", () => {
+        const result = evaluatePreTradeRiskPolicy({
+            holdings: [{ symbol: "GOOG", marketValue: 450_000, policyBucket: "active" }],
+            portfolioValue: 500_000,
+            trade: { ticker: "GOOG", side: "buy", quantity: 100, price: 1_000, linkedThesisId: "seed-goog", thesisUpdatedAt: "2026-05-01" },
+            themeCaps: { employer_linked_wealth: 15 },
+            asOf: "2026-05-15",
+        });
+
+        assert.equal(result.checks.some((check) => check.ruleType === "employer_stock_allocation"), false);
+    });
+
+    test("a buy of a held ticker goes in the bucket chosen for it", () => {
+        const result = evaluatePreTradeRiskPolicy({
+            holdings: [
+                { symbol: "XYZ", marketValue: 20_000, policyBucket: "speculative" },
+                { symbol: "VTI", marketValue: 80_000, defaultBucket: "core" },
+            ],
+            portfolioValue: 100_000,
+            trade: { ticker: "XYZ", side: "buy", quantity: 10, price: 100, linkedThesisId: "t", thesisUpdatedAt: "2026-05-01" },
+            asOf: "2026-05-15",
+        });
+
+        const bucket = result.checks.find((check) => check.ruleType === "bucket_allocation");
+        assert.ok(bucket);
+        assert.match(bucket.label, /Speculative/);
+        assert.equal(result.checks.some((check) => check.ruleType === "missing_bucket_classification"), false);
     });
 
     test("flags theme/factor cap adds independently from bucket caps", () => {

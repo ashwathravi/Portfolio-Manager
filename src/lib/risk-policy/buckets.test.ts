@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
     computeBucketAllocation,
+    defaultPolicyBucket,
     policyBucketLabel,
     resolvePolicyBucketAssignment,
     type PolicyClassifiableHolding,
@@ -27,6 +28,31 @@ describe("risk policy / bucket model", () => {
         assert.equal(resolvePolicyBucketAssignment({ symbol: "FNMA" }).bucket, "special_situation");
         assert.equal(resolvePolicyBucketAssignment({ symbol: "SGOV" }).bucket, "cash_reserve");
         assert.equal(resolvePolicyBucketAssignment({ symbol: "VTI" }).bucket, "core");
+    });
+
+    test("a holding starts in the bucket its security type suggests", () => {
+        const of = (type: string | null, sector: string | null = null) => defaultPolicyBucket("XYZ", { type, sector });
+        assert.equal(of("ETF", "Funds"), "core");
+        assert.equal(of("ETF", "Bonds"), "core");
+        assert.equal(of("BOND"), "core");
+        assert.equal(of("CS", "Tech"), "active");
+        assert.equal(of("ADRC", "Healthcare"), "active");
+        assert.equal(of("PFD", "Finance"), "active");
+        assert.equal(of("WARRANT"), "speculative");
+        assert.equal(of("ETF", "Crypto"), "speculative");
+        assert.equal(of(null), null);
+        assert.equal(defaultPolicyBucket("XYZ"), null);
+        // A well-known ticker keeps its bucket whatever its type.
+        assert.equal(defaultPolicyBucket("FNMA", { type: "CS", sector: "Finance" }), "special_situation");
+        assert.equal(defaultPolicyBucket("sgov", { type: "ETF", sector: "Bonds" }), "cash_reserve");
+    });
+
+    test("the user's choice, then the instrument, then the default the page worked out", () => {
+        assert.deepEqual(resolvePolicyBucketAssignment({ symbol: "XYZ", defaultBucket: "core" }), { bucket: "core", source: "fallback" });
+        assert.deepEqual(resolvePolicyBucketAssignment({ symbol: "XYZ", defaultBucket: "core", policyBucket: "active" }), { bucket: "active", source: "explicit" });
+        // A default worked out as none: unassigned, even for a well-known ticker.
+        assert.deepEqual(resolvePolicyBucketAssignment({ symbol: "VTI", defaultBucket: null }), { bucket: "unassigned", source: "missing" });
+        assert.deepEqual(resolvePolicyBucketAssignment({ symbol: "XYZ", defaultBucket: "unassigned" }), { bucket: "unassigned", source: "missing" });
     });
 
     test("routes option-like instruments to speculative even without a ticker mapping", () => {

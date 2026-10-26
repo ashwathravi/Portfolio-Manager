@@ -34,6 +34,8 @@ export interface ThemeWeight {
 
 export interface ThemeExposureHolding extends PolicyClassifiableHolding {
     themeWeights?: readonly ThemeWeight[] | null;
+    /** One of the tickers the user named as their employer's (Settings › Employer stock). */
+    isEmployerStock?: boolean;
 }
 
 export interface ThemeContributor {
@@ -155,13 +157,11 @@ const FALLBACK_THEME_WEIGHTS_BY_SYMBOL: Record<string, readonly ThemeWeight[]> =
         { theme: "mega_cap_growth", weight: 0.35, source: "fallback" },
         { theme: "cloud_platforms", weight: 0.25, source: "fallback" },
         { theme: "ai_infrastructure", weight: 0.2, source: "fallback" },
-        { theme: "employer_linked_wealth", weight: 0.2, source: "fallback" },
     ],
     GOOGL: [
         { theme: "mega_cap_growth", weight: 0.35, source: "fallback" },
         { theme: "cloud_platforms", weight: 0.25, source: "fallback" },
         { theme: "ai_infrastructure", weight: 0.2, source: "fallback" },
-        { theme: "employer_linked_wealth", weight: 0.2, source: "fallback" },
     ],
     NVDA: [
         { theme: "ai_infrastructure", weight: 0.45, source: "fallback" },
@@ -250,7 +250,27 @@ export function themeLabel(theme: ThemeId): string {
     return THEME_META[theme].label;
 }
 
+/**
+ * The share of an employer's stock that counts as employer-linked wealth: it
+ * moves with the user's paycheck as well as the market. The rest keeps the
+ * company's own themes.
+ */
+export const EMPLOYER_LINK_WEIGHT = 0.2;
+
 export function themeWeightsForSymbol(
+    symbol: string | null | undefined,
+    explicitWeights?: readonly ThemeWeight[] | null,
+    { employer = false }: { employer?: boolean } = {},
+): readonly ThemeWeight[] {
+    const weights = companyThemeWeights(symbol, explicitWeights);
+    if (!employer || weights.some((weight) => weight.theme === "employer_linked_wealth")) return weights;
+    return [
+        ...weights.map((weight) => ({ ...weight, weight: weight.weight * (1 - EMPLOYER_LINK_WEIGHT) })),
+        { theme: "employer_linked_wealth", weight: EMPLOYER_LINK_WEIGHT, source: "fallback" },
+    ];
+}
+
+function companyThemeWeights(
     symbol: string | null | undefined,
     explicitWeights?: readonly ThemeWeight[] | null,
 ): readonly ThemeWeight[] {
@@ -288,7 +308,9 @@ export function computeThemeExposure(
     for (const holding of holdings) {
         const holdingMarketValue = safeMarketValue(holding.marketValue);
         const policyBucket = resolvePolicyBucketAssignment(holding).bucket;
-        const weights = themeWeightsForSymbol(holding.symbol, holding.themeWeights);
+        const weights = themeWeightsForSymbol(holding.symbol, holding.themeWeights, {
+            employer: holding.isEmployerStock,
+        });
 
         for (const weight of weights) {
             const weightedValue = holdingMarketValue * weight.weight;

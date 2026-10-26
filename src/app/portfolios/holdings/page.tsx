@@ -11,6 +11,7 @@ import HoldingsLoading from "./loading";
 import { DEFAULT_OPTION_RISK_POSITIONS } from "@/lib/risk-policy";
 import { getSecurityProfiles } from "@/lib/markets/price-store";
 import { holdingName, loadSecurityProfiles } from "@/lib/markets/security-profile";
+import { defaultPolicyBucket } from "@/lib/risk-policy/buckets";
 
 /**
  * Phase 4 (AR-74) Holdings page.
@@ -95,6 +96,8 @@ async function HoldingsContent() {
             name: holdingName(h.symbol, h.name, profile),
             // Without reference data yet, the client falls back to sectorFor().
             ...(profile?.sector ? { sector: profile.sector } : {}),
+            // The bucket it's in until the user chooses one (launch item i54).
+            defaultBucket: defaultPolicyBucket(h.symbol, profile),
             quantity: qty,
             avgCost: avg,
             currentPrice: last,

@@ -73,6 +73,8 @@ export interface PreTradeRiskPolicyInput {
     thesisMaxAgeDays?: number;
     overrideReason?: string;
     asOf?: Date | string;
+    /** The tickers the user named as their employer's (the employer plan's symbols). */
+    employerSymbols?: readonly string[];
 }
 
 export interface PreTradeRiskPolicyCheck {
@@ -123,7 +125,7 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 export function evaluatePreTradeRiskPolicy(input: PreTradeRiskPolicyInput): PreTradeRiskPolicyImpact {
     const asOf = normalizeDate(input.asOf);
-    const holdings = normalizeHoldings(input.holdings);
+    const holdings = normalizeHoldings(input.holdings, input.employerSymbols ?? []);
     const trade = normalizeTrade(input.trade);
     const portfolioValue = safeMoney(
         input.portfolioValue ??
@@ -151,7 +153,8 @@ export function evaluatePreTradeRiskPolicy(input: PreTradeRiskPolicyInput): PreT
         portfolioValue,
     });
 
-    const tradeHolding = holdingForTrade(trade, tradeValue);
+    const employerSymbols = new Set((input.employerSymbols ?? []).map(normalizeSymbol).filter(Boolean));
+    const tradeHolding = holdingForTrade(trade, tradeValue, holdings, employerSymbols);
     const bucketAssignment = resolvePolicyBucketAssignment(tradeHolding);
     const currentBucketAllocation = computeBucketAllocation(holdings, input.bucketPolicies ?? DEFAULT_BUCKET_POLICIES);
     const postHoldings = buildPostTradeHoldings(holdings, tradeHolding, tradeValue, trade.side);
@@ -173,7 +176,9 @@ export function evaluatePreTradeRiskPolicy(input: PreTradeRiskPolicyInput): PreT
             portfolioValue,
             currentThemeExposure,
             postThemeExposure,
-            tradeWeights: themeWeightsForSymbol(trade.ticker, trade.themeWeights),
+            tradeWeights: themeWeightsForSymbol(trade.ticker, trade.themeWeights, {
+                employer: tradeHolding.isEmployerStock,
+            }),
         }),
         buildOptionsCheck({
             trade,
@@ -593,18 +598,24 @@ function buildPostTradeHoldings(
     return next;
 }
 
+/** The trade as a holding: in the bucket the user chose for that ticker when they hold it. */
 function holdingForTrade(
     trade: NormalizedTrade,
     tradeValue: number,
+    holdings: readonly NormalizedHolding[],
+    employerSymbols: ReadonlySet<string>,
 ): PolicyClassifiableHolding & ThemeExposureHolding {
+    const held = holdings.find((holding) => holding.symbol === trade.ticker);
     return {
         id: `trade-${trade.ticker}`,
         symbol: trade.ticker,
         name: trade.ticker,
         marketValue: tradeValue,
-        policyBucket: trade.policyBucket,
+        policyBucket: trade.policyBucket ?? held?.policyBucket,
+        defaultBucket: held?.defaultBucket,
         instrumentType: trade.instrumentType === "option" ? "option" : "equity",
-        themeWeights: trade.themeWeights,
+        themeWeights: trade.themeWeights ?? held?.themeWeights,
+        isEmployerStock: held?.isEmployerStock ?? employerSymbols.has(trade.ticker),
     };
 }
 
@@ -663,12 +674,20 @@ interface NormalizedTrade extends Required<Pick<PreTradeRiskPolicyTrade, "ticker
     optionPremiumAtRisk?: number;
 }
 
-function normalizeHoldings(holdings: readonly PreTradeRiskPolicyHolding[]): NormalizedHolding[] {
-    return holdings.map((holding) => ({
-        ...holding,
-        symbol: normalizeSymbol(holding.symbol ?? holding.ticker),
-        marketValue: safeMoney(holding.marketValue),
-    }));
+function normalizeHoldings(
+    holdings: readonly PreTradeRiskPolicyHolding[],
+    employerSymbols: readonly string[],
+): NormalizedHolding[] {
+    const employer = new Set(employerSymbols.map(normalizeSymbol).filter(Boolean));
+    return holdings.map((holding) => {
+        const symbol = normalizeSymbol(holding.symbol ?? holding.ticker);
+        return {
+            ...holding,
+            symbol,
+            marketValue: safeMoney(holding.marketValue),
+            isEmployerStock: holding.isEmployerStock ?? employer.has(symbol),
+        };
+    });
 }
 
 function normalizeTrade(trade: PreTradeRiskPolicyTrade): NormalizedTrade {

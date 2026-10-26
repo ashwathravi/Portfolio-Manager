@@ -2,6 +2,7 @@ import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
+    DEFAULT_SELL_DISCIPLINE_RULES,
     evaluateSellDiscipline,
     reactivateSellDisciplineRule,
     resolveSellDisciplineRule,
@@ -58,6 +59,39 @@ function rule(patch: Partial<SellDisciplineRule>): SellDisciplineRule {
 }
 
 describe("sell discipline policy engine", () => {
+    test("the default trim band watches the employer stock the user named, and nothing else", () => {
+        const band = DEFAULT_SELL_DISCIPLINE_RULES.find((candidate) => candidate.id === "sell-goog-employer-cap")!;
+        assert.equal(band.symbol, undefined);
+        assert.equal(band.label, "Employer-stock trim band");
+
+        // AAPL is 45% of the portfolio, but nobody named an employer.
+        const unnamed = evaluateSellDiscipline({
+            holdings: HOLDINGS.map((holding) => ({ ...holding, isEmployerStock: false })),
+            portfolioValue: 250_000,
+            rules: [band],
+            asOf: "2026-05-15",
+        });
+        assert.equal(unnamed.triggeredCount, 0);
+
+        const named = evaluateSellDiscipline({
+            holdings: HOLDINGS.map((holding) => ({ ...holding, isEmployerStock: holding.symbol === "AAPL" })),
+            portfolioValue: 250_000,
+            rules: [band],
+            asOf: "2026-05-15",
+        });
+        assert.equal(named.tasks[0]?.symbol, "AAPL");
+    });
+
+    test("regression: an employer vest without a symbol or employer stock fires nothing", () => {
+        const summary = evaluateSellDiscipline({
+            holdings: HOLDINGS.map((holding) => ({ ...holding, isEmployerStock: false })),
+            portfolioValue: 250_000,
+            rules: [rule({ type: "employer_vest", vestDate: "2026-05-01" })],
+            asOf: "2026-05-15",
+        });
+        assert.equal(summary.triggeredCount, 0);
+    });
+
     test("triggers allocation caps and no-add blocks", () => {
         const summary = evaluateSellDiscipline({
             holdings: HOLDINGS,
