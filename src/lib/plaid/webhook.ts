@@ -104,7 +104,29 @@ const KEY_TTL_MS = 24 * 60 * 60 * 1000;
  * at worst refused for this long; Plaid retries a refused webhook.)
  */
 const UNKNOWN_KEY_TTL_MS = 5 * 60 * 1000;
+/**
+ * At most this many kids kept: forged webhooks name kids of their choosing,
+ * so the cache can't be left to grow with them. Plaid uses a handful.
+ */
+const MAX_CACHED_KEYS = 256;
 const keyCache = new Map<string, { key: PlaidWebhookKey | null; fetchedAt: number }>();
+
+/** Drops expired entries, then the oldest (unknown kids before real keys) past the cap. */
+function remember(kid: string, key: PlaidWebhookKey | null, now: number): void {
+    for (const [cached, entry] of keyCache) {
+        if (now - entry.fetchedAt >= (entry.key ? KEY_TTL_MS : UNKNOWN_KEY_TTL_MS)) keyCache.delete(cached);
+    }
+    keyCache.delete(kid);
+    keyCache.set(kid, { key, fetchedAt: now });
+    for (const [cached, entry] of keyCache) {
+        if (keyCache.size <= MAX_CACHED_KEYS) break;
+        if (!entry.key) keyCache.delete(cached);
+    }
+    for (const cached of keyCache.keys()) {
+        if (keyCache.size <= MAX_CACHED_KEYS) break;
+        keyCache.delete(cached);
+    }
+}
 
 /** Plaid's key for `kid`, kept by kid; null when Plaid doesn't know it. */
 export function plaidWebhookKeyFetcher({
@@ -145,11 +167,15 @@ export function plaidWebhookKeyFetcher({
             if (!(error instanceof PlaidApiError)) return null;
             // Plaid answered that it has no such key: remembered as unknown below.
         }
-        keyCache.set(kid, { key, fetchedAt: clock() });
+        remember(kid, key, clock());
         return key;
     };
 }
 
 export function resetPlaidWebhookKeysForTests(): void {
     keyCache.clear();
+}
+
+export function plaidWebhookKeysCachedForTests(): number {
+    return keyCache.size;
 }

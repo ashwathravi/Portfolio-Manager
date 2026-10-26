@@ -365,7 +365,8 @@ export async function postPlaid({
     return payload;
 }
 
-function mapPlaidAccount({
+/** One of /accounts/get's accounts, as Atlas stores it. */
+export function mapPlaidAccount({
     account,
     linkAccount,
     institution,

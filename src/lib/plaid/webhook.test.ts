@@ -3,7 +3,14 @@ import assert from "node:assert/strict";
 import { createHash, generateKeyPairSync, sign } from "node:crypto";
 
 import type { PlaidFetch } from "./link";
-import { PLAID_WEBHOOK_MAX_AGE_SECONDS, plaidWebhookKeyFetcher, resetPlaidWebhookKeysForTests, verifyPlaidWebhook, type PlaidWebhookKey } from "./webhook";
+import {
+    PLAID_WEBHOOK_MAX_AGE_SECONDS,
+    plaidWebhookKeyFetcher,
+    plaidWebhookKeysCachedForTests,
+    resetPlaidWebhookKeysForTests,
+    verifyPlaidWebhook,
+    type PlaidWebhookKey,
+} from "./webhook";
 
 const NOW = Date.UTC(2026, 9, 26, 15, 0, 0);
 const BODY = '{\n  "webhook_type": "HOLDINGS",\n  "webhook_code": "DEFAULT_UPDATE",\n  "item_id": "item-1"\n}';
@@ -107,6 +114,31 @@ describe("plaidWebhookKeyFetcher", () => {
         now += 5 * 60 * 1000;
         assert.equal(await getKey("kid-x"), null);
         assert.equal(calls, 2);
+    });
+
+    test("regression: forged kids can't grow the cache: it's capped, and expired ones go", async () => {
+        // The Codex finding on PR #163: every unknown kid was kept for good.
+        resetPlaidWebhookKeysForTests();
+        let now = NOW;
+        const fetchImpl: PlaidFetch = (_url, init) => {
+            const kid = JSON.parse(String(init.body)).key_id as string;
+            return kid === "kid-real"
+                ? reply({ key: { kty: "EC", crv: "P-256", x: "x", y: "y", expired_at: null } })
+                : reply({ error_type: "INVALID_INPUT", error_code: "INVALID_WEBHOOK_VERIFICATION_KEY_ID", error_message: "unknown" }, 400);
+        };
+        const getKey = plaidWebhookKeyFetcher({ ...config, fetchImpl, clock: () => now });
+        await getKey("kid-real");
+        for (let i = 0; i < 1000; i++) await getKey(`forged-${i}`);
+        assert.ok(plaidWebhookKeysCachedForTests() <= 256, String(plaidWebhookKeysCachedForTests()));
+        // The real key outlasts the forged ones.
+        let asked = 0;
+        const counting: PlaidFetch = (url, init) => { asked++; return fetchImpl(url, init); };
+        assert.ok(await plaidWebhookKeyFetcher({ ...config, fetchImpl: counting, clock: () => now })("kid-real"));
+        assert.equal(asked, 0);
+        // A day on, the next lookup clears what expired.
+        now += 24 * 60 * 60 * 1000;
+        await getKey("forged-new");
+        assert.equal(plaidWebhookKeysCachedForTests(), 1);
     });
 
     test("Plaid unreachable is no key, and asked again next time", async () => {

@@ -213,6 +213,53 @@ test.describe('Settings page', () => {
         await expect(failed).toHaveCount(0);
     });
 
+    test('regression: retrying a failed reconnect signs in to the same connection again, not a new one', async ({ page }) => {
+        // The Codex finding on PR #163: Retry opened Link for a new connection.
+        await page.route('**/api/plaid/connections', async (route) => {
+            await route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({
+                    data: [plaidE2EConnection({
+                        itemId: 'item-fidelity',
+                        institutionName: 'Fidelity',
+                        status: 'login_required',
+                        accounts: [{ plaidAccountId: 'acc-f1', name: 'Individual', mask: '1234', type: 'investment', subtype: 'brokerage', syncStatus: 'sync_ready', portfolio: { id: 'p-f1', name: 'Fidelity Individual' } }],
+                    })],
+                }),
+            });
+        });
+        const linkTokenBodies: unknown[] = [];
+        await page.route('**/api/plaid/link-token', async (route) => {
+            linkTokenBodies.push(route.request().postDataJSON());
+            if (linkTokenBodies.length === 1) {
+                await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: 'Unable to create Plaid link token.', code: 'PLAID_LINK_TOKEN_FAILED' }) });
+                return;
+            }
+            await route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({ linkToken: 'link-sandbox-update', expiration: '2026-10-26T16:00:00Z', requestId: 'r', environment: 'sandbox', products: [] }),
+            });
+        });
+        const syncRequests: unknown[] = [];
+        await page.route('**/api/plaid/sync', async (route) => {
+            syncRequests.push(route.request().postDataJSON());
+            await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { itemId: 'item-fidelity', accounts: [], overLimit: [] } }) });
+        });
+        await mockPlaidLinkSdk(page);
+        await reloadAppPage(page);
+
+        const card = page.getByTestId('integrations-card');
+        await card.getByTestId('plaid-connection').getByRole('button', { name: 'Reconnect' }).click();
+        const panel = card.getByTestId('plaid-link-panel');
+        await expect(panel).toHaveAttribute('data-state', 'error');
+        await panel.getByRole('button', { name: 'Retry Plaid Link' }).click();
+        await expect.poll(() => syncRequests.length).toBe(1);
+        expect(linkTokenBodies).toEqual([{ itemId: 'item-fidelity' }, { itemId: 'item-fidelity' }]);
+        expect(syncRequests[0]).toEqual({ itemId: 'item-fidelity', reconnected: true });
+    });
+
     test('a connection that needs a sign-in reconnects through Link; accounts waiting are picked here; disconnecting asks first', async ({ page }) => {
         // Launch items i45 and i46.
         let connections: unknown[] = [

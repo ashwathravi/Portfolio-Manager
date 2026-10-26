@@ -169,6 +169,9 @@ export function IntegrationsCard() {
     const [plaidLinkToken, setPlaidLinkToken] = useState<PlaidLinkTokenResponse | null>(null);
     const [plaidExchange, setPlaidExchange] = useState<PlaidExchangeClientResponse | null>(null);
     const [selectedPlaidAccountIds, setSelectedPlaidAccountIds] = useState<string[]>([]);
+    // The connection being signed in to again, so Retry after a failure
+    // reopens update mode for it rather than linking a new connection.
+    const [reconnecting, setReconnecting] = useState<PlaidConnection | null>(null);
 
     /** After a change: this list, the pages' data, and the sidebar's account count. */
     const refreshAfterChange = () => {
@@ -273,6 +276,7 @@ export function IntegrationsCard() {
     };
 
     const startPlaidLink = async () => {
+        setReconnecting(null);
         setPlaidStatus("loading");
         setPlaidError(null);
         setPlaidExchange(null);
@@ -291,11 +295,13 @@ export function IntegrationsCard() {
 
     /** Link's update mode: the user signs in to the institution again, then it syncs. */
     const onReconnect = async (connection: PlaidConnection) => {
+        setReconnecting(connection);
         setPlaidStatus("loading");
         setPlaidError(null);
         try {
             const token = await createLinkToken(connection.itemId);
             await openLink(token, () => {
+                setReconnecting(null);
                 setPlaidStatus("idle");
                 // The server reads the connection from Plaid again first: the
                 // accounts it may still read, its login and its consent.
@@ -361,12 +367,13 @@ export function IntegrationsCard() {
                 selectedPlaidAccountIds={selectedPlaidAccountIds}
                 onToggle={togglePlaidAccount}
                 onCancel={() => {
+                    setReconnecting(null);
                     setPlaidStatus("idle");
                     setPlaidError(null);
                     setPlaidExchange(null);
                     setPlaidLinkToken(null);
                 }}
-                onRetry={startPlaidLink}
+                onRetry={() => void (reconnecting ? onReconnect(reconnecting) : startPlaidLink())}
                 onConnect={() => void connectSelectedPlaidAccounts()}
             />
 

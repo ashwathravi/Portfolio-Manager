@@ -566,11 +566,11 @@ describe('Plaid sync into portfolios', { skip: !DATABASE_URL && 'SCRIPTS_TEST_DA
         };
 
         // Still wanting a sign-in: it stays so, nothing else changes.
-        assert.deepEqual(await refresh({ error: { error_code: 'ITEM_LOGIN_REQUIRED' } }), { status: 'login_required', accountsRemoved: 0 });
+        assert.deepEqual(await refresh({ error: { error_code: 'ITEM_LOGIN_REQUIRED' } }), { status: 'login_required', accountsRemoved: 0, accountsAdded: 0 });
         assert.equal((await itemRow('item-fixed'))[0].status, 'login_required');
 
         // Signed in again, one account no longer shared: it stops syncing.
-        assert.deepEqual(await refresh({ error: null, consent_expiration_time: null }), { status: 'active', accountsRemoved: 1 });
+        assert.deepEqual(await refresh({ error: null, consent_expiration_time: null }), { status: 'active', accountsRemoved: 1, accountsAdded: 0 });
         assert.equal((await itemRow('item-fixed'))[0].status, 'active');
         assert.deepEqual((await statuses('u-fixed')).map((r) => [r.id, r.status]), [['acc_dropped', 'excluded'], ['acc_fixed', 'sync_ready'], ['acc_waiting', 'awaiting_selection']]);
 
@@ -582,6 +582,43 @@ describe('Plaid sync into portfolios', { skip: !DATABASE_URL && 'SCRIPTS_TEST_DA
         assert.equal((await itemRow('item-fixed'))[0].status, 'pending_expiration');
 
         await assert.rejects(refreshPlaidItem('u-someone-else', 'item-fixed', deps(fakePlaid({}).fetchImpl)), PlaidItemNotFoundError);
+    });
+
+    test('regression: an account whose access is restored on reconnect comes back under its new ID, into the same account in Atlas', async () => {
+        // The Codex finding on PR #163: Plaid gives restored access a new
+        // account_id; the old one stopped syncing and the new one was never stored.
+        await linkedUser('u-restore', 'item-restore', [['acc_old_id', 'Individual', 'investment']]);
+        await selectPlaidAccounts('u-restore', 'item-restore', ['acc_old_id'], database);
+        await syncPlaidItem('u-restore', 'item-restore', deps(fakePlaid({
+            '/investments/holdings/get': holdingsOf('acc_old_id', [['sec_aapl', 1, 100, 90]]),
+            '/investments/transactions/get': transactionsOf('acc_old_id', []),
+        }).fetchImpl));
+        // As the exchange stores it: the connection's institution.
+        await sql`UPDATE plaid_accounts SET institution_id = 'ins_1', institution_name = 'Fidelity' WHERE user_id = 'u-restore'`;
+        const [portfolio] = await sql<{ id: string }[]>`SELECT id FROM portfolios WHERE user_id = 'u-restore'`;
+
+        const plaidAccount = (account_id: string, name: string, mask: string) => ({
+            account_id, name, mask, type: 'investment', subtype: 'brokerage', balances: { current: 100, iso_currency_code: 'USD' },
+        });
+        const reconnect = fakePlaid({
+            '/item/get': () => ({ json: { item: { item_id: 'item-restore', error: null, consent_expiration_time: null } } }),
+            '/accounts/get': () => ({ json: { accounts: [plaidAccount('acc_new_id', 'Individual', '1234'), plaidAccount('acc_added', 'Joint', '9999')] } }),
+        });
+        assert.deepEqual(await refreshPlaidItem('u-restore', 'item-restore', deps(reconnect.fetchImpl)), { status: 'active', accountsRemoved: 1, accountsAdded: 2 });
+        // The restored account keeps its pick and history; a new one waits to be picked.
+        const rows = await sql<{ id: string; status: string; synced: boolean }[]>`
+            SELECT plaid_account_id AS id, sync_status AS status, holdings_synced_at IS NOT NULL AS synced FROM plaid_accounts WHERE user_id = 'u-restore' ORDER BY plaid_account_id`;
+        assert.deepEqual(rows.map((r) => [r.id, r.status, r.synced]), [['acc_added', 'awaiting_selection', false], ['acc_new_id', 'sync_ready', true], ['acc_old_id', 'excluded', true]]);
+        const [moved] = await sql<{ external: string }[]>`SELECT external_account_id AS external FROM portfolios WHERE id = ${portfolio.id}`;
+        assert.equal(moved.external, 'acc_new_id');
+
+        // The next sync writes into the same account in Atlas, not a new one.
+        const synced = await syncPlaidItem('u-restore', 'item-restore', deps(fakePlaid({
+            '/investments/holdings/get': holdingsOf('acc_new_id', [['sec_aapl', 2, 100, 180]]),
+            '/investments/transactions/get': transactionsOf('acc_new_id', []),
+        }).fetchImpl, new Date('2026-10-26T22:30:00.000Z')));
+        assert.deepEqual(synced.accounts.map((a) => [a.portfolioId, a.created]), [[portfolio.id, false]]);
+        assert.equal((await sql`SELECT 1 FROM portfolios WHERE user_id = 'u-restore'`).length, 1);
     });
 });
 

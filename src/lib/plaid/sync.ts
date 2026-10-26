@@ -35,7 +35,17 @@ import {
     type AccountHoldings,
     type TransactionSkipReason,
 } from "./investments";
-import { PlaidApiError, asRecord, plaidAccountFingerprint, postPlaid, readArray, resolvePlaidEnvironment, type PlaidCredentials, type PlaidFetch } from "./link";
+import {
+    PlaidApiError,
+    asRecord,
+    mapPlaidAccount,
+    plaidAccountFingerprint,
+    postPlaid,
+    readArray,
+    resolvePlaidEnvironment,
+    type PlaidCredentials,
+    type PlaidFetch,
+} from "./link";
 import { getPlaidAccessTokenForUser } from "./server-token-vault";
 import type { PlaidEnvironment } from "./types";
 
@@ -569,63 +579,140 @@ export type PlaidItemRefresh = "active" | "pending_expiration" | "login_required
 /**
  * Reads the connection's state from Plaid again after Link's update mode
  * (launch item i45), where the user may have signed in again, renewed
- * consent, or changed which accounts Atlas may read: accounts Plaid no
- * longer returns stop syncing (asking for them would fail the whole
- * request), and the status follows Plaid's answer (login fine; consent
- * with a week or more left, or none to end). The user's own connection
- * only (PlaidItemNotFoundError otherwise); Plaid's errors other than a
- * login still needed are thrown.
+ * consent, or changed which accounts Atlas may read:
+ *   - Accounts Plaid no longer returns stop syncing (asking for them would
+ *     fail the whole request); what was brought in stays.
+ *   - Accounts it returns that aren't stored are added. One that's the same
+ *     account as one no longer returned (restored access comes back under a
+ *     new ID) takes its place: its pick, its sync history and its account
+ *     in Atlas. Any other waits to be picked.
+ *   - The status follows Plaid's answer: login fine; consent with a week or
+ *     more left, or none to end.
+ * The user's own connection only (PlaidItemNotFoundError otherwise);
+ * Plaid's errors other than a login still needed are thrown.
  */
-export async function refreshPlaidItem(userId: string, itemId: string, deps: SyncDeps): Promise<{ status: PlaidItemRefresh; accountsRemoved: number }> {
+export async function refreshPlaidItem(
+    userId: string,
+    itemId: string,
+    deps: SyncDeps,
+): Promise<{ status: PlaidItemRefresh; accountsRemoved: number; accountsAdded: number }> {
     const { config, database = db, fetchImpl = fetch, getAccessToken = getPlaidAccessTokenForUser, now = new Date() } = deps;
     const [item] = await database
-        .select({ id: plaidItems.id })
+        .select({ id: plaidItems.id, institutionId: plaidItems.institutionId, institutionName: plaidItems.institutionName })
         .from(plaidItems)
         .where(and(eq(plaidItems.userId, userId), eq(plaidItems.plaidItemId, itemId), ne(plaidItems.status, "revoked"), isNull(plaidItems.revokedAt)))
         .limit(1);
     if (!item) throw new PlaidItemNotFoundError();
     const accessToken = await getAccessToken(itemId, userId);
-    if (!accessToken) return { status: "no-token", accountsRemoved: 0 };
+    if (!accessToken) return { status: "no-token", accountsRemoved: 0, accountsAdded: 0 };
 
     const setStatus = (status: string) => database
         .update(plaidItems)
         .set({ status, updatedAt: now })
         .where(and(eq(plaidItems.id, item.id), eq(plaidItems.userId, userId)));
     let state: Record<string, unknown>;
-    let accessible: Set<string>;
+    let listed: Record<string, unknown>[];
     try {
         state = asRecord(asRecord(await postPlaid({ endpoint: "/item/get", ...config, fetchImpl, body: { access_token: accessToken } })).item);
-        const listed = asRecord(await postPlaid({ endpoint: "/accounts/get", ...config, fetchImpl, body: { access_token: accessToken } }));
-        accessible = new Set(readArray(listed, "accounts").map((account) => asRecord(account).account_id).filter((id): id is string => typeof id === "string"));
+        listed = readArray(asRecord(await postPlaid({ endpoint: "/accounts/get", ...config, fetchImpl, body: { access_token: accessToken } })), "accounts")
+            .map(asRecord)
+            .filter((account) => typeof account.account_id === "string");
     } catch (error) {
         if (error instanceof PlaidApiError && error.errorCode === "ITEM_LOGIN_REQUIRED") {
             await setStatus("login_required");
-            return { status: "login_required", accountsRemoved: 0 };
+            return { status: "login_required", accountsRemoved: 0, accountsAdded: 0 };
         }
         throw error;
     }
     if ((asRecord(state.error) as { error_code?: unknown }).error_code === "ITEM_LOGIN_REQUIRED") {
         await setStatus("login_required");
-        return { status: "login_required", accountsRemoved: 0 };
+        return { status: "login_required", accountsRemoved: 0, accountsAdded: 0 };
     }
 
-    // Accounts the user no longer lets Atlas read: they stop syncing (what
-    // was brought in stays, as when disconnecting).
-    const removed = await database
-        .update(plaidAccounts)
-        .set({ syncStatus: "excluded", updatedAt: now })
-        .where(and(
-            eq(plaidAccounts.userId, userId),
-            eq(plaidAccounts.plaidItemRecordId, item.id),
-            inArray(plaidAccounts.syncStatus, ["sync_ready", "awaiting_selection"]),
-            accessible.size > 0 ? notInArray(plaidAccounts.plaidAccountId, [...accessible]) : sql`true`,
-        ))
-        .returning({ id: plaidAccounts.id });
+    const institution = { id: item.institutionId ?? "unknown", name: item.institutionName ?? "Plaid institution" };
+    const products = new Set((process.env.PLAID_PRODUCTS ?? "investments,transactions").split(",").map((p) => p.trim()).filter(Boolean));
+    const returnedIds = new Set(listed.map((account) => account.account_id as string));
+
+    const { removed, added } = await database.transaction(async (tx) => {
+        const stored = await tx
+            .select({
+                id: plaidAccounts.id,
+                plaidAccountId: plaidAccounts.plaidAccountId,
+                institutionId: plaidAccounts.institutionId,
+                institutionName: plaidAccounts.institutionName,
+                name: plaidAccounts.name,
+                mask: plaidAccounts.mask,
+                subtype: plaidAccounts.subtype,
+                syncStatus: plaidAccounts.syncStatus,
+                lastSyncedAt: plaidAccounts.lastSyncedAt,
+                holdingsSyncedAt: plaidAccounts.holdingsSyncedAt,
+            })
+            .from(plaidAccounts)
+            .where(and(eq(plaidAccounts.userId, userId), eq(plaidAccounts.plaidItemRecordId, item.id)));
+        const storedIds = new Set(stored.map((a) => a.plaidAccountId));
+        // No longer returned, and still picked or waiting: they stop syncing.
+        const gone = stored.filter((a) => !returnedIds.has(a.plaidAccountId) && (a.syncStatus === "sync_ready" || a.syncStatus === "awaiting_selection"));
+        const goneByFingerprint = new Map(gone.map((a) => [plaidAccountFingerprint(a), a]));
+
+        let addedCount = 0;
+        const fresh = listed
+            .filter((account) => !storedIds.has(account.account_id as string))
+            .map((account) => mapPlaidAccount({ account, institution, products }));
+        for (const account of fresh) {
+            const previous = goneByFingerprint.get(plaidAccountFingerprint({
+                institutionId: account.institution.id,
+                institutionName: account.institution.name,
+                name: account.name,
+                mask: account.mask,
+                subtype: account.subtype,
+            }));
+            await tx
+                .insert(plaidAccounts)
+                .values({
+                    userId,
+                    plaidItemRecordId: item.id,
+                    plaidAccountId: account.plaidAccountId,
+                    name: account.name,
+                    officialName: account.officialName ?? null,
+                    mask: account.mask || null,
+                    type: account.type,
+                    subtype: account.subtype,
+                    currentBalance: Number.isFinite(account.currentBalance) ? String(account.currentBalance) : null,
+                    isoCurrencyCode: account.isoCurrencyCode,
+                    institutionId: account.institution.id,
+                    institutionName: account.institution.name,
+                    capabilities: [...account.capabilities],
+                    verificationStatus: account.verificationStatus,
+                    // The same account under a new ID keeps its pick and sync history.
+                    syncStatus: previous?.syncStatus ?? "awaiting_selection",
+                    lastSyncedAt: previous?.lastSyncedAt ?? null,
+                    holdingsSyncedAt: previous?.holdingsSyncedAt ?? null,
+                    updatedAt: now,
+                })
+                .onConflictDoNothing({ target: [plaidAccounts.userId, plaidAccounts.plaidAccountId] });
+            if (previous) {
+                // ...and its account in Atlas, which it syncs into from now on.
+                await tx
+                    .update(portfolios)
+                    .set({ externalAccountId: account.plaidAccountId })
+                    .where(and(eq(portfolios.userId, userId), eq(portfolios.source, "plaid"), eq(portfolios.externalAccountId, previous.plaidAccountId)));
+                goneByFingerprint.delete(plaidAccountFingerprint(previous));
+            }
+            addedCount++;
+        }
+        if (gone.length > 0) {
+            await tx
+                .update(plaidAccounts)
+                .set({ syncStatus: "excluded", updatedAt: now })
+                .where(and(eq(plaidAccounts.userId, userId), inArray(plaidAccounts.id, gone.map((a) => a.id))));
+        }
+        return { removed: gone.length, added: addedCount };
+    });
 
     const ends = typeof state.consent_expiration_time === "string" ? Date.parse(state.consent_expiration_time) : NaN;
     const status: PlaidItemRefresh = Number.isFinite(ends) && ends - now.getTime() < CONSENT_WARNING_MS ? "pending_expiration" : "active";
     await setStatus(status);
-    return { status, accountsRemoved: removed.length };
+    return { status, accountsRemoved: removed, accountsAdded: added };
 }
 
 // ---------------------------------------------------------------------------
