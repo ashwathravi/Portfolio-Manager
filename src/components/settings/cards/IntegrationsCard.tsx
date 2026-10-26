@@ -1,16 +1,13 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, Link2, CheckCircle2, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
-import { useSettingsStore } from "@/lib/stores/settingsStore";
 import { plaidSyncMessage, type SyncedAccountSummary } from "@/lib/plaid/sync-summary";
-import {
-    connectedPlaidAccountMatchesDiscovered,
-    plaidAccountToConnectedAccount,
-} from "@/lib/plaid/link";
+import type { PlaidConnection, PlaidConnectionAccount } from "@/lib/plaid/connections";
 import type {
     PlaidDiscoveredAccount,
     PlaidExchangeClientResponse,
@@ -41,35 +38,23 @@ declare global {
 }
 
 /**
- * AR-87 Connected accounts card.
+ * Settings › Connected accounts: the user's Plaid connections, from the
+ * database (launch item i46), each with its accounts and what they sync
+ * into, and what to do next with it (launch items i44 and i45):
+ *   - + Connect opens Plaid Link; the accounts found are reviewed and the
+ *     picked ones synced into portfolios straight away.
+ *   - Sync now brings a connection's picked accounts up to date.
+ *   - Reconnect opens Link in update mode when the institution wants its
+ *     user to sign in again, or consent is about to end.
+ *   - Disconnect ends Atlas's access at Plaid; the accounts already brought
+ *     in stay on Accounts until deleted there.
+ *   - Accounts not picked yet (linked before picks were kept) are picked here.
  *
- * Lists integrations from `useSettingsStore.accounts`. Each row shows:
- *   - Logo tile (monogram from first letter, tinted by status)
- *   - Name + account mask
- *   - Status line:
- *       · reconciled → green dot + "Synced <relative time>"
- *       · needs-review → amber dot + "Auth expired"
- *       · error → red dot + error message
- *   - Manage / Reconnect link on the right
- *
- * The + Connect CTA launches the AR-149 Plaid Link flow. The client
- * sees Link/account metadata only; access-token exchange is handled by
- * `/api/plaid/exchange-public-token` and never returned to the browser.
- *
- * Why inline here instead of reusing `<IntegrationsList>` from the
- * old tabbed page? That component is tuned for a full-page view with
- * a table and bulk actions. This card is the compact at-a-glance
- * version — 3 rows tall, optimized for the settings grid.
+ * The browser sees Link and account metadata only; access tokens stay
+ * server-side (`/api/plaid/exchange-public-token`).
  */
 
-function statusBucket(status: "reconciled" | "needs-review" | "error") {
-    // Spec text: "Synced Ns ago" vs "Auth expired". "needs-review"
-    // surfaces as Auth expired because that's the most common cause
-    // we stub in the fixtures; for real data we'd carry a reason.
-    if (status === "reconciled") return { tone: "ok", label: "Synced" } as const;
-    if (status === "needs-review") return { tone: "warn", label: "Auth expired" } as const;
-    return { tone: "error", label: "Error" } as const;
-}
+const CONNECTIONS_KEY = ["plaid-connections"] as const;
 
 function formatCurrency(value: number): string {
     return new Intl.NumberFormat("en-US", {
@@ -77,6 +62,11 @@ function formatCurrency(value: number): string {
         currency: "USD",
         maximumFractionDigits: 0,
     }).format(value);
+}
+
+function formatWhen(iso: string | null): string {
+    if (!iso) return "not synced yet";
+    return `synced ${new Date(iso).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`;
 }
 
 function loadPlaidLinkScript(): Promise<void> {
@@ -120,18 +110,30 @@ async function readApiError(response: Response, fallback: string): Promise<strin
     }
 }
 
+/** The user's connections; none when linked accounts aren't set up here. */
+async function fetchConnections(): Promise<PlaidConnection[]> {
+    const response = await fetch("/api/plaid/connections", { credentials: "same-origin" });
+    if (response.status === 503) return [];
+    if (!response.ok) throw new Error(await readApiError(response, "Couldn't load the connected accounts."));
+    return ((await response.json()) as { data: PlaidConnection[] }).data;
+}
+
 /**
- * Syncs a linked connection's investment accounts into portfolios (launch
- * item i44). With `plaidAccountIds`, the accounts just picked after Link:
- * those sync from now on, the rest of the connection's don't.
+ * Syncs a connection's picked investment accounts into portfolios (launch
+ * item i44). With `plaidAccountIds`, the accounts just picked: those of its
+ * accounts still waiting for a pick sync from now on, the rest don't.
  */
-async function syncPlaidConnection(itemId: string, plaidAccountIds?: readonly string[]): Promise<{ ok: boolean; message: string }> {
+async function syncPlaidConnection(
+    itemId: string,
+    plaidAccountIds?: readonly string[],
+    { reconnected = false }: { reconnected?: boolean } = {},
+): Promise<{ ok: boolean; message: string }> {
     try {
         const response = await fetch("/api/plaid/sync", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             credentials: "same-origin",
-            body: JSON.stringify({ itemId, ...(plaidAccountIds ? { plaidAccountIds } : {}) }),
+            body: JSON.stringify({ itemId, ...(plaidAccountIds ? { plaidAccountIds } : {}), ...(reconnected ? { reconnected: true } : {}) }),
         });
         if (!response.ok) return { ok: false, message: await readApiError(response, "Couldn't sync the linked accounts. Try again.") };
         const body = (await response.json()) as { data: { accounts: SyncedAccountSummary[]; overLimit?: string[] } };
@@ -141,64 +143,76 @@ async function syncPlaidConnection(itemId: string, plaidAccountIds?: readonly st
     }
 }
 
+/** A Link token: a new connection, or with `itemId` update mode for one of the user's. */
+async function createLinkToken(itemId?: string): Promise<PlaidLinkTokenResponse> {
+    const response = await fetch("/api/plaid/link-token", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        ...(itemId ? { body: JSON.stringify({ itemId }) } : {}),
+    });
+    if (!response.ok) throw new Error(await readApiError(response, "Unable to create Plaid link token"));
+    return (await response.json()) as PlaidLinkTokenResponse;
+}
+
 export function IntegrationsCard() {
     const router = useRouter();
     const queryClient = useQueryClient();
-    const accounts = useSettingsStore((s) => s.accounts);
-    const syncAccount = useSettingsStore((s) => s.syncAccount);
-    const reconnectAccount = useSettingsStore((s) => s.reconnectAccount);
-    const connectPlaidAccounts = useSettingsStore((s) => s.connectPlaidAccounts);
+    // No retries: a failed load shows its own state, with Try again.
+    const connectionsQuery = useQuery({ queryKey: CONNECTIONS_KEY, queryFn: fetchConnections, staleTime: 30_000, retry: false });
+    const connections = connectionsQuery.data ?? [];
 
-    // Local "busy" flag keyed by account id — prevents double-clicks
-    // on the Manage/Reconnect buttons while a mock sync is in flight.
-    const [busyId, setBusyId] = useState<string | null>(null);
+    // The connection an action is running on, against double clicks.
+    const [busyItem, setBusyItem] = useState<string | null>(null);
     const [plaidStatus, setPlaidStatus] = useState<"idle" | "loading" | "review" | "saving" | "error">("idle");
     const [plaidError, setPlaidError] = useState<string | null>(null);
     const [plaidLinkToken, setPlaidLinkToken] = useState<PlaidLinkTokenResponse | null>(null);
     const [plaidExchange, setPlaidExchange] = useState<PlaidExchangeClientResponse | null>(null);
     const [selectedPlaidAccountIds, setSelectedPlaidAccountIds] = useState<string[]>([]);
+    // The connection being signed in to again, so Retry after a failure
+    // reopens update mode for it rather than linking a new connection.
+    const [reconnecting, setReconnecting] = useState<PlaidConnection | null>(null);
 
-    /** After a sync: the pages' data, and the sidebar's account count. */
-    const refreshAfterSync = () => {
+    /** After a change: this list, the pages' data, and the sidebar's account count. */
+    const refreshAfterChange = () => {
         router.refresh();
+        void queryClient.invalidateQueries({ queryKey: CONNECTIONS_KEY });
         void queryClient.invalidateQueries({ queryKey: ["portfolios"] });
     };
 
-    const onSyncNow = async (id: string) => {
-        const account = accounts.find((candidate) => candidate.id === id);
-        if (account?.provider !== "plaid" || !account.plaidItemId) return onManage(id);
-        const itemId = account.plaidItemId;
-        setBusyId(id);
-        // The accounts connected here on this connection are the user's pick:
-        // one linked before picks were kept on the server gets picked now.
-        const connected = accounts
-            .filter((candidate) => candidate.provider === "plaid" && candidate.plaidItemId === itemId && candidate.plaidAccountId)
-            .map((candidate) => candidate.plaidAccountId as string);
-        const result = await syncPlaidConnection(itemId, connected);
-        setBusyId(null);
-        if (!result.ok) {
-            toast.error(result.message);
-            return;
+    const runSync = async (itemId: string, plaidAccountIds?: readonly string[], options?: { reconnected?: boolean }) => {
+        setBusyItem(itemId);
+        const result = await syncPlaidConnection(itemId, plaidAccountIds, options);
+        setBusyItem(null);
+        if (result.ok) toast.success(result.message);
+        else toast.error(result.message);
+        refreshAfterChange();
+        return result.ok;
+    };
+
+    const onDisconnect = async (connection: PlaidConnection) => {
+        const name = connection.institutionName ?? "this connection";
+        if (!window.confirm(
+            `Disconnect ${name}? Atlas stops syncing its accounts and its access through Plaid ends. `
+            + "The accounts already brought in stay on Accounts until you delete them there.",
+        )) return;
+        setBusyItem(connection.itemId);
+        try {
+            const response = await fetch(`/api/plaid/connections/${encodeURIComponent(connection.itemId)}`, {
+                method: "DELETE",
+                credentials: "same-origin",
+            });
+            if (!response.ok) throw new Error(await readApiError(response, "Couldn't disconnect. Try again."));
+            toast.success(`Disconnected ${name}.`);
+        } catch (error) {
+            toast.error(error instanceof Error ? error.message : "Couldn't disconnect. Try again.");
+        } finally {
+            setBusyItem(null);
+            refreshAfterChange();
         }
-        syncAccount(id);
-        toast.success(result.message);
-        refreshAfterSync();
     };
 
-    const onManage = (id: string) => {
-        setBusyId(id);
-        // Mock sync: just touch lastSynced. Real implementation would
-        // hit the integration provider's refresh endpoint.
-        setTimeout(() => {
-            syncAccount(id);
-            setBusyId(null);
-            toast.success("Synced");
-        }, 350);
-    };
-
-    const existingPlaidAccountIds = accounts
-        .map((account) => account.plaidAccountId)
-        .filter((id): id is string => Boolean(id));
+    const existingPlaidAccountIds = connections.flatMap((c) => c.accounts.map((a) => a.plaidAccountId));
 
     const handlePlaidSuccess = async ({
         publicToken,
@@ -225,16 +239,7 @@ export function IntegrationsCard() {
                 throw new Error(await readApiError(exchangeResponse, "Unable to exchange Plaid public token"));
             }
             const exchange = (await exchangeResponse.json()) as PlaidExchangeClientResponse;
-            const duplicateIds = new Set([
-                ...exchange.duplicatePlaidAccountIds,
-                ...exchange.accounts
-                    .filter((account) =>
-                        accounts.some((existingAccount) =>
-                            connectedPlaidAccountMatchesDiscovered(existingAccount, account),
-                        ),
-                    )
-                    .map((account) => account.plaidAccountId),
-            ]);
+            const duplicateIds = new Set(exchange.duplicatePlaidAccountIds);
 
             setPlaidLinkToken(token);
             setPlaidExchange(exchange);
@@ -251,64 +256,61 @@ export function IntegrationsCard() {
         }
     };
 
+    const openLink = async (token: PlaidLinkTokenResponse, onSuccess: (publicToken: string, metadata: PlaidLinkMetadata) => void) => {
+        await loadPlaidLinkScript();
+        if (!window.Plaid) throw new Error("Plaid Link SDK did not initialize");
+        const handler = window.Plaid.create({
+            token: token.linkToken,
+            onSuccess,
+            onExit: (error) => {
+                if (!error) {
+                    setPlaidStatus("idle");
+                    setPlaidLinkToken(null);
+                    return;
+                }
+                setPlaidError(error.error_message ?? "Plaid Link closed before completion");
+                setPlaidStatus("error");
+            },
+        });
+        handler.open();
+    };
+
     const startPlaidLink = async () => {
+        setReconnecting(null);
         setPlaidStatus("loading");
         setPlaidError(null);
         setPlaidExchange(null);
         setSelectedPlaidAccountIds([]);
         try {
-            const tokenResponse = await fetch("/api/plaid/link-token", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-            });
-            if (!tokenResponse.ok) {
-                throw new Error(await readApiError(tokenResponse, "Unable to create Plaid link token"));
-            }
-            const token = (await tokenResponse.json()) as PlaidLinkTokenResponse;
-
+            const token = await createLinkToken();
             setPlaidLinkToken(token);
-            await loadPlaidLinkScript();
-
-            if (!window.Plaid) {
-                throw new Error("Plaid Link SDK did not initialize");
-            }
-
-            const handler = window.Plaid.create({
-                token: token.linkToken,
-                onSuccess: (publicToken, metadata) => {
-                    void handlePlaidSuccess({ publicToken, metadata, token });
-                },
-                onExit: (error) => {
-                    if (!error) {
-                        setPlaidStatus("idle");
-                        setPlaidLinkToken(null);
-                        return;
-                    }
-                    setPlaidError(error.error_message ?? "Plaid Link closed before completion");
-                    setPlaidStatus("error");
-                },
+            await openLink(token, (publicToken, metadata) => {
+                void handlePlaidSuccess({ publicToken, metadata, token });
             });
-            handler.open();
         } catch (error) {
-            const message = error instanceof Error ? error.message : "Plaid Link failed";
-            setPlaidError(message);
+            setPlaidError(error instanceof Error ? error.message : "Plaid Link failed");
             setPlaidStatus("error");
         }
     };
 
-    const onReconnect = (id: string) => {
-        const account = accounts.find((candidate) => candidate.id === id);
-        if (account?.provider === "plaid") {
-            void startPlaidLink();
-            return;
+    /** Link's update mode: the user signs in to the institution again, then it syncs. */
+    const onReconnect = async (connection: PlaidConnection) => {
+        setReconnecting(connection);
+        setPlaidStatus("loading");
+        setPlaidError(null);
+        try {
+            const token = await createLinkToken(connection.itemId);
+            await openLink(token, () => {
+                setReconnecting(null);
+                setPlaidStatus("idle");
+                // The server reads the connection from Plaid again first: the
+                // accounts it may still read, its login and its consent.
+                void runSync(connection.itemId, undefined, { reconnected: true });
+            });
+        } catch (error) {
+            setPlaidError(error instanceof Error ? error.message : "Plaid Link failed");
+            setPlaidStatus("error");
         }
-
-        setBusyId(id);
-        setTimeout(() => {
-            reconnectAccount(id);
-            setBusyId(null);
-            toast.success("Reconnected");
-        }, 450);
     };
 
     const togglePlaidAccount = (accountId: string) => {
@@ -322,37 +324,8 @@ export function IntegrationsCard() {
     const connectSelectedPlaidAccounts = async () => {
         if (!plaidExchange) return;
         setPlaidStatus("saving");
-        const selected = new Set(selectedPlaidAccountIds);
-        const lastSynced = new Date().toLocaleString("en-US", {
-            month: "short",
-            day: "numeric",
-            hour: "numeric",
-            minute: "2-digit",
-            hour12: true,
-        });
-        const connectedAccounts = plaidExchange.accounts
-            .filter((account) => selected.has(account.plaidAccountId))
-            .map((account) =>
-                plaidAccountToConnectedAccount({
-                    account,
-                    itemId: plaidExchange.itemId,
-                    lastSynced,
-                    tokenStored: plaidExchange.accessTokenStored,
-                    tokenStorageMode: plaidExchange.accessTokenStorageMode,
-                    tokenStorageDurable: plaidExchange.accessTokenStorageDurable,
-                }),
-            );
-
-        connectPlaidAccounts(connectedAccounts);
-        toast.success(`Connected ${connectedAccounts.length} Plaid account${connectedAccounts.length === 1 ? "" : "s"}`);
-        // Bring their holdings and transactions in now, not tonight.
-        const synced = await syncPlaidConnection(plaidExchange.itemId, [...selected]);
-        if (synced.ok) {
-            toast.success(synced.message);
-            refreshAfterSync();
-        } else {
-            toast.error(synced.message);
-        }
+        // Bring the picked accounts' holdings and transactions in now, not tonight.
+        await runSync(plaidExchange.itemId, selectedPlaidAccountIds);
         setPlaidStatus("idle");
         setPlaidExchange(null);
         setPlaidLinkToken(null);
@@ -394,99 +367,167 @@ export function IntegrationsCard() {
                 selectedPlaidAccountIds={selectedPlaidAccountIds}
                 onToggle={togglePlaidAccount}
                 onCancel={() => {
+                    setReconnecting(null);
                     setPlaidStatus("idle");
                     setPlaidError(null);
                     setPlaidExchange(null);
                     setPlaidLinkToken(null);
                 }}
-                onRetry={startPlaidLink}
+                onRetry={() => void (reconnecting ? onReconnect(reconnecting) : startPlaidLink())}
                 onConnect={() => void connectSelectedPlaidAccounts()}
             />
 
             <div className="pm-integrations">
-                {accounts.length === 0 ? (
+                {connectionsQuery.isError && connections.length === 0 ? (
+                    // Not "none connected": the list couldn't be read (an outage).
+                    <div className="pm-integrations-empty" role="alert" data-testid="plaid-connections-error">
+                        <p>Couldn&apos;t load your connected accounts.</p>
+                        <button type="button" className="pm-integration-action" onClick={() => void connectionsQuery.refetch()} disabled={connectionsQuery.isFetching}>
+                            {connectionsQuery.isFetching ? "Trying…" : "Try again"}
+                        </button>
+                    </div>
+                ) : connections.length === 0 ? (
                     <div className="pm-integrations-empty">
-                        No accounts connected yet. Click <strong>+ Connect</strong> to
-                        link a brokerage.
+                        {connectionsQuery.isPending
+                            ? "Loading connected accounts…"
+                            : <>No accounts connected yet. Click <strong>+ Connect</strong> to link a brokerage.</>}
                     </div>
                 ) : (
-                    accounts.map((a) => {
-                        const bucket = statusBucket(a.status);
-                        const firstLetter = a.name.charAt(0).toUpperCase();
-                        const busy = busyId === a.id;
-                        const needsReconnect = a.status !== "reconciled" || (a.provider === "plaid" && a.syncReady === false);
-
-                        return (
-                            <div
-                                key={a.id}
-                                className={`pm-integration-row is-${bucket.tone}`}
-                            >
-                                <div
-                                    className="pm-integration-logo"
-                                    aria-hidden="true"
-                                >
-                                    {firstLetter}
-                                </div>
-
-                                <div className="pm-integration-meta">
-                                    <div className="pm-integration-name">
-                                        {a.name}
-                                        <span className="pm-integration-mask">
-                                            {a.accountMask}
-                                        </span>
-                                        {a.provider === "plaid" && (
-                                            <span className="pm-integration-provider">
-                                                Plaid
-                                            </span>
-                                        )}
-                                        {a.provider === "plaid" && a.syncReady === false && (
-                                            <span className="pm-integration-provider is-warn">
-                                                Sync paused
-                                            </span>
-                                        )}
-                                    </div>
-                                    <div className="pm-integration-status">
-                                        {bucket.tone === "ok" ? (
-                                            <CheckCircle2
-                                                className="pm-integration-status-icon"
-                                                aria-hidden="true"
-                                            />
-                                        ) : (
-                                            <AlertTriangle
-                                                className="pm-integration-status-icon"
-                                                aria-hidden="true"
-                                            />
-                                        )}
-                                        <span>
-                                            {formatConnectedAccountStatus(a, bucket.label)}
-                                        </span>
-                                    </div>
-                                </div>
-
-                                <button
-                                    type="button"
-                                    className={`pm-integration-action is-${needsReconnect ? "warn" : "ghost"}`}
-                                    onClick={() =>
-                                        needsReconnect
-                                            ? onReconnect(a.id)
-                                            : void onSyncNow(a.id)
-                                    }
-                                    disabled={busy}
-                                >
-                                    {busy
-                                        ? "…"
-                                        : needsReconnect
-                                            ? "Reconnect"
-                                            : a.provider === "plaid"
-                                                ? "Sync now"
-                                                : "Manage"}
-                                </button>
-                            </div>
-                        );
-                    })
+                    connections.map((connection) => (
+                        <ConnectionRow
+                            key={connection.itemId}
+                            connection={connection}
+                            busy={busyItem === connection.itemId}
+                            onSync={(picked) => void runSync(connection.itemId, picked)}
+                            onReconnect={() => void onReconnect(connection)}
+                            onDisconnect={() => void onDisconnect(connection)}
+                        />
+                    ))
                 )}
             </div>
         </section>
+    );
+}
+
+const STATUS_LABELS: Record<PlaidConnection["status"], { tone: "ok" | "warn"; text: string } | null> = {
+    active: null,
+    login_required: { tone: "warn", text: "Sign in again" },
+    pending_expiration: { tone: "warn", text: "Access ends soon" },
+};
+
+function isInvestment(account: PlaidConnectionAccount): boolean {
+    return account.type === "investment";
+}
+
+function accountStatus(account: PlaidConnectionAccount) {
+    if (!isInvestment(account)) return <span className="pm-plaid-sync-note">Balances only; not synced</span>;
+    if (account.syncStatus === "sync_ready") {
+        return account.portfolio
+            ? <span className="pm-plaid-sync-note is-ok">Syncs into <Link href="/portfolios/accounts">{account.portfolio.name}</Link></span>
+            : <span className="pm-plaid-sync-note is-ok">Syncs at the next sync</span>;
+    }
+    if (account.syncStatus === "excluded") return <span className="pm-plaid-sync-note">Not synced</span>;
+    return <span className="pm-plaid-sync-note is-warn">Waiting for you to choose</span>;
+}
+
+function ConnectionRow({
+    connection,
+    busy,
+    onSync,
+    onReconnect,
+    onDisconnect,
+}: {
+    connection: PlaidConnection;
+    busy: boolean;
+    onSync: (picked?: string[]) => void;
+    onReconnect: () => void;
+    onDisconnect: () => void;
+}) {
+    const label = STATUS_LABELS[connection.status];
+    const name = connection.institutionName ?? "Linked institution";
+    const syncing = connection.accounts.filter((a) => isInvestment(a) && a.syncStatus === "sync_ready").length;
+    const waiting = connection.accounts.filter((a) => isInvestment(a) && a.syncStatus === "awaiting_selection");
+    const [picked, setPicked] = useState<string[]>([]);
+    const needsLogin = connection.status === "login_required";
+
+    return (
+        <div className={`pm-integration-row pm-plaid-connection is-${label?.tone ?? "ok"}`} data-testid="plaid-connection">
+            <div className="pm-integration-logo" aria-hidden="true">{name.charAt(0).toUpperCase()}</div>
+            <div className="pm-integration-meta">
+                <div className="pm-integration-name">
+                    {name}
+                    <span className="pm-integration-provider">Plaid</span>
+                    {label && <span className="pm-integration-provider is-warn">{label.text}</span>}
+                </div>
+                <div className="pm-integration-status">
+                    {label ? (
+                        <AlertTriangle className="pm-integration-status-icon" aria-hidden="true" />
+                    ) : (
+                        <CheckCircle2 className="pm-integration-status-icon" aria-hidden="true" />
+                    )}
+                    <span>
+                        {syncing} {syncing === 1 ? "account syncs" : "accounts sync"} · {formatWhen(connection.lastSuccessfulSyncAt)}
+                    </span>
+                </div>
+                <ul className="pm-plaid-connection-accounts" aria-label={`${name} accounts`}>
+                    {connection.accounts.map((account) => (
+                        <li key={account.plaidAccountId}>
+                            <span className="pm-plaid-account-name">
+                                {account.name}
+                                {account.mask && <span className="pm-integration-mask"> ••{account.mask}</span>}
+                            </span>
+                            {accountStatus(account)}
+                        </li>
+                    ))}
+                </ul>
+                {waiting.length > 0 && (
+                    <div className="pm-plaid-pick" data-testid="plaid-pick">
+                        <p className="pm-plaid-panel-copy">Choose which of these accounts to sync into Atlas:</p>
+                        {waiting.map((account) => (
+                            <label key={account.plaidAccountId} className="pm-plaid-account">
+                                <input
+                                    type="checkbox"
+                                    checked={picked.includes(account.plaidAccountId)}
+                                    onChange={() => setPicked((current) => current.includes(account.plaidAccountId)
+                                        ? current.filter((id) => id !== account.plaidAccountId)
+                                        : [...current, account.plaidAccountId])}
+                                    aria-label={`Sync ${account.name}`}
+                                />
+                                <span className="pm-plaid-account-main">
+                                    <span className="pm-plaid-account-name">{account.name}</span>
+                                    <span className="pm-plaid-account-meta">{account.subtype}{account.mask ? ` · ••${account.mask}` : ""}</span>
+                                </span>
+                            </label>
+                        ))}
+                        <div className="pm-plaid-actions">
+                            <button
+                                type="button"
+                                className="pm-settings-card-cta"
+                                disabled={busy || picked.length === 0 || needsLogin}
+                                onClick={() => onSync(picked)}
+                            >
+                                Sync selected
+                            </button>
+                        </div>
+                    </div>
+                )}
+            </div>
+            <div className="pm-plaid-connection-actions">
+                {connection.status === "active" || connection.status === "pending_expiration" ? (
+                    <button type="button" className="pm-integration-action is-ghost" onClick={() => onSync()} disabled={busy}>
+                        {busy ? "…" : "Sync now"}
+                    </button>
+                ) : null}
+                {connection.status !== "active" && (
+                    <button type="button" className="pm-integration-action is-warn" onClick={onReconnect} disabled={busy}>
+                        Reconnect
+                    </button>
+                )}
+                <button type="button" className="pm-integration-action" onClick={onDisconnect} disabled={busy}>
+                    Disconnect
+                </button>
+            </div>
+        </div>
     );
 }
 
@@ -594,32 +635,6 @@ function formatPlaidTokenStorage(exchange: PlaidExchangeClientResponse): string 
             : "Access token stored server-side in the encrypted vault.";
     }
     return "Access token cached in this server session; reconnect after a server restart.";
-}
-
-function formatConnectedAccountStatus(
-    account: {
-        provider?: "manual" | "schwab" | "plaid";
-        syncReady?: boolean;
-        tokenStorageDurable?: boolean;
-        tokenStorageMode?: "memory" | "encrypted_file" | "postgres";
-        lastSynced: string;
-    },
-    fallbackLabel: string,
-): string {
-    if (account.provider !== "plaid") {
-        return fallbackLabel === "Synced" ? `${fallbackLabel} · ${account.lastSynced}` : fallbackLabel;
-    }
-
-    if (account.syncReady === false) {
-        return "Reconnect required · provider token unavailable";
-    }
-
-    if (account.tokenStorageDurable) {
-        const storageLabel = account.tokenStorageMode === "postgres" ? "durable registry" : "encrypted vault";
-        return `${fallbackLabel} · ${storageLabel} · ${account.lastSynced}`;
-    }
-
-    return `${fallbackLabel} · session token · ${account.lastSynced}`;
 }
 
 function PlaidAccountOption({

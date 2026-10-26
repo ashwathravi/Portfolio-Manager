@@ -8,7 +8,8 @@ import postgres from 'postgres';
 import * as schema from '../../src/db/schema';
 import type { PlaidFetch } from '../../src/lib/plaid/link';
 import { deletePortfolio } from '../../src/lib/portfolio/manage';
-import { PlaidItemNotFoundError, selectPlaidAccounts, syncAllPlaidItems, syncPlaidItem } from '../../src/lib/plaid/sync';
+import { PlaidTokenUnavailableError, disconnectPlaidItem, handlePlaidWebhook, listPlaidConnections } from '../../src/lib/plaid/connections';
+import { PlaidItemNotFoundError, connectedAccountFingerprints, refreshPlaidItem, selectPlaidAccounts, syncAllPlaidItems, syncPlaidItem } from '../../src/lib/plaid/sync';
 
 // Launch item i44: Plaid's holdings and investment transactions synced into
 // portfolios, against a scratch database with every migration applied and a
@@ -411,4 +412,271 @@ describe('Plaid sync into portfolios', { skip: !DATABASE_URL && 'SCRIPTS_TEST_DA
         assert.ok(!plaid.requests.some((r) => (r.body.options as { account_ids: string[] }).account_ids.includes('acc_night')));
         assert.equal((await sql`SELECT 1 FROM portfolios WHERE user_id = 'u-night'`).length, 0);
     });
+
+    // Launch items i45 and i46: connections as Settings lists them,
+    // disconnecting, and what Plaid's webhooks change.
+
+    const itemRow = (item: string) => sql<{ status: string; revoked: boolean; token: string }[]>`
+        SELECT status, revoked_at IS NOT NULL AS revoked, access_token_ciphertext AS token FROM plaid_items WHERE plaid_item_id = ${item}`;
+
+    test('Settings lists the user\'s connections from the database, each account with what it syncs into', async () => {
+        const [connection] = await listPlaidConnections('u-sync', database);
+        assert.equal(connection.itemId, 'item-sync');
+        assert.equal(connection.institutionName, 'Fidelity');
+        assert.equal(connection.status, 'active');
+        assert.ok(connection.lastSuccessfulSyncAt);
+        assert.deepEqual(connection.accounts.map((a) => [a.plaidAccountId, a.syncStatus, a.portfolio?.name ?? null]), [['acc_brokerage', 'sync_ready', 'My brokerage']]);
+        // Picks and statuses as they are (the nightly test above synced acc_a).
+        const picked = await listPlaidConnections('u-pick', database);
+        assert.deepEqual(picked[0].accounts.map((a) => [a.plaidAccountId, a.type, a.syncStatus, a.portfolio?.name ?? null]), [
+            ['acc_a', 'investment', 'sync_ready', 'Fidelity Brokerage'], ['acc_c', 'depository', 'excluded', null], ['acc_b', 'investment', 'excluded', null],
+        ]);
+        assert.deepEqual(await listPlaidConnections('u-nobody', database), []);
+    });
+
+    test('disconnecting ends it at Plaid, revokes it here with its token wiped, and keeps the accounts brought in', async () => {
+        await linkedUser('u-disc', 'item-disc', [['acc_disc', 'Individual', 'investment']]);
+        await selectPlaidAccounts('u-disc', 'item-disc', ['acc_disc'], database);
+        await syncPlaidItem('u-disc', 'item-disc', deps(fakePlaid({
+            '/investments/holdings/get': holdingsOf('acc_disc', [['sec_aapl', 1, 100, 90]]),
+            '/investments/transactions/get': transactionsOf('acc_disc', []),
+        }).fetchImpl));
+
+        // Plaid can't be told: nothing changes, to try again.
+        const down = fakePlaid({ '/item/remove': () => ({ status: 500, json: { error_type: 'API_ERROR', error_code: 'INTERNAL_SERVER_ERROR', error_message: 'down' } }) });
+        await assert.rejects(disconnectPlaidItem('u-disc', 'item-disc', { config: CONFIG, database, fetchImpl: down.fetchImpl, getAccessToken: async () => 'access-sandbox-1' }));
+        assert.deepEqual((await itemRow('item-disc')).map((r) => r.status), ['active']);
+
+        await assert.rejects(disconnectPlaidItem('u-someone-else', 'item-disc', { config: CONFIG, database, getAccessToken: async () => 'x' }), PlaidItemNotFoundError);
+
+        const plaid = fakePlaid({ '/item/remove': () => ({ json: { request_id: 'r' } }) });
+        await disconnectPlaidItem('u-disc', 'item-disc', { config: CONFIG, database, fetchImpl: plaid.fetchImpl, getAccessToken: async () => 'access-sandbox-1', now: NOW });
+        assert.deepEqual(plaid.requests.map((r) => [r.endpoint, r.body.access_token]), [['/item/remove', 'access-sandbox-1']]);
+        assert.deepEqual((await itemRow('item-disc')).map((r) => ({ ...r })), [{ status: 'revoked', revoked: true, token: '' }]);
+        assert.deepEqual((await statuses('u-disc')).map((r) => r.status), ['excluded']);
+        assert.equal((await sql`SELECT 1 FROM portfolios WHERE user_id = 'u-disc'`).length, 1);
+        assert.deepEqual(await listPlaidConnections('u-disc', database), []);
+        await assert.rejects(disconnectPlaidItem('u-disc', 'item-disc', { config: CONFIG, database, getAccessToken: async () => 'x' }), PlaidItemNotFoundError);
+    });
+
+    test('disconnecting one Plaid has already let go of still revokes it here', async () => {
+        await linkedUser('u-gone', 'item-gone', [['acc_gone', 'Individual', 'investment']]);
+        const gone = fakePlaid({ '/item/remove': () => ({ status: 400, json: { error_type: 'ITEM_ERROR', error_code: 'ITEM_NOT_FOUND', error_message: 'gone' } }) });
+        await disconnectPlaidItem('u-gone', 'item-gone', { config: CONFIG, database, fetchImpl: gone.fetchImpl, getAccessToken: async () => 'access-sandbox-1' });
+        assert.deepEqual((await itemRow('item-gone')).map((r) => r.status), ['revoked']);
+    });
+
+    test('webhooks: new data syncs the connection; item events change its status', async () => {
+        await linkedUser('u-hook', 'item-hook', [['acc_hook', 'Individual', 'investment'], ['acc_hook2', 'IRA', 'investment']]);
+        await selectPlaidAccounts('u-hook', 'item-hook', ['acc_hook', 'acc_hook2'], database);
+        const scheduled: string[] = [];
+        const hook = (body: Record<string, unknown>) => handlePlaidWebhook({ item_id: 'item-hook', ...body }, {
+            database, now: NOW, scheduleSync: (userId, itemId) => scheduled.push(`${userId}/${itemId}`),
+        });
+        const status = async () => (await itemRow('item-hook'))[0].status;
+
+        assert.deepEqual(await hook({ webhook_type: 'HOLDINGS', webhook_code: 'DEFAULT_UPDATE' }), { action: 'sync', connections: 1 });
+        assert.deepEqual(await hook({ webhook_type: 'INVESTMENTS_TRANSACTIONS', webhook_code: 'HISTORICAL_UPDATE' }), { action: 'sync', connections: 1 });
+        assert.deepEqual(scheduled, ['u-hook/item-hook', 'u-hook/item-hook']);
+
+        assert.equal((await hook({ webhook_type: 'ITEM', webhook_code: 'ERROR', error: { error_code: 'ITEM_LOGIN_REQUIRED' } })).action, 'login-required');
+        assert.equal(await status(), 'login_required');
+        // Waiting for a sign-in, new data doesn't sync it.
+        assert.deepEqual(await hook({ webhook_type: 'HOLDINGS', webhook_code: 'DEFAULT_UPDATE' }), { action: 'ignored', connections: 0 });
+        assert.equal(scheduled.length, 2);
+        // Another error isn't a status change.
+        assert.equal((await hook({ webhook_type: 'ITEM', webhook_code: 'ERROR', error: { error_code: 'INSTITUTION_DOWN' } })).action, 'ignored');
+
+        assert.equal((await hook({ webhook_type: 'ITEM', webhook_code: 'LOGIN_REPAIRED' })).action, 'repaired');
+        assert.equal(await status(), 'active');
+        assert.equal((await hook({ webhook_type: 'ITEM', webhook_code: 'PENDING_EXPIRATION' })).action, 'expiring');
+        assert.equal(await status(), 'pending_expiration');
+
+        assert.equal((await hook({ webhook_type: 'ITEM', webhook_code: 'USER_ACCOUNT_REVOKED', account_id: 'acc_hook2' })).action, 'account-revoked');
+        assert.deepEqual((await statuses('u-hook')).map((r) => [r.id, r.status]), [['acc_hook', 'sync_ready'], ['acc_hook2', 'excluded']]);
+
+        assert.equal((await hook({ webhook_type: 'ITEM', webhook_code: 'USER_PERMISSION_REVOKED' })).action, 'revoked');
+        assert.deepEqual((await itemRow('item-hook')).map((r) => ({ ...r })), [{ status: 'revoked', revoked: true, token: '' }]);
+        // Revoked, nothing more is done for it.
+        assert.deepEqual(await hook({ webhook_type: 'HOLDINGS', webhook_code: 'DEFAULT_UPDATE' }), { action: 'ignored', connections: 0 });
+        assert.deepEqual(await handlePlaidWebhook({ webhook_type: 'HOLDINGS', webhook_code: 'DEFAULT_UPDATE', item_id: 'item-unknown' }, { database, scheduleSync: () => assert.fail('no sync') }), { action: 'ignored', connections: 0 });
+    });
+
+    test('a sync that goes through after Link\'s update mode marks the login repaired', async () => {
+        await linkedUser('u-repair', 'item-repair', [['acc_repair', 'Individual', 'investment']]);
+        await selectPlaidAccounts('u-repair', 'item-repair', ['acc_repair'], database);
+        await sql`UPDATE plaid_items SET status = 'login_required' WHERE plaid_item_id = 'item-repair'`;
+        const result = await syncPlaidItem('u-repair', 'item-repair', deps(fakePlaid({
+            '/investments/holdings/get': holdingsOf('acc_repair', [['sec_aapl', 1, 100, 90]]),
+            '/investments/transactions/get': transactionsOf('acc_repair', []),
+        }).fetchImpl));
+        assert.equal(result.status, 'synced');
+        assert.equal((await itemRow('item-repair'))[0].status, 'active');
+    });
+
+    test('regression: a connection whose token can\'t be read isn\'t disconnected here, so its access at Plaid can still be ended', async () => {
+        // The Codex finding on PR #163: the token was wiped though Plaid was never told.
+        await linkedUser('u-notoken', 'item-notoken', [['acc_notoken', 'Individual', 'investment']]);
+        const plaid = fakePlaid({});
+        await assert.rejects(
+            disconnectPlaidItem('u-notoken', 'item-notoken', { config: CONFIG, database, fetchImpl: plaid.fetchImpl, getAccessToken: async () => undefined }),
+            PlaidTokenUnavailableError,
+        );
+        assert.equal(plaid.requests.length, 0);
+        assert.deepEqual((await itemRow('item-notoken')).map((r) => ({ ...r })), [{ status: 'active', revoked: false, token: 'c' }]);
+    });
+
+    test('regression: the same account linked again through another connection isn\'t synced twice', async () => {
+        // The Codex finding on PR #163: relinking a brokerage gives its accounts
+        // new IDs; picked again, they synced into a second portfolio.
+        await linkedUser('u-dup', 'item-dup-1', [['acc_dup_1', 'Individual', 'investment']]);
+        await selectPlaidAccounts('u-dup', 'item-dup-1', ['acc_dup_1'], database);
+        const [first] = await sql<{ id: string }[]>`SELECT id FROM plaid_items WHERE plaid_item_id = 'item-dup-1'`;
+        const [second] = await sql<{ id: string }[]>`
+            INSERT INTO plaid_items (user_id, plaid_item_id, institution_id, institution_name, access_token_ciphertext, access_token_iv, access_token_auth_tag)
+            VALUES ('u-dup', 'item-dup-2', 'ins_1', 'Fidelity', 'c', 'i', 't') RETURNING id`;
+        assert.ok(first && second);
+        await sql`
+            INSERT INTO plaid_accounts (user_id, plaid_item_record_id, plaid_account_id, name, mask, type, subtype, capabilities, verification_status, institution_id)
+            VALUES ('u-dup', ${second.id}, 'acc_dup_2', 'INDIVIDUAL ', '1234', 'investment', 'brokerage', '["holdings"]', 'automatically_verified', null),
+                   ('u-dup', ${second.id}, 'acc_new_2', 'Joint', '4321', 'investment', 'brokerage', '["holdings"]', 'automatically_verified', null)`;
+        // Matched by institution, name, last four and subtype, not by ID. (The
+        // first connection's rows have no institution_id: named by institution.)
+        await sql`UPDATE plaid_accounts SET institution_name = 'Fidelity' WHERE user_id = 'u-dup'`;
+        const elsewhere = await connectedAccountFingerprints('u-dup', { exceptItemId: 'item-dup-2', statuses: ['sync_ready'] }, database);
+        assert.equal(elsewhere.size, 1);
+        assert.equal(await selectPlaidAccounts('u-dup', 'item-dup-2', ['acc_dup_2', 'acc_new_2'], database), 1);
+        assert.deepEqual((await statuses('u-dup')).map((r) => [r.id, r.status]), [['acc_dup_1', 'sync_ready'], ['acc_dup_2', 'excluded'], ['acc_new_2', 'sync_ready']]);
+    });
+
+    test('regression: after Link\'s update mode, the connection is read from Plaid again: login, consent, and the accounts it may read', async () => {
+        // The Codex findings on PR #163: a connection with nothing picked stayed
+        // "sign in again"; "access ends soon" stayed after consent was renewed;
+        // an account the user stopped sharing failed every later sync.
+        await linkedUser('u-fixed', 'item-fixed', [['acc_fixed', 'Individual', 'investment'], ['acc_dropped', 'Joint', 'investment'], ['acc_waiting', 'IRA', 'investment']]);
+        await selectPlaidAccounts('u-fixed', 'item-fixed', ['acc_fixed', 'acc_dropped'], database);
+        await sql`UPDATE plaid_accounts SET sync_status = 'awaiting_selection' WHERE plaid_account_id = 'acc_waiting'`;
+        await sql`UPDATE plaid_items SET status = 'login_required' WHERE plaid_item_id = 'item-fixed'`;
+        const refresh = (item: Record<string, unknown>, accountIds = ['acc_fixed', 'acc_waiting']) => {
+            const plaid = fakePlaid({
+                '/item/get': () => ({ json: { item: { item_id: 'item-fixed', ...item } } }),
+                '/accounts/get': () => ({ json: { accounts: accountIds.map((account_id) => ({ account_id })) } }),
+            });
+            return refreshPlaidItem('u-fixed', 'item-fixed', deps(plaid.fetchImpl));
+        };
+
+        // Still wanting a sign-in: it stays so, nothing else changes.
+        assert.deepEqual(await refresh({ error: { error_code: 'ITEM_LOGIN_REQUIRED' } }), { status: 'login_required', accountsRemoved: 0, accountsAdded: 0 });
+        assert.equal((await itemRow('item-fixed'))[0].status, 'login_required');
+
+        // Signed in again, one account no longer shared: it stops syncing.
+        assert.deepEqual(await refresh({ error: null, consent_expiration_time: null }), { status: 'active', accountsRemoved: 1, accountsAdded: 0 });
+        assert.equal((await itemRow('item-fixed'))[0].status, 'active');
+        assert.deepEqual((await statuses('u-fixed')).map((r) => [r.id, r.status]), [['acc_dropped', 'excluded'], ['acc_fixed', 'sync_ready'], ['acc_waiting', 'awaiting_selection']]);
+
+        // Consent: renewed for months is fine; days left is still ending soon.
+        await sql`UPDATE plaid_items SET status = 'pending_expiration' WHERE plaid_item_id = 'item-fixed'`;
+        assert.equal((await refresh({ error: null, consent_expiration_time: '2027-10-25T00:00:00Z' })).status, 'active');
+        assert.equal((await itemRow('item-fixed'))[0].status, 'active');
+        assert.equal((await refresh({ error: null, consent_expiration_time: '2026-10-28T00:00:00Z' })).status, 'pending_expiration');
+        assert.equal((await itemRow('item-fixed'))[0].status, 'pending_expiration');
+
+        await assert.rejects(refreshPlaidItem('u-someone-else', 'item-fixed', deps(fakePlaid({}).fetchImpl)), PlaidItemNotFoundError);
+    });
+
+    test('regression: an account whose access is restored on reconnect comes back under its new ID, into the same account in Atlas', async () => {
+        // The Codex finding on PR #163: Plaid gives restored access a new
+        // account_id; the old one stopped syncing and the new one was never stored.
+        await linkedUser('u-restore', 'item-restore', [['acc_old_id', 'Individual', 'investment']]);
+        await selectPlaidAccounts('u-restore', 'item-restore', ['acc_old_id'], database);
+        await syncPlaidItem('u-restore', 'item-restore', deps(fakePlaid({
+            '/investments/holdings/get': holdingsOf('acc_old_id', [['sec_aapl', 1, 100, 90]]),
+            '/investments/transactions/get': transactionsOf('acc_old_id', []),
+        }).fetchImpl));
+        // As the exchange stores it: the connection's institution.
+        await sql`UPDATE plaid_accounts SET institution_id = 'ins_1', institution_name = 'Fidelity' WHERE user_id = 'u-restore'`;
+        const [portfolio] = await sql<{ id: string }[]>`SELECT id FROM portfolios WHERE user_id = 'u-restore'`;
+
+        const plaidAccount = (account_id: string, name: string, mask: string) => ({
+            account_id, name, mask, type: 'investment', subtype: 'brokerage', balances: { current: 100, iso_currency_code: 'USD' },
+        });
+        const reconnect = fakePlaid({
+            '/item/get': () => ({ json: { item: { item_id: 'item-restore', error: null, consent_expiration_time: null } } }),
+            '/accounts/get': () => ({ json: { accounts: [plaidAccount('acc_new_id', 'Individual', '1234'), plaidAccount('acc_added', 'Joint', '9999')] } }),
+        });
+        assert.deepEqual(await refreshPlaidItem('u-restore', 'item-restore', deps(reconnect.fetchImpl)), { status: 'active', accountsRemoved: 1, accountsAdded: 2 });
+        // The restored account keeps its pick and history; a new one waits to be picked.
+        const rows = await sql<{ id: string; status: string; synced: boolean }[]>`
+            SELECT plaid_account_id AS id, sync_status AS status, holdings_synced_at IS NOT NULL AS synced FROM plaid_accounts WHERE user_id = 'u-restore' ORDER BY plaid_account_id`;
+        assert.deepEqual(rows.map((r) => [r.id, r.status, r.synced]), [['acc_added', 'awaiting_selection', false], ['acc_new_id', 'sync_ready', true], ['acc_old_id', 'excluded', true]]);
+        const [moved] = await sql<{ external: string }[]>`SELECT external_account_id AS external FROM portfolios WHERE id = ${portfolio.id}`;
+        assert.equal(moved.external, 'acc_new_id');
+
+        // The next sync writes into the same account in Atlas, not a new one.
+        const synced = await syncPlaidItem('u-restore', 'item-restore', deps(fakePlaid({
+            '/investments/holdings/get': holdingsOf('acc_new_id', [['sec_aapl', 2, 100, 180]]),
+            '/investments/transactions/get': transactionsOf('acc_new_id', []),
+        }).fetchImpl, new Date('2026-10-26T22:30:00.000Z')));
+        assert.deepEqual(synced.accounts.map((a) => [a.portfolioId, a.created]), [[portfolio.id, false]]);
+        assert.equal((await sql`SELECT 1 FROM portfolios WHERE user_id = 'u-restore'`).length, 1);
+    });
+
+    /**
+     * Runs `run` while another connection holds the user's account lock, and
+     * says whether it waited for it. The lock is let go even when `run` or an
+     * assertion fails, so a failing test can't hang the run.
+     */
+    async function waitsForAccountLock<T>(userId: string, run: () => Promise<T>): Promise<{ waited: boolean; result: T }> {
+        const scratch = new URL(DATABASE_URL!);
+        scratch.pathname = `/${name}`;
+        const other = postgres(scratch.toString(), { max: 1, onnotice: () => {} });
+        let release = () => {};
+        const released = new Promise<void>((resolve) => { release = resolve; });
+        let holder: Promise<unknown> = Promise.resolve();
+        try {
+            let locked!: () => void;
+            const holding = new Promise<void>((resolve) => { locked = resolve; });
+            holder = other.begin(async (transaction) => {
+                // postgres.js types a transaction without its tagged-template call.
+                const tx = transaction as unknown as typeof other;
+                await tx`SELECT pg_advisory_xact_lock(hashtext(${`atlas:accounts:${userId}`}))`;
+                locked();
+                await released;
+            });
+            await holding;
+            let finished = false;
+            const running = run().then((result) => { finished = true; return result; });
+            await new Promise((resolve) => setTimeout(resolve, 300));
+            const waited = !finished;
+            release();
+            await holder;
+            return { waited, result: await running };
+        } finally {
+            release();
+            await holder.catch(() => {});
+            await other.end();
+        }
+    }
+
+    test('regression: reconnect reconciliation waits for the user\'s account lock, as a sync\'s write and deleting an account do', async () => {
+        // The Codex finding on PR #163: without it, a sync in flight could
+        // write an account under the ID being moved, making a second one.
+        await linkedUser('u-lock', 'item-lock', [['acc_lock', 'Individual', 'investment']]);
+        const { waited, result } = await waitsForAccountLock('u-lock', () => refreshPlaidItem('u-lock', 'item-lock', deps(fakePlaid({
+            '/item/get': () => ({ json: { item: { item_id: 'item-lock', error: null, consent_expiration_time: null } } }),
+            '/accounts/get': () => ({ json: { accounts: [{ account_id: 'acc_lock' }] } }),
+        }).fetchImpl)));
+        assert.equal(waited, true);
+        assert.equal(result.status, 'active');
+    });
+
+    test('regression: a pick waits for the user\'s account lock, so two picks of the same account through two connections can\'t both go through', async () => {
+        // The Codex finding on PR #163: two tabs picking the same account
+        // through different connections could each see it synced nowhere.
+        await linkedUser('u-picklock', 'item-picklock', [['acc_picklock', 'Individual', 'investment']]);
+        const { waited, result } = await waitsForAccountLock('u-picklock', () => selectPlaidAccounts('u-picklock', 'item-picklock', ['acc_picklock'], database));
+        assert.equal(waited, true);
+        assert.equal(result, 1);
+    });
 });
+

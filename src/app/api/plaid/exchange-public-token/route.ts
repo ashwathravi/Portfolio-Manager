@@ -3,11 +3,13 @@ import { apiError, internalServerError, logApiEvent } from "@/lib/api/security";
 import { requestIdFrom } from "@/lib/observability/request-id";
 import { requireSessionApiUserScope } from "@/lib/api/session-security";
 import {
+    discoveredPlaidAccountFingerprint,
     exchangePlaidPublicToken,
     resolvePlaidEnvironment,
     sanitizePlaidExchangeForClient,
 } from "@/lib/plaid/link";
-import { storePlaidConnection } from "@/lib/plaid/server-token-vault";
+import { plaidConnectionsInDatabase, storePlaidConnection } from "@/lib/plaid/server-token-vault";
+import { connectedAccountFingerprints } from "@/lib/plaid/sync";
 import type { PlaidLinkMetadata } from "@/lib/plaid/types";
 
 export const dynamic = "force-dynamic";
@@ -48,6 +50,22 @@ export async function POST(request: Request) {
         if (!tokenStorage.stored && process.env.NODE_ENV === "production") {
             return apiError("Plaid token storage is not configured.", "PLAID_TOKEN_STORAGE_NOT_CONFIGURED", 503);
         }
+        // Accounts the user already has through another connection (the same
+        // brokerage linked again, its accounts under new IDs) aren't offered
+        // again, or they'd sync twice (launch item i46). Only a hint for the
+        // review: picking one is refused again when the pick is saved, so a
+        // failed lookup doesn't fail the link.
+        let elsewhere = new Set<string>();
+        if (plaidConnectionsInDatabase()) {
+            try {
+                elsewhere = await connectedAccountFingerprints(auth.context.userId, { exceptItemId: exchange.itemId, statuses: ["sync_ready", "awaiting_selection"] });
+            } catch (error) {
+                console.warn("Plaid exchange: couldn't check for accounts already connected.", error instanceof Error ? error.name : "error");
+            }
+        }
+        const duplicateAccountIds = exchange.accounts
+            .filter((account) => elsewhere.has(discoveredPlaidAccountFingerprint(account)))
+            .map((account) => account.plaidAccountId);
 
         logApiEvent("plaid_public_token_exchanged", {
             route: "/api/plaid/exchange-public-token",
@@ -62,6 +80,7 @@ export async function POST(request: Request) {
             sanitizePlaidExchangeForClient({
                 exchange,
                 existingPlaidAccountIds,
+                duplicateAccountIds,
                 accessTokenStored: tokenStorage.stored,
                 accessTokenStorageMode: tokenStorage.mode,
                 accessTokenStorageDurable: tokenStorage.durable,

@@ -70,8 +70,15 @@ test.describe('Settings page', () => {
         await expect(page.locator('.pm-strategy-card').first()).toBeVisible();
     });
 
-    test('Plaid Link flow discovers and connects selected accounts', async ({ page }) => {
+    test('Plaid Link connects the picked accounts, syncs them, and lists the connection from the server', async ({ page }) => {
+        // Launch items i44 and i46: the picked accounts sync straight away, and
+        // the card lists connections from the database, not this browser.
+        let connections: unknown[] = [];
+        await page.route('**/api/plaid/connections', async (route) => {
+            await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: connections }) });
+        });
         await page.route('**/api/plaid/link-token', async (route) => {
+            expect(route.request().postData() ?? '').not.toContain('itemId');
             await route.fulfill({
                 status: 200,
                 contentType: 'application/json',
@@ -93,23 +100,10 @@ test.describe('Settings page', () => {
                 contentType: 'application/json',
                 body: JSON.stringify({
                     itemId: 'item-plaid-sandbox-investments',
-                    institution: {
-                        id: 'ins_109508',
-                        name: 'Plaid Sandbox Investments',
-                    },
+                    institution: { id: 'ins_109508', name: 'Plaid Sandbox Investments' },
                     accounts: [
-                        plaidE2EAccount({
-                            plaidAccountId: 'plaid-growth-brokerage',
-                            name: 'Plaid Growth Brokerage',
-                            subtype: 'brokerage',
-                            currentBalance: 125430,
-                        }),
-                        plaidE2EAccount({
-                            plaidAccountId: 'plaid-roth-ira',
-                            name: 'Plaid Roth IRA',
-                            subtype: 'roth',
-                            currentBalance: 84320,
-                        }),
+                        plaidE2EAccount({ plaidAccountId: 'plaid-growth-brokerage', name: 'Plaid Growth Brokerage', subtype: 'brokerage', currentBalance: 125430 }),
+                        plaidE2EAccount({ plaidAccountId: 'plaid-roth-ira', name: 'Plaid Roth IRA', subtype: 'roth', currentBalance: 84320 }),
                         plaidE2EAccount({
                             plaidAccountId: 'plaid-cash-management',
                             name: 'Plaid Cash Management',
@@ -127,12 +121,19 @@ test.describe('Settings page', () => {
                 }),
             });
         });
-        // Launch item i44: the picked accounts sync straight away, and "Sync
-        // now" syncs the connection again.
         const syncRequests: unknown[] = [];
         await page.route('**/api/plaid/sync', async (route) => {
             syncRequests.push(route.request().postDataJSON());
             if (syncRequests.length === 1) {
+                connections = [plaidE2EConnection({
+                    itemId: 'item-plaid-sandbox-investments',
+                    institutionName: 'Plaid Sandbox Investments',
+                    accounts: [
+                        { plaidAccountId: 'plaid-cash-management', name: 'Plaid Cash Management', mask: '2222', type: 'depository', subtype: 'checking', syncStatus: 'excluded', portfolio: null },
+                        { plaidAccountId: 'plaid-growth-brokerage', name: 'Plaid Growth Brokerage', mask: '0000', type: 'investment', subtype: 'brokerage', syncStatus: 'sync_ready', portfolio: { id: 'p-growth', name: 'Plaid Sandbox Investments Plaid Growth Brokerage' } },
+                        { plaidAccountId: 'plaid-roth-ira', name: 'Plaid Roth IRA', mask: '1111', type: 'investment', subtype: 'roth', syncStatus: 'sync_ready', portfolio: { id: 'p-roth', name: 'Plaid Sandbox Investments Plaid Roth IRA' } },
+                    ],
+                })];
                 await route.fulfill({
                     status: 200,
                     contentType: 'application/json',
@@ -143,6 +144,7 @@ test.describe('Settings page', () => {
                                 { name: 'Plaid Sandbox Investments Plaid Growth Brokerage', positions: 7, transactionsAdded: 100, transactionsPending: false, holdingsSkipped: 0, costUnknown: 0 },
                                 { name: 'Plaid Sandbox Investments Plaid Roth IRA', positions: 2, transactionsAdded: 20, transactionsPending: false, holdingsSkipped: 1, costUnknown: 0 },
                             ],
+                            overLimit: [],
                         },
                     }),
                 });
@@ -154,57 +156,11 @@ test.describe('Settings page', () => {
                 body: JSON.stringify({ error: 'Your bank wants you to sign in again before Atlas can sync this connection.', code: 'PLAID_LOGIN_REQUIRED' }),
             });
         });
-        await page.addInitScript(() => {
-            const w = window as unknown as {
-                Plaid: {
-                    create: (options: {
-                        onSuccess: (publicToken: string, metadata: unknown) => void;
-                    }) => { open: () => void; destroy: () => void };
-                };
-            };
-            w.Plaid = {
-                create: (options) => ({
-                    open: () => {
-                        options.onSuccess('public-sandbox-e2e', {
-                            institution: {
-                                name: 'Plaid Sandbox Investments',
-                                institution_id: 'ins_109508',
-                            },
-                            accounts: [
-                                {
-                                    id: 'plaid-growth-brokerage',
-                                    name: 'Plaid Growth Brokerage',
-                                    mask: '0000',
-                                    type: 'investment',
-                                    subtype: 'brokerage',
-                                },
-                                {
-                                    id: 'plaid-roth-ira',
-                                    name: 'Plaid Roth IRA',
-                                    mask: '1111',
-                                    type: 'investment',
-                                    subtype: 'roth',
-                                },
-                                {
-                                    id: 'plaid-cash-management',
-                                    name: 'Plaid Cash Management',
-                                    mask: '2222',
-                                    type: 'depository',
-                                    subtype: 'checking',
-                                },
-                            ],
-                            link_session_id: 'link-session-e2e',
-                        });
-                    },
-                    destroy: () => undefined,
-                }),
-            };
-        });
-
+        await mockPlaidLinkSdk(page);
         await reloadAppPage(page);
 
         const card = page.getByTestId('integrations-card');
-        await expect(card).toBeVisible();
+        await expect(card).toContainText('No accounts connected yet');
 
         const panel = card.getByTestId('plaid-link-panel');
         await clickUntil(card.getByRole('button', { name: /^Connect$/ }), async () => {
@@ -212,29 +168,178 @@ test.describe('Settings page', () => {
         });
         await expect(panel).toHaveAttribute('data-state', 'review');
         await expect(panel).toContainText('Plaid Sandbox Investments');
-        await expect(panel).toContainText('Access token stored server-side');
-
         await expect(card.getByLabel('Select Plaid Growth Brokerage')).toBeChecked();
         await expect(card.getByLabel('Select Plaid Roth IRA')).toBeChecked();
         await card.getByLabel('Select Plaid Cash Management').uncheck();
-
         await card.getByRole('button', { name: 'Connect selected' }).click();
-        await expect(card.getByTestId('plaid-link-panel')).toHaveCount(0);
-        await expect(card).toContainText('Plaid Growth Brokerage');
-        await expect(card).toContainText('Plaid Roth IRA');
-        await expect(card.locator('.pm-integration-provider')).toHaveCount(2);
 
         // Only the accounts picked sync: the checking account was unticked.
         await expect(page.getByText("2 accounts: 9 positions and 120 new transactions. 1 holding without a ticker, or in another currency, wasn't brought in.")).toBeVisible();
         expect(syncRequests[0]).toEqual({ itemId: 'item-plaid-sandbox-investments', plaidAccountIds: ['plaid-growth-brokerage', 'plaid-roth-ira'] });
 
-        // "Sync now" syncs the connection again, with the accounts connected
-        // here as the pick (so one linked before picks were kept is picked),
-        // and says why when it can't.
-        const growth = card.locator('.pm-integration-row').filter({ hasText: 'Plaid Growth Brokerage' });
-        await growth.getByRole('button', { name: 'Sync now' }).click();
+        // The connection as the server has it: what each account syncs into.
+        const connection = card.getByTestId('plaid-connection');
+        await expect(connection).toHaveCount(1);
+        await expect(connection).toContainText('Plaid Sandbox Investments');
+        await expect(connection).toContainText('2 accounts sync');
+        const accounts = connection.getByRole('list', { name: 'Plaid Sandbox Investments accounts' }).getByRole('listitem');
+        await expect(accounts.filter({ hasText: 'Plaid Growth Brokerage' }).getByRole('link', { name: 'Plaid Sandbox Investments Plaid Growth Brokerage' })).toHaveAttribute('href', '/portfolios/accounts');
+        await expect(accounts.filter({ hasText: 'Plaid Cash Management' })).toContainText('Balances only; not synced');
+
+        // "Sync now" syncs the connection, and says why when it can't.
+        await connection.getByRole('button', { name: 'Sync now' }).click();
         await expect(page.getByText('Your bank wants you to sign in again before Atlas can sync this connection.')).toBeVisible();
-        expect(syncRequests[1]).toEqual({ itemId: 'item-plaid-sandbox-investments', plaidAccountIds: ['plaid-growth-brokerage', 'plaid-roth-ira'] });
+        expect(syncRequests[1]).toEqual({ itemId: 'item-plaid-sandbox-investments' });
+    });
+
+    test('regression: connections that fail to load say so, with Try again, not "none connected"', async ({ page }) => {
+        // The Codex finding on PR #163: an outage read as having no accounts.
+        let fail = true;
+        await page.route('**/api/plaid/connections', async (route) => {
+            if (fail) {
+                await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: 'Unable to load the linked accounts.', code: 'PLAID_CONNECTIONS_FAILED' }) });
+                return;
+            }
+            await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: [] }) });
+        });
+        await reloadAppPage(page);
+        const card = page.getByTestId('integrations-card');
+        const failed = card.getByTestId('plaid-connections-error');
+        await expect(failed).toContainText("Couldn't load your connected accounts.");
+        await expect(card).not.toContainText('No accounts connected yet');
+        fail = false;
+        await failed.getByRole('button', { name: 'Try again' }).click();
+        await expect(card).toContainText('No accounts connected yet');
+        await expect(failed).toHaveCount(0);
+    });
+
+    test('regression: retrying a failed reconnect signs in to the same connection again, not a new one', async ({ page }) => {
+        // The Codex finding on PR #163: Retry opened Link for a new connection.
+        await page.route('**/api/plaid/connections', async (route) => {
+            await route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({
+                    data: [plaidE2EConnection({
+                        itemId: 'item-fidelity',
+                        institutionName: 'Fidelity',
+                        status: 'login_required',
+                        accounts: [{ plaidAccountId: 'acc-f1', name: 'Individual', mask: '1234', type: 'investment', subtype: 'brokerage', syncStatus: 'sync_ready', portfolio: { id: 'p-f1', name: 'Fidelity Individual' } }],
+                    })],
+                }),
+            });
+        });
+        const linkTokenBodies: unknown[] = [];
+        await page.route('**/api/plaid/link-token', async (route) => {
+            linkTokenBodies.push(route.request().postDataJSON());
+            if (linkTokenBodies.length === 1) {
+                await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: 'Unable to create Plaid link token.', code: 'PLAID_LINK_TOKEN_FAILED' }) });
+                return;
+            }
+            await route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({ linkToken: 'link-sandbox-update', expiration: '2026-10-26T16:00:00Z', requestId: 'r', environment: 'sandbox', products: [] }),
+            });
+        });
+        const syncRequests: unknown[] = [];
+        await page.route('**/api/plaid/sync', async (route) => {
+            syncRequests.push(route.request().postDataJSON());
+            await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { itemId: 'item-fidelity', accounts: [], overLimit: [] } }) });
+        });
+        await mockPlaidLinkSdk(page);
+        await reloadAppPage(page);
+
+        const card = page.getByTestId('integrations-card');
+        await card.getByTestId('plaid-connection').getByRole('button', { name: 'Reconnect' }).click();
+        const panel = card.getByTestId('plaid-link-panel');
+        await expect(panel).toHaveAttribute('data-state', 'error');
+        await panel.getByRole('button', { name: 'Retry Plaid Link' }).click();
+        await expect.poll(() => syncRequests.length).toBe(1);
+        expect(linkTokenBodies).toEqual([{ itemId: 'item-fidelity' }, { itemId: 'item-fidelity' }]);
+        expect(syncRequests[0]).toEqual({ itemId: 'item-fidelity', reconnected: true });
+    });
+
+    test('a connection that needs a sign-in reconnects through Link; accounts waiting are picked here; disconnecting asks first', async ({ page }) => {
+        // Launch items i45 and i46.
+        let connections: unknown[] = [
+            plaidE2EConnection({
+                itemId: 'item-fidelity',
+                institutionName: 'Fidelity',
+                status: 'login_required',
+                accounts: [{ plaidAccountId: 'acc-f1', name: 'Individual', mask: '1234', type: 'investment', subtype: 'brokerage', syncStatus: 'sync_ready', portfolio: { id: 'p-f1', name: 'Fidelity Individual' } }],
+            }),
+            plaidE2EConnection({
+                itemId: 'item-vanguard',
+                institutionName: 'Vanguard',
+                accounts: [
+                    { plaidAccountId: 'acc-v1', name: 'Brokerage', mask: '5555', type: 'investment', subtype: 'brokerage', syncStatus: 'awaiting_selection', portfolio: null },
+                    { plaidAccountId: 'acc-v2', name: 'Roth IRA', mask: '6666', type: 'investment', subtype: 'roth', syncStatus: 'awaiting_selection', portfolio: null },
+                ],
+            }),
+        ];
+        await page.route('**/api/plaid/connections', async (route) => {
+            await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: connections }) });
+        });
+        const linkTokenBodies: unknown[] = [];
+        await page.route('**/api/plaid/link-token', async (route) => {
+            linkTokenBodies.push(route.request().postDataJSON());
+            await route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({ linkToken: 'link-sandbox-update', expiration: '2026-10-26T16:00:00Z', requestId: 'r', environment: 'sandbox', products: [] }),
+            });
+        });
+        const syncRequests: unknown[] = [];
+        await page.route('**/api/plaid/sync', async (route) => {
+            syncRequests.push(route.request().postDataJSON());
+            await route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({ data: { itemId: 'x', accounts: [{ name: 'Fidelity Individual', positions: 3, transactionsAdded: 0, transactionsPending: false, holdingsSkipped: 0, costUnknown: 0 }], overLimit: [] } }),
+            });
+        });
+        const deleted: string[] = [];
+        await page.route('**/api/plaid/connections/*', async (route) => {
+            if (route.request().method() !== 'DELETE') return route.fallback();
+            deleted.push(new URL(route.request().url()).pathname);
+            connections = connections.slice(0, 1);
+            await route.fulfill({ status: 204 });
+        });
+        await mockPlaidLinkSdk(page);
+        await reloadAppPage(page);
+
+        const card = page.getByTestId('integrations-card');
+        const fidelity = card.getByTestId('plaid-connection').filter({ hasText: 'Fidelity' });
+        const vanguard = card.getByTestId('plaid-connection').filter({ hasText: 'Vanguard' });
+
+        // Fidelity wants a sign-in: Reconnect opens Link in update mode, then syncs.
+        await expect(fidelity).toContainText('Sign in again');
+        await expect(fidelity.getByRole('button', { name: 'Sync now' })).toHaveCount(0);
+        await fidelity.getByRole('button', { name: 'Reconnect' }).click();
+        await expect(page.getByText('Fidelity Individual: 3 positions and 0 new transactions.')).toBeVisible();
+        expect(linkTokenBodies[0]).toEqual({ itemId: 'item-fidelity' });
+        // Read again from Plaid first: its accounts, login and consent.
+        expect(syncRequests[0]).toEqual({ itemId: 'item-fidelity', reconnected: true });
+
+        // Vanguard's accounts wait for a pick: picked here, they sync.
+        const pick = vanguard.getByTestId('plaid-pick');
+        await expect(vanguard).toContainText('Waiting for you to choose');
+        await expect(pick.getByRole('button', { name: 'Sync selected' })).toBeDisabled();
+        await pick.getByLabel('Sync Roth IRA').check();
+        await pick.getByRole('button', { name: 'Sync selected' }).click();
+        await expect.poll(() => syncRequests.length).toBe(2);
+        expect(syncRequests[1]).toEqual({ itemId: 'item-vanguard', plaidAccountIds: ['acc-v2'] });
+
+        // Disconnect asks first, then the connection is gone from the list.
+        page.once('dialog', (dialog) => {
+            expect(dialog.message()).toContain('Disconnect Vanguard?');
+            void dialog.accept();
+        });
+        await vanguard.getByRole('button', { name: 'Disconnect' }).click();
+        await expect(page.getByText('Disconnected Vanguard.')).toBeVisible();
+        expect(deleted).toEqual(['/api/plaid/connections/item-vanguard']);
+        await expect(card.getByTestId('plaid-connection')).toHaveCount(1);
     });
 
     test('legacy ?tab=notifications links land on the Notifications section', async ({ page }) => {
@@ -438,6 +543,56 @@ test.describe('Settings page', () => {
         await expect(aaplRule).toHaveAttribute('data-state', 'resolved');
     });
 });
+
+/** A connection as GET /api/plaid/connections lists it. */
+function plaidE2EConnection({
+    itemId,
+    institutionName,
+    status = 'active',
+    accounts,
+}: {
+    itemId: string;
+    institutionName: string;
+    status?: string;
+    accounts: Array<Record<string, unknown>>;
+}) {
+    return {
+        itemId,
+        institutionName,
+        status,
+        lastSuccessfulSyncAt: '2026-10-25T22:30:00.000Z',
+        accounts: accounts.map((account) => ({ lastSyncedAt: '2026-10-25T22:30:00.000Z', ...account })),
+    };
+}
+
+/** Plaid's Link SDK, answering success as soon as Link opens. */
+async function mockPlaidLinkSdk(page: import('@playwright/test').Page) {
+    await page.addInitScript(() => {
+        const w = window as unknown as {
+            Plaid: {
+                create: (options: {
+                    onSuccess: (publicToken: string, metadata: unknown) => void;
+                }) => { open: () => void; destroy: () => void };
+            };
+        };
+        w.Plaid = {
+            create: (options) => ({
+                open: () => {
+                    options.onSuccess('public-sandbox-e2e', {
+                        institution: { name: 'Plaid Sandbox Investments', institution_id: 'ins_109508' },
+                        accounts: [
+                            { id: 'plaid-growth-brokerage', name: 'Plaid Growth Brokerage', mask: '0000', type: 'investment', subtype: 'brokerage' },
+                            { id: 'plaid-roth-ira', name: 'Plaid Roth IRA', mask: '1111', type: 'investment', subtype: 'roth' },
+                            { id: 'plaid-cash-management', name: 'Plaid Cash Management', mask: '2222', type: 'depository', subtype: 'checking' },
+                        ],
+                        link_session_id: 'link-session-e2e',
+                    });
+                },
+                destroy: () => undefined,
+            }),
+        };
+    });
+}
 
 function plaidE2EAccount({
     plaidAccountId,

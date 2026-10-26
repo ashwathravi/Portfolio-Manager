@@ -1,6 +1,6 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert';
-import { readJsonBody } from './body';
+import { readJsonBody, readTextBody } from './body';
 
 function chunked(parts: string[]): Request {
     const enc = new TextEncoder();
@@ -37,5 +37,18 @@ describe('readJsonBody', () => {
     test('malformed or missing bodies are invalid JSON', async () => {
         assert.deepStrictEqual(await readJsonBody(new Request('http://x', { method: 'POST', body: '{oops' }), 100), { ok: false, reason: 'invalid-json' });
         assert.deepStrictEqual(await readJsonBody(new Request('http://x', { method: 'POST' }), 100), { ok: false, reason: 'invalid-json' });
+    });
+});
+
+describe('readTextBody', () => {
+    test('keeps the body exactly as sent, whitespace and all', async () => {
+        // A webhook signature covers these bytes (launch item i45).
+        const body = '{\n  "webhook_type": "ITEM",\n  "note": "é"\n}';
+        assert.deepStrictEqual(await readTextBody(chunked([body.slice(0, 7), body.slice(7)]), 1024), { ok: true, text: body });
+    });
+
+    test('is capped like readJsonBody, and a missing body says so', async () => {
+        assert.deepStrictEqual(await readTextBody(chunked(['x'.repeat(40), 'y'.repeat(40)]), 64), { ok: false, reason: 'too-large' });
+        assert.deepStrictEqual(await readTextBody(new Request('http://x', { method: 'POST' }), 100), { ok: false, reason: 'missing' });
     });
 });
