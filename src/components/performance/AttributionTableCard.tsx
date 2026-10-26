@@ -1,11 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import {
-    computeAttribution,
-    formatPp,
-    type AttributionSegment,
-} from "@/lib/performance/attribution";
+import { useState } from "react";
+import { formatPp, type AttributionSummary } from "@/lib/performance/attribution";
 
 /**
  * Performance › Attribution — the full Brinson (BHB) table: weights and
@@ -13,17 +9,14 @@ import {
  * card above shows one effect at a time; this is where the numbers add up.
  */
 export function AttributionTableCard({
-    sectors,
-    assetClasses,
+    sector,
+    assetClass,
 }: {
-    sectors: AttributionSegment[];
-    assetClasses: AttributionSegment[];
+    sector: AttributionSummary;
+    assetClass: AttributionSummary;
 }) {
     const [basis, setBasis] = useState<"sector" | "assetClass">("sector");
-    const summary = useMemo(
-        () => computeAttribution(basis === "sector" ? sectors : assetClasses),
-        [basis, sectors, assetClasses],
-    );
+    const summary = basis === "sector" ? sector : assetClass;
     const pct = (f: number) => `${(f * 100).toFixed(1)}%`;
     const tone = (f: number) => (Math.round(f * 1000) === 0 ? "" : f > 0 ? "pm-num-pos" : "pm-num-neg");
 
