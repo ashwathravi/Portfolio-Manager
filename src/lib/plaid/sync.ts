@@ -178,7 +178,10 @@ export async function selectPlaidAccounts(
             eq(plaidAccounts.plaidItemRecordId, item.id),
             eq(plaidAccounts.syncStatus, "awaiting_selection"),
         );
-        // Picked, less any the user already syncs through another connection.
+        // Picked, less any the user already syncs through another connection:
+        // under the user's account lock, so two picks of the same account
+        // through different connections (two tabs) can't both see none.
+        await buildLockUserAccountsQuery(userId, tx);
         const syncedElsewhere = await connectedAccountFingerprints(userId, { exceptItemId: itemId, statuses: ["sync_ready"] }, tx);
         const candidates = plaidAccountIds.length === 0 ? [] : await tx
             .select({
