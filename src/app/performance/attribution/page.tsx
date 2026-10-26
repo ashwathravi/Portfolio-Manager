@@ -5,6 +5,7 @@ import { AttributionPageClient } from "@/components/performance/AttributionPageC
 import { DataUnavailableNotice } from "@/components/data-display/DataUnavailableNotice";
 import { isDatabaseConfigured } from "@/db/connection-options";
 import { requirePageUserId } from "@/lib/auth/request-user";
+import { loggableError } from "@/lib/observability/loggable-error";
 import { loadAttributionHistory, type AttributionHistory } from "@/lib/performance/attribution-loader";
 import PerformanceLoading from "../loading";
 
@@ -32,7 +33,8 @@ async function AttributionContent({ accountId }: { accountId: string | null }) {
             history = await loadAttributionHistory(userId, { accountId });
         } catch (e) {
             // With a configured database a failure is an outage, not a user without history.
-            console.error("Attribution history fetch failed — showing the outage notice.", e);
+            // Logged during a render, so an AggregateError can't go to the console as is.
+            console.error("Attribution history fetch failed — showing the outage notice.", loggableError(e));
             return (
                 <div className="pm-perf-stack">
                     <DataUnavailableNotice what="your attribution" />
