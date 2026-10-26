@@ -35,7 +35,7 @@ import {
     type AccountHoldings,
     type TransactionSkipReason,
 } from "./investments";
-import { PlaidApiError, resolvePlaidEnvironment, type PlaidCredentials, type PlaidFetch } from "./link";
+import { PlaidApiError, asRecord, plaidAccountFingerprint, postPlaid, resolvePlaidEnvironment, type PlaidCredentials, type PlaidFetch } from "./link";
 import { getPlaidAccessTokenForUser } from "./server-token-vault";
 import type { PlaidEnvironment } from "./types";
 
@@ -109,13 +109,46 @@ export function linkedPortfolioDescription(institutionName: string | null, mask:
 // ---------------------------------------------------------------------------
 
 /**
+ * The accounts the user has through their other connections (not revoked),
+ * as fingerprints (plaidAccountFingerprint): linking a brokerage again can
+ * give the same accounts new IDs, and syncing them twice would count their
+ * holdings and cash twice (launch item i46).
+ */
+export async function connectedAccountFingerprints(
+    userId: string,
+    { exceptItemId, statuses }: { exceptItemId: string; statuses: readonly string[] },
+    database: Executor = db,
+): Promise<Set<string>> {
+    const rows = await database
+        .select({
+            institutionId: plaidAccounts.institutionId,
+            institutionName: plaidAccounts.institutionName,
+            name: plaidAccounts.name,
+            mask: plaidAccounts.mask,
+            subtype: plaidAccounts.subtype,
+        })
+        .from(plaidAccounts)
+        .innerJoin(plaidItems, eq(plaidItems.id, plaidAccounts.plaidItemRecordId))
+        .where(and(
+            eq(plaidAccounts.userId, userId),
+            ne(plaidItems.plaidItemId, exceptItemId),
+            ne(plaidItems.status, "revoked"),
+            isNull(plaidItems.revokedAt),
+            inArray(plaidAccounts.syncStatus, [...statuses]),
+        ));
+    return new Set(rows.map((row) => plaidAccountFingerprint(row)));
+}
+
+/**
  * The user's pick: these accounts of the item sync, the rest of its
  * accounts don't. Sent after Link, and by "Sync now" with the accounts the
  * user connected in Settings, so an account linked before picks existed
  * can still be picked. Only accounts still waiting for a pick change: one
  * already picked keeps syncing, and one excluded (a linked account the user
- * deleted) stays excluded. Only the user's own, active item; returns how
- * many of its investment accounts were picked now.
+ * deleted) stays excluded, and one the user already syncs through another
+ * connection (the same account, linked again) isn't picked twice. Only the
+ * user's own item; returns how many of its investment accounts were picked
+ * now.
  */
 export async function selectPlaidAccounts(
     userId: string,
@@ -135,7 +168,21 @@ export async function selectPlaidAccounts(
             eq(plaidAccounts.plaidItemRecordId, item.id),
             eq(plaidAccounts.syncStatus, "awaiting_selection"),
         );
-        const picked = plaidAccountIds.length > 0 ? inArray(plaidAccounts.plaidAccountId, [...plaidAccountIds]) : sql`false`;
+        // Picked, less any the user already syncs through another connection.
+        const syncedElsewhere = await connectedAccountFingerprints(userId, { exceptItemId: itemId, statuses: ["sync_ready"] }, tx);
+        const candidates = plaidAccountIds.length === 0 ? [] : await tx
+            .select({
+                plaidAccountId: plaidAccounts.plaidAccountId,
+                institutionId: plaidAccounts.institutionId,
+                institutionName: plaidAccounts.institutionName,
+                name: plaidAccounts.name,
+                mask: plaidAccounts.mask,
+                subtype: plaidAccounts.subtype,
+            })
+            .from(plaidAccounts)
+            .where(and(ofItem, inArray(plaidAccounts.plaidAccountId, [...plaidAccountIds])));
+        const pickable = candidates.filter((c) => !syncedElsewhere.has(plaidAccountFingerprint(c))).map((c) => c.plaidAccountId);
+        const picked = pickable.length > 0 ? inArray(plaidAccounts.plaidAccountId, pickable) : sql`false`;
         const selected = await tx
             .update(plaidAccounts)
             .set({ syncStatus: "sync_ready", updatedAt: new Date() })
@@ -144,7 +191,7 @@ export async function selectPlaidAccounts(
         await tx
             .update(plaidAccounts)
             .set({ syncStatus: "excluded", updatedAt: new Date() })
-            .where(and(ofItem, plaidAccountIds.length > 0 ? notInArray(plaidAccounts.plaidAccountId, [...plaidAccountIds]) : sql`true`));
+            .where(and(ofItem, pickable.length > 0 ? notInArray(plaidAccounts.plaidAccountId, pickable) : sql`true`));
         return selected.length;
     });
 }
@@ -159,7 +206,7 @@ interface SyncTarget {
 
 async function loadSyncTargets(userId: string, itemId: string, database: Database) {
     const [item] = await database
-        .select({ id: plaidItems.id, institutionName: plaidItems.institutionName })
+        .select({ id: plaidItems.id, institutionName: plaidItems.institutionName, status: plaidItems.status })
         .from(plaidItems)
         .where(and(eq(plaidItems.userId, userId), eq(plaidItems.plaidItemId, itemId), isNull(plaidItems.revokedAt)))
         .limit(1);
@@ -427,7 +474,27 @@ export interface SyncDeps {
 export async function syncPlaidItem(userId: string, itemId: string, deps: SyncDeps): Promise<ItemSyncResult> {
     const { config, database = db, fetchImpl = fetch, getAccessToken = getPlaidAccessTokenForUser, now = new Date(), deadline, clock } = deps;
     const { item, accounts } = await loadSyncTargets(userId, itemId, database);
-    if (accounts.length === 0) return { itemId, status: "synced", accounts: [], overLimit: [] };
+    if (accounts.length === 0) {
+        // Nothing to sync yet (no account picked), but after Link's update
+        // mode the login may be fixed: ask Plaid, so the accounts can be picked.
+        if (item.status === "login_required") {
+            const accessToken = await getAccessToken(itemId, userId);
+            if (accessToken) {
+                try {
+                    const answer = asRecord(asRecord(await postPlaid({ endpoint: "/item/get", ...config, fetchImpl, body: { access_token: accessToken } })).item);
+                    if (answer.error == null) {
+                        await database
+                            .update(plaidItems)
+                            .set({ status: "active", updatedAt: now })
+                            .where(and(eq(plaidItems.id, item.id), eq(plaidItems.userId, userId), eq(plaidItems.status, "login_required")));
+                    }
+                } catch {
+                    // Plaid unreachable or the login still broken: it stays as it is.
+                }
+            }
+        }
+        return { itemId, status: "synced", accounts: [], overLimit: [] };
+    }
     // Tried now, however it ends: the nightly job takes the least recently tried first.
     await database
         .update(plaidItems)

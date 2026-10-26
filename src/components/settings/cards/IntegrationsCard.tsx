@@ -154,7 +154,8 @@ async function createLinkToken(itemId?: string): Promise<PlaidLinkTokenResponse>
 export function IntegrationsCard() {
     const router = useRouter();
     const queryClient = useQueryClient();
-    const connectionsQuery = useQuery({ queryKey: CONNECTIONS_KEY, queryFn: fetchConnections, staleTime: 30_000 });
+    // No retries: a failed load shows its own state, with Try again.
+    const connectionsQuery = useQuery({ queryKey: CONNECTIONS_KEY, queryFn: fetchConnections, staleTime: 30_000, retry: false });
     const connections = connectionsQuery.data ?? [];
 
     // The connection an action is running on, against double clicks.
@@ -364,7 +365,15 @@ export function IntegrationsCard() {
             />
 
             <div className="pm-integrations">
-                {connections.length === 0 ? (
+                {connectionsQuery.isError && connections.length === 0 ? (
+                    // Not "none connected": the list couldn't be read (an outage).
+                    <div className="pm-integrations-empty" role="alert" data-testid="plaid-connections-error">
+                        <p>Couldn&apos;t load your connected accounts.</p>
+                        <button type="button" className="pm-integration-action" onClick={() => void connectionsQuery.refetch()} disabled={connectionsQuery.isFetching}>
+                            {connectionsQuery.isFetching ? "Trying…" : "Try again"}
+                        </button>
+                    </div>
+                ) : connections.length === 0 ? (
                     <div className="pm-integrations-empty">
                         {connectionsQuery.isPending
                             ? "Loading connected accounts…"

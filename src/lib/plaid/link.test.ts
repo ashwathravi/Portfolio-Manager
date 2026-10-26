@@ -4,6 +4,7 @@ import {
     connectedPlaidAccountMatchesDiscovered,
     createPlaidLinkToken,
     exchangePlaidPublicToken,
+    plaidAccountFingerprint,
     plaidAccountToConnectedAccount,
     plaidBaseUrl,
     sanitizePlaidExchangeForClient,
@@ -55,6 +56,19 @@ describe("Plaid Link helpers", () => {
         assert.strictEqual(token.linkToken, "link-sandbox-update");
         assert.deepStrictEqual(token.products, []);
         assert.ok(!JSON.stringify(token).includes("access-sandbox-item"));
+    });
+
+    test("the same account through another connection has the same fingerprint, whatever its IDs", () => {
+        // Launch item i46: relinking a brokerage gives its accounts new IDs.
+        const a = plaidAccountFingerprint({ institutionId: "ins_1", institutionName: "Fidelity", name: "Individual", mask: "1234", subtype: "Brokerage" });
+        assert.strictEqual(plaidAccountFingerprint({ institutionId: "ins_1", name: " INDIVIDUAL ", mask: "**1234", subtype: "brokerage" }), a);
+        assert.notStrictEqual(plaidAccountFingerprint({ institutionId: "ins_1", name: "Individual", mask: "5678", subtype: "brokerage" }), a);
+        assert.notStrictEqual(plaidAccountFingerprint({ institutionId: "ins_2", name: "Individual", mask: "1234", subtype: "brokerage" }), a);
+        // Without an institution ID, its name stands in.
+        assert.strictEqual(
+            plaidAccountFingerprint({ institutionId: null, institutionName: "Fidelity", name: "Roth", mask: "1", subtype: "roth" }),
+            plaidAccountFingerprint({ institutionName: "fidelity", name: "Roth", mask: "1", subtype: "Roth" }),
+        );
     });
 
     test("rejects missing Plaid client user ids", async () => {
@@ -172,6 +186,12 @@ describe("Plaid Link helpers", () => {
         assert.strictEqual(response.accessTokenStorageDurable, true);
         assert.deepStrictEqual(response.duplicatePlaidAccountIds, ["acc-growth"]);
         assert.ok(!serialized.includes("access-sandbox-server-only"));
+
+        // Accounts the server found the user has through another connection
+        // are duplicates too (launch item i46).
+        const relinked = sanitizePlaidExchangeForClient({ exchange, duplicateAccountIds: ["acc-growth"], accessTokenStored: true });
+        assert.deepStrictEqual(relinked.duplicatePlaidAccountIds, ["acc-growth"]);
+        assert.deepStrictEqual(sanitizePlaidExchangeForClient({ exchange, accessTokenStored: true }).duplicatePlaidAccountIds, []);
     });
 
     test("maps Plaid accounts to connected-account metadata", async () => {

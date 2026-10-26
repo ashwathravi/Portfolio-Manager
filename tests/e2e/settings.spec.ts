@@ -192,6 +192,27 @@ test.describe('Settings page', () => {
         expect(syncRequests[1]).toEqual({ itemId: 'item-plaid-sandbox-investments' });
     });
 
+    test('regression: connections that fail to load say so, with Try again, not "none connected"', async ({ page }) => {
+        // The Codex finding on PR #163: an outage read as having no accounts.
+        let fail = true;
+        await page.route('**/api/plaid/connections', async (route) => {
+            if (fail) {
+                await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: 'Unable to load the linked accounts.', code: 'PLAID_CONNECTIONS_FAILED' }) });
+                return;
+            }
+            await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: [] }) });
+        });
+        await reloadAppPage(page);
+        const card = page.getByTestId('integrations-card');
+        const failed = card.getByTestId('plaid-connections-error');
+        await expect(failed).toContainText("Couldn't load your connected accounts.");
+        await expect(card).not.toContainText('No accounts connected yet');
+        fail = false;
+        await failed.getByRole('button', { name: 'Try again' }).click();
+        await expect(card).toContainText('No accounts connected yet');
+        await expect(failed).toHaveCount(0);
+    });
+
     test('a connection that needs a sign-in reconnects through Link; accounts waiting are picked here; disconnecting asks first', async ({ page }) => {
         // Launch items i45 and i46.
         let connections: unknown[] = [

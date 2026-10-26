@@ -120,6 +120,17 @@ async function revokeItem(tx: Executor, userId: string, itemRecordId: string, no
         .where(and(eq(plaidAccounts.plaidItemRecordId, itemRecordId), eq(plaidAccounts.userId, userId)));
 }
 
+/**
+ * The connection's token can't be read here (the encryption key missing or
+ * changed): it can't be removed at Plaid, so nothing is revoked or wiped.
+ */
+export class PlaidTokenUnavailableError extends Error {
+    constructor() {
+        super("Plaid access token unavailable");
+        this.name = "PlaidTokenUnavailableError";
+    }
+}
+
 /** Plaid's answers that mean the connection is already gone there. */
 const ALREADY_REMOVED = new Set(["ITEM_NOT_FOUND", "INVALID_ACCESS_TOKEN"]);
 
@@ -127,8 +138,10 @@ const ALREADY_REMOVED = new Set(["ITEM_NOT_FOUND", "INVALID_ACCESS_TOKEN"]);
  * Disconnects the user's connection: removed at Plaid (/item/remove, which
  * ends Atlas's access at the institution), then revoked here. Its linked
  * accounts stay, with what was last brought in. Throws PlaidItemNotFoundError
- * for a connection that isn't the user's (or is revoked already), and
- * Plaid's error when Plaid can't be told, leaving it connected to try again.
+ * for a connection that isn't the user's (or is revoked already), and, leaving
+ * it connected to try again, PlaidTokenUnavailableError when its token can't
+ * be read (revoking here then would leave Atlas's access open at Plaid with
+ * no token left to end it) or Plaid's error when Plaid can't be told.
  */
 export async function disconnectPlaidItem(
     userId: string,
@@ -155,12 +168,11 @@ export async function disconnectPlaidItem(
     if (!item) throw new PlaidItemNotFoundError();
 
     const accessToken = await getAccessToken(itemId, userId);
-    if (accessToken) {
-        try {
-            await postPlaid({ endpoint: "/item/remove", ...config, fetchImpl, body: { access_token: accessToken } });
-        } catch (error) {
-            if (!(error instanceof PlaidApiError && error.errorCode && ALREADY_REMOVED.has(error.errorCode))) throw error;
-        }
+    if (!accessToken) throw new PlaidTokenUnavailableError();
+    try {
+        await postPlaid({ endpoint: "/item/remove", ...config, fetchImpl, body: { access_token: accessToken } });
+    } catch (error) {
+        if (!(error instanceof PlaidApiError && error.errorCode && ALREADY_REMOVED.has(error.errorCode))) throw error;
     }
     await database.transaction((tx) => revokeItem(tx, userId, item.id, now));
     forgetPlaidAccessToken(itemId, userId);

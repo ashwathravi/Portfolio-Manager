@@ -171,17 +171,20 @@ export async function exchangePlaidPublicToken({
 export function sanitizePlaidExchangeForClient({
     exchange,
     existingPlaidAccountIds = [],
+    duplicateAccountIds = [],
     accessTokenStored,
     accessTokenStorageMode = "memory",
     accessTokenStorageDurable = false,
 }: {
     exchange: PlaidPublicTokenExchangeResult;
     existingPlaidAccountIds?: readonly string[];
+    /** Accounts the user has connected already through another Item (launch item i46). */
+    duplicateAccountIds?: readonly string[];
     accessTokenStored: boolean;
     accessTokenStorageMode?: PlaidExchangeClientResponse["accessTokenStorageMode"];
     accessTokenStorageDurable?: boolean;
 }): PlaidExchangeClientResponse {
-    const existing = new Set(existingPlaidAccountIds);
+    const existing = new Set([...existingPlaidAccountIds, ...duplicateAccountIds]);
     return {
         itemId: exchange.itemId,
         institution: exchange.institution,
@@ -253,13 +256,34 @@ export function plaidAccountToConnectedAccount({
     };
 }
 
-function discoveredPlaidAccountFingerprint(account: PlaidDiscoveredAccount): string {
+/**
+ * The same account at the same institution, whatever Item it came through:
+ * linking a brokerage again can give its accounts new IDs, so they're told
+ * apart by institution, name, last four digits and subtype.
+ */
+export function plaidAccountFingerprint(account: {
+    institutionId?: string | null;
+    institutionName?: string | null;
+    name: string;
+    mask?: string | null;
+    subtype: string;
+}): string {
     return [
-        normalizeFingerprintPart(account.institution.id || account.institution.name),
+        normalizeFingerprintPart(account.institutionId || account.institutionName || undefined),
         normalizeFingerprintPart(account.name),
-        normalizeAccountMask(account.mask),
-        normalizeFingerprintPart(titleCase(account.subtype)),
+        normalizeAccountMask(account.mask ?? undefined),
+        normalizeFingerprintPart(account.subtype),
     ].join("|");
+}
+
+export function discoveredPlaidAccountFingerprint(account: PlaidDiscoveredAccount): string {
+    return plaidAccountFingerprint({
+        institutionId: account.institution.id,
+        institutionName: account.institution.name,
+        name: account.name,
+        mask: account.mask,
+        subtype: titleCase(account.subtype),
+    });
 }
 
 function connectedPlaidAccountFingerprint(account: PlaidConnectedAccountLike): string {
