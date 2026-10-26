@@ -787,13 +787,20 @@ test.describe('Trade › risk policy on the user\'s own portfolio', () => {
 
     test('regression: a no-add rule for a ticker without a thesis lifts once the user writes one', async ({ page }) => {
         await gotoAppPage(page, '/settings');
+        // Settings sections hydrate inside a Suspense boundary, and a form
+        // filled before then is reset: the ticker field upper-cases what's
+        // typed once it's hydrated.
+        const ticker = page.getByLabel('Sell discipline ticker');
+        await expect(async () => {
+            await ticker.fill('amzn');
+            await expect(ticker).toHaveValue('AMZN', { timeout: 500 });
+        }).toPass({ timeout: 10_000 });
         await page.getByLabel('Sell discipline trigger type').selectOption('missing_thesis_no_add');
-        await page.getByLabel('Sell discipline ticker').fill('AMZN');
         await page.getByLabel('Sell discipline action').selectOption('no_add');
         await page.getByRole('button', { name: 'Add sell rule' }).click();
-        await expect(
-            page.getByTestId('sell-discipline-rule').filter({ hasText: 'AMZN Missing thesis no-add' }).first(),
-        ).toHaveAttribute('data-state', 'triggered');
+        const rule = page.getByTestId('sell-discipline-rule').filter({ hasText: 'AMZN Missing thesis no-add' });
+        await expect(rule).toHaveCount(1);
+        await expect(rule).toHaveAttribute('data-state', 'triggered');
 
         const loaded = researchLoaded(page, 'theses');
         await gotoAppPage(page, '/execution');
