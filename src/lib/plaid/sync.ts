@@ -634,6 +634,10 @@ export async function refreshPlaidItem(
     const returnedIds = new Set(listed.map((account) => account.account_id as string));
 
     const { removed, added } = await database.transaction(async (tx) => {
+        // Under the user's account lock, as a sync's write and deleting an
+        // account take it: a sync in flight can't write the account under the
+        // ID it's moving from, nor this pick up an exclusion made just now.
+        await buildLockUserAccountsQuery(userId, tx);
         const stored = await tx
             .select({
                 id: plaidAccounts.id,

@@ -620,5 +620,45 @@ describe('Plaid sync into portfolios', { skip: !DATABASE_URL && 'SCRIPTS_TEST_DA
         assert.deepEqual(synced.accounts.map((a) => [a.portfolioId, a.created]), [[portfolio.id, false]]);
         assert.equal((await sql`SELECT 1 FROM portfolios WHERE user_id = 'u-restore'`).length, 1);
     });
+
+    test('regression: reconnect reconciliation waits for the user\'s account lock, as a sync\'s write and deleting an account do', async () => {
+        // The Codex finding on PR #163: without it, a sync in flight could
+        // write an account under the ID being moved, making a second one.
+        await linkedUser('u-lock', 'item-lock', [['acc_lock', 'Individual', 'investment']]);
+        const scratch = new URL(DATABASE_URL!);
+        scratch.pathname = `/${name}`;
+        const other = postgres(scratch.toString(), { max: 1, onnotice: () => {} });
+        let release = () => {};
+        const released = new Promise<void>((resolve) => { release = resolve; });
+        let holder: Promise<unknown> = Promise.resolve();
+        try {
+            let locked!: () => void;
+            const holding = new Promise<void>((resolve) => { locked = resolve; });
+            holder = other.begin(async (transaction) => {
+                // postgres.js types a transaction without its tagged-template call.
+                const tx = transaction as unknown as typeof other;
+                await tx`SELECT pg_advisory_xact_lock(hashtext(${'atlas:accounts:u-lock'}))`;
+                locked();
+                await released;
+            });
+            await holding;
+            let finished = false;
+            const refresh = refreshPlaidItem('u-lock', 'item-lock', deps(fakePlaid({
+                '/item/get': () => ({ json: { item: { item_id: 'item-lock', error: null, consent_expiration_time: null } } }),
+                '/accounts/get': () => ({ json: { accounts: [{ account_id: 'acc_lock' }] } }),
+            }).fetchImpl)).then((result) => { finished = true; return result; });
+            await new Promise((resolve) => setTimeout(resolve, 300));
+            assert.equal(finished, false);
+            release();
+            await holder;
+            assert.equal((await refresh).status, 'active');
+        } finally {
+            // Let go of the lock even when an assertion failed, or the
+            // connection (and the run) would wait on it for good.
+            release();
+            await holder.catch(() => {});
+            await other.end();
+        }
+    });
 });
 
