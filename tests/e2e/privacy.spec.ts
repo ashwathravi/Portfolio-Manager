@@ -50,6 +50,17 @@ test.describe('Privacy policy', () => {
     await expect(retention.getByText(/When you remove a watchlist ticker or delete a journal entry or thesis/)).toContainText('notes and reasoning are erased');
   });
 
+  test('says which linked accounts are synced, how often, and how to stop one', async ({ page }) => {
+    // Launch item i44: linked investment accounts are kept as accounts.
+    const collected = page.getByRole('region', { name: 'What we collect' });
+    const linked = collected.getByRole('listitem').filter({ hasText: 'Accounts you link through Plaid.' });
+    await expect(linked).toContainText('For each investment account you choose to connect, we keep its holdings, cash and up to two years of its investment transactions');
+    await expect(linked).toContainText('refreshed each weekday evening and whenever you choose Sync now');
+    await expect(linked).toContainText('accounts you don’t choose aren’t synced');
+    const retention = page.getByRole('region', { name: 'Keeping and deleting your data' });
+    await expect(retention).toContainText('To stop syncing a single account, delete it on the Accounts page');
+  });
+
   test('names every service that receives data, including error reports', async ({ page }) => {
     const sharing = page.getByRole('region', { name: 'Who we share it with' });
     for (const service of ['Plaid', 'Google', 'Vercel', 'Upstash', 'Supabase', 'Sentry']) {

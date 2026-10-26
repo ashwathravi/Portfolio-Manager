@@ -12,7 +12,7 @@ export const metadata: Metadata = {
 // the page is public (see isPublicRoute in src/proxy.ts) and renders without
 // the app chrome (src/components/layout/AppFrame.tsx).
 const CONTACT_EMAIL = "ashwath.ravi@gmail.com";
-const LAST_UPDATED = "October 23, 2026";
+const LAST_UPDATED = "October 25, 2026";
 const PLAID_PRIVACY_URL = "https://plaid.com/legal/#end-user-privacy-policy";
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
@@ -56,9 +56,12 @@ export default async function PrivacyPage({ searchParams }: { searchParams: Sear
                         <li>
                             <strong>Accounts you link through Plaid.</strong> If you connect a brokerage or bank,
                             Plaid sends us the institution name, account names and types, the last four digits
-                            of account numbers, balances, holdings and investment transactions. You sign in to
-                            your institution through Plaid, so we never see or store your bank username or
-                            password.
+                            of account numbers, balances, holdings and investment transactions. For each
+                            investment account you choose to connect, we keep its holdings, cash and up to two
+                            years of its investment transactions as an account in Atlas Wealth, refreshed each
+                            weekday evening and whenever you choose Sync now; accounts you don&rsquo;t choose
+                            aren&rsquo;t synced. You sign in to your institution through Plaid, so we never see or
+                            store your bank username or password.
                         </li>
                         <li>
                             <strong>Data you add.</strong> Portfolios, holdings and transactions you import from
@@ -165,9 +168,10 @@ export default async function PrivacyPage({ searchParams }: { searchParams: Sear
                     <p>
                         Plaid keeps its own record of each connection under its policy. To end it, remove Atlas
                         Wealth through your institution or at{" "}
-                        <a href="https://my.plaid.com" target="_blank" rel="noreferrer">my.plaid.com</a>; to
-                        disconnect a single account from Atlas Wealth, email us. Data kept in your browser is
-                        removed when you clear this site&rsquo;s data.
+                        <a href="https://my.plaid.com" target="_blank" rel="noreferrer">my.plaid.com</a>. To stop
+                        syncing a single account, delete it on the Accounts page: its holdings and transactions
+                        go with it, and it isn&rsquo;t synced again. Data kept in your browser is removed when you
+                        clear this site&rsquo;s data.
                     </p>
                 </section>
 

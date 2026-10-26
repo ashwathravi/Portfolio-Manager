@@ -2,6 +2,8 @@ import { afterEach, describe, test } from "node:test";
 import assert from "node:assert/strict";
 
 import { DAILY_JOBS } from "@/lib/jobs/daily-jobs";
+import { DEFAULT_BUDGET_MS } from "@/lib/markets/price-ingest";
+import { PLAID_JOB_BUDGET_MS } from "@/lib/plaid/sync";
 
 import { GET, maxDuration } from "./route";
 
@@ -37,8 +39,11 @@ describe("GET /api/cron/daily", () => {
         }
     });
 
-    test("runs the session cleanup, the price ingest, then the snapshots valued at those prices, with room for the budget", () => {
-        assert.deepEqual(DAILY_JOBS.map((job) => job.name), ["expired-sessions", "prices", "snapshots"]);
+    test("runs the session cleanup, the linked-account sync, the price ingest, then the snapshots valued at those prices, with room for the budgets", () => {
+        assert.deepEqual(DAILY_JOBS.map((job) => job.name), ["expired-sessions", "plaid", "prices", "snapshots"]);
         assert.equal(maxDuration, 300);
+        // The sync and the price backfill each stop at their budget, together
+        // short of the limit, leaving the cleanup and snapshots room.
+        assert.ok(PLAID_JOB_BUDGET_MS + DEFAULT_BUDGET_MS <= (maxDuration - 20) * 1000);
     });
 });

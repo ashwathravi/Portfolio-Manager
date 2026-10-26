@@ -6,6 +6,7 @@ import { join } from "node:path";
 
 import { POST as exchangePublicToken } from "./exchange-public-token/route";
 import { POST as createLinkToken } from "./link-token/route";
+import { POST as syncPlaid } from "./sync/route";
 import {
     getPlaidAccessTokenForUser,
     getPlaidAccessToken,
@@ -18,6 +19,7 @@ import { resetApiSecurityForTests } from "@/lib/api/security";
 const USER_ID = "11111111-1111-4111-8111-111111111111";
 const ORIGINAL_FETCH = globalThis.fetch;
 const ORIGINAL_NODE_ENV = process.env.NODE_ENV;
+const ORIGINAL_DATABASE_URL = process.env.DATABASE_URL;
 
 describe("Plaid API routes", () => {
     afterEach(() => {
@@ -32,6 +34,8 @@ describe("Plaid API routes", () => {
         delete process.env.PLAID_TOKEN_KEY_VERSION;
         delete process.env.PLAID_TOKEN_STORAGE;
         delete process.env.PLAID_TOKEN_VAULT_PATH;
+        if (ORIGINAL_DATABASE_URL === undefined) delete process.env.DATABASE_URL;
+        else process.env.DATABASE_URL = ORIGINAL_DATABASE_URL;
         setNodeEnv(ORIGINAL_NODE_ENV);
         setPlaidTokenRegistryStoreForTests(null);
         resetPlaidTokenVaultForTests({ clearFile: true });
@@ -118,6 +122,50 @@ describe("Plaid API routes", () => {
             code: "PLAID_LINK_TOKEN_FAILED",
         });
         assert.ok(!JSON.stringify(body).includes("provider secret diagnostic"));
+    });
+
+    test("sync fails closed when sign-in is not configured", async () => {
+        const response = await syncPlaid(authorizedRequest("/api/plaid/sync", { itemId: "item-route" }));
+        assert.equal(response.status, 503);
+        assert.equal((await response.json()).code, "AUTH_CONFIGURATION_ERROR");
+    });
+
+    test("sync says linked accounts can't sync without Plaid's keys or a database", async () => {
+        process.env.AUTH_LOCAL_DEV_BYPASS = "1";
+        process.env.AUTH_LOCAL_DEV_USER_ID = USER_ID;
+        delete process.env.DATABASE_URL;
+        const withoutKeys = await syncPlaid(authorizedRequest("/api/plaid/sync", { itemId: "item-route" }));
+        assert.equal(withoutKeys.status, 503);
+        assert.equal((await withoutKeys.json()).code, "PLAID_NOT_CONFIGURED");
+
+        configurePlaidEnv();
+        const withoutDatabase = await syncPlaid(authorizedRequest("/api/plaid/sync", { itemId: "item-route" }));
+        assert.equal(withoutDatabase.status, 503);
+        assert.equal((await withoutDatabase.json()).code, "PLAID_NOT_CONFIGURED");
+    });
+
+    test("regression: sync says why it can't when Plaid connections aren't kept in the database", async () => {
+        // The Codex finding on PR #162: the local file vault keeps only the
+        // token, so the sync looked for a connection that was never stored.
+        configurePlaidEnv();
+        process.env.DATABASE_URL = "postgres://atlas_app:pw@db.example.invalid:6543/postgres";
+        const response = await syncPlaid(authorizedRequest("/api/plaid/sync", { itemId: "item-route" }));
+        assert.equal(response.status, 503);
+        assert.deepEqual(await response.json(), {
+            error: "Linked accounts can't sync here: Plaid connections aren't kept in the database (set PLAID_TOKEN_STORAGE=postgres).",
+            code: "PLAID_CONNECTIONS_NOT_STORED",
+        });
+    });
+
+    test("sync refuses a request that isn't one, before touching the database", async () => {
+        configurePlaidEnv();
+        process.env.DATABASE_URL = "postgres://atlas_app:pw@db.example.invalid:6543/postgres";
+        process.env.PLAID_TOKEN_STORAGE = "postgres";
+        for (const body of [{}, { itemId: "has space" }, { itemId: "item-route", plaidAccountIds: "acc" }, { itemId: "item-route", accessToken: "x" }]) {
+            const response = await syncPlaid(authorizedRequest("/api/plaid/sync", body));
+            assert.equal(response.status, 400, JSON.stringify(body));
+            assert.equal((await response.json()).code, "INVALID_PLAID_SYNC");
+        }
     });
 
     test("exchanges public tokens and stores Plaid access tokens under user scope", async (t) => {

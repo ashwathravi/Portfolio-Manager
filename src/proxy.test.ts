@@ -264,6 +264,7 @@ describe("API proxy security", () => {
         const delegated = [
             ["/api/plaid/link-token", "POST"],
             ["/api/plaid/exchange-public-token", "POST"],
+            ["/api/plaid/sync", "POST"],
             ["/api/portfolios/count", "GET"],
             ["/api/portfolios", "POST"],
             ["/api/transactions", "POST"],
