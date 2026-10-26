@@ -57,6 +57,7 @@ export async function createPlaidLinkToken({
     countryCodes = DEFAULT_COUNTRY_CODES,
     redirectUri,
     webhook,
+    accessToken,
     fetchImpl = fetch,
 }: {
     credentials: PlaidCredentials;
@@ -67,6 +68,12 @@ export async function createPlaidLinkToken({
     countryCodes?: readonly string[];
     redirectUri?: string;
     webhook?: string;
+    /**
+     * An existing connection's token: Link opens in update mode, to sign in
+     * again (launch item i45) rather than link a new institution, and asks
+     * for no products (the connection has them).
+     */
+    accessToken?: string;
     fetchImpl?: PlaidFetch;
 }): Promise<PlaidLinkTokenResponse> {
     assertCredentials(credentials);
@@ -79,7 +86,7 @@ export async function createPlaidLinkToken({
             client_name: clientName,
             language: "en",
             country_codes: [...countryCodes],
-            products: [...products],
+            ...(accessToken ? { access_token: accessToken } : { products: [...products] }),
             user: {
                 client_user_id: normalizeClientUserId(clientUserId),
             },
@@ -94,7 +101,7 @@ export async function createPlaidLinkToken({
         expiration: readString(data, "expiration"),
         requestId: readString(data, "request_id"),
         environment,
-        products: [...products],
+        products: accessToken ? [] : [...products],
     };
 }
 

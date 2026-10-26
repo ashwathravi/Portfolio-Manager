@@ -16,13 +16,12 @@
 
 import { NextResponse } from "next/server";
 
-import { isDatabaseConfigured } from "@/db/connection-options";
 import { readJsonBody } from "@/lib/api/body";
 import { apiError, internalServerError, logApiEvent } from "@/lib/api/security";
 import { requireSessionApiUserScope } from "@/lib/api/session-security";
 import { requestIdFrom } from "@/lib/observability/request-id";
-import { plaidConnectionsInDatabase } from "@/lib/plaid/server-token-vault";
-import { PlaidItemNotFoundError, plaidConfigFromEnv, selectPlaidAccounts, syncPlaidItem } from "@/lib/plaid/sync";
+import { plaidAvailability } from "@/lib/plaid/availability";
+import { PlaidItemNotFoundError, selectPlaidAccounts, syncPlaidItem } from "@/lib/plaid/sync";
 import { plaidSyncSchema } from "@/lib/validators/plaid-sync";
 
 export const dynamic = "force-dynamic";
@@ -35,19 +34,9 @@ export async function POST(request: Request) {
     const auth = await requireSessionApiUserScope(request);
     if (!auth.ok) return auth.response;
 
-    const config = plaidConfigFromEnv();
-    if (!config || !isDatabaseConfigured()) {
-        return apiError("Linked accounts can't sync here: Plaid isn't set up.", "PLAID_NOT_CONFIGURED", 503);
-    }
-    // In local development the token vault can be a file or memory, which
-    // keeps no connection to sync (production always uses the database).
-    if (!plaidConnectionsInDatabase()) {
-        return apiError(
-            "Linked accounts can't sync here: Plaid connections aren't kept in the database (set PLAID_TOKEN_STORAGE=postgres).",
-            "PLAID_CONNECTIONS_NOT_STORED",
-            503,
-        );
-    }
+    const plaid = plaidAvailability();
+    if (!plaid.ok) return apiError(plaid.message, plaid.code, 503);
+    const { config } = plaid;
 
     const body = await readJsonBody(request, MAX_BODY_BYTES);
     if (!body.ok) return apiError("Invalid sync request", "INVALID_PLAID_SYNC", body.reason === "too-large" ? 413 : 400);

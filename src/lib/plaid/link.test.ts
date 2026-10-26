@@ -40,6 +40,23 @@ describe("Plaid Link helpers", () => {
         assert.ok(!JSON.stringify(token).includes("sandbox-secret"));
     });
 
+    test("opens Link in update mode for an existing connection: its token, and no products", async () => {
+        // Launch item i45: signing in to a connection again, not linking a new one.
+        const token = await createPlaidLinkToken({
+            credentials,
+            clientUserId: "user-1",
+            accessToken: "access-sandbox-item",
+            fetchImpl: mockPlaidFetch((_url, body) => {
+                assert.strictEqual(body.access_token, "access-sandbox-item");
+                assert.ok(!("products" in body));
+                return { link_token: "link-sandbox-update", expiration: "2026-10-26T16:00:00Z", request_id: "request-update" };
+            }),
+        });
+        assert.strictEqual(token.linkToken, "link-sandbox-update");
+        assert.deepStrictEqual(token.products, []);
+        assert.ok(!JSON.stringify(token).includes("access-sandbox-item"));
+    });
+
     test("rejects missing Plaid client user ids", async () => {
         await assert.rejects(
             () => createPlaidLinkToken({

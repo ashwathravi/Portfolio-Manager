@@ -12,7 +12,7 @@ import {
     writeFileSync,
 } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, ne } from "drizzle-orm";
 import { db } from "@/db";
 import { isDatabaseConfigured } from "@/db/connection-options";
 import { plaidAccounts, plaidItems } from "@/db/schema";
@@ -167,7 +167,9 @@ const drizzlePlaidTokenRegistryStore: PlaidTokenRegistryStore = {
             .where(and(
                 eq(plaidItems.userId, userId),
                 eq(plaidItems.plaidItemId, itemId),
-                eq(plaidItems.status, "active"),
+                // A connection waiting for its user to sign in again still has
+                // its token: Link's update mode needs it to repair the login.
+                ne(plaidItems.status, "revoked"),
                 isNull(plaidItems.revokedAt),
             ))
             .limit(1);
@@ -179,6 +181,10 @@ const drizzlePlaidTokenRegistryStore: PlaidTokenRegistryStore = {
             .set({
                 status: "revoked",
                 revokedAt: now,
+                // The token is no use once revoked: none of it is kept.
+                accessTokenCiphertext: "",
+                accessTokenIv: "",
+                accessTokenAuthTag: "",
                 updatedAt: now,
             })
             .where(and(
@@ -306,6 +312,11 @@ export async function getPlaidAccessTokenForUser(itemId: string, userId: string)
     } catch {
         return undefined;
     }
+}
+
+/** Drops this server's cached copy of a connection's token (it was revoked). */
+export function forgetPlaidAccessToken(itemId: string, userId: string): void {
+    plaidAccessTokenByScope.delete(vaultItemKey(itemId, userId));
 }
 
 export async function revokePlaidConnectionForUser({

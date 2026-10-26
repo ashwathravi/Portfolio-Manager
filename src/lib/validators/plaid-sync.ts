@@ -4,7 +4,7 @@ import { z } from 'zod';
  * Plaid's IDs for an Item and its accounts: opaque, but always letters,
  * digits, hyphens and underscores (launch item i44).
  */
-const plaidIdSchema = z.string()
+export const plaidIdSchema = z.string()
     .regex(/^[A-Za-z0-9_-]{1,128}$/, 'must be a Plaid ID');
 
 /** Most accounts one institution login has, with room to spare. */

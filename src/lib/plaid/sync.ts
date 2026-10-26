@@ -10,7 +10,7 @@
  * the nightly job (syncAllPlaidItems).
  */
 
-import { and, asc, eq, inArray, isNull, notInArray, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, ne, notInArray, sql } from "drizzle-orm";
 
 import { db } from "@/db";
 import { holdings, plaidAccounts, plaidItems, portfolios, transactions } from "@/db/schema";
@@ -127,7 +127,7 @@ export async function selectPlaidAccounts(
         const [item] = await tx
             .select({ id: plaidItems.id })
             .from(plaidItems)
-            .where(and(eq(plaidItems.userId, userId), eq(plaidItems.plaidItemId, itemId), eq(plaidItems.status, "active"), isNull(plaidItems.revokedAt)))
+            .where(and(eq(plaidItems.userId, userId), eq(plaidItems.plaidItemId, itemId), ne(plaidItems.status, "revoked"), isNull(plaidItems.revokedAt)))
             .limit(1);
         if (!item) throw new PlaidItemNotFoundError();
         const ofItem = and(
@@ -490,7 +490,9 @@ export async function syncPlaidItem(userId: string, itemId: string, deps: SyncDe
         }
         await database
             .update(plaidItems)
-            .set({ lastSuccessfulSyncAt: now, updatedAt: now })
+            // A sync that went through means the login works again (after
+            // Link's update mode, launch item i45).
+            .set({ lastSuccessfulSyncAt: now, status: sql`case when ${plaidItems.status} = 'login_required' then 'active' else ${plaidItems.status} end`, updatedAt: now })
             .where(and(eq(plaidItems.id, item.id), eq(plaidItems.userId, userId)));
         return { itemId, status: "synced", accounts: results, overLimit };
     } catch (error) {
@@ -550,7 +552,9 @@ export async function syncAllPlaidItems({
         .from(plaidItems)
         .innerJoin(plaidAccounts, eq(plaidAccounts.plaidItemRecordId, plaidItems.id))
         .where(and(
-            eq(plaidItems.status, "active"),
+            // Not one waiting for its user to sign in again; one whose consent
+            // ends soon still works until then.
+            inArray(plaidItems.status, ["active", "pending_expiration"]),
             isNull(plaidItems.revokedAt),
             eq(plaidAccounts.syncStatus, "sync_ready"),
             eq(plaidAccounts.type, "investment"),

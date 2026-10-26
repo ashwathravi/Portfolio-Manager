@@ -6843,6 +6843,56 @@
   gap: 8px;
 }
 
+/* Connected accounts from the database (launch items i45, i46) */
+.pm-integration-row.pm-plaid-connection {
+  align-items: start;
+}
+.pm-plaid-connection-accounts {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.pm-plaid-connection-accounts li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 12px;
+  font-size: 12.5px;
+}
+.pm-plaid-sync-note {
+  font-size: 11.5px;
+  color: var(--pm-fg-subtle);
+}
+.pm-plaid-sync-note.is-ok { color: var(--pm-fg-muted); }
+.pm-plaid-sync-note.is-warn { color: var(--pm-warn); }
+.pm-plaid-sync-note a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
+.pm-plaid-pick {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.pm-plaid-connection-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+}
+@media (max-width: 560px) {
+  .pm-integration-row.pm-plaid-connection {
+    grid-template-columns: auto 1fr;
+  }
+  .pm-plaid-connection-actions {
+    grid-column: 1 / -1;
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+}
+
 /* --- Advanced links footer ----------------------------------------- */
 
 .pm-settings-advanced-grid {
