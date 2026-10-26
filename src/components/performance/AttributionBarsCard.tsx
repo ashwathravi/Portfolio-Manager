@@ -1,12 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { BarChart, type BarDatum } from "@/components/charts";
-import {
-    computeAttribution,
-    type AttributionResult,
-    type AttributionSegment,
-} from "@/lib/performance/attribution";
+import type { AttributionResult, AttributionSummary } from "@/lib/performance/attribution";
 
 /**
  * Phase 4 (AR-76) Attribution bars card.
@@ -14,8 +10,9 @@ import {
  * Renders a BarChart for a chosen attribution effect across either sector
  * segments or asset-class segments, with a totals strip underneath that
  * shows the roll-up alpha and its three components (allocation / selection
- * / interaction). The BHB math lives in `lib/performance/attribution.ts`;
- * this card is purely presentational.
+ * / interaction). The BHB math lives in `lib/performance/attribution.ts`
+ * (and its linking over a period in attribution-history.ts); this card is
+ * purely presentational.
  */
 
 export type AttributionMode = "allocation" | "selection" | "interaction" | "total";
@@ -34,8 +31,9 @@ const BASIS_LABELS: Record<AttributionBasis, string> = {
 };
 
 export interface AttributionBarsCardProps {
-    sectors: AttributionSegment[];
-    assetClasses: AttributionSegment[];
+    /** BHB results by sector and by asset class (computed, or linked over a period). */
+    sector: AttributionSummary;
+    assetClass: AttributionSummary;
 }
 
 function effectValue(r: AttributionResult, mode: AttributionMode): number {
@@ -51,15 +49,11 @@ function effectValue(r: AttributionResult, mode: AttributionMode): number {
     }
 }
 
-export function AttributionBarsCard({
-    sectors,
-    assetClasses,
-}: AttributionBarsCardProps) {
+export function AttributionBarsCard({ sector, assetClass }: AttributionBarsCardProps) {
     const [basis, setBasis] = useState<AttributionBasis>("sector");
     const [mode, setMode] = useState<AttributionMode>("selection");
 
-    const source = basis === "sector" ? sectors : assetClasses;
-    const summary = useMemo(() => computeAttribution(source), [source]);
+    const summary = basis === "sector" ? sector : assetClass;
 
     // Express effects in percentage *points* so the BarChart labels read as
     // +2.1 / −0.8 rather than tiny 0.021 numbers.
@@ -159,11 +153,25 @@ function fmtBarLabel(v: number): string {
     return `${sign}${Math.abs(v).toFixed(1)}`;
 }
 
-// "Communication Services" overflows the bar slot — trim a few common offenders.
+// Up to a dozen bars share the width: long labels run into each other.
+const SHORT_LABELS: Record<string, string> = {
+    "Technology": "Tech",
+    "Communication": "Comms",
+    "Communication Services": "Comms",
+    "Consumer": "Cons.",
+    "Consumer Discretionary": "Cons. Disc.",
+    "Financials": "Fin.",
+    "Healthcare": "Health",
+    "Industrials": "Indus.",
+    "Materials": "Matls",
+    "Real estate": "Real est.",
+    "Utilities": "Utils",
+    "Funds and other": "Other",
+    "International Equities": "Intl Eq.",
+    "Cash & Equivalents": "Cash",
+    "Warrants and rights": "Warrants",
+};
+
 function shortLabel(label: string): string {
-    return label
-        .replace(/International /, "Intl ")
-        .replace(/Consumer Discretionary/, "Cons. Disc.")
-        .replace(/Communication Services/, "Comms.")
-        .replace(/Cash & Equivalents/, "Cash");
+    return SHORT_LABELS[label] ?? label;
 }
