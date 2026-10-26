@@ -24,6 +24,7 @@ import {
     SEED_ORDERS,
 } from "@/lib/execution/seed";
 import {
+    chosenBucketForTrade,
     employerSymbols,
     evaluateSellDiscipline,
     evaluatePreTradeRiskPolicy,
@@ -507,6 +508,7 @@ function OrderForm({ onSubmit }: OrderFormProps) {
                     price,
                     instrumentType,
                     marketValue: notional,
+                    policyBucket: chosenBucketForTrade(riskPolicy, tickerUpper, instrumentType),
                     optionPremiumAtRisk: isOptionOrder ? optionOrderPolicy.premiumAtRisk : undefined,
                     linkedThesisId: rationaleDraft.thesisId,
                     thesisUpdatedAt: selectedThesis?.dateUpdated,
@@ -535,8 +537,7 @@ function OrderForm({ onSubmit }: OrderFormProps) {
             optionOrderPolicy.premiumAtRisk,
             rationaleDraft.thesisId,
             selectedThesis?.dateUpdated,
-            riskPolicy.bucketPolicies,
-            riskPolicy.themeCaps,
+            riskPolicy,
             optionsRiskPolicy,
             guardrailPrefs.concentrationCapPct,
             riskPolicyOverrideReason,

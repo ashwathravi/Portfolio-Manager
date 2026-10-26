@@ -167,6 +167,35 @@ describe("pre-trade risk policy evaluator", () => {
         assert.match(empty.summary, /Add holdings/);
     });
 
+    test("regression: an option on a held stock is an option, not in the stock's bucket", () => {
+        const result = evaluatePreTradeRiskPolicy({
+            holdings: [
+                { symbol: "XYZ", marketValue: 60_000, policyBucket: "core" },
+                { symbol: "VTI", marketValue: 40_000, policyBucket: "core" },
+            ],
+            portfolioValue: 100_000,
+            trade: { ticker: "XYZ", side: "buy", quantity: 1, price: 5, instrumentType: "option", optionPremiumAtRisk: 500, linkedThesisId: "t", thesisUpdatedAt: "2026-05-01" },
+            existingOptionPositions: [],
+            asOf: "2026-05-15",
+        });
+        const bucket = result.checks.find((check) => check.ruleType === "bucket_allocation");
+        assert.ok(bucket);
+        assert.match(bucket.label, /Speculative/);
+        assert.equal(result.checks.some((check) => /Core/.test(check.label)), false);
+    });
+
+    test("regression: a ticker sold out of is bought back into the bucket chosen for it", () => {
+        const result = evaluatePreTradeRiskPolicy({
+            holdings: [{ symbol: "VTI", marketValue: 100_000, policyBucket: "core" }],
+            portfolioValue: 100_000,
+            trade: { ticker: "MSFT", side: "buy", quantity: 10, price: 400, policyBucket: "speculative", linkedThesisId: "t", thesisUpdatedAt: "2026-05-01" },
+            asOf: "2026-05-15",
+        });
+        const bucket = result.checks.find((check) => check.ruleType === "bucket_allocation");
+        assert.ok(bucket);
+        assert.match(bucket.label, /Speculative/);
+    });
+
     test("a buy of a held ticker goes in the bucket chosen for it", () => {
         const result = evaluatePreTradeRiskPolicy({
             holdings: [

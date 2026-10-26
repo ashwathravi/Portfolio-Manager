@@ -616,7 +616,11 @@ function buildPostTradeHoldings(
     return next;
 }
 
-/** The trade as a holding: in the bucket the user chose for that ticker when they hold it. */
+/**
+ * The trade as a holding. A stock order goes in the bucket of the ticker
+ * held; an option is classified as an option, whatever bucket its
+ * underlying is in.
+ */
 function holdingForTrade(
     trade: NormalizedTrade,
     tradeValue: number,
@@ -624,13 +628,14 @@ function holdingForTrade(
     employerSymbols: ReadonlySet<string>,
 ): PolicyClassifiableHolding & ThemeExposureHolding {
     const held = holdings.find((holding) => holding.symbol === trade.ticker);
+    const heldBucket = trade.instrumentType === "equity" ? held : undefined;
     return {
         id: `trade-${trade.ticker}`,
         symbol: trade.ticker,
         name: trade.ticker,
         marketValue: tradeValue,
-        policyBucket: trade.policyBucket ?? held?.policyBucket,
-        defaultBucket: held?.defaultBucket,
+        policyBucket: trade.policyBucket ?? heldBucket?.policyBucket,
+        defaultBucket: heldBucket?.defaultBucket,
         instrumentType: trade.instrumentType === "option" ? "option" : "equity",
         themeWeights: trade.themeWeights ?? held?.themeWeights,
         isEmployerStock: held?.isEmployerStock ?? employerSymbols.has(trade.ticker),

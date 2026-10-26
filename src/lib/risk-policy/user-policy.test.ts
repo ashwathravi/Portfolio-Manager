@@ -12,6 +12,7 @@ import {
     EMPTY_POLICY_PORTFOLIO,
     MAX_BUCKET_ASSIGNMENTS,
     MAX_EMPLOYER_TICKERS,
+    chosenBucketForTrade,
     employerSymbols,
     evaluateRiskPolicy,
     parseEmployerTickers,
@@ -117,6 +118,15 @@ describe("withBucketChoice", () => {
         // At the limit exactly, nothing goes.
         const most = Object.fromEntries(Array.from({ length: MAX_BUCKET_ASSIGNMENTS - 1 }, (_, i) => [`OLD${i}`, "core" as const]));
         assert.equal(Object.keys(withBucketChoice(most, "NEW", "active", [])).length, MAX_BUCKET_ASSIGNMENTS);
+    });
+});
+
+describe("chosenBucketForTrade", () => {
+    test("the choice for a stock order's ticker, held or not; none for an option", () => {
+        const policy = { bucketAssignments: { MSFT: "speculative" as const } };
+        assert.equal(chosenBucketForTrade(policy, "msft", "equity"), "speculative");
+        assert.equal(chosenBucketForTrade(policy, "MSFT", "option"), undefined);
+        assert.equal(chosenBucketForTrade(policy, "AAPL", "equity"), undefined);
     });
 });
 

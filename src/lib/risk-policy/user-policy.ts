@@ -160,6 +160,20 @@ export function withBucketChoice(
     );
 }
 
+/**
+ * The bucket the user chose for a ticker they're about to trade, held now
+ * or not (a choice outlives selling out). An option keeps its own
+ * classification, so none.
+ */
+export function chosenBucketForTrade(
+    policy: Pick<RiskPolicySettings, "bucketAssignments">,
+    ticker: string,
+    instrumentType: "equity" | "option",
+): AssignablePolicyBucket | undefined {
+    if (instrumentType !== "equity") return undefined;
+    return policy.bucketAssignments?.[normalizeTicker(ticker)];
+}
+
 /** The evaluation's input from the user's portfolio and policy. */
 export function riskPolicyInput(
     portfolio: PolicyPortfolio,
