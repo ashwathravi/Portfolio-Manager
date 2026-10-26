@@ -10,7 +10,7 @@
 
 import { createHash, createPublicKey, timingSafeEqual, verify } from "node:crypto";
 
-import { asRecord, postPlaid, type PlaidCredentials, type PlaidFetch } from "./link";
+import { PlaidApiError, asRecord, postPlaid, type PlaidCredentials, type PlaidFetch } from "./link";
 import type { PlaidEnvironment } from "./types";
 
 /** Plaid's limit on a webhook's age, against replays. */
@@ -98,6 +98,12 @@ export async function verifyPlaidWebhook({
 
 /** Keys don't change for a kid; refetched daily to catch one Plaid expires. */
 const KEY_TTL_MS = 24 * 60 * 60 * 1000;
+/**
+ * A kid Plaid says it doesn't know is remembered as unknown this long, so
+ * forged webhooks can't make each request a call to Plaid. (A new key is
+ * at worst refused for this long; Plaid retries a refused webhook.)
+ */
+const UNKNOWN_KEY_TTL_MS = 5 * 60 * 1000;
 const keyCache = new Map<string, { key: PlaidWebhookKey | null; fetchedAt: number }>();
 
 /** Plaid's key for `kid`, kept by kid; null when Plaid doesn't know it. */
@@ -114,7 +120,7 @@ export function plaidWebhookKeyFetcher({
 }) {
     return async (kid: string): Promise<PlaidWebhookKey | null> => {
         const cached = keyCache.get(kid);
-        if (cached && clock() - cached.fetchedAt < KEY_TTL_MS) return cached.key;
+        if (cached && clock() - cached.fetchedAt < (cached.key ? KEY_TTL_MS : UNKNOWN_KEY_TTL_MS)) return cached.key;
         let key: PlaidWebhookKey | null = null;
         try {
             const response = asRecord(await postPlaid({
@@ -134,9 +140,10 @@ export function plaidWebhookKeyFetcher({
                     expired_at: typeof candidate.expired_at === "number" ? candidate.expired_at : null,
                 };
             }
-        } catch {
-            // An unknown kid, or Plaid unreachable: not verified, not cached.
-            return null;
+        } catch (error) {
+            // Plaid unreachable: not verified, and asked again next time.
+            if (!(error instanceof PlaidApiError)) return null;
+            // Plaid answered that it has no such key: remembered as unknown below.
         }
         keyCache.set(kid, { key, fetchedAt: clock() });
         return key;

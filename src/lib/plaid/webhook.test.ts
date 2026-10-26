@@ -92,16 +92,33 @@ describe("plaidWebhookKeyFetcher", () => {
         assert.deepEqual(asked, ["kid-1", "kid-1"]);
     });
 
-    test("a kid Plaid doesn't know is no key, and isn't kept", async () => {
+    test("regression: a kid Plaid doesn't know is remembered as unknown for a while, so forged webhooks don't each call Plaid", async () => {
+        resetPlaidWebhookKeysForTests();
+        let now = NOW;
+        let calls = 0;
+        const fetchImpl: PlaidFetch = () => {
+            calls++;
+            return reply({ error_type: "INVALID_INPUT", error_code: "INVALID_WEBHOOK_VERIFICATION_KEY_ID", error_message: "unknown" }, 400);
+        };
+        const getKey = plaidWebhookKeyFetcher({ ...config, fetchImpl, clock: () => now });
+        assert.equal(await getKey("kid-x"), null);
+        assert.equal(await getKey("kid-x"), null);
+        assert.equal(calls, 1);
+        now += 5 * 60 * 1000;
+        assert.equal(await getKey("kid-x"), null);
+        assert.equal(calls, 2);
+    });
+
+    test("Plaid unreachable is no key, and asked again next time", async () => {
         resetPlaidWebhookKeysForTests();
         let calls = 0;
         const fetchImpl: PlaidFetch = () => {
             calls++;
-            return reply({ error_code: "INVALID_WEBHOOK_VERIFICATION_KEY_ID", error_message: "unknown" }, 400);
+            return Promise.reject(new TypeError("fetch failed"));
         };
         const getKey = plaidWebhookKeyFetcher({ ...config, fetchImpl, clock: () => NOW });
-        assert.equal(await getKey("kid-x"), null);
-        assert.equal(await getKey("kid-x"), null);
+        assert.equal(await getKey("kid-1"), null);
+        assert.equal(await getKey("kid-1"), null);
         assert.equal(calls, 2);
     });
 });
