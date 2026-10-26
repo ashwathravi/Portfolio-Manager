@@ -114,6 +114,59 @@ describe("pre-trade risk policy evaluator", () => {
         assert.equal(result.checks.some((check) => check.ruleType === "employer_stock_allocation"), false);
     });
 
+    test("regression: a ticker held in two accounts takes the trade once", () => {
+        const holdings: PreTradeRiskPolicyHolding[] = [
+            { symbol: "XYZ", marketValue: 20_000, policyBucket: "speculative" },
+            { symbol: "XYZ", marketValue: 10_000, policyBucket: "speculative" },
+            { symbol: "VTI", marketValue: 70_000, policyBucket: "core" },
+        ];
+        const bucketCheck = (side: "buy" | "sell") => evaluatePreTradeRiskPolicy({
+            holdings,
+            portfolioValue: 100_000,
+            trade: { ticker: "XYZ", side, quantity: 50, price: 100, linkedThesisId: "t", thesisUpdatedAt: "2026-05-01" },
+            asOf: "2026-05-15",
+        }).checks.find((check) => check.ruleType === "bucket_allocation")!;
+
+        const buy = bucketCheck("buy");
+        assert.equal(buy.currentValue, 30_000);
+        assert.equal(buy.postValue, 35_000);
+        // A sale bigger than one account's position comes out of the next.
+        const sell = evaluatePreTradeRiskPolicy({
+            holdings,
+            portfolioValue: 100_000,
+            trade: { ticker: "XYZ", side: "sell", quantity: 250, price: 100 },
+            asOf: "2026-05-15",
+        }).checks.find((check) => check.ruleType === "bucket_allocation")!;
+        assert.equal(sell.currentValue, 30_000);
+        assert.equal(sell.postValue, 5_000);
+        assert.equal(bucketCheck("sell").postValue, 25_000);
+    });
+
+    test("regression: holdings that couldn't be loaded need a reason, not a silent pass", () => {
+        const input = {
+            holdings: [],
+            portfolioValue: 0,
+            trade: { ticker: "NVDA", side: "buy" as const, quantity: 10, price: 500 },
+            portfolioUnavailable: true,
+            asOf: "2026-05-15",
+        };
+        const blocked = evaluatePreTradeRiskPolicy(input);
+        assert.equal(blocked.decision, "override_required");
+        assert.equal(blocked.requiresOverride, true);
+        assert.equal(blocked.blocksSubmit, true);
+        assert.equal(blocked.direction, "missing_data");
+        assert.match(blocked.summary, /couldn't be loaded/);
+
+        const overridden = evaluatePreTradeRiskPolicy({ ...input, overrideReason: "Checked my holdings by hand first." });
+        assert.equal(overridden.blocksSubmit, false);
+        assert.equal(overridden.overrideAccepted, true);
+
+        // Loaded, but nothing held: nothing to check against.
+        const empty = evaluatePreTradeRiskPolicy({ ...input, portfolioUnavailable: false });
+        assert.equal(empty.blocksSubmit, false);
+        assert.match(empty.summary, /Add holdings/);
+    });
+
     test("a buy of a held ticker goes in the bucket chosen for it", () => {
         const result = evaluatePreTradeRiskPolicy({
             holdings: [

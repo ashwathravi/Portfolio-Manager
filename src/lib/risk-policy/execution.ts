@@ -75,6 +75,11 @@ export interface PreTradeRiskPolicyInput {
     asOf?: Date | string;
     /** The tickers the user named as their employer's (the employer plan's symbols). */
     employerSymbols?: readonly string[];
+    /**
+     * The user's holdings couldn't be loaded. Nothing can be checked, so the
+     * order needs a reason to go ahead, as a policy exception does.
+     */
+    portfolioUnavailable?: boolean;
 }
 
 export interface PreTradeRiskPolicyCheck {
@@ -137,8 +142,12 @@ export function evaluatePreTradeRiskPolicy(input: PreTradeRiskPolicyInput): PreT
         ? safeMoney(trade.optionPremiumAtRisk ?? trade.marketValue)
         : safeMoney(trade.marketValue);
 
-    if (!trade.ticker || portfolioValue <= 0 || tradeValue <= 0) {
-        return emptyImpact("Risk policy needs ticker, price, quantity, and portfolio value.");
+    if (!trade.ticker || tradeValue <= 0) {
+        return emptyImpact("Risk policy needs ticker, price, and quantity.");
+    }
+    if (input.portfolioUnavailable) return unavailableImpact(overrideAccepted);
+    if (portfolioValue <= 0) {
+        return emptyImpact("Add holdings to an account to check orders against your risk policy.");
     }
 
     const currentHoldingValue = valueForSymbol(holdings, trade.ticker);
@@ -570,6 +579,11 @@ function buildStaleThesisCheck({
     };
 }
 
+/**
+ * The holdings after the trade, which applies once however many accounts
+ * hold the ticker: a buy adds to the first of them, a sale comes out of
+ * them in turn.
+ */
 function buildPostTradeHoldings(
     holdings: readonly NormalizedHolding[],
     tradeHolding: PolicyClassifiableHolding & ThemeExposureHolding,
@@ -578,15 +592,19 @@ function buildPostTradeHoldings(
 ): NormalizedHolding[] {
     const symbol = normalizeSymbol(tradeHolding.symbol);
     let matched = false;
+    let toSell = tradeValue;
     const next = holdings.map((holding) => {
         if (normalizeSymbol(holding.symbol) !== symbol) return holding;
+        const value = safeMoney(holding.marketValue);
+        if (side === "buy") {
+            if (matched) return holding;
+            matched = true;
+            return { ...holding, marketValue: value + tradeValue };
+        }
         matched = true;
-        return {
-            ...holding,
-            marketValue: side === "buy"
-                ? safeMoney(holding.marketValue) + tradeValue
-                : Math.max(0, safeMoney(holding.marketValue) - tradeValue),
-        };
+        const sold = Math.min(value, toSell);
+        toSell -= sold;
+        return { ...holding, marketValue: value - sold };
     });
     if (!matched && side === "buy") {
         next.push({
@@ -643,6 +661,22 @@ function summarizeDirection(checks: readonly PreTradeRiskPolicyCheck[]): PreTrad
     if (checks.some((check) => check.status !== "pass" && check.direction === "risk_increasing")) return "risk_increasing";
     if (checks.some((check) => check.direction === "risk_reducing")) return "risk_reducing";
     return "neutral";
+}
+
+function unavailableImpact(overrideAccepted: boolean): PreTradeRiskPolicyImpact {
+    return {
+        decision: "override_required",
+        blocksSubmit: !overrideAccepted,
+        requiresOverride: true,
+        overrideAccepted,
+        direction: "missing_data",
+        summary: overrideAccepted
+            ? "Your holdings couldn't be loaded; override captured."
+            : "Your holdings couldn't be loaded, so this order can't be checked against your risk policy.",
+        checks: [],
+        failedChecks: [],
+        exceptionPreview: [],
+    };
 }
 
 function emptyImpact(summary: string): PreTradeRiskPolicyImpact {

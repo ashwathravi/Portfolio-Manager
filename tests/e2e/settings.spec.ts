@@ -405,6 +405,8 @@ test.describe('Settings page', () => {
     test('a holding\'s bucket can be chosen; Today\'s checks follow it, and it can go back to its default', async ({ page }) => {
         test.skip(!databaseAuthEnabled, 'Today reads the policy saved to the server');
         test.skip(!(await hasPolicyHoldings(page)), 'the bucket choices need holdings');
+        // Settings, Today, Settings, Holdings and Settings again.
+        test.slow();
 
         // TSLA is the only speculative holding: 12% of the portfolio, over the 5% cap.
         await gotoAppPage(page, '/');
@@ -443,7 +445,10 @@ test.describe('Settings page', () => {
 
         await gotoAppPage(page, '/settings');
         const back = savedRiskPolicy(page, (riskPolicy) => !('TSLA' in ((riskPolicy.bucketAssignments as object) ?? {})));
-        await page.getByLabel('TSLA bucket').selectOption('');
+        const tslaAgain = page.getByLabel('TSLA bucket');
+        // The saved choice shows once the page has hydrated with the user's settings.
+        await expect(tslaAgain).toHaveValue('core');
+        await tslaAgain.selectOption('');
         await back;
         await expect(page.getByLabel('TSLA bucket').locator('option:checked')).toHaveText('Speculative/options (default)');
     });

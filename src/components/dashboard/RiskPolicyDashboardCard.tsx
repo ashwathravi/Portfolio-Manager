@@ -262,7 +262,7 @@ function SellDisciplineTaskCard({ task }: { task: SellDisciplineTask }) {
             data-state={task.state}
         >
             <header className="pm-sell-task-head">
-                <span className="pm-sell-task-kicker">{task.symbol ?? "Portfolio"}</span>
+                <span className="pm-sell-task-kicker">{task.symbols?.join(" / ") ?? task.symbol ?? "Portfolio"}</span>
                 <span className="pm-risk-policy-status" data-status="breached">
                     {action}
                 </span>

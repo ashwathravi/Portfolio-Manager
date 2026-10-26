@@ -273,7 +273,8 @@ function OrderForm({ onSubmit }: OrderFormProps) {
     // The risk policy checks the order against the user's own holdings and
     // the theses they wrote (launch item i54); prices and buying power are
     // still examples until a brokerage is connected.
-    const { portfolio: policyPortfolio } = usePolicyPortfolio();
+    // When they couldn't be loaded, the checks say so and the order needs a reason.
+    const { portfolio: policyPortfolio, unavailable: policyUnavailable } = usePolicyPortfolio();
     const policyHoldingRows = useMemo(
         () => policyHoldings(policyPortfolio.holdings, riskPolicy),
         [policyPortfolio.holdings, riskPolicy],
@@ -517,8 +518,10 @@ function OrderForm({ onSubmit }: OrderFormProps) {
                 maxSinglePositionPct: guardrailPrefs.concentrationCapPct,
                 overrideReason: riskPolicyOverrideReason,
                 employerSymbols: policyEmployerSymbols,
+                portfolioUnavailable: policyUnavailable,
             }),
         [
+            policyUnavailable,
             policyHoldingRows,
             policyValue,
             policyEmployerSymbols,
