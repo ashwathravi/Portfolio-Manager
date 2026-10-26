@@ -9,7 +9,7 @@ import * as schema from '../../src/db/schema';
 import type { PlaidFetch } from '../../src/lib/plaid/link';
 import { deletePortfolio } from '../../src/lib/portfolio/manage';
 import { PlaidTokenUnavailableError, disconnectPlaidItem, handlePlaidWebhook, listPlaidConnections } from '../../src/lib/plaid/connections';
-import { PlaidItemNotFoundError, connectedAccountFingerprints, selectPlaidAccounts, syncAllPlaidItems, syncPlaidItem } from '../../src/lib/plaid/sync';
+import { PlaidItemNotFoundError, connectedAccountFingerprints, refreshPlaidItem, selectPlaidAccounts, syncAllPlaidItems, syncPlaidItem } from '../../src/lib/plaid/sync';
 
 // Launch item i44: Plaid's holdings and investment transactions synced into
 // portfolios, against a scratch database with every migration applied and a
@@ -549,18 +549,39 @@ describe('Plaid sync into portfolios', { skip: !DATABASE_URL && 'SCRIPTS_TEST_DA
         assert.deepEqual((await statuses('u-dup')).map((r) => [r.id, r.status]), [['acc_dup_1', 'sync_ready'], ['acc_dup_2', 'excluded'], ['acc_new_2', 'sync_ready']]);
     });
 
-    test('regression: after Link\'s update mode, a connection with nothing picked yet is marked repaired, so its accounts can be picked', async () => {
-        // The Codex finding on PR #163: with no account to sync, the sync
-        // returned before the login was marked repaired.
-        await linkedUser('u-fixed', 'item-fixed', [['acc_fixed', 'Individual', 'investment']]);
+    test('regression: after Link\'s update mode, the connection is read from Plaid again: login, consent, and the accounts it may read', async () => {
+        // The Codex findings on PR #163: a connection with nothing picked stayed
+        // "sign in again"; "access ends soon" stayed after consent was renewed;
+        // an account the user stopped sharing failed every later sync.
+        await linkedUser('u-fixed', 'item-fixed', [['acc_fixed', 'Individual', 'investment'], ['acc_dropped', 'Joint', 'investment'], ['acc_waiting', 'IRA', 'investment']]);
+        await selectPlaidAccounts('u-fixed', 'item-fixed', ['acc_fixed', 'acc_dropped'], database);
+        await sql`UPDATE plaid_accounts SET sync_status = 'awaiting_selection' WHERE plaid_account_id = 'acc_waiting'`;
         await sql`UPDATE plaid_items SET status = 'login_required' WHERE plaid_item_id = 'item-fixed'`;
-        const stillBroken = fakePlaid({ '/item/get': () => ({ json: { item: { item_id: 'item-fixed', error: { error_code: 'ITEM_LOGIN_REQUIRED' } } } }) });
-        assert.deepEqual((await syncPlaidItem('u-fixed', 'item-fixed', deps(stillBroken.fetchImpl))).accounts, []);
+        const refresh = (item: Record<string, unknown>, accountIds = ['acc_fixed', 'acc_waiting']) => {
+            const plaid = fakePlaid({
+                '/item/get': () => ({ json: { item: { item_id: 'item-fixed', ...item } } }),
+                '/accounts/get': () => ({ json: { accounts: accountIds.map((account_id) => ({ account_id })) } }),
+            });
+            return refreshPlaidItem('u-fixed', 'item-fixed', deps(plaid.fetchImpl));
+        };
+
+        // Still wanting a sign-in: it stays so, nothing else changes.
+        assert.deepEqual(await refresh({ error: { error_code: 'ITEM_LOGIN_REQUIRED' } }), { status: 'login_required', accountsRemoved: 0 });
         assert.equal((await itemRow('item-fixed'))[0].status, 'login_required');
-        const fixed = fakePlaid({ '/item/get': () => ({ json: { item: { item_id: 'item-fixed', error: null } } }) });
-        await syncPlaidItem('u-fixed', 'item-fixed', deps(fixed.fetchImpl));
+
+        // Signed in again, one account no longer shared: it stops syncing.
+        assert.deepEqual(await refresh({ error: null, consent_expiration_time: null }), { status: 'active', accountsRemoved: 1 });
         assert.equal((await itemRow('item-fixed'))[0].status, 'active');
-        assert.deepEqual(fixed.requests.map((r) => [r.endpoint, r.body.access_token]), [['/item/get', 'access-sandbox-1']]);
+        assert.deepEqual((await statuses('u-fixed')).map((r) => [r.id, r.status]), [['acc_dropped', 'excluded'], ['acc_fixed', 'sync_ready'], ['acc_waiting', 'awaiting_selection']]);
+
+        // Consent: renewed for months is fine; days left is still ending soon.
+        await sql`UPDATE plaid_items SET status = 'pending_expiration' WHERE plaid_item_id = 'item-fixed'`;
+        assert.equal((await refresh({ error: null, consent_expiration_time: '2027-10-25T00:00:00Z' })).status, 'active');
+        assert.equal((await itemRow('item-fixed'))[0].status, 'active');
+        assert.equal((await refresh({ error: null, consent_expiration_time: '2026-10-28T00:00:00Z' })).status, 'pending_expiration');
+        assert.equal((await itemRow('item-fixed'))[0].status, 'pending_expiration');
+
+        await assert.rejects(refreshPlaidItem('u-someone-else', 'item-fixed', deps(fakePlaid({}).fetchImpl)), PlaidItemNotFoundError);
     });
 });
 

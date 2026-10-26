@@ -35,7 +35,7 @@ import {
     type AccountHoldings,
     type TransactionSkipReason,
 } from "./investments";
-import { PlaidApiError, asRecord, plaidAccountFingerprint, postPlaid, resolvePlaidEnvironment, type PlaidCredentials, type PlaidFetch } from "./link";
+import { PlaidApiError, asRecord, plaidAccountFingerprint, postPlaid, readArray, resolvePlaidEnvironment, type PlaidCredentials, type PlaidFetch } from "./link";
 import { getPlaidAccessTokenForUser } from "./server-token-vault";
 import type { PlaidEnvironment } from "./types";
 
@@ -474,27 +474,7 @@ export interface SyncDeps {
 export async function syncPlaidItem(userId: string, itemId: string, deps: SyncDeps): Promise<ItemSyncResult> {
     const { config, database = db, fetchImpl = fetch, getAccessToken = getPlaidAccessTokenForUser, now = new Date(), deadline, clock } = deps;
     const { item, accounts } = await loadSyncTargets(userId, itemId, database);
-    if (accounts.length === 0) {
-        // Nothing to sync yet (no account picked), but after Link's update
-        // mode the login may be fixed: ask Plaid, so the accounts can be picked.
-        if (item.status === "login_required") {
-            const accessToken = await getAccessToken(itemId, userId);
-            if (accessToken) {
-                try {
-                    const answer = asRecord(asRecord(await postPlaid({ endpoint: "/item/get", ...config, fetchImpl, body: { access_token: accessToken } })).item);
-                    if (answer.error == null) {
-                        await database
-                            .update(plaidItems)
-                            .set({ status: "active", updatedAt: now })
-                            .where(and(eq(plaidItems.id, item.id), eq(plaidItems.userId, userId), eq(plaidItems.status, "login_required")));
-                    }
-                } catch {
-                    // Plaid unreachable or the login still broken: it stays as it is.
-                }
-            }
-        }
-        return { itemId, status: "synced", accounts: [], overLimit: [] };
-    }
+    if (accounts.length === 0) return { itemId, status: "synced", accounts: [], overLimit: [] };
     // Tried now, however it ends: the nightly job takes the least recently tried first.
     await database
         .update(plaidItems)
@@ -575,6 +555,77 @@ export async function syncPlaidItem(userId: string, itemId: string, deps: SyncDe
         if (error instanceof PlaidDeadlineError) return { itemId, status: "timed-out", accounts: [] };
         return { itemId, status: "failed", accounts: [], error: error instanceof Error ? error.message : String(error) };
     }
+}
+
+// ---------------------------------------------------------------------------
+// After Link's update mode
+// ---------------------------------------------------------------------------
+
+/** Plaid warns a week before consent ends; with longer left it isn't ending soon. */
+const CONSENT_WARNING_MS = 7 * DAY_MS;
+
+export type PlaidItemRefresh = "active" | "pending_expiration" | "login_required" | "no-token";
+
+/**
+ * Reads the connection's state from Plaid again after Link's update mode
+ * (launch item i45), where the user may have signed in again, renewed
+ * consent, or changed which accounts Atlas may read: accounts Plaid no
+ * longer returns stop syncing (asking for them would fail the whole
+ * request), and the status follows Plaid's answer (login fine; consent
+ * with a week or more left, or none to end). The user's own connection
+ * only (PlaidItemNotFoundError otherwise); Plaid's errors other than a
+ * login still needed are thrown.
+ */
+export async function refreshPlaidItem(userId: string, itemId: string, deps: SyncDeps): Promise<{ status: PlaidItemRefresh; accountsRemoved: number }> {
+    const { config, database = db, fetchImpl = fetch, getAccessToken = getPlaidAccessTokenForUser, now = new Date() } = deps;
+    const [item] = await database
+        .select({ id: plaidItems.id })
+        .from(plaidItems)
+        .where(and(eq(plaidItems.userId, userId), eq(plaidItems.plaidItemId, itemId), ne(plaidItems.status, "revoked"), isNull(plaidItems.revokedAt)))
+        .limit(1);
+    if (!item) throw new PlaidItemNotFoundError();
+    const accessToken = await getAccessToken(itemId, userId);
+    if (!accessToken) return { status: "no-token", accountsRemoved: 0 };
+
+    const setStatus = (status: string) => database
+        .update(plaidItems)
+        .set({ status, updatedAt: now })
+        .where(and(eq(plaidItems.id, item.id), eq(plaidItems.userId, userId)));
+    let state: Record<string, unknown>;
+    let accessible: Set<string>;
+    try {
+        state = asRecord(asRecord(await postPlaid({ endpoint: "/item/get", ...config, fetchImpl, body: { access_token: accessToken } })).item);
+        const listed = asRecord(await postPlaid({ endpoint: "/accounts/get", ...config, fetchImpl, body: { access_token: accessToken } }));
+        accessible = new Set(readArray(listed, "accounts").map((account) => asRecord(account).account_id).filter((id): id is string => typeof id === "string"));
+    } catch (error) {
+        if (error instanceof PlaidApiError && error.errorCode === "ITEM_LOGIN_REQUIRED") {
+            await setStatus("login_required");
+            return { status: "login_required", accountsRemoved: 0 };
+        }
+        throw error;
+    }
+    if ((asRecord(state.error) as { error_code?: unknown }).error_code === "ITEM_LOGIN_REQUIRED") {
+        await setStatus("login_required");
+        return { status: "login_required", accountsRemoved: 0 };
+    }
+
+    // Accounts the user no longer lets Atlas read: they stop syncing (what
+    // was brought in stays, as when disconnecting).
+    const removed = await database
+        .update(plaidAccounts)
+        .set({ syncStatus: "excluded", updatedAt: now })
+        .where(and(
+            eq(plaidAccounts.userId, userId),
+            eq(plaidAccounts.plaidItemRecordId, item.id),
+            inArray(plaidAccounts.syncStatus, ["sync_ready", "awaiting_selection"]),
+            accessible.size > 0 ? notInArray(plaidAccounts.plaidAccountId, [...accessible]) : sql`true`,
+        ))
+        .returning({ id: plaidAccounts.id });
+
+    const ends = typeof state.consent_expiration_time === "string" ? Date.parse(state.consent_expiration_time) : NaN;
+    const status: PlaidItemRefresh = Number.isFinite(ends) && ends - now.getTime() < CONSENT_WARNING_MS ? "pending_expiration" : "active";
+    await setStatus(status);
+    return { status, accountsRemoved: removed.length };
 }
 
 // ---------------------------------------------------------------------------

@@ -123,13 +123,17 @@ async function fetchConnections(): Promise<PlaidConnection[]> {
  * item i44). With `plaidAccountIds`, the accounts just picked: those of its
  * accounts still waiting for a pick sync from now on, the rest don't.
  */
-async function syncPlaidConnection(itemId: string, plaidAccountIds?: readonly string[]): Promise<{ ok: boolean; message: string }> {
+async function syncPlaidConnection(
+    itemId: string,
+    plaidAccountIds?: readonly string[],
+    { reconnected = false }: { reconnected?: boolean } = {},
+): Promise<{ ok: boolean; message: string }> {
     try {
         const response = await fetch("/api/plaid/sync", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             credentials: "same-origin",
-            body: JSON.stringify({ itemId, ...(plaidAccountIds ? { plaidAccountIds } : {}) }),
+            body: JSON.stringify({ itemId, ...(plaidAccountIds ? { plaidAccountIds } : {}), ...(reconnected ? { reconnected: true } : {}) }),
         });
         if (!response.ok) return { ok: false, message: await readApiError(response, "Couldn't sync the linked accounts. Try again.") };
         const body = (await response.json()) as { data: { accounts: SyncedAccountSummary[]; overLimit?: string[] } };
@@ -173,9 +177,9 @@ export function IntegrationsCard() {
         void queryClient.invalidateQueries({ queryKey: ["portfolios"] });
     };
 
-    const runSync = async (itemId: string, plaidAccountIds?: readonly string[]) => {
+    const runSync = async (itemId: string, plaidAccountIds?: readonly string[], options?: { reconnected?: boolean }) => {
         setBusyItem(itemId);
-        const result = await syncPlaidConnection(itemId, plaidAccountIds);
+        const result = await syncPlaidConnection(itemId, plaidAccountIds, options);
         setBusyItem(null);
         if (result.ok) toast.success(result.message);
         else toast.error(result.message);
@@ -293,7 +297,9 @@ export function IntegrationsCard() {
             const token = await createLinkToken(connection.itemId);
             await openLink(token, () => {
                 setPlaidStatus("idle");
-                void runSync(connection.itemId);
+                // The server reads the connection from Plaid again first: the
+                // accounts it may still read, its login and its consent.
+                void runSync(connection.itemId, undefined, { reconnected: true });
             });
         } catch (error) {
             setPlaidError(error instanceof Error ? error.message : "Plaid Link failed");

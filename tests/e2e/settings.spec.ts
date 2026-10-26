@@ -272,7 +272,8 @@ test.describe('Settings page', () => {
         await fidelity.getByRole('button', { name: 'Reconnect' }).click();
         await expect(page.getByText('Fidelity Individual: 3 positions and 0 new transactions.')).toBeVisible();
         expect(linkTokenBodies[0]).toEqual({ itemId: 'item-fidelity' });
-        expect(syncRequests[0]).toEqual({ itemId: 'item-fidelity' });
+        // Read again from Plaid first: its accounts, login and consent.
+        expect(syncRequests[0]).toEqual({ itemId: 'item-fidelity', reconnected: true });
 
         // Vanguard's accounts wait for a pick: picked here, they sync.
         const pick = vanguard.getByTestId('plaid-pick');

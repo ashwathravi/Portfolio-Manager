@@ -21,7 +21,7 @@ import { apiError, internalServerError, logApiEvent } from "@/lib/api/security";
 import { requireSessionApiUserScope } from "@/lib/api/session-security";
 import { requestIdFrom } from "@/lib/observability/request-id";
 import { plaidAvailability } from "@/lib/plaid/availability";
-import { PlaidItemNotFoundError, selectPlaidAccounts, syncPlaidItem } from "@/lib/plaid/sync";
+import { PlaidItemNotFoundError, refreshPlaidItem, selectPlaidAccounts, syncPlaidItem } from "@/lib/plaid/sync";
 import { plaidSyncSchema } from "@/lib/validators/plaid-sync";
 
 export const dynamic = "force-dynamic";
@@ -46,9 +46,19 @@ export async function POST(request: Request) {
     }
 
     const { userId } = auth.context;
-    const { itemId, plaidAccountIds } = parsed.data;
+    const { itemId, plaidAccountIds, reconnected } = parsed.data;
     const requestId = requestIdFrom(request.headers);
     try {
+        // After Link's update mode: which accounts, login and consent, as Plaid has them now.
+        if (reconnected) {
+            const refreshed = await refreshPlaidItem(userId, itemId, { config });
+            if (refreshed.status === "login_required") {
+                return apiError("Your bank wants you to sign in again before Atlas can sync this connection.", "PLAID_LOGIN_REQUIRED", 409);
+            }
+            if (refreshed.status === "no-token") {
+                return apiError("This connection needs linking again before it can sync.", "PLAID_TOKEN_MISSING", 409);
+            }
+        }
         if (plaidAccountIds) await selectPlaidAccounts(userId, itemId, plaidAccountIds);
         // Within this function's time, with room left to answer.
         const result = await syncPlaidItem(userId, itemId, { config, deadline: Date.now() + (maxDuration - 10) * 1000 });
