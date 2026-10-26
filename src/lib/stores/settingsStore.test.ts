@@ -2,6 +2,7 @@ import { test, describe, before, beforeEach } from 'node:test';
 import assert from 'node:assert';
 import type { ConnectedAccount, Tag } from './settingsStore';
 import type { PlaidConnectedAccountInput } from '@/lib/plaid/types';
+import { DEFAULT_EMPLOYER_STOCK_DERISKING_PLAN, DEFAULT_SELL_DISCIPLINE_RULES } from '@/lib/risk-policy';
 
 type SettingsStoreHook = typeof import('./settingsStore').useSettingsStore;
 
@@ -876,6 +877,26 @@ describe('settingsStore', () => {
             assert.strictEqual(migrated.riskPolicy?.churnPolicy.windowDays, 30);
             // A document without the slice keeps the defaults.
             assert.strictEqual(migrateSettings({ demo: { showSampleData: false } }, 15).riskPolicy, undefined);
+        });
+
+        test('regression: a v15 document loses the employer stock it was seeded with', async () => {
+            const { migrateSettings, normalizeSettings } = await import('./settingsStore');
+            const seededPlan = {
+                ...DEFAULT_EMPLOYER_STOCK_DERISKING_PLAN,
+                label: 'GOOG employer stock de-risking',
+                symbols: ['GOOG', 'GOOGL'],
+            };
+            const seededBand = { id: 'sell-goog-employer-cap', type: 'allocation_cap', label: 'GOOG employer-stock trim band', action: 'trim', state: 'active', symbol: 'GOOG', thresholdPct: 25, noAdd: true };
+            const migrated = normalizeSettings(migrateSettings({ riskPolicy: { employerStockPlan: seededPlan, sellDisciplineRules: [seededBand] } }, 15));
+
+            assert.deepStrictEqual(migrated.riskPolicy?.employerStockPlan.symbols, []);
+            assert.strictEqual(migrated.riskPolicy?.employerStockPlan.label, 'Employer stock de-risking');
+            assert.deepStrictEqual(migrated.riskPolicy?.sellDisciplineRules, [DEFAULT_SELL_DISCIPLINE_RULES[0]]);
+
+            // Activated, it was the user's choice: GOOG stays.
+            const active = migrateSettings({ riskPolicy: { employerStockPlan: { ...seededPlan, state: 'active' }, sellDisciplineRules: [seededBand] } }, 15);
+            assert.deepStrictEqual(active.riskPolicy?.employerStockPlan.symbols, ['GOOG', 'GOOGL']);
+            assert.strictEqual(active.riskPolicy?.sellDisciplineRules[0].symbol, 'GOOG');
         });
 
         test('leaves a current document as it is', async () => {

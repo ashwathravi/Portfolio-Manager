@@ -518,7 +518,9 @@ function findThesis(
 ): SellDisciplineThesis | undefined {
     if (rule.thesisId) return theses.find((thesis) => thesis.id === rule.thesisId);
     const symbol = normalizeSymbol(rule.symbol ?? fallbackSymbol);
-    return theses.find((thesis) => normalizeSymbol(thesis.ticker) === symbol);
+    const forTicker = theses.filter((thesis) => normalizeSymbol(thesis.ticker) === symbol);
+    // A ticker's current thesis: one archived and replaced is the replacement.
+    return forTicker.find((thesis) => thesis.status !== "archived") ?? forTicker[0];
 }
 
 function isSnoozed(rule: SellDisciplineRule, asOf: Date): boolean {

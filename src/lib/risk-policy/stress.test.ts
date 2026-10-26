@@ -51,6 +51,15 @@ describe("risk policy / stress scenarios", () => {
         assert.ok(result.totalImpactUsd < 0);
     });
 
+    test("regression: theme shocks use the employer-adjusted weights the policy reports", () => {
+        const msft = { symbol: "MSFT", name: "Microsoft", marketValue: 100_000 };
+        const ai = (holding: typeof msft & { isEmployerStock?: boolean }) =>
+            runStressScenario({ holdings: [holding], scenario: findStressScenario("ai_basket_30_down") }).totalImpactUsd;
+        // MSFT is 30% AI infrastructure; named as the employer's, a fifth is employer-linked instead.
+        assert.equal(ai(msft), -9_000);
+        assert.equal(ai({ ...msft, isEmployerStock: true }), -7_200);
+    });
+
     test("supports custom ticker and theme scenarios", () => {
         const tickerResult = runStressScenario({
             holdings: HOLDINGS,

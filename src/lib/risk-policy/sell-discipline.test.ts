@@ -125,6 +125,24 @@ describe("sell discipline policy engine", () => {
         assert.equal(summary.tasks[0].symbols, undefined);
     });
 
+    test("regression: a ticker's archived thesis gives way to its replacement, whatever the order", () => {
+        const archived = { id: "th-old", ticker: "AMZN", status: "archived", dateUpdated: "2026-01-01", healthScore: 10 };
+        const current = { id: "th-new", ticker: "AMZN", status: "active", dateUpdated: "2026-05-01", healthScore: 80 };
+        for (const theses of [[archived, current], [current, archived]]) {
+            const summary = evaluateSellDiscipline({
+                holdings: [{ symbol: "AMZN", marketValue: 50_000 }],
+                theses,
+                portfolioValue: 100_000,
+                rules: [
+                    rule({ id: "no-add", type: "missing_thesis_no_add", symbol: "AMZN", action: "no_add", noAdd: true }),
+                    rule({ id: "break", type: "thesis_break", symbol: "AMZN", action: "exit", thresholdPct: 50 }),
+                ],
+                asOf: "2026-05-15",
+            });
+            assert.deepEqual(summary.tasks, []);
+        }
+    });
+
     test("regression: an employer vest without a symbol or employer stock fires nothing", () => {
         const summary = evaluateSellDiscipline({
             holdings: HOLDINGS.map((holding) => ({ ...holding, isEmployerStock: false })),

@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { PERSISTED_SETTINGS_SLICES, SETTINGS_VERSION } from '@/lib/settings/document';
 import { sanitizeSettings } from '@/lib/validators/settings-slices';
-import { migrateLandingPage, stripSeededDemoAccounts, type LandingPage } from './settingsMigrations';
+import { migrateLandingPage, stripSeededDemoAccounts, unseedEmployerStock, type LandingPage } from './settingsMigrations';
 import {
     DEFAULT_BUCKET_POLICIES,
     DEFAULT_CASH_DEPLOYMENT_RULE,
@@ -1049,7 +1049,10 @@ export function migrateSettings(persistedState: unknown, version: number): Parti
         }
     }
     if (version < 16 && s.riskPolicy) {
-        s.riskPolicy = { ...s.riskPolicy, bucketAssignments: {} };
+        s.riskPolicy = unseedEmployerStock({ ...s.riskPolicy, bucketAssignments: {} }, {
+            planLabel: DEFAULT_EMPLOYER_STOCK_DERISKING_PLAN.label,
+            trimBandLabel: DEFAULT_SELL_DISCIPLINE_RULES.find((rule) => rule.id === 'sell-goog-employer-cap')?.label ?? 'Employer-stock trim band',
+        });
     }
     return s as Partial<PersistedSettings>;
 }

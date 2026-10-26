@@ -6,7 +6,7 @@
  * settings as the user edits them.
  */
 
-import { and, eq } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 
 import { db } from "@/db";
 import { isDatabaseConfigured } from "@/db/connection-options";
@@ -27,7 +27,7 @@ import { EMPTY_POLICY_PORTFOLIO, type PolicyPortfolio, type RiskPolicySettings }
 
 type Database = typeof db;
 
-/** What the sell rules read of the user's theses. */
+/** What the sell rules read of the user's theses, newest first, as the research store has them. */
 export function buildPolicyThesesQuery(userId: string, database: Pick<Database, "select"> = db) {
     return database
         .select({
@@ -40,7 +40,8 @@ export function buildPolicyThesesQuery(userId: string, database: Pick<Database, 
             healthScore: theses.healthScore,
         })
         .from(theses)
-        .where(and(eq(theses.userId, userId), eq(theses.dismissed, false)));
+        .where(and(eq(theses.userId, userId), eq(theses.dismissed, false)))
+        .orderBy(desc(theses.createdAt), asc(theses.id));
 }
 
 /** The theses the user wrote: the examples, edited or not, are left out. */

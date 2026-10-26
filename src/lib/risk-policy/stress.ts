@@ -37,6 +37,8 @@ export interface StressHolding {
     policyBucket?: PolicyBucketId | null;
     themeWeights?: ReturnType<typeof themeWeightsForSymbol> | null;
     sector?: Sector | string | null;
+    /** Named as the employer's: part of it is employer-linked wealth, as on Today. */
+    isEmployerStock?: boolean;
 }
 
 export interface StressContributor {
@@ -323,7 +325,7 @@ function targetShockForHolding(
     }
     if (target.kind === "theme") {
         const targetTheme = target.value as ThemeId | undefined;
-        const weight = themeWeightsForSymbol(holding.symbol, holding.themeWeights)
+        const weight = themeWeightsForSymbol(holding.symbol, holding.themeWeights, { employer: holding.isEmployerStock })
             .find((candidate) => candidate.theme === targetTheme)?.weight ?? 0;
         return target.shockPct * weight;
     }
@@ -384,7 +386,7 @@ function buildMissingDataNotes(
 
     const unknownThemeValue = holdings
         .filter((holding) =>
-            themeWeightsForSymbol(holding.symbol, holding.themeWeights)
+            themeWeightsForSymbol(holding.symbol, holding.themeWeights, { employer: holding.isEmployerStock })
                 .some((weight) => weight.theme === "unknown"),
         )
         .reduce((sum, holding) => sum + holding.marketValue, 0);
