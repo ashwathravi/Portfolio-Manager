@@ -16,6 +16,7 @@ import {
     type StressScenarioResult,
 } from "@/lib/risk-policy";
 import { useSettingsStore } from "@/lib/stores/settingsStore";
+import { useRequestTime } from "@/components/providers/RequestTimeProvider";
 
 export interface RiskPolicyDashboardCardProps {
     summary: RiskPolicyDashboardSummary;
@@ -35,9 +36,11 @@ export function RiskPolicyDashboardCard({
     portfolio,
 }: RiskPolicyDashboardCardProps) {
     const riskPolicy = useSettingsStore((s) => s.riskPolicy);
+    // Today's date, the same on the server and in the browser.
+    const requestTime = useRequestTime();
     const summary = useMemo(
-        () => (portfolio ? evaluateRiskPolicy(portfolio, riskPolicy) : initialSummary),
-        [initialSummary, portfolio, riskPolicy],
+        () => (portfolio ? evaluateRiskPolicy(portfolio, riskPolicy, { asOf: new Date(requestTime) }) : initialSummary),
+        [initialSummary, portfolio, riskPolicy, requestTime],
     );
     const headline = buildHeadline(summary);
 

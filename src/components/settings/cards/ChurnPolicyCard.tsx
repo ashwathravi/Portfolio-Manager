@@ -4,6 +4,7 @@ import { useMemo } from "react";
 import { Repeat2 } from "lucide-react";
 import { computeChurnAnalysis, DEFAULT_CHURN_POLICY } from "@/lib/risk-policy";
 import { usePolicyPortfolio } from "@/components/providers/PolicyPortfolioProvider";
+import { useRequestTime } from "@/components/providers/RequestTimeProvider";
 import { useSettingsStore } from "@/lib/stores/settingsStore";
 
 export function ChurnPolicyCard() {
@@ -11,15 +12,18 @@ export function ChurnPolicyCard() {
     const updateRiskPolicy = useSettingsStore((s) => s.updateRiskPolicy);
     // The preview: the user's own buys and sells.
     const { portfolio } = usePolicyPortfolio();
+    const requestTime = useRequestTime();
     const policy = riskPolicy.churnPolicy ?? DEFAULT_CHURN_POLICY;
     const summary = useMemo(
         () =>
             computeChurnAnalysis(portfolio.trades, {
+                // The window ends today, not at the last trade.
+                asOf: new Date(requestTime),
                 windowDays: policy.windowDays,
                 watchRepeatSymbols: policy.watchRepeatSymbols,
                 breachRepeatSymbols: policy.breachRepeatSymbols,
             }),
-        [portfolio.trades, policy.windowDays, policy.watchRepeatSymbols, policy.breachRepeatSymbols],
+        [portfolio.trades, requestTime, policy.windowDays, policy.watchRepeatSymbols, policy.breachRepeatSymbols],
     );
     const status = summary.status;
 
