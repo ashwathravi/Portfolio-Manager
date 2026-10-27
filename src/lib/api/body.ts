@@ -7,11 +7,15 @@ export type JsonBodyResult =
     | { ok: true; value: unknown }
     | { ok: false; reason: 'too-large' | 'invalid-json' };
 
-export async function readJsonBody(request: Request, maxBytes: number): Promise<JsonBodyResult> {
+export type TextBodyResult =
+    | { ok: true; text: string }
+    | { ok: false; reason: 'too-large' | 'missing' };
+
+/** The raw body as text, under the same cap: for a signature over its exact bytes. */
+export async function readTextBody(request: Request, maxBytes: number): Promise<TextBodyResult> {
     const declared = Number(request.headers.get('content-length') ?? NaN);
     if (Number.isFinite(declared) && declared > maxBytes) return { ok: false, reason: 'too-large' };
-    if (!request.body) return { ok: false, reason: 'invalid-json' };
-
+    if (!request.body) return { ok: false, reason: 'missing' };
     const reader = request.body.getReader();
     const chunks: Uint8Array[] = [];
     let total = 0;
@@ -25,15 +29,20 @@ export async function readJsonBody(request: Request, maxBytes: number): Promise<
         }
         chunks.push(value);
     }
-
     const bytes = new Uint8Array(total);
     let offset = 0;
     for (const c of chunks) {
         bytes.set(c, offset);
         offset += c.byteLength;
     }
+    return { ok: true, text: new TextDecoder().decode(bytes) };
+}
+
+export async function readJsonBody(request: Request, maxBytes: number): Promise<JsonBodyResult> {
+    const body = await readTextBody(request, maxBytes);
+    if (!body.ok) return { ok: false, reason: body.reason === 'too-large' ? 'too-large' : 'invalid-json' };
     try {
-        return { ok: true, value: JSON.parse(new TextDecoder().decode(bytes)) };
+        return { ok: true, value: JSON.parse(body.text) };
     } catch {
         return { ok: false, reason: 'invalid-json' };
     }

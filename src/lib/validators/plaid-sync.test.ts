@@ -13,6 +13,12 @@ describe('plaidSyncSchema', () => {
         assert.deepEqual(plaidSyncSchema.parse({ itemId: ITEM, plaidAccountIds: [] }).plaidAccountIds, []);
     });
 
+    test('takes `reconnected: true` after Link\'s update mode, and nothing else for it', () => {
+        assert.deepEqual(plaidSyncSchema.parse({ itemId: ITEM, reconnected: true }), { itemId: ITEM, reconnected: true });
+        assert.equal(plaidSyncSchema.safeParse({ itemId: ITEM, reconnected: false }).success, false);
+        assert.equal(plaidSyncSchema.safeParse({ itemId: ITEM, reconnected: 'yes' }).success, false);
+    });
+
     test('refuses an ID that is not a Plaid ID', () => {
         for (const itemId of ['', 'has space', 'a/b', '<script>', 'x'.repeat(129)]) {
             const result = plaidSyncSchema.safeParse({ itemId });

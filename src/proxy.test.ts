@@ -93,6 +93,15 @@ describe("API proxy security", () => {
         assert.equal((await proxy(apiRequest({}, "/api/cronjobs/daily"))).status, 401);
     });
 
+    test("lets Plaid's webhook through without a session, for the route to check Plaid's signature", async () => {
+        // Launch item i45: Plaid calls it; only its POST, only that path.
+        setNodeEnv("production");
+        configureAuth();
+        assert.equal((await proxy(apiRequest({}, "/api/plaid/webhook", null, [], "POST"))).status, 200);
+        assert.equal((await proxy(apiRequest({}, "/api/plaid/webhook", null, [], "GET"))).status, 401);
+        assert.equal((await proxy(apiRequest({}, "/api/plaid/webhooks", null, [], "POST"))).status, 401);
+    });
+
     test("runs cron routes even when production sign-in is misconfigured", async () => {
         setNodeEnv("production");
         process.env.AUTH_SECRET = "partial-only";
@@ -265,6 +274,8 @@ describe("API proxy security", () => {
             ["/api/plaid/link-token", "POST"],
             ["/api/plaid/exchange-public-token", "POST"],
             ["/api/plaid/sync", "POST"],
+            ["/api/plaid/connections", "GET"],
+            ["/api/plaid/connections/eVBnVMp7zdTJLkRNr33Rs6zr7KNJqBFL9DrE6", "DELETE"],
             ["/api/portfolios/count", "GET"],
             ["/api/portfolios", "POST"],
             ["/api/transactions", "POST"],
