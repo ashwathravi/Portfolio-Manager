@@ -7,6 +7,9 @@ import { join } from "node:path";
 import { POST as exchangePublicToken } from "./exchange-public-token/route";
 import { POST as createLinkToken } from "./link-token/route";
 import { POST as syncPlaid } from "./sync/route";
+import { GET as listConnections } from "./connections/route";
+import { DELETE as disconnect } from "./connections/[itemId]/route";
+import { POST as webhook } from "./webhook/route";
 import {
     getPlaidAccessTokenForUser,
     getPlaidAccessToken,
@@ -168,6 +171,49 @@ describe("Plaid API routes", () => {
         }
     });
 
+    test("connections and disconnect say Plaid isn't set up, and refuse an ID that isn't Plaid's", async () => {
+        process.env.AUTH_LOCAL_DEV_BYPASS = "1";
+        process.env.AUTH_LOCAL_DEV_USER_ID = USER_ID;
+        delete process.env.DATABASE_URL;
+        const list = await listConnections(new Request("https://atlas.test/api/plaid/connections"));
+        assert.equal(list.status, 503);
+        assert.equal((await list.json()).code, "PLAID_NOT_CONFIGURED");
+
+        configureStoredPlaid();
+        const bad = await disconnect(new Request("https://atlas.test/api/plaid/connections/x", { method: "DELETE" }), { params: Promise.resolve({ itemId: "not an id" }) });
+        assert.equal(bad.status, 400);
+        assert.equal((await bad.json()).code, "INVALID_PLAID_ITEM");
+    });
+
+    test("Plaid's webhook is refused without Plaid's signature, before anything is read", async (t) => {
+        t.mock.method(console, "info", () => {});
+        delete process.env.DATABASE_URL;
+        const unconfigured = await webhook(new Request("https://atlas.test/api/plaid/webhook", { method: "POST", body: "{}" }));
+        assert.equal(unconfigured.status, 503);
+
+        configureStoredPlaid();
+        const unsigned = await webhook(new Request("https://atlas.test/api/plaid/webhook", {
+            method: "POST",
+            body: JSON.stringify({ webhook_type: "ITEM", webhook_code: "USER_PERMISSION_REVOKED", item_id: "item-route" }),
+        }));
+        assert.equal(unsigned.status, 401);
+        assert.deepEqual(await unsigned.json(), { error: "Webhook not verified", code: "PLAID_WEBHOOK_UNVERIFIED" });
+
+        const tooLarge = await webhook(new Request("https://atlas.test/api/plaid/webhook", { method: "POST", body: "x".repeat(70 * 1024) }));
+        assert.equal(tooLarge.status, 413);
+    });
+
+    test("update mode needs one of the user's connections", async () => {
+        configurePlaidEnv();
+        const invalid = await createLinkToken(authorizedRequest("/api/plaid/link-token", { itemId: "not an id" }));
+        assert.equal(invalid.status, 400);
+        assert.equal((await invalid.json()).code, "INVALID_PLAID_ITEM");
+        // No token for that connection under this user: not theirs, or gone.
+        const unknown = await createLinkToken(authorizedRequest("/api/plaid/link-token", { itemId: "item-someone-elses" }));
+        assert.equal(unknown.status, 404);
+        assert.equal((await unknown.json()).code, "PLAID_ITEM_NOT_FOUND");
+    });
+
     test("exchanges public tokens and stores Plaid access tokens under user scope", async (t) => {
         t.mock.method(console, "info", () => {});
         configurePlaidEnv();
@@ -272,6 +318,13 @@ function configurePlaidEnv(): void {
     process.env.PLAID_CLIENT_ID = "client-id";
     process.env.PLAID_SECRET = "sandbox-secret";
     process.env.PLAID_ENV = "sandbox";
+}
+
+// Plaid set up, with its connections kept in a (never contacted) database.
+function configureStoredPlaid(): void {
+    configurePlaidEnv();
+    process.env.DATABASE_URL = "postgres://atlas_app:pw@db.example.invalid:6543/postgres";
+    process.env.PLAID_TOKEN_STORAGE = "postgres";
 }
 
 function authorizedRequest(pathname: string, body?: unknown): Request {

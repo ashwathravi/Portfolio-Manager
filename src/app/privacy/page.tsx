@@ -12,7 +12,7 @@ export const metadata: Metadata = {
 // the page is public (see isPublicRoute in src/proxy.ts) and renders without
 // the app chrome (src/components/layout/AppFrame.tsx).
 const CONTACT_EMAIL = "ashwath.ravi@gmail.com";
-const LAST_UPDATED = "October 25, 2026";
+const LAST_UPDATED = "October 26, 2026";
 const PLAID_PRIVACY_URL = "https://plaid.com/legal/#end-user-privacy-policy";
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
@@ -172,7 +172,8 @@ export default async function PrivacyPage({ searchParams }: { searchParams: Sear
                         limit. Older questions are deleted the same way once you have more than 25.
                     </p>
                     <p>
-                        Plaid keeps its own record of each connection under its policy. To end it, remove Atlas
+                        Plaid keeps its own record of each connection under its policy. To end it, disconnect it
+                        in Settings (which also ends it at Plaid and erases our token for it), or remove Atlas
                         Wealth through your institution or at{" "}
                         <a href="https://my.plaid.com" target="_blank" rel="noreferrer">my.plaid.com</a>. To stop
                         syncing a single account, delete it on the Accounts page: its holdings and transactions

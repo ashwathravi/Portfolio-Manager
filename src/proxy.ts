@@ -59,6 +59,11 @@ async function routeRequest(request: NextRequest, event: NextFetchEvent | undefi
         // sign-in is misconfigured. Limited per IP against token guessing.
         return (await rateLimitApiRequest(request)) ?? next();
     }
+    if (isProviderWebhookRoute(pathname, request.method)) {
+        // No session: Plaid calls it, and the route checks Plaid's signature
+        // over the body itself (src/lib/plaid/webhook.ts). Limited per IP.
+        return (await rateLimitApiRequest(request)) ?? next();
+    }
     if (isPublicRoute(pathname)) return next();
 
     const mode = authRuntimeMode();
@@ -143,6 +148,10 @@ function isCronRoute(pathname: string): boolean {
     return pathname.startsWith("/api/cron/");
 }
 
+function isProviderWebhookRoute(pathname: string, method: string): boolean {
+    return pathname === "/api/plaid/webhook" && method === "POST";
+}
+
 function isSchwabRoute(pathname: string): boolean {
     return pathname === "/api/auth/schwab" || pathname.startsWith("/api/schwab/");
 }
@@ -151,6 +160,8 @@ function isSessionBackedApiRoute(pathname: string, method: string): boolean {
     if (pathname === "/api/plaid/link-token" && method === "POST") return true;
     if (pathname === "/api/plaid/exchange-public-token" && method === "POST") return true;
     if (pathname === "/api/plaid/sync" && method === "POST") return true;
+    if (pathname === "/api/plaid/connections" && method === "GET") return true;
+    if (/^\/api\/plaid\/connections\/[^/]+$/.test(pathname) && method === "DELETE") return true;
     if (pathname === "/api/portfolios/count" && method === "GET") return true;
     if (pathname === "/api/portfolios" && method === "POST") return true;
     if (pathname === "/api/transactions" && method === "POST") return true;
