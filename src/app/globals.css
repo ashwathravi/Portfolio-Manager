@@ -10505,6 +10505,17 @@ a:focus-visible,
   line-height: 1.4;
 }
 
+.pm-login-notice {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid rgba(15, 118, 110, 0.2);
+  border-radius: 8px;
+  background: rgba(204, 251, 241, 0.6);
+  color: #115e59;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
 .pm-login-google {
   width: 100%;
   min-height: 44px;
