@@ -167,9 +167,10 @@ export default async function PrivacyPage({ searchParams }: { searchParams: Sear
                         devices know it was removed; it goes when your account does.
                     </p>
                     <p>
-                        When you clear your Ask conversation it disappears straight away, and its questions and
-                        answers are deleted a day later: until then they count towards the day&rsquo;s question
-                        limit. Older questions are deleted the same way once you have more than 25.
+                        When you clear your Ask conversation it disappears straight away. Its questions and answers
+                        are deleted once they&rsquo;re a day old, by the next nightly cleanup (each weekday
+                        evening): until then they count towards the day&rsquo;s question limit. Older questions
+                        are deleted the same way once you have more than 25.
                     </p>
                     <p>
                         Plaid keeps its own record of each connection under its policy. To end it, disconnect it

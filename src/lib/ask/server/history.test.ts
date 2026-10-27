@@ -1,14 +1,19 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 
+import type { SQL } from 'drizzle-orm';
+import { PgDialect } from 'drizzle-orm/pg-core';
+
 import {
     ASK_HISTORY_LIMIT,
     buildAskHistoryQuery,
     buildClearAskHistoryQuery,
     buildInsertMessagesQuery,
     buildLockAskQuery,
+    buildPruneAllAskHistoryQuery,
     buildPruneAskHistoryQuery,
     buildQuestionsSinceQuery,
+    pruneAskHistory,
 } from './history';
 
 describe('Ask history queries', () => {
@@ -47,6 +52,16 @@ describe('Ask history queries', () => {
         assert.match(sql, /^insert into "ask_messages" \("user_id", "id", "role", "content", "citations", "tool_runs", "cleared", "created_at"\)/);
         assert.equal(params[0], 'user-a');
         assert.equal(params[1], 'q1');
+    });
+
+    test('the daily job: every user\'s old rows that are cleared or past their conversation', async () => {
+        let executed: SQL | null = null;
+        const database = { execute: async (query: SQL) => { executed = query; return { count: 3 } as never; } } as never;
+        assert.deepEqual(await pruneAskHistory({ now: new Date('2026-10-26T16:00:00.000Z'), database }), { deleted: 3 });
+        const { sql, params } = new PgDialect().sqlToQuery(executed!);
+        assert.match(sql.replace(/\s+/g, ' '), /^ delete from "ask_messages" where "ask_messages"."created_at" < \$1::timestamp and \( "ask_messages"."cleared" or \("ask_messages"."user_id", "ask_messages"."id"\) not in \( select user_id, id from \( select user_id, id, row_number\(\) over \(partition by user_id order by created_at desc, id desc\) as place from "ask_messages" where not cleared \) as kept where place <= \$2 \) \) $/);
+        assert.deepEqual(params, ['2026-10-25T16:00:00.000Z', ASK_HISTORY_LIMIT]);
+        void buildPruneAllAskHistoryQuery;
     });
 
     test('one question at a time per user', async () => {

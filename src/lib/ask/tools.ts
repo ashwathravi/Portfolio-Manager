@@ -300,14 +300,27 @@ export const CORRELATION_SESSIONS = 90;
 /** Fewest shared daily returns worth a correlation. */
 export const MIN_CORRELATION_RETURNS = 20;
 
-/** Daily returns by date: each close against the one before it. */
-function dailyReturns(closes: readonly StoredClose[] | undefined): Map<string, number> {
-    const returns = new Map<string, number>();
-    const sorted = [...(closes ?? [])].sort((a, b) => (a.date < b.date ? -1 : 1));
-    for (let i = 1; i < sorted.length; i++) {
-        if (sorted[i - 1].close > 0) returns.set(sorted[i].date, sorted[i].close / sorted[i - 1].close - 1);
+/**
+ * Both tickers' returns over the same intervals: between consecutive dates
+ * both have a close for, the last CORRELATION_SESSIONS of them. A session
+ * one of them is missing is spanned by both, so a return is never paired
+ * with one over different days.
+ */
+function alignedReturns(
+    a: readonly StoredClose[] | undefined,
+    b: readonly StoredClose[] | undefined,
+): { a: number[]; b: number[] } {
+    const closeOf = new Map((b ?? []).map((close) => [close.date, close.close]));
+    const shared = (a ?? [])
+        .filter((close) => close.close > 0 && (closeOf.get(close.date) ?? 0) > 0)
+        .sort((x, y) => (x.date < y.date ? -1 : 1))
+        .slice(-(CORRELATION_SESSIONS + 1));
+    const out = { a: [] as number[], b: [] as number[] };
+    for (let i = 1; i < shared.length; i++) {
+        out.a.push(shared[i].close / shared[i - 1].close - 1);
+        out.b.push(closeOf.get(shared[i].date)! / closeOf.get(shared[i - 1].date)! - 1);
     }
-    return returns;
+    return out;
 }
 
 function pearson(xs: readonly number[], ys: readonly number[]): number | null {
@@ -327,8 +340,8 @@ function pearson(xs: readonly number[], ys: readonly number[]): number | null {
 
 /**
  * How each holding's daily returns moved with the requested ticker's over
- * the last CORRELATION_SESSIONS sessions of stored closes. A holding with
- * fewer than MIN_CORRELATION_RETURNS shared days is left out.
+ * the last CORRELATION_SESSIONS sessions of stored closes both have. A
+ * holding with fewer than MIN_CORRELATION_RETURNS shared returns is left out.
  */
 export function correlation_with(
     ctx: AskContext,
@@ -336,23 +349,21 @@ export function correlation_with(
 ): AskRow[] {
     const target = normalizeTicker(args.symbol);
     if (!target) return [];
-    const targetReturns = dailyReturns(ctx.closes?.get(target));
-    const recent = [...targetReturns.keys()].sort().slice(-CORRELATION_SESSIONS);
+    const targetCloses = ctx.closes?.get(target);
     const total = positions(ctx).reduce((s, p) => s + p.marketValue, 0);
     return positions(ctx)
         .filter((p) => p.symbol !== target)
         .flatMap((p): Array<{ coef: number; row: AskRow }> => {
-            const own = dailyReturns(ctx.closes?.get(p.symbol));
-            const shared = recent.filter((date) => own.has(date));
-            if (shared.length < MIN_CORRELATION_RETURNS) return [];
-            const coef = pearson(shared.map((d) => targetReturns.get(d)!), shared.map((d) => own.get(d)!));
+            const returns = alignedReturns(targetCloses, ctx.closes?.get(p.symbol));
+            if (returns.a.length < MIN_CORRELATION_RETURNS) return [];
+            const coef = pearson(returns.a, returns.b);
             if (coef === null) return [];
             return [{
                 coef,
                 row: {
                     label: p.symbol,
                     value: coef.toFixed(2),
-                    sub: `${shared.length} sessions · ${total > 0 ? ((p.marketValue / total) * 100).toFixed(1) : '0.0'}% of holdings`,
+                    sub: `${returns.a.length} sessions · ${total > 0 ? ((p.marketValue / total) * 100).toFixed(1) : '0.0'}% of holdings`,
                     tone: coef >= 0.6 ? 'warn' : 'neutral',
                     href: `/portfolios/detail/${encodeURIComponent(p.symbol)}`,
                 },

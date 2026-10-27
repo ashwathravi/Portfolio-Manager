@@ -9,6 +9,7 @@ import type { PolicyPortfolioHolding, RiskPolicySettings } from '@/lib/risk-poli
 import { storedRiskPolicy } from '@/lib/settings/risk-policy';
 
 import { plan } from './planner';
+import { renderAnswer } from './renderer';
 import { runAsk } from './run';
 import type { AskContext } from './tools';
 
@@ -115,6 +116,24 @@ describe('Ask Ledger answers from the user\'s data', () => {
         assert.match(runAsk("Where did last month's P&L come from?", empty).text, /No closed trades in that window/);
     });
 
+    test('regression: an empty result with holdings says what it means, not that there are none', () => {
+        const allDown = context({
+            portfolio: {
+                holdings: [holding('h1', 'NVDA', 10, 200, 180), holding('h2', 'VTI', 10, 300, 250, 'core')],
+                cashTotal: 0,
+                trades: [],
+                theses: [{ id: 'u1', ticker: 'NVDA', status: 'active' }, { id: 'u2', ticker: 'VTI', status: 'active' }],
+            },
+        });
+        assert.match(runAsk('What are my best performing holdings?', allDown).text, /^None of your positions is up on what it cost right now\./);
+        assert.match(runAsk('Which positions have no written thesis?', allDown).text, /^Every position you hold has an active written thesis\./);
+        // Nothing breached: inside every check, with holdings or without.
+        const noBreaches = [{ name: 'policy_breaches' as const, args: {}, rows: [] }];
+        const intent = { intent: 'policy_breaches' as const, calls: [] };
+        assert.strictEqual(renderAnswer(intent, noBreaches, { hasHoldings: true }).text, 'Every risk policy check is inside its limit right now.');
+        assert.match(renderAnswer(intent, noBreaches, { hasHoldings: false }).text, /no holdings to answer from yet/);
+    });
+
     test('sector exposure from the securities master, one position per ticker', () => {
         const answer = runAsk('Am I overexposed to AI?', context());
         const rows = answer.toolRuns[0].rows;
@@ -162,6 +181,16 @@ describe('Ask Ledger answers from the user\'s data', () => {
         assert.match(answer.toolRuns[0].rows[0].sub ?? '', /^59 sessions/);
         assert.match(answer.text, /moved with \*\*SPY\*\*/);
         assert.match(runAsk('How do my holdings correlate with SPY?', context()).text, /aren't enough stored daily closes for SPY/);
+    });
+
+    test('regression: a session one ticker is missing is spanned by both returns', () => {
+        // NVDA moves exactly with SPY; dropping one of its closes must not pair
+        // a two-day NVDA return with a one-day SPY return.
+        const spy = closes(60, wiggle);
+        const nvda = closes(60, wiggle).filter((_, i) => i !== 30);
+        const answer = runAsk('How do my holdings correlate with SPY?', context({ closes: new Map([['SPY', spy], ['NVDA', nvda]]) }));
+        assert.deepStrictEqual(answer.toolRuns[0].rows.map((r) => [r.label, r.value]), [['NVDA', '1.00']]);
+        assert.match(answer.toolRuns[0].rows[0].sub ?? '', /^58 sessions/);
     });
 
     test('policy breaches follow the user\'s own caps', () => {

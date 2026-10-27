@@ -7,7 +7,9 @@
  *   the conversation marks its rows `cleared` rather than deleting them, so
  *   it doesn't reset the count.
  * - Rows older than a day that are cleared, or past the last
- *   ASK_HISTORY_LIMIT, are deleted as new ones arrive.
+ *   ASK_HISTORY_LIMIT, are deleted: the user's own when they ask or clear,
+ *   and everyone's by the daily job "ask-history", so a conversation
+ *   cleared and never followed by another question goes too.
  */
 
 import { and, count, desc, eq, gte, lt, notInArray, or, sql } from "drizzle-orm";
@@ -93,6 +95,37 @@ export function buildPruneAskHistoryQuery(userId: string, before: Date, database
         ));
 }
 
+/**
+ * Every user's rows older than `before` that are cleared, or past their
+ * last ASK_HISTORY_LIMIT messages not cleared.
+ */
+export function buildPruneAllAskHistoryQuery(before: Date, database: Pick<Database, "execute"> = db) {
+    return database.execute(sql`
+        delete from ${askMessages}
+        where ${askMessages.createdAt} < ${before.toISOString()}::timestamp
+          and (
+            ${askMessages.cleared}
+            or (${askMessages.userId}, ${askMessages.id}) not in (
+              select user_id, id from (
+                select user_id, id, row_number() over (partition by user_id order by created_at desc, id desc) as place
+                from ${askMessages}
+                where not cleared
+              ) as kept
+              where place <= ${ASK_HISTORY_LIMIT}
+            )
+          )
+    `);
+}
+
+/** Daily job "ask-history": deletes what no conversation keeps any more. */
+export async function pruneAskHistory({
+    now = new Date(),
+    database = db,
+}: { now?: Date; database?: Database } = {}): Promise<{ deleted: number }> {
+    const result = await buildPruneAllAskHistoryQuery(new Date(now.getTime() - ASK_LIMIT_WINDOW_MS), database);
+    return { deleted: result.count };
+}
+
 type AskMessageRow = typeof askMessages.$inferSelect;
 
 function toMessage(row: AskMessageRow): AskMessage {
@@ -147,6 +180,10 @@ export async function saveAskTurn(
     });
 }
 
-export async function clearAskHistory(userId: string, database: Database = db): Promise<void> {
-    await buildClearAskHistoryQuery(userId, database);
+/** Hides the conversation now; what's already a day old goes now too, the rest by the daily job. */
+export async function clearAskHistory(userId: string, now: Date = new Date(), database: Database = db): Promise<void> {
+    await database.transaction(async (tx) => {
+        await buildClearAskHistoryQuery(userId, tx);
+        await buildPruneAskHistoryQuery(userId, new Date(now.getTime() - ASK_LIMIT_WINDOW_MS), tx);
+    });
 }

@@ -2,7 +2,7 @@ import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import type { ActivityRow } from './activity';
-import { closedTrades } from './closed-trades';
+import { closedTrades, shareScale } from './closed-trades';
 
 let seq = 0;
 function trade(date: string, side: 'BUY' | 'SELL', symbol: string, quantity: number, price: number, extra: Partial<ActivityRow> = {}): ActivityRow {
@@ -81,5 +81,42 @@ describe('closedTrades', () => {
             { ...trade('2026-01-07', 'BUY', 'KO', 1, 1), side: 'DIVIDEND' },
         ]);
         assert.deepEqual(trades, []);
+    });
+
+    test('regression: a buy and a sale either side of a split are put on one share scale', () => {
+        // 10 bought at $100, a 2-for-1 split, 20 sold at $60: a $200 gain, not a $400 loss.
+        const rows = [trade('2026-01-05', 'BUY', 'KO', 10, 100), trade('2026-03-05', 'SELL', 'KO', 20, 60)];
+        assert.equal(closedTrades(rows)[0].realizedPnl, -400); // without closes, the scales can't be told apart
+        const adjusted: Record<string, number> = { '2026-01-05': 50.5, '2026-03-05': 59 };
+        const [sale] = closedTrades(rows, { adjustedClose: (symbol, date) => (symbol === 'KO' ? adjusted[date] ?? null : null) });
+        assert.deepEqual({ quantity: sale.quantity, costBasis: sale.costBasis, realizedPnl: sale.realizedPnl }, { quantity: 20, costBasis: 1000, realizedPnl: 200 });
+    });
+
+    test("a ticker that split with a trade whose scale can't be told is left out; one that never split is kept", () => {
+        const rows = [
+            trade('2026-01-05', 'BUY', 'KO', 10, 100),
+            trade('2026-02-05', 'BUY', 'KO', 5, 104),
+            trade('2026-03-05', 'SELL', 'KO', 20, 60),
+            trade('2026-01-05', 'BUY', 'PG', 10, 150),
+            trade('2026-03-05', 'SELL', 'PG', 10, 160),
+        ];
+        // No KO close on Feb 5, and PG has none at all.
+        const adjusted: Record<string, number> = { '2026-01-05': 50, '2026-03-05': 60 };
+        const trades = closedTrades(rows, { adjustedClose: (symbol, date) => (symbol === 'KO' ? adjusted[date] ?? null : null) });
+        assert.deepEqual(trades.map((t) => t.symbol), ['PG']);
+    });
+});
+
+describe('shareScale', () => {
+    test('1 near the close, a split ratio away from it, null otherwise', () => {
+        assert.equal(shareScale(102, 100), 1);
+        assert.equal(shareScale(1000, 101), 10);
+        assert.equal(shareScale(25, 101), 0.25);
+        assert.equal(shareScale(150, 100), 1.5);
+        assert.equal(shareScale(285, 100), 3); // within a tenth of 3
+        assert.equal(shareScale(130, 100), null); // 30% off the close isn't a 3-for-2 split
+        assert.equal(shareScale(2.3 * 100, 100), null);
+        assert.equal(shareScale(100, null), null);
+        assert.equal(shareScale(0, 100), null);
     });
 });

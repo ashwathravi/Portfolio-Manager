@@ -18,7 +18,7 @@ import type { AskAnswer } from './types';
 /** Run an already planned question over `ctx`. */
 export function answerPlanned(planned: PlannerResult, ctx: AskContext): AskAnswer {
     const runs = planned.calls.map((call) => runTool(call.name, call.args, ctx));
-    return renderAnswer(planned, runs);
+    return renderAnswer(planned, runs, { hasHoldings: ctx.portfolio.holdings.length > 0 });
 }
 
 /**

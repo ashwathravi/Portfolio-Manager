@@ -50,7 +50,7 @@ test.describe('Privacy policy', () => {
   test('says what stays when you remove a watchlist ticker, journal entry or thesis', async ({ page }) => {
     const retention = page.getByRole('region', { name: 'Keeping and deleting your data' });
     await expect(retention).toContainText('watchlist, journal, theses, Ask questions and settings');
-    await expect(retention).toContainText('When you clear your Ask conversation it disappears straight away, and its questions and answers are deleted a day later');
+    await expect(retention).toContainText('When you clear your Ask conversation it disappears straight away. Its questions and answers are deleted once they’re a day old, by the next nightly cleanup');
     await expect(retention.getByText(/When you remove a watchlist ticker or delete a journal entry or thesis/)).toContainText('notes and reasoning are erased');
   });
 

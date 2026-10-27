@@ -9,8 +9,9 @@
 
 import { isDatabaseConfigured } from "@/db/connection-options";
 import { DrizzleAlphaRadarSemanticMemoryRepository } from "@/lib/alpha-radar/memory-repository";
+import { closeOn } from "@/lib/performance/holdings-returns";
 import { storedClosesLoader, type ClosesLoader } from "@/lib/performance/return-history";
-import { closedTrades } from "@/lib/portfolio/closed-trades";
+import { closedTrades, type ClosedTrade } from "@/lib/portfolio/closed-trades";
 import { EMPTY_POLICY_PORTFOLIO, normalizeTicker } from "@/lib/risk-policy";
 import { loadPolicyData, loadUserRiskPolicy } from "@/lib/risk-policy/server";
 import { storedRiskPolicy } from "@/lib/settings/risk-policy";
@@ -72,13 +73,27 @@ export async function loadAskContext(
         closes = await sources.loadCloses(symbols, from, now.toISOString().slice(0, 10));
     }
 
+    // Closed trades, for the questions about them: sales matched against
+    // earlier buys, on today's share scale by the split-adjusted closes.
+    let trades: ClosedTrade[] = [];
+    if (uses("pnl_attribution") || uses("trades_matching")) {
+        const sold = new Set(data.activity.filter((row) => row.side === "SELL" && row.symbol).map((row) => row.symbol!));
+        const firstTrade = data.activity
+            .filter((row) => row.side === "BUY" && row.symbol && sold.has(row.symbol))
+            .reduce<string | null>((first, row) => (first === null || row.date < first ? row.date : first), null);
+        if (sold.size > 0 && firstTrade) {
+            const adjusted = await sources.loadCloses([...sold], firstTrade.slice(0, 10), now.toISOString().slice(0, 10));
+            trades = closedTrades(data.activity, { adjustedClose: (symbol, date) => closeOn(adjusted.get(symbol), date) });
+        }
+    }
+
     const sectors: Record<string, string> = {};
     for (const [symbol, profile] of data.profiles) if (profile.sector) sectors[symbol] = profile.sector;
 
     return {
         portfolio: data.portfolio,
         activity: data.activity,
-        closedTrades: closedTrades(data.activity),
+        closedTrades: trades,
         policy,
         sectors,
         closes,

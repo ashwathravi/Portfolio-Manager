@@ -40,9 +40,32 @@ function citationFor(run: AskToolRun, index: number): AskCitation {
     return { marker, label: row?.label ?? run.name, href };
 }
 
+/** What the answer was drawn from, beyond the tools' rows. */
+export interface AnswerSource {
+    /** The user holds at least one position. */
+    hasHoldings: boolean;
+}
+
+/** Intents answered from the user's holdings: with none, that's what the answer says. */
+const FROM_HOLDINGS = new Set<PlannerResult['intent']>([
+    'alpha_hurt',
+    'alpha_helped',
+    'exposure',
+    'unknown',
+    'policy_breaches',
+    'stress_test',
+    'theme_policy_exposure',
+    'missing_thesis',
+    'trim_to_target',
+    'correlation',
+]);
+
 /** What an empty answer means, where it isn't just "nothing matched". */
-function emptyLede(intent: PlannerResult['intent'], run: AskToolRun | undefined): string {
+function emptyLede(intent: PlannerResult['intent'], run: AskToolRun | undefined, source: AnswerSource): string {
     const symbol = (run?.args as { symbol?: string } | undefined)?.symbol;
+    if (!source.hasHoldings && FROM_HOLDINGS.has(intent)) {
+        return `There are no holdings to answer from yet. Add an account with positions and ask again.`;
+    }
     switch (intent) {
         case 'pnl_source':
         case 'pnl_sector':
@@ -51,21 +74,32 @@ function emptyLede(intent: PlannerResult['intent'], run: AskToolRun | undefined)
             return `No closed trades in that window. A sale counts once it can be matched against a buy recorded before it.`;
         case 'correlation':
             return `There aren't enough stored daily closes${symbol ? ` for ${symbol}` : ''} and your holdings to measure a correlation yet.`;
-        case 'alpha_hurt':
         case 'alpha_helped':
+            return `None of your positions is up on what it cost right now.`;
+        case 'alpha_hurt':
+            return `None of your positions has a recorded cost to measure a gain or loss against.`;
         case 'exposure':
         case 'unknown':
+            return `Your holdings have no value to measure yet.`;
         case 'policy_breaches':
-        case 'stress_test':
+            return `Every risk policy check is inside its limit right now.`;
         case 'theme_policy_exposure':
-            return `There are no holdings to answer from yet. Add an account with positions and ask again.`;
+            return `None of your holdings has theme data yet.`;
+        case 'missing_thesis':
+            return `Every position you hold has an active written thesis.`;
+        case 'trim_to_target':
+            return `You don't hold ${symbol ?? 'that ticker'}, so there's nothing to trim.`;
+        case 'churn_risks':
+            return `No name has been traded back and forth in the window your policy watches.`;
+        case 'trade_policy_impact':
+            return `None of your recent buys added to a name a breached or watched policy check points at.`;
         default:
             return `I ran the query but didn't find any matching data in the current window.`;
     }
 }
 
-function lede(intent: PlannerResult['intent'], run: AskToolRun | undefined): string {
-    if (!run || run.rows.length === 0) return emptyLede(intent, run);
+function lede(intent: PlannerResult['intent'], run: AskToolRun | undefined, source: AnswerSource): string {
+    if (!run || run.rows.length === 0) return emptyLede(intent, run, source);
     if (run.rows[0].label === NO_EMPLOYER_LABEL) {
         return `You haven't named your employer's stock yet, so there's nothing to measure[[tool:${run.name}#0]].`;
     }
@@ -131,9 +165,10 @@ function kvList(rows: AskRow[], run: AskToolRun): string {
 export function renderAnswer(
     plan: PlannerResult,
     runs: AskToolRun[],
+    source: AnswerSource,
 ): AskAnswer {
     const run = runs[0];
-    const ledeText = lede(plan.intent, run);
+    const ledeText = lede(plan.intent, run, source);
     const body = run && run.rows.length > 0 ? `\n\n${kvList(run.rows, run)}` : '';
     const text = `${ledeText}${body}`;
 
