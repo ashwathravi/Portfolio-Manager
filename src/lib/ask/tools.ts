@@ -79,6 +79,16 @@ function usdSigned(n: number): string {
     return `${sign}$${abs}`;
 }
 
+/** An amount in its own currency: "$1,000", "CA$1,000". */
+function money(n: number, currency: string): string {
+    if (currency === 'USD') return usd(n);
+    try {
+        return new Intl.NumberFormat('en-US', { style: 'currency', currency, maximumFractionDigits: 0 }).format(n);
+    } catch {
+        return `${Math.round(n).toLocaleString('en-US')} ${currency}`;
+    }
+}
+
 function pct(n: number): string {
     if (!Number.isFinite(n)) return '0%';
     return `${n >= 0 ? '+' : ''}${n.toFixed(1)}%`;
@@ -644,7 +654,7 @@ export function trade_policy_impact(ctx: AskContext, _args: Record<string, unkno
         .slice(0, 8)
         .map((row) => ({
             label: `BUY ${row.symbol}`,
-            value: usd(row.value),
+            value: money(row.value, row.currency),
             sub: `${new Date(row.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })} · added to a name a breached or watched policy check points at`,
             tone: 'warn',
             href: '/execution',

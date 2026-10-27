@@ -242,6 +242,9 @@ describe('Ask Ledger answers from the user\'s data', () => {
         assert.strictEqual(runAsk('How much cash is unassigned to jobs?', context()).toolRuns[0].rows[0].value, '$10,000');
         const assigned = context({}, { cashJobs: [{ id: 'cash-tax_reserve', type: 'tax_reserve', label: 'Tax reserve', amount: 10_000 }] });
         assert.strictEqual(runAsk('How much cash is unassigned to jobs?', assigned).toolRuns[0].rows[0].value, '$0');
+        // A buy in another currency is shown in it, not as dollars.
+        const cad = context({ activity: [{ ...row('t9', '2026-10-23', 'BUY', 'TSLA', 4, 250), currency: 'CAD' }] });
+        assert.deepStrictEqual(runAsk('Which trades increased policy risk?', cad).toolRuns[0].rows.map((r) => r.value), ['CA$1,000']);
         // TSLA was bought into a breached speculative bucket; KO and PG are names traded back and forth.
         assert.deepStrictEqual(
             runAsk('Which trades increased policy risk?', context()).toolRuns[0].rows.map((r) => [r.label, r.value]),
