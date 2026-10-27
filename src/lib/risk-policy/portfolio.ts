@@ -87,8 +87,10 @@ export function buildPolicyPortfolio({
     return {
         holdings,
         cashTotal: accounts.reduce((sum, account) => sum + (account.cashBalance || 0), 0),
+        // The policy's figures are in dollars: a trade in another currency is
+        // left out of its turnover rather than added as if it were dollars.
         trades: activity
-            .filter((row) => (row.side === "BUY" || row.side === "SELL") && !(Date.parse(row.date) < since))
+            .filter((row) => (row.side === "BUY" || row.side === "SELL") && row.currency === "USD" && !(Date.parse(row.date) < since))
             .map((row) => ({
                 id: row.id,
                 date: row.date,

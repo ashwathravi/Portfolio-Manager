@@ -79,6 +79,9 @@ describe("buildPolicyPortfolio", () => {
             { id: "t3", date: "2026-10-22T15:00:00Z", type: "sell", ticker: "KO", amount: 640 },
         ]);
         assert.deepEqual(portfolio.theses, [{ id: "th", ticker: "KO" }]);
+        // Dollars only: a trade in another currency isn't turnover in dollars.
+        const cad = buildPolicyPortfolio({ accounts: [], activity: [{ ...activity("c1", "2026-10-20T15:00:00Z", "BUY", "SHOP", 100), currency: "CAD" }], asOf });
+        assert.deepEqual(cad.trades, []);
         // Without a date, every buy and sell is kept.
         assert.equal(buildPolicyPortfolio({ accounts: [], activity: [activity("t4", old, "BUY", "PG", 100)] }).trades.length, 1);
     });

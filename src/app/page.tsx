@@ -126,7 +126,8 @@ export default async function Today() {
     theses,
     asOf: new Date(),
   });
-  const riskPolicySummary = evaluateRiskPolicy(policyPortfolio, riskPolicy);
+  // Measured as of now: the trading-activity window ends today, not at the last trade.
+  const riskPolicySummary = evaluateRiskPolicy(policyPortfolio, riskPolicy, { asOf: new Date() });
 
   return (
     <div className="pm-dashboard-stack p-6">

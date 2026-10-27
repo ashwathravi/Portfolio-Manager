@@ -92,6 +92,15 @@ describe("riskPolicyInput / evaluateRiskPolicy", () => {
         assert.ok(after.nextActions.some((action) => action.id === "speculative_options_exposure"));
     });
 
+    test("regression: trading activity is measured back from today, not from the last trade", () => {
+        const old = (id: string, type: string, date: string) => ({ id, date, type, ticker: "MSFT", amount: 1_000 });
+        const portfolio = { ...PORTFOLIO, trades: [old("t1", "buy", "2026-07-01"), old("t2", "sell", "2026-07-08"), old("t3", "buy", "2026-07-15")] };
+        const churn = (asOf?: Date) => evaluateRiskPolicy(portfolio, POLICY, { asOf }).dimensions.find((d) => d.id === "churn_activity")!;
+        // MSFT traded back and forth in July: within 90 days of the last trade, not of Oct 26.
+        assert.deepEqual(churn().impactedSymbols, ["MSFT"]);
+        assert.deepEqual(churn(new Date("2026-10-26T12:00:00Z")).impactedSymbols, []);
+    });
+
     test("an empty portfolio has nothing to measure", () => {
         const summary = evaluateRiskPolicy(EMPTY_POLICY_PORTFOLIO, POLICY);
         assert.equal(summary.totalMarketValue, 0);
