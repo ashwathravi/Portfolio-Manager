@@ -1,13 +1,15 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
+import { signOut } from "next-auth/react";
+import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
     AlertDialog,
-    AlertDialogAction,
     AlertDialogCancel,
     AlertDialogContent,
     AlertDialogDescription,
@@ -16,110 +18,150 @@ import {
     AlertDialogTitle,
     AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { useSettingsStore } from "@/lib/stores/settingsStore";
-import { toast } from "sonner";
+import { holdingsCsvRows, transactionsCsvRows, type AccountExport } from "@/lib/account/export-data";
+import { exportToCsv } from "@/lib/exportCsv";
+import { prepareForAccountDeletionSignOut } from "@/lib/storage/sign-out";
+
+/**
+ * Settings › Data (launch item i65): download everything Atlas holds for
+ * you, or delete your account and all of it, with your linked connections
+ * ended at Plaid.
+ */
+
+async function readApiError(response: Response, fallback: string): Promise<string> {
+    try {
+        const payload = (await response.json()) as { error?: unknown };
+        return typeof payload.error === "string" && payload.error.trim() ? payload.error : fallback;
+    } catch {
+        return fallback;
+    }
+}
+
+function saveFile(filename: string, contents: string, type: string) {
+    const url = URL.createObjectURL(new Blob([contents], { type }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+}
 
 export function DataManagement() {
     const [deleteConfirmText, setDeleteConfirmText] = useState("");
-    const [isExporting, setIsExporting] = useState(false);
-    const resetSettings = useSettingsStore((s) => s.resetSettings);
+    const [exporting, setExporting] = useState<"json" | "transactions" | "holdings" | null>(null);
+    const [deleting, setDeleting] = useState(false);
+    const [deleteError, setDeleteError] = useState<string | null>(null);
 
-    const handleExport = async () => {
-        setIsExporting(true);
-
-        const exportData = {
-            exportedAt: new Date().toISOString(),
-            profile: useSettingsStore.getState().profile,
-            notifications: useSettingsStore.getState().notifications,
-            tags: useSettingsStore.getState().tags,
-            accounts: useSettingsStore.getState().accounts,
-        };
-
-        const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: "application/json" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `atlas-wealth-export-${new Date().toISOString().split("T")[0]}.json`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-
-        setIsExporting(false);
-        toast.success("Data exported successfully");
+    const download = async (kind: "json" | "transactions" | "holdings") => {
+        setExporting(kind);
+        try {
+            const response = await fetch("/api/account/export", { credentials: "same-origin" });
+            if (!response.ok) throw new Error(await readApiError(response, "Couldn't export your data. Try again."));
+            const data = (await response.json()) as AccountExport;
+            const day = data.exportedAt.slice(0, 10);
+            if (kind === "json") {
+                saveFile(`atlas-wealth-export-${day}.json`, JSON.stringify(data, null, 2), "application/json");
+            } else {
+                const rows = kind === "transactions" ? transactionsCsvRows(data) : holdingsCsvRows(data);
+                if (rows.length === 0) {
+                    toast.info(kind === "transactions" ? "You have no transactions to export." : "You have no holdings to export.");
+                    return;
+                }
+                exportToCsv(`atlas-wealth-${kind}-${day}.csv`, rows);
+            }
+            toast.success("Your data was downloaded.");
+        } catch (error) {
+            toast.error(error instanceof Error ? error.message : "Couldn't export your data. Try again.");
+        } finally {
+            setExporting(null);
+        }
     };
 
-    const handleDeleteAccount = () => {
-        resetSettings();
-        setDeleteConfirmText("");
-        toast.success("Account data has been reset");
+    const deleteAccount = async () => {
+        setDeleting(true);
+        setDeleteError(null);
+        try {
+            const response = await fetch("/api/account", {
+                method: "DELETE",
+                headers: { "Content-Type": "application/json" },
+                credentials: "same-origin",
+                body: JSON.stringify({ confirm: deleteConfirmText }),
+            });
+            if (!response.ok) throw new Error(await readApiError(response, "Couldn't delete your account. Nothing was deleted; try again."));
+            // The account and its session are gone: clear this browser's
+            // copies (nothing unsaved is sent), then sign out.
+            prepareForAccountDeletionSignOut();
+            await signOut({ callbackUrl: "/login?deleted=1" });
+        } catch (error) {
+            setDeleteError(error instanceof Error ? error.message : "Couldn't delete your account. Try again.");
+            setDeleting(false);
+        }
     };
 
     return (
-        <Card>
+        <Card data-testid="data-management">
             <CardHeader>
                 <CardTitle>Data & Privacy</CardTitle>
             </CardHeader>
             <CardContent className="space-y-6">
-                {/* Data Encryption */}
-                <div className="flex items-center justify-between">
+                <p className="text-sm text-muted-foreground">
+                    How your data is kept and protected, and who it&apos;s shared with:{" "}
+                    <Link href="/privacy" className="underline underline-offset-2">Privacy Policy</Link>.
+                </p>
+
+                <hr className="border-border" />
+
+                <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
-                        <h4 className="font-medium">Data Encryption</h4>
-                        <p className="text-sm text-muted-foreground">All your data is encrypted at rest and in transit</p>
+                        <h4 className="font-medium">Download your data</h4>
+                        <p className="text-sm text-muted-foreground">
+                            Everything Atlas holds for you as one JSON file (accounts, holdings, transactions,
+                            value history, settings, watchlist, journal and theses), or your transactions or
+                            holdings as CSV.
+                        </p>
                     </div>
-                    <span className="text-sm font-medium text-primary">Enabled</span>
+                    <div className="flex flex-wrap gap-2">
+                        <Button variant="outline" onClick={() => void download("json")} disabled={exporting !== null}>
+                            {exporting === "json" ? "Preparing…" : "Everything (JSON)"}
+                        </Button>
+                        <Button variant="outline" onClick={() => void download("transactions")} disabled={exporting !== null}>
+                            {exporting === "transactions" ? "Preparing…" : "Transactions (CSV)"}
+                        </Button>
+                        <Button variant="outline" onClick={() => void download("holdings")} disabled={exporting !== null}>
+                            {exporting === "holdings" ? "Preparing…" : "Holdings (CSV)"}
+                        </Button>
+                    </div>
                 </div>
 
                 <hr className="border-border" />
 
-                {/* Export Data */}
-                <div className="flex items-center justify-between">
+                <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
-                        <h4 className="font-medium">Export Data</h4>
-                        <p className="text-sm text-muted-foreground">Download all your portfolio and transaction data</p>
+                        <h4 className="font-medium">Delete account</h4>
+                        <p className="text-sm text-muted-foreground">
+                            Permanently delete your account and everything Atlas holds for you, and end its access to
+                            your linked institutions.
+                        </p>
                     </div>
-                    <AlertDialog>
+                    <AlertDialog
+                        onOpenChange={() => {
+                            setDeleteConfirmText("");
+                            setDeleteError(null);
+                        }}
+                    >
                         <AlertDialogTrigger asChild>
-                            <Button variant="outline">
-                                Export
-                            </Button>
+                            <Button variant="destructive">Delete account</Button>
                         </AlertDialogTrigger>
                         <AlertDialogContent>
                             <AlertDialogHeader>
-                                <AlertDialogTitle>Export Your Data</AlertDialogTitle>
+                                <AlertDialogTitle>Delete your account?</AlertDialogTitle>
                                 <AlertDialogDescription>
-                                    This will download a JSON file containing your profile, settings, and trading data.
-                                </AlertDialogDescription>
-                            </AlertDialogHeader>
-                            <AlertDialogFooter>
-                                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                <AlertDialogAction onClick={handleExport} disabled={isExporting}>
-                                    {isExporting ? "Exporting..." : "Export"}
-                                </AlertDialogAction>
-                            </AlertDialogFooter>
-                        </AlertDialogContent>
-                    </AlertDialog>
-                </div>
-
-                <hr className="border-border" />
-
-                {/* Delete Account */}
-                <div className="flex items-center justify-between">
-                    <div>
-                        <h4 className="font-medium">Delete Account</h4>
-                        <p className="text-sm text-muted-foreground">Permanently delete your account and all associated data</p>
-                    </div>
-                    <AlertDialog onOpenChange={() => setDeleteConfirmText("")}>
-                        <AlertDialogTrigger asChild>
-                            <Button variant="destructive">
-                                Delete Account
-                            </Button>
-                        </AlertDialogTrigger>
-                        <AlertDialogContent>
-                            <AlertDialogHeader>
-                                <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
-                                <AlertDialogDescription>
-                                    This action cannot be undone. This will permanently delete your account and all associated data.
+                                    This deletes your accounts, holdings, transactions, value history, settings,
+                                    watchlist, journal and theses, and ends Atlas&apos;s access to your linked
+                                    institutions through Plaid. It can&apos;t be undone; download your data first if you
+                                    want a copy.
                                 </AlertDialogDescription>
                             </AlertDialogHeader>
                             <div className="space-y-2 py-2">
@@ -132,17 +174,22 @@ export function DataManagement() {
                                     onChange={(e) => setDeleteConfirmText(e.target.value)}
                                     placeholder="DELETE"
                                     className="font-mono"
+                                    autoComplete="off"
                                 />
+                                {deleteError && (
+                                    <p className="text-sm text-destructive" role="alert" data-testid="delete-account-error">{deleteError}</p>
+                                )}
                             </div>
                             <AlertDialogFooter>
-                                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                <AlertDialogAction
-                                    onClick={handleDeleteAccount}
-                                    disabled={deleteConfirmText !== "DELETE"}
-                                    className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                                <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+                                {/* Not an AlertDialogAction: the dialog stays open to show a refusal. */}
+                                <Button
+                                    variant="destructive"
+                                    onClick={() => void deleteAccount()}
+                                    disabled={deleteConfirmText !== "DELETE" || deleting}
                                 >
-                                    Delete Account
-                                </AlertDialogAction>
+                                    {deleting ? "Deleting…" : "Delete account"}
+                                </Button>
                             </AlertDialogFooter>
                         </AlertDialogContent>
                     </AlertDialog>

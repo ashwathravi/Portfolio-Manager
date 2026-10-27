@@ -115,3 +115,19 @@ async function setSessionCookie(context: BrowserContext, sessionToken: string) {
         sameSite: 'Lax',
     }]);
 }
+
+/**
+ * What the database still holds for a user (launch item i65): their user
+ * row, sessions, accounts and settings. All zero once the account is deleted.
+ */
+export async function accountRowsLeft(userId: string): Promise<{ users: number; sessions: number; portfolios: number; settings: number }> {
+    const sql = database();
+    const [counts] = await sql<{ users: number; sessions: number; portfolios: number; settings: number }[]>`
+        SELECT
+            (SELECT count(*) FROM auth_users WHERE id = ${userId})::int AS users,
+            (SELECT count(*) FROM auth_sessions WHERE user_id = ${userId})::int AS sessions,
+            (SELECT count(*) FROM portfolios WHERE user_id = ${userId})::int AS portfolios,
+            (SELECT count(*) FROM user_settings WHERE user_id = ${userId})::int AS settings`;
+    return { ...counts };
+}
+
