@@ -4,6 +4,8 @@
  * Settings card builds the CSV files from the same export.
  */
 
+import type { Order } from "@/types/execution";
+
 export const ACCOUNT_EXPORT_FORMAT = "atlas-wealth-export";
 export const ACCOUNT_EXPORT_VERSION = 1;
 
@@ -52,6 +54,9 @@ export interface ExportedValuationPosition {
     marketValue: number | null;
 }
 
+/** An order plan drafted on Trade, as the blotter shows it (src/types/execution.ts). */
+export type ExportedOrderPlan = Order;
+
 export interface ExportedAccount {
     id: string;
     name: string;
@@ -64,6 +69,8 @@ export interface ExportedAccount {
     holdings: ExportedHolding[];
     transactions: ExportedTransaction[];
     valuationHistory: ExportedValuation[];
+    /** Oldest first. */
+    orderPlans: ExportedOrderPlan[];
 }
 
 export interface ExportedConnection {

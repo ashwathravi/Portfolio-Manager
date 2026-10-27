@@ -677,6 +677,12 @@ test.describe('Settings page', () => {
         }
 
         await gotoAppPage(page, '/execution');
+        // The ticket hydrates before it takes a ticker (it upper-cases what's typed).
+        const ticker = page.getByLabel('Ticker');
+        await expect(async () => {
+            await ticker.fill('aapl');
+            await expect(ticker).toHaveValue('AAPL', { timeout: 1_000 });
+        }).toPass({ timeout: 10_000 });
         const guardrails = page.locator('.pm-exec-guardrails');
         await expect(guardrails).toContainText('Sell discipline');
         await expect(guardrails).toContainText('No-add rule triggered: AAPL Allocation cap');

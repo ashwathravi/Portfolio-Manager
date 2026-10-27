@@ -169,6 +169,8 @@ function isSessionBackedApiRoute(pathname: string, method: string): boolean {
     if (pathname === "/api/transactions" && method === "POST") return true;
     if (pathname === "/api/transactions/import" && method === "POST") return true;
     if (/^\/api\/transactions\/(?!import$)[^/]+$/.test(pathname) && method === "DELETE") return true;
+    if (pathname === "/api/orders" && method === "POST") return true;
+    if (/^\/api\/orders\/[^/]+$/.test(pathname) && method === "PATCH") return true;
     if (/^\/api\/portfolios\/(?!count$)[^/]+$/.test(pathname) && (method === "PATCH" || method === "DELETE")) return true;
     if (/^\/api\/portfolio\/[^/]+\/value$/.test(pathname) && method === "GET") return true;
     if (pathname === "/api/portfolio/import" && method === "POST") return true;

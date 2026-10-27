@@ -5184,6 +5184,12 @@
   box-shadow: 0 0 0 3px color-mix(in oklab, var(--pm-accent) 18%, transparent);
 }
 
+/* Where the ticker's price comes from (a stored close; never live). */
+.pm-exec-field-note {
+  font-size: 11.5px;
+  color: var(--pm-fg-subtle);
+}
+
 .pm-exec-field-hint {
   position: absolute;
   right: 10px;
@@ -5803,13 +5809,13 @@
   border: 1px solid transparent;
 }
 
-.pm-exec-status-working {
+.pm-exec-status-ready {
   background: color-mix(in oklab, var(--pm-accent) 14%, transparent);
   color: var(--pm-accent);
   border-color: color-mix(in oklab, var(--pm-accent) 35%, transparent);
 }
 
-.pm-exec-status-filled {
+.pm-exec-status-placed {
   background: color-mix(in oklab, var(--pm-success) 14%, transparent);
   color: var(--pm-success);
   border-color: color-mix(in oklab, var(--pm-success) 35%, transparent);
@@ -5827,13 +5833,8 @@
   border-color: var(--pm-border);
 }
 
-.pm-exec-status-rejected {
-  background: color-mix(in oklab, var(--pm-danger) 14%, transparent);
-  color: var(--pm-danger);
-  border-color: color-mix(in oklab, var(--pm-danger) 35%, transparent);
-}
-
-.pm-exec-cancel {
+.pm-exec-cancel,
+.pm-exec-place {
   appearance: none;
   background: transparent;
   border: none;
@@ -5848,6 +5849,25 @@
 .pm-exec-cancel:hover {
   color: var(--pm-danger);
   background: color-mix(in oklab, var(--pm-danger) 12%, transparent);
+}
+
+.pm-exec-place:hover {
+  color: var(--pm-success);
+  background: color-mix(in oklab, var(--pm-success) 12%, transparent);
+}
+
+.pm-exec-cancel:disabled,
+.pm-exec-place:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* The account a plan is for, under its ticker. */
+.pm-exec-table-account {
+  display: block;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--pm-fg-subtle);
 }
 
 .pm-exec-cancel-icon {
@@ -7208,6 +7228,7 @@
    have one specified — the same 2px solid outline + 2px offset we use
    on .pm-btn. */
 .pm-exec-cancel:focus-visible,
+.pm-exec-place:focus-visible,
 .pm-exec-instrument-btn:focus-visible,
 .pm-exec-side-btn:focus-visible,
 .pm-exec-tif-btn:focus-visible,
