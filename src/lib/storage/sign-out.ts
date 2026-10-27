@@ -62,3 +62,43 @@ export async function prepareForSignOut(
         clearBrowserDataOnSignOut();
     }
 }
+
+/**
+ * What deleting the account removes from this browser (launch item i65):
+ * everything kept under this user's key, the copies only this browser held
+ * (alerts, review notes) included, and what signing out removes.
+ */
+export function clearBrowserDataOnAccountDeletion(
+    storage: Pick<Storage, "getItem" | "setItem" | "removeItem" | "key" | "length"> | null = browserLocalStorage(),
+    scope: string = currentStorageScope(),
+): void {
+    clearBrowserDataOnSignOut(storage, scope);
+    if (!storage) return;
+    const suffix = `:${scope}`;
+    const keys: string[] = [];
+    try {
+        for (let i = 0; i < storage.length; i++) {
+            const key = storage.key(i);
+            if (key?.endsWith(suffix)) keys.push(key);
+        }
+    } catch {
+        // Storage unreadable: nothing more to find.
+    }
+    for (const key of keys) {
+        try {
+            storage.removeItem(key);
+        } catch {
+            // Already gone.
+        }
+    }
+}
+
+/**
+ * After the account is deleted: nothing unsaved is sent (there's no account
+ * to keep it), settings sync stops, and this browser's copies of the
+ * user's data go. Call before signOut().
+ */
+export function prepareForAccountDeletionSignOut(): void {
+    haltSettingsSync();
+    clearBrowserDataOnAccountDeletion();
+}

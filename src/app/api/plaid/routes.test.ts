@@ -308,6 +308,47 @@ describe("Plaid API routes", () => {
         assert.equal(await getPlaidAccessTokenForUser("item-route", USER_ID), "access-route-token");
         assert.ok(!JSON.stringify(body).includes("access-route-token"));
     });
+
+    for (const plaidRemoves of [true, false]) {
+        test(`regression: a connection that can't be saved is ended at Plaid, not left open without its token (Plaid ${plaidRemoves ? "answers" : "is down"})`, async (t) => {
+            t.mock.method(console, "info", () => {});
+            const warn = t.mock.method(console, "warn", () => {});
+            configurePlaidEnv();
+            process.env.PLAID_TOKEN_STORAGE = "postgres";
+            process.env.PLAID_TOKEN_ENCRYPTION_KEY = "test-only-registry-key";
+            const registry = createTestRegistryStore();
+            // As when the account is deleted while the connection is linked:
+            // the user row is gone by the time it's saved.
+            setPlaidTokenRegistryStoreForTests({
+                ...registry.store,
+                upsertConnection: async () => { throw new Error("insert violates foreign key constraint"); },
+            });
+            const removed: string[] = [];
+            globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+                const endpoint = String(url);
+                if (endpoint.endsWith("/item/public_token/exchange")) {
+                    return Response.json({ access_token: "access-route-token", item_id: "item-route", request_id: "r" });
+                }
+                if (endpoint.endsWith("/item/remove")) {
+                    removed.push(JSON.parse(String(init?.body)).access_token);
+                    return plaidRemoves
+                        ? Response.json({ request_id: "r" })
+                        : Response.json({ error_type: "API_ERROR", error_code: "INTERNAL_SERVER_ERROR", error_message: "down" }, { status: 500 });
+                }
+                return Response.json({ accounts: [] });
+            }) as typeof fetch;
+
+            const response = await exchangePublicToken(authorizedRequest("/api/plaid/exchange-public-token", { publicToken: "public-route-token" }));
+            const body = await response.json();
+
+            assert.equal(response.status, 503);
+            assert.equal(body.code, "PLAID_CONNECTION_NOT_SAVED");
+            assert.deepEqual(removed, ["access-route-token"]);
+            assert.ok(!JSON.stringify(body).includes("access-route-token"));
+            assert.equal(warn.mock.callCount(), plaidRemoves ? 0 : 1);
+            assert.ok(!JSON.stringify(warn.mock.calls.map((c) => c.arguments)).includes("access-route-token"));
+        });
+    }
 });
 
 // Signs in as the fixed local-bypass principal (non-production only) and

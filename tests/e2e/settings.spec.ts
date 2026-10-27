@@ -1,6 +1,9 @@
+import { readFileSync } from 'node:fs';
 import { test, expect } from '@playwright/test';
 import { clickUntil, gotoAppPage, openPolicyChecks, reloadAppPage } from './helpers/app';
-import { signInAsFreshUser } from './helpers/users';
+import { accountRowsLeft, signInAsFreshUser } from './helpers/users';
+
+const databaseAuthEnabled = Boolean(process.env.CI || process.env.E2E_DATABASE_AUTH === '1');
 
 /**
  * Phase 9 (AR-94) Settings tests, refreshed for JournalPlus (AR-109).
@@ -340,6 +343,51 @@ test.describe('Settings page', () => {
         await expect(page.getByText('Disconnected Vanguard.')).toBeVisible();
         expect(deleted).toEqual(['/api/plaid/connections/item-vanguard']);
         await expect(card.getByTestId('plaid-connection')).toHaveCount(1);
+    });
+
+    test('Data: everything downloads as JSON, and transactions as CSV, from the account', async ({ page }) => {
+        // Launch item i65: the export is the account's data, not this browser's settings.
+        test.skip(!databaseAuthEnabled, 'requires the database-auth E2E mode');
+        const data = page.getByTestId('data-management');
+        const [json] = await Promise.all([page.waitForEvent('download'), data.getByRole('button', { name: 'Everything (JSON)' }).click()]);
+        expect(json.suggestedFilename()).toMatch(/^atlas-wealth-export-\d{4}-\d{2}-\d{2}\.json$/);
+        const exported = JSON.parse(readFileSync(await json.path(), 'utf8')) as { format: string; accounts: Array<{ name: string; transactions: unknown[] }> };
+        expect(exported.format).toBe('atlas-wealth-export');
+        // The fresh user is a copy of fixture user A: its accounts and transactions.
+        expect(exported.accounts.length).toBeGreaterThan(0);
+        expect(exported.accounts.some((a) => a.transactions.length > 0)).toBe(true);
+        expect(JSON.stringify(exported)).not.toContain('userId');
+
+        const [csv] = await Promise.all([page.waitForEvent('download'), data.getByRole('button', { name: 'Transactions (CSV)' }).click()]);
+        expect(csv.suggestedFilename()).toMatch(/^atlas-wealth-transactions-.*\.csv$/);
+        expect(readFileSync(await csv.path(), 'utf8').split('\n')[0]).toBe('account,date,type,symbol,quantity,price,amount,fees,currency,notes,source');
+    });
+
+    test('Data: deleting the account needs DELETE typed, then signs out with everything gone', async ({ context, page }) => {
+        // Launch item i65: Delete account used to reset this browser's settings only.
+        test.skip(!databaseAuthEnabled, 'requires the database-auth E2E mode');
+        const userId = await signInAsFreshUser(context);
+        await gotoAppPage(page, '/settings');
+        expect(await accountRowsLeft(userId)).toEqual({ users: 1, sessions: 1, portfolios: expect.any(Number), settings: expect.any(Number) });
+
+        await page.getByTestId('data-management').getByRole('button', { name: 'Delete account' }).click();
+        const dialog = page.getByRole('alertdialog');
+        const confirm = dialog.getByRole('button', { name: 'Delete account' });
+        await expect(confirm).toBeDisabled();
+        await dialog.getByLabel('Type DELETE to confirm').fill('delete');
+        await expect(confirm).toBeDisabled();
+        await dialog.getByLabel('Type DELETE to confirm').fill('DELETE');
+        await confirm.click();
+
+        await page.waitForURL(/\/login\?deleted=1/);
+        await expect(page.getByTestId('login-account-deleted')).toContainText('Your account and its data were deleted');
+        expect(await accountRowsLeft(userId)).toEqual({ users: 0, sessions: 0, portfolios: 0, settings: 0 });
+        // This browser kept nothing of theirs.
+        const leftover = await page.evaluate((scope) => Object.keys(localStorage).filter((key) => key.endsWith(`:${scope}`)), userId);
+        expect(leftover).toEqual([]);
+        // Signed out: the app sends them to sign in.
+        await page.goto('/settings');
+        await expect(page).toHaveURL(/\/login/);
     });
 
     test('legacy ?tab=notifications links land on the Notifications section', async ({ page }) => {
