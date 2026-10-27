@@ -34,6 +34,8 @@ export const PRE_TRADE_RISK_POLICY_RULE_TYPES = [
     "no_add_to_breached_position",
     "stale_thesis",
     "missing_bucket_classification",
+    // The user's holdings couldn't be loaded, so nothing was checked.
+    "portfolio_unavailable",
 ] as const;
 
 export type PreTradeRiskPolicyRuleType = (typeof PRE_TRADE_RISK_POLICY_RULE_TYPES)[number];
@@ -145,7 +147,7 @@ export function evaluatePreTradeRiskPolicy(input: PreTradeRiskPolicyInput): PreT
     if (!trade.ticker || tradeValue <= 0) {
         return emptyImpact("Risk policy needs ticker, price, and quantity.");
     }
-    if (input.portfolioUnavailable) return unavailableImpact(overrideAccepted);
+    if (input.portfolioUnavailable) return unavailableImpact(trade.ticker, overrideReason, asOf);
     if (portfolioValue <= 0) {
         return emptyImpact("Add holdings to an account to check orders against your risk policy.");
     }
@@ -668,7 +670,12 @@ function summarizeDirection(checks: readonly PreTradeRiskPolicyCheck[]): PreTrad
     return "neutral";
 }
 
-function unavailableImpact(overrideAccepted: boolean): PreTradeRiskPolicyImpact {
+/**
+ * Holdings that couldn't be loaded: nothing is checked, so the order needs
+ * a reason, kept with it as an exception like any other override.
+ */
+function unavailableImpact(ticker: string, overrideReason: string, asOf: Date): PreTradeRiskPolicyImpact {
+    const overrideAccepted = overrideReason.length >= OVERRIDE_MIN_CHARS;
     return {
         decision: "override_required",
         blocksSubmit: !overrideAccepted,
@@ -680,7 +687,18 @@ function unavailableImpact(overrideAccepted: boolean): PreTradeRiskPolicyImpact 
             : "Your holdings couldn't be loaded, so this order can't be checked against your risk policy.",
         checks: [],
         failedChecks: [],
-        exceptionPreview: [],
+        exceptionPreview: overrideAccepted
+            ? [{
+                ruleType: "portfolio_unavailable",
+                symbol: normalizeSymbol(ticker),
+                reason: overrideReason,
+                currentPct: 0,
+                postPct: 0,
+                thresholdPct: 0,
+                message: "Holdings couldn't be loaded, so the order wasn't checked against the risk policy.",
+                capturedAt: asOf.toISOString(),
+            }]
+            : [],
     };
 }
 

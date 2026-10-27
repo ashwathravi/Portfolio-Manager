@@ -157,9 +157,22 @@ describe("pre-trade risk policy evaluator", () => {
         assert.equal(blocked.direction, "missing_data");
         assert.match(blocked.summary, /couldn't be loaded/);
 
-        const overridden = evaluatePreTradeRiskPolicy({ ...input, overrideReason: "Checked my holdings by hand first." });
+        assert.deepEqual(blocked.exceptionPreview, []);
+
+        const overridden = evaluatePreTradeRiskPolicy({ ...input, overrideReason: "  Checked my holdings by hand first. " });
         assert.equal(overridden.blocksSubmit, false);
         assert.equal(overridden.overrideAccepted, true);
+        // The reason is kept with the order, as any override's is.
+        assert.deepEqual(overridden.exceptionPreview, [{
+            ruleType: "portfolio_unavailable",
+            symbol: "NVDA",
+            reason: "Checked my holdings by hand first.",
+            currentPct: 0,
+            postPct: 0,
+            thresholdPct: 0,
+            message: "Holdings couldn't be loaded, so the order wasn't checked against the risk policy.",
+            capturedAt: "2026-05-15T00:00:00.000Z",
+        }]);
 
         // Loaded, but nothing held: nothing to check against.
         const empty = evaluatePreTradeRiskPolicy({ ...input, portfolioUnavailable: false });
