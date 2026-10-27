@@ -21,6 +21,7 @@ import { authUsers, authVerificationTokens, plaidItems, portfolios } from "@/db/
 import { disconnectPlaidItem } from "@/lib/plaid/connections";
 import type { PlaidFetch } from "@/lib/plaid/link";
 import type { PlaidConfig } from "@/lib/plaid/sync";
+import { buildLockUserAccountsQuery } from "@/lib/portfolio/manage";
 
 type Database = typeof db;
 
@@ -73,7 +74,24 @@ export async function deleteAccount(
     if (blocked.length > 0) throw new AccountDeletionBlockedError(blocked);
 
     return database.transaction(async (tx) => {
-        const [user] = await tx.select({ email: authUsers.email }).from(authUsers).where(eq(authUsers.id, userId)).limit(1);
+        // After any sync, pick or account deletion in flight. Locking the
+        // user row makes anything added for them meanwhile (an account, a
+        // connection) wait, then fail once they're gone, instead of slipping
+        // in between the statements below; locking their connections does
+        // the same for one linked again.
+        await buildLockUserAccountsQuery(userId, tx);
+        const [user] = await tx.select({ email: authUsers.email }).from(authUsers).where(eq(authUsers.id, userId)).for("update");
+        const connections = await tx
+            .select({ institutionName: plaidItems.institutionName, status: plaidItems.status, revokedAt: plaidItems.revokedAt })
+            .from(plaidItems)
+            .where(eq(plaidItems.userId, userId))
+            .for("update");
+        // Linked while the others were being ended: its token would go with
+        // the user row, leaving Atlas's access open. Trying again ends it.
+        const linkedSince = connections.filter((c) => c.status !== "revoked" && c.revokedAt === null);
+        if (linkedSince.length > 0) {
+            throw new AccountDeletionBlockedError(linkedSince.map((c) => c.institutionName ?? "a linked institution"));
+        }
         // portfolios.user_id is RESTRICT: the accounts go first, taking their
         // holdings, transactions and valuation history with them.
         const accounts = await tx.delete(portfolios).where(eq(portfolios.userId, userId)).returning({ id: portfolios.id });

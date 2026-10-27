@@ -22,6 +22,8 @@ describe('account deletion and export', { skip: !DATABASE_URL && 'SCRIPTS_TEST_D
     const name = `account_test_${process.pid}`;
     let server: ReturnType<typeof postgres>;
     let sql: ReturnType<typeof postgres>;
+    /** A second session, for writes that land while a deletion runs. */
+    let other: ReturnType<typeof postgres>;
     let database: Parameters<typeof deleteAccount>[1]['database'] & object;
 
     before(async () => {
@@ -31,12 +33,14 @@ describe('account deletion and export', { skip: !DATABASE_URL && 'SCRIPTS_TEST_D
         const scratch = new URL(DATABASE_URL!);
         scratch.pathname = `/${name}`;
         sql = postgres(scratch.toString(), { max: 1, onnotice: () => {} });
+        other = postgres(scratch.toString(), { max: 1, onnotice: () => {} });
         await sql.unsafe(readFileSync('scripts/db/init-local.sql', 'utf8'));
         await migrate(drizzle(sql), { migrationsFolder: 'drizzle' });
         database = drizzle(sql, { schema });
     });
 
     after(async () => {
+        await other?.end();
         await sql?.end();
         await server?.unsafe(`DROP DATABASE IF EXISTS ${name}`);
         await server?.end();
@@ -153,6 +157,60 @@ describe('account deletion and export', { skip: !DATABASE_URL && 'SCRIPTS_TEST_D
         // Plaid not set up here, with a connection open: blocked too.
         await assert.rejects(deleteAccount('u-blocked', { plaid: null, database, now: NOW }), AccountDeletionBlockedError);
         assert.deepEqual(await rowsOf('u-blocked'), before);
+    });
+
+    test('regression: a connection linked while the others are being ended blocks the deletion, and nothing is deleted', async () => {
+        await seedUser('u-late-link');
+        const plaid = plaidThat(200);
+        const fetchImpl: PlaidFetch = async (url, init) => {
+            // The user links another institution in a second tab meanwhile.
+            await other`
+                INSERT INTO plaid_items (user_id, plaid_item_id, institution_id, institution_name, access_token_ciphertext, access_token_iv, access_token_auth_tag)
+                VALUES ('u-late-link', 'item-late', 'ins_2', 'Schwab', 'late-cipher', 'i', 't')`;
+            return plaid.fetchImpl(url, init);
+        };
+        await assert.rejects(
+            deleteAccount('u-late-link', { plaid: CONFIG, database, fetchImpl, getAccessToken: async () => 'access-sandbox-1', now: NOW }),
+            (error: unknown) => error instanceof AccountDeletionBlockedError && error.institutions.join() === 'Schwab',
+        );
+        const left = await rowsOf('u-late-link');
+        assert.deepEqual([left.users, left.portfolios, left.plaid_items], [1, 1, 2]);
+        // Trying again ends the new one too.
+        assert.deepEqual(
+            await deleteAccount('u-late-link', { plaid: CONFIG, database, fetchImpl: plaid.fetchImpl, getAccessToken: async () => 'access-sandbox-2', now: NOW }),
+            { accounts: 1, connections: 1 },
+        );
+        assert.equal((await rowsOf('u-late-link')).users, 0);
+    });
+
+    test('regression: an account being added when the deletion starts is deleted with the rest, not a failed deletion', async () => {
+        await seedUser('u-race');
+        let inserted!: () => void;
+        let release!: () => void;
+        const insertedYet = new Promise<void>((resolve) => { inserted = resolve; });
+        const held = new Promise<void>((resolve) => { release = resolve; });
+        const adding = other.begin(async (transaction) => {
+            const tx = transaction as unknown as typeof other;
+            await tx`INSERT INTO portfolios (user_id, name) VALUES ('u-race', 'Added meanwhile')`;
+            inserted();
+            await held;
+        });
+        await insertedYet;
+        const deletion = deleteAccount('u-race', { plaid: CONFIG, database, fetchImpl: plaidThat(200).fetchImpl, getAccessToken: async () => 'access-sandbox-1', now: NOW });
+        try {
+            // The deletion waits for the open transaction rather than
+            // missing its row.
+            const deadline = Date.now() + 10_000;
+            while ((await server`SELECT 1 FROM pg_stat_activity WHERE datname = ${name} AND wait_event_type = 'Lock'`).length === 0) {
+                assert.ok(Date.now() < deadline, 'the deletion never waited for the account being added');
+                await new Promise((resolve) => setTimeout(resolve, 20));
+            }
+        } finally {
+            release();
+            await adding;
+        }
+        assert.deepEqual(await deletion, { accounts: 2, connections: 1 });
+        assert.equal((await rowsOf('u-race')).users, 0);
     });
 
     test('a user without linked connections is deleted without asking Plaid', async () => {
