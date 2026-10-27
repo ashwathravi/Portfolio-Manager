@@ -162,6 +162,8 @@ function isSessionBackedApiRoute(pathname: string, method: string): boolean {
     if (pathname === "/api/plaid/sync" && method === "POST") return true;
     if (pathname === "/api/plaid/connections" && method === "GET") return true;
     if (/^\/api\/plaid\/connections\/[^/]+$/.test(pathname) && method === "DELETE") return true;
+    if (pathname === "/api/account" && method === "DELETE") return true;
+    if (pathname === "/api/account/export" && method === "GET") return true;
     if (pathname === "/api/portfolios/count" && method === "GET") return true;
     if (pathname === "/api/portfolios" && method === "POST") return true;
     if (pathname === "/api/transactions" && method === "POST") return true;

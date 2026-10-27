@@ -154,11 +154,13 @@ export default async function PrivacyPage({ searchParams }: { searchParams: Sear
                 <section aria-labelledby="privacy-retention">
                     <h2 id="privacy-retention">Keeping and deleting your data</h2>
                     <p>
-                        We keep your data while your account is open. Email <ContactLink /> to delete your
-                        account: within 30 days we remove your account, linked-account data (including our
-                        encrypted access to your institutions), portfolios, transactions, watchlist, journal,
-                        theses, Ask questions and settings from our database,
-                        unless the law requires us to keep something.
+                        We keep your data while your account is open. Download a copy of it at any time in
+                        Settings (one JSON file, or your transactions and holdings as CSV). Delete your account in
+                        Settings and we remove, straight away, your account, portfolios, holdings, transactions,
+                        value history, watchlist, journal, theses, Ask questions and settings from our database, end
+                        our access to your linked institutions at Plaid and erase our encrypted access to them, and
+                        clear what this browser kept for you. You can also email <ContactLink /> to have it done
+                        within 30 days. We keep nothing afterwards unless the law requires us to.
                     </p>
                     <p>
                         When you remove a watchlist ticker or delete a journal entry or thesis, its notes and

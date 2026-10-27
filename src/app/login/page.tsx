@@ -18,6 +18,8 @@ export default async function LoginPage({
     const params = await searchParams;
     const callbackUrl = safeCallbackPath(readParam(params.callbackUrl));
     const error = readParam(params.error);
+    // After Settings › Data › Delete account (launch item i65).
+    const deleted = readParam(params.deleted) === "1";
 
     if (isAuthConfigured()) {
         const session = await auth();
@@ -38,6 +40,12 @@ export default async function LoginPage({
                     <h1 id="pm-login-title">Sign in</h1>
                     <p>Use your Google account to open your Atlas Wealth workspace.</p>
                 </div>
+
+                {deleted && (
+                    <p className="pm-login-notice" role="status" data-testid="login-account-deleted">
+                        Your account and its data were deleted, and Atlas&rsquo;s access to your linked institutions ended.
+                    </p>
+                )}
 
                 {error && (
                     <p className="pm-login-error" role="alert">

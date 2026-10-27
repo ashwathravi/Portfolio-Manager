@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 import { SETTINGS_STORAGE_KEY } from "@/lib/settings/sync";
 
-import { CLEARED_ON_SIGN_OUT, clearBrowserDataOnSignOut } from "./sign-out";
+import { CLEARED_ON_SIGN_OUT, clearBrowserDataOnAccountDeletion, clearBrowserDataOnSignOut } from "./sign-out";
 import { userStorageKey } from "./user-scope";
 
 class FakeStorage {
@@ -11,6 +11,8 @@ class FakeStorage {
     getItem(key: string) { return this.store.get(key) ?? null; }
     setItem(key: string, value: string) { this.store.set(key, value); }
     removeItem(key: string) { this.store.delete(key); }
+    key(index: number) { return [...this.store.keys()][index] ?? null; }
+    get length() { return this.store.size; }
 }
 
 describe("clearBrowserDataOnSignOut", () => {
@@ -87,5 +89,28 @@ describe("clearBrowserDataOnSignOut", () => {
 
     test("does nothing without storage", () => {
         assert.doesNotThrow(() => clearBrowserDataOnSignOut(null, "user-a"));
+    });
+});
+
+const ASK_KEY = CLEARED_ON_SIGN_OUT[0];
+
+describe("clearBrowserDataOnAccountDeletion", () => {
+    test("removes everything under the deleted user's key, the copies only this browser held included", () => {
+        // Launch item i65: alerts and review notes stay at sign-out; a deleted account takes them.
+        const storage = new FakeStorage();
+        for (const base of ["atlas-alerts", "atlas-review-notes", ASK_KEY, SETTINGS_STORAGE_KEY]) {
+            storage.setItem(userStorageKey(base, "user-a"), "a");
+            storage.setItem(userStorageKey(base, "user-b"), "b");
+        }
+        storage.setItem("atlas-theme", "dark");
+        clearBrowserDataOnAccountDeletion(storage, "user-a");
+        assert.deepEqual([...storage.store.keys()].sort(), [
+            "atlas-theme",
+            ...["atlas-alerts", "atlas-review-notes", ASK_KEY, SETTINGS_STORAGE_KEY].map((base) => userStorageKey(base, "user-b")),
+        ].sort());
+    });
+
+    test("does nothing without storage", () => {
+        assert.doesNotThrow(() => clearBrowserDataOnAccountDeletion(null, "user-a"));
     });
 });

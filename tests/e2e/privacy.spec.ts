@@ -63,6 +63,9 @@ test.describe('Privacy policy', () => {
     await expect(linked).toContainText('accounts you don’t choose aren’t synced');
     const retention = page.getByRole('region', { name: 'Keeping and deleting your data' });
     await expect(retention).toContainText('To stop syncing a single account, delete it on the Accounts page');
+    // Launch item i65: download and delete in Settings, straight away.
+    await expect(retention).toContainText('Download a copy of it at any time in Settings');
+    await expect(retention).toContainText('Delete your account in Settings and we remove, straight away');
     // Launch item i45: a connection can be ended from Settings.
     await expect(retention).toContainText('disconnect it in Settings (which also ends it at Plaid and erases our token for it)');
   });

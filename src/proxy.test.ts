@@ -276,6 +276,8 @@ describe("API proxy security", () => {
             ["/api/plaid/sync", "POST"],
             ["/api/plaid/connections", "GET"],
             ["/api/plaid/connections/eVBnVMp7zdTJLkRNr33Rs6zr7KNJqBFL9DrE6", "DELETE"],
+            ["/api/account", "DELETE"],
+            ["/api/account/export", "GET"],
             ["/api/portfolios/count", "GET"],
             ["/api/portfolios", "POST"],
             ["/api/transactions", "POST"],
