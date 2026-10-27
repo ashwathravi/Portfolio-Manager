@@ -67,7 +67,8 @@ export default async function PrivacyPage({ searchParams }: { searchParams: Sear
                             <strong>Data you add.</strong> Portfolios, holdings and transactions you import from
                             CSV or enter by hand, your watchlist (tickers, why they&rsquo;re on it, target prices and
                             notes), your decision journal, your research theses (with their catalysts and evidence
-                            links), and the SEC filers you add to Alpha Radar. During the beta,
+                            links), the questions you ask Ask and its answers (the last 25 of each), and the SEC
+                            filers you add to Alpha Radar. During the beta,
                             Alpha Radar&rsquo;s list of filers and any notes on them are shared by every account,
                             so don&rsquo;t put anything private there.
                         </li>
@@ -88,11 +89,11 @@ export default async function PrivacyPage({ searchParams }: { searchParams: Sear
                     </ul>
                     <p>
                         Some things are stored only in your browser, not on our servers: price alerts and their
-                        notes, weekly reviews and Ask history.
-                        Each account that signs in on this browser gets its own copy, signing out removes your
-                        Ask history, and clearing this site&rsquo;s data removes the rest. Someone with access to
-                        this browser profile could still read them. To show prices, the ticker symbols in your
-                        watchlist and theses are sent to our server and on to the market data provider.
+                        notes, and weekly reviews.
+                        Each account that signs in on this browser gets its own copy, and clearing this
+                        site&rsquo;s data removes them. Someone with access to this browser profile could still
+                        read them. To show prices, the ticker symbols in your watchlist and theses are sent to
+                        our server and on to the market data provider.
                     </p>
                     <p>We do not use advertising or analytics cookies, tracking pixels or third-party trackers.</p>
                 </section>
@@ -156,7 +157,7 @@ export default async function PrivacyPage({ searchParams }: { searchParams: Sear
                         We keep your data while your account is open. Email <ContactLink /> to delete your
                         account: within 30 days we remove your account, linked-account data (including our
                         encrypted access to your institutions), portfolios, transactions, watchlist, journal,
-                        theses and settings from our database,
+                        theses, Ask questions and settings from our database,
                         unless the law requires us to keep something.
                     </p>
                     <p>
@@ -164,6 +165,11 @@ export default async function PrivacyPage({ searchParams }: { searchParams: Sear
                         reasoning are erased straight away. A short record stays (the ticker and its dates, and
                         for a journal entry or thesis its type, outcome or status, and conviction) so your other
                         devices know it was removed; it goes when your account does.
+                    </p>
+                    <p>
+                        When you clear your Ask conversation it disappears straight away, and its questions and
+                        answers are deleted a day later: until then they count towards the day&rsquo;s question
+                        limit. Older questions are deleted the same way once you have more than 25.
                     </p>
                     <p>
                         Plaid keeps its own record of each connection under its policy. To end it, remove Atlas

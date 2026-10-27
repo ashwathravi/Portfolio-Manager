@@ -58,12 +58,14 @@ function norm(s: string): string {
         .trim();
 }
 
+/** Upper-case words that aren't tickers. */
+const NOT_TICKERS = new Set(['AI', 'ETF', 'ETFS', 'USD', 'YTD', 'PNL', 'CEO', 'IPO', 'IRA', 'NAV', 'ESG', 'US']);
+
 /** Extract a likely ticker symbol from the question. Looks for a
  *  2-5-letter uppercase token (e.g. "MSFT", "BRK") in the original
  *  text before normalisation. */
 function extractSymbol(q: string): string | undefined {
-    const m = q.match(/\b[A-Z]{2,5}\b/);
-    return m ? m[0] : undefined;
+    return q.match(/\b[A-Z]{2,5}\b/g)?.find((token) => !NOT_TICKERS.has(token));
 }
 
 function extractRangeDays(q: string): number {
@@ -82,22 +84,22 @@ function extractPercent(q: string): number | undefined {
     return Number.isFinite(value) ? value : undefined;
 }
 
-function extractPolicySymbol(q: string): string | undefined {
-    return extractSymbol(q) ?? (/\bgoogl?\b/i.test(q) ? 'GOOG' : undefined);
-}
-
 export function plan(question: string): PlannerResult {
     const q = norm(question);
 
     // --- Risk Policy Engine ------------------------------------------
     if (/\bwhat happens if\b|\bstress\b|\bscenario\b|\bdrawdown\b|\bdrops?\b|\bfalls?\b/.test(q)) {
+        // The employer's stock (the tickers named in Settings), a theme, a
+        // ticker, or else the broad market.
         let scenarioId = 'broad_market_20_tech_beta';
-        if (/\bgoogl?\b/.test(q)) scenarioId = 'employer_40_down';
+        let symbol: string | undefined;
+        if (/\bemployer\b|\bmy company\b/.test(q)) scenarioId = 'employer_40_down';
         else if (/\bai\b/.test(q)) scenarioId = 'ai_basket_30_down';
         else if (/\bsemi|semiconductor|chip\b/.test(q)) scenarioId = 'semis_35_down';
         else if (/\bcrypto|risk on|liquidity\b/.test(q)) scenarioId = 'crypto_liquidity_50_down';
+        else symbol = extractSymbol(question);
         return {
-            calls: [{ name: 'stress_test', args: { scenarioId } }],
+            calls: [{ name: 'stress_test', args: symbol ? { scenarioId, symbol } : { scenarioId } }],
             intent: 'stress_test',
         };
     }
@@ -106,9 +108,10 @@ export function plan(question: string): PlannerResult {
         return {
             calls: [{
                 name: 'trim_to_target',
+                // Without a ticker, the employer stock; without a %, its plan's target.
                 args: {
-                    symbol: extractPolicySymbol(question) ?? 'GOOG',
-                    targetPct: extractPercent(question) ?? 25,
+                    symbol: extractSymbol(question),
+                    targetPct: extractPercent(question),
                 },
             }],
             intent: 'trim_to_target',
@@ -225,7 +228,7 @@ export function plan(question: string): PlannerResult {
     }
 
     // --- Trade filter: wins / losses ---------------------------------
-    if (/\b(wins?|winners?|profit|good trades?)\b/.test(q) && /\btrade/.test(q)) {
+    if (/\b(wins?|winning|winners?|profit|good trades?)\b/.test(q) && /\btrade/.test(q)) {
         return {
             calls: [
                 {
@@ -236,7 +239,7 @@ export function plan(question: string): PlannerResult {
             intent: 'trades_win',
         };
     }
-    if (/\b(loss|losses|losers?|bad trades?)\b/.test(q) && /\btrade/.test(q)) {
+    if (/\b(loss|losses|losing|losers?|bad trades?)\b/.test(q) && /\btrade/.test(q)) {
         return {
             calls: [
                 {

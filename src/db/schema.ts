@@ -793,6 +793,35 @@ export const thesisEvidence = pgTable("thesis_evidence", {
     appRuntimeAccess: appRuntimeAccessPolicy(),
 })).enableRLS();
 
+// ---------------------------------------------------------------------------
+// Ask (launch item i56)
+// ---------------------------------------------------------------------------
+
+/**
+ * The user's Ask conversation: each question and the answer to it, as the
+ * server wrote them. Clearing the conversation marks the rows `cleared`
+ * rather than deleting them, so the day's questions still count against
+ * the daily limit; old rows are pruned as new ones arrive.
+ */
+export const askMessages = pgTable("ask_messages", {
+    userId: text("user_id")
+        .notNull()
+        .references(() => authUsers.id, { onDelete: "cascade" }),
+    id: text("id").notNull(),
+    role: text("role").notNull(),
+    content: text("content").notNull(),
+    citations: jsonb("citations").$type<unknown[]>().notNull().default([]),
+    toolRuns: jsonb("tool_runs").$type<unknown[]>().notNull().default([]),
+    cleared: boolean("cleared").notNull().default(false),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => ({
+    pk: primaryKey({ columns: [table.userId, table.id], name: "ask_messages_pkey" }),
+    userCreatedAt: index("ask_messages_user_created_at_idx").on(table.userId, table.createdAt),
+    roleCheck: check("ask_messages_role_check", sql`${table.role} in ('user', 'assistant')`),
+    serverOnlyNoClientAccess: serverOnlyNoClientAccessPolicy(),
+    appRuntimeAccess: appRuntimeAccessPolicy(),
+})).enableRLS();
+
 export const portfoliosRelations = relations(portfolios, ({ one, many }) => ({
     user: one(authUsers, {
         fields: [portfolios.userId],

@@ -18,6 +18,7 @@ import type {
     AskToolRun,
 } from './types';
 import type { PlannerResult } from './planner';
+import { NO_EMPLOYER_LABEL } from './tools';
 
 function citationFor(run: AskToolRun, index: number): AskCitation {
     const marker = `tool:${run.name}#${index}`;
@@ -39,9 +40,34 @@ function citationFor(run: AskToolRun, index: number): AskCitation {
     return { marker, label: row?.label ?? run.name, href };
 }
 
+/** What an empty answer means, where it isn't just "nothing matched". */
+function emptyLede(intent: PlannerResult['intent'], run: AskToolRun | undefined): string {
+    const symbol = (run?.args as { symbol?: string } | undefined)?.symbol;
+    switch (intent) {
+        case 'pnl_source':
+        case 'pnl_sector':
+        case 'trades_win':
+        case 'trades_loss':
+            return `No closed trades in that window. A sale counts once it can be matched against a buy recorded before it.`;
+        case 'correlation':
+            return `There aren't enough stored daily closes${symbol ? ` for ${symbol}` : ''} and your holdings to measure a correlation yet.`;
+        case 'alpha_hurt':
+        case 'alpha_helped':
+        case 'exposure':
+        case 'unknown':
+        case 'policy_breaches':
+        case 'stress_test':
+        case 'theme_policy_exposure':
+            return `There are no holdings to answer from yet. Add an account with positions and ask again.`;
+        default:
+            return `I ran the query but didn't find any matching data in the current window.`;
+    }
+}
+
 function lede(intent: PlannerResult['intent'], run: AskToolRun | undefined): string {
-    if (!run || run.rows.length === 0) {
-        return `I ran the query but didn't find any matching data in the current window.`;
+    if (!run || run.rows.length === 0) return emptyLede(intent, run);
+    if (run.rows[0].label === NO_EMPLOYER_LABEL) {
+        return `You haven't named your employer's stock yet, so there's nothing to measure[[tool:${run.name}#0]].`;
     }
     const windowCopy = (() => {
         const rd = (run.args as { rangeDays?: number }).rangeDays;
@@ -53,12 +79,12 @@ function lede(intent: PlannerResult['intent'], run: AskToolRun | undefined): str
     })();
     switch (intent) {
         case 'alpha_hurt':
-            return `Your biggest alpha drags right now are **${run.rows[0].label}** at ${run.rows[0].value}[[tool:${run.name}#0]]. Full list:`;
+            return `Your biggest drags right now, by unrealized gain or loss, start with **${run.rows[0].label}** at ${run.rows[0].value}[[tool:${run.name}#0]]. Full list:`;
         case 'alpha_helped':
-            return `Your top alpha contributors are led by **${run.rows[0].label}** at ${run.rows[0].value}[[tool:${run.name}#0]]. Top five:`;
+            return `Your biggest contributors right now, by unrealized gain, are led by **${run.rows[0].label}** at ${run.rows[0].value}[[tool:${run.name}#0]]. Top five:`;
         case 'pnl_source':
         case 'pnl_sector':
-            return `P&L ${windowCopy} nets ${run.headline ?? run.rows[0].value}[[tool:${run.name}#0]], broken down by sector:`;
+            return `Realized P&L ${windowCopy} nets ${run.headline ?? run.rows[0].value}[[tool:${run.name}#0]] from closed trades, broken down by ${(run.args as { groupBy?: string }).groupBy ?? 'sector'}:`;
         case 'exposure':
             return `Current sector exposure is led by **${run.rows[0].label}** at ${run.rows[0].value}[[tool:${run.name}#0]] of NAV. Full book:`;
         case 'trades_win':
@@ -66,7 +92,7 @@ function lede(intent: PlannerResult['intent'], run: AskToolRun | undefined): str
         case 'trades_loss':
             return `You closed ${run.rows.length} ${run.rows.length === 1 ? 'loss' : 'losses'} in that window. Most recent:`;
         case 'correlation':
-            return `Correlation neighbours for the requested symbol (stub — live price series lands in v2):`;
+            return `How your holdings' daily returns moved with **${(run.args as { symbol?: string }).symbol ?? 'the requested ticker'}** over recent stored closes, closest first:`;
         case 'alpha_radar_memory':
             return `I searched Alpha Radar evidence memory and found **${run.rows[0].label}**[[tool:${run.name}#0]]. Closest matches:`;
         case 'policy_breaches':
