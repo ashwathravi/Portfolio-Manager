@@ -86,8 +86,11 @@ export default async function LoginPage({
                     </p>
                 )}
 
-                <p className="pm-login-legal">
-                    <Link href={withCallback("/privacy", callbackUrl)}>Privacy Policy</Link>
+                <p className="pm-login-legal" data-testid="login-legal">
+                    By continuing, you agree to the{" "}
+                    <Link href={withCallback("/terms", callbackUrl)}>Terms of Service</Link> and acknowledge the{" "}
+                    <Link href={withCallback("/privacy", callbackUrl)}>Privacy Policy</Link>. Atlas Wealth is not
+                    investment advice.
                 </p>
             </section>
         </div>

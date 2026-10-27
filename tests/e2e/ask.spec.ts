@@ -18,6 +18,7 @@ import { databaseAuthEnabled, signInAsFreshUser } from './helpers/users';
  *     against a daily limit; another account never sees it. Without one,
  *     this browser keeps it under `pm-ask-v1`
  *   - Sidebar nav item + Beta pill are visible
+ *   - Under the question box: answers are not investment advice (i64)
  *
  * Tests that ask sign in as a fresh user (a copy of fixture user A): the
  * conversation is kept per user on the server.
@@ -91,6 +92,9 @@ test.describe('Ask Ledger — ⌘K command palette', () => {
 
     test('Close button dismisses the Ask overlay', async ({ page }) => {
         await openAskOverlay(page);
+        // Launch item i64: under the question box, wherever Ask opens.
+        await expect(page.getByTestId('ask-overlay').getByTestId('ask-note'))
+            .toHaveText('Answers are information, not investment advice.');
         await page.getByTestId('ask-close').click();
         await expect(page.getByTestId('ask-overlay')).toHaveCount(0);
     });
@@ -126,6 +130,7 @@ test.describe('Ask Ledger — dedicated /ask page', () => {
         await expect(sheet).not.toContainText(/example data/i);
         // The empty state's worked example is labelled as one.
         await expect(page.getByTestId('ask-example')).toContainText('Example');
+        await expect(sheet.getByTestId('ask-note')).toHaveText('Answers are information, not investment advice.');
     });
 
     test('a P&L question is answered from closed trades', async ({ page }) => {

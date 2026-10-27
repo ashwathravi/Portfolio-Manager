@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { gotoAppPage } from './helpers/app';
+import { databaseAuthEnabled } from './helpers/users';
 
 /**
  * Sidebar + information architecture.
@@ -123,4 +124,38 @@ test.describe('Legacy route redirects', () => {
             await expect(page).toHaveURL(to);
         });
     }
+});
+
+test.describe('App footer', () => {
+    // Launch item i64: the end of every page inside the app.
+    test('every page ends with the advice disclaimer, the data sources and the legal pages', async ({ page }) => {
+        for (const path of ['/', '/portfolios/holdings', '/execution', '/research', '/ask', '/settings']) {
+            await gotoAppPage(page, path);
+            const footer = page.getByTestId('app-footer');
+            await expect(footer).toHaveCount(1);
+            await expect(footer).toContainText('Not investment advice. Atlas Wealth never places trades or moves money.');
+            await expect(footer.getByRole('link', { name: 'Massive' })).toHaveAttribute('href', 'https://massive.com');
+            await expect(footer.getByRole('link', { name: 'SEC EDGAR' })).toHaveAttribute('href', 'https://www.sec.gov/edgar');
+            const legal = footer.getByRole('navigation', { name: 'Legal' });
+            const callback = path === '/' ? '' : `?callbackUrl=${encodeURIComponent(path)}`;
+            await expect(legal.getByRole('link', { name: 'Terms of Service' })).toHaveAttribute('href', `/terms${callback}`);
+            await expect(legal.getByRole('link', { name: 'Privacy Policy' })).toHaveAttribute('href', `/privacy${callback}`);
+        }
+    });
+
+    test('the terms bring you back to the page you opened them from', async ({ page }) => {
+        await gotoAppPage(page, '/execution');
+        await page.getByTestId('app-footer').getByRole('link', { name: 'Terms of Service' }).click();
+        await expect(page).toHaveURL(/\/terms\?callbackUrl=%2Fexecution$/);
+        const footer = page.locator('.pm-legal-footer');
+        if (databaseAuthEnabled) {
+            await footer.getByRole('link', { name: 'Back to Atlas Wealth' }).click();
+            await expect(page).toHaveURL(/\/execution$/);
+        } else {
+            // The local sign-in bypass has no session, so the page offers
+            // sign-in, still bound for Trade.
+            await expect(footer.getByRole('link', { name: 'Back to sign in' }))
+                .toHaveAttribute('href', '/login?callbackUrl=%2Fexecution');
+        }
+    });
 });

@@ -89,7 +89,10 @@ test.describe('Privacy policy', () => {
     await expect(contact).toHaveAttribute('href', /^mailto:[^@\s]+@[^@\s]+$/);
   });
 
-  test('scrolls to the end of the policy and links back to sign in', async ({ page }) => {
+  test('scrolls to the end of the policy and links back to sign in and to the terms', async ({ page }) => {
+    // Launch item i64.
+    await expect(page.locator('.pm-legal-footer').getByRole('link', { name: 'Terms of Service' }))
+      .toHaveAttribute('href', '/terms');
     const back = page.getByRole('link', { name: 'Back to sign in' });
     await back.scrollIntoViewIfNeeded();
     await expect(back).toBeInViewport();

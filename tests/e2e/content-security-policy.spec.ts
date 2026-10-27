@@ -28,7 +28,7 @@ function scriptSources(policy: string): string[] {
 }
 
 test.describe('Content Security Policy', () => {
-    for (const path of ['/', '/portfolios/holdings', '/research', '/execution', '/strategies', '/performance', '/settings', '/privacy']) {
+    for (const path of ['/', '/portfolios/holdings', '/research', '/execution', '/strategies', '/performance', '/settings', '/privacy', '/terms']) {
         test(`${path} runs with a nonce and breaks no rule`, async ({ page }) => {
             await recordViolations(page);
             const response = await page.goto(path);
