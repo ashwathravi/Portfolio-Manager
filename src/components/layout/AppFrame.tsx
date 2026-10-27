@@ -2,14 +2,15 @@
 
 import { useEffect } from "react";
 import { usePathname } from "next/navigation";
+import { AppFooter } from "@/components/layout/AppFooter";
 import { AppSidebar } from "@/components/layout/AppSidebar";
 import { TopBar } from "@/components/layout/TopBar";
 import { TweaksPanel } from "@/components/layout/TweaksPanel";
 import { CommandCenter } from "@/components/command/CommandCenter";
 import { PageHeaderProvider } from "@/components/layout/PageHeaderContext";
 
-// Sign-in and the public privacy policy render without the sidebar/topbar.
-const CHROMELESS_PATHS = new Set(["/login", "/privacy"]);
+// Sign-in and the public legal pages render without the sidebar/topbar.
+const CHROMELESS_PATHS = new Set(["/login", "/privacy", "/terms"]);
 
 export function AppFrame({ children }: { children: React.ReactNode }) {
     const pathname = usePathname();
@@ -24,7 +25,7 @@ export function AppFrame({ children }: { children: React.ReactNode }) {
 
     if (CHROMELESS_PATHS.has(pathname)) {
         // The body never scrolls (overflow-hidden in the root layout), so
-        // this main is the scroll container for the long privacy policy.
+        // this main is the scroll container for the long legal pages.
         return <main className="h-screen overflow-y-auto">{children}</main>;
     }
 
@@ -45,6 +46,7 @@ export function AppFrame({ children }: { children: React.ReactNode }) {
                         tabIndex={-1}
                     >
                         {children}
+                        <AppFooter pathname={pathname} />
                     </main>
                 </div>
             </div>

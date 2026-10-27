@@ -10181,6 +10181,12 @@ a:focus-visible,
   cursor: not-allowed;
 }
 
+.pm-ask-note {
+  margin: 8px 0 0;
+  font-size: 11.5px;
+  color: var(--pm-fg-muted);
+}
+
 .pm-ask-inputrow {
   display: flex;
   align-items: flex-end;

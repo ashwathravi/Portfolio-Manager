@@ -127,20 +127,24 @@ describe("API proxy security", () => {
         assert.equal((await proxy(apiRequest(headers, "/api/cron/daily"))).status, 200);
     });
 
-    test("keeps the privacy policy public when production auth is unavailable", async () => {
+    test("keeps the privacy policy and terms public when production auth is unavailable", async () => {
         setNodeEnv("production");
 
-        assert.equal((await proxy(pageRequest("/privacy"))).status, 200);
-        assert.equal((await proxy(pageRequest("/privacy/private"))).status, 503);
+        for (const path of ["/privacy", "/terms"]) {
+            assert.equal((await proxy(pageRequest(path))).status, 200, path);
+            assert.equal((await proxy(pageRequest(`${path}/private`))).status, 503, path);
+        }
     });
 
-    test("serves the privacy policy to signed-out visitors when sign-in is configured", async () => {
+    test("serves the privacy policy and terms to signed-out visitors when sign-in is configured", async () => {
         configureAuth();
 
-        const response = await proxy(pageRequest("/privacy"));
+        for (const path of ["/privacy", "/terms"]) {
+            const response = await proxy(pageRequest(path));
 
-        assert.equal(response.status, 200);
-        assert.equal(response.headers.get("location"), null);
+            assert.equal(response.status, 200, path);
+            assert.equal(response.headers.get("location"), null, path);
+        }
     });
 
     test("keeps only exact public asset paths open", async () => {

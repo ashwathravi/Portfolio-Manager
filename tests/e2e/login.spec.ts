@@ -19,11 +19,36 @@ test.describe('Login', () => {
     await expect(page.getByRole('heading', { level: 1, name: 'Privacy Policy' })).toBeVisible();
   });
 
+  test('says continuing agrees to the terms, and links to them', async ({ context, page }) => {
+    await context.clearCookies();
+    await page.goto('/login');
+
+    // Launch item i64.
+    await expect(page.getByTestId('login-legal')).toHaveText(
+      'By continuing, you agree to the Terms of Service and acknowledge the Privacy Policy. Atlas Wealth is not investment advice.',
+    );
+    await page.getByRole('link', { name: 'Terms of Service' }).click();
+    await expect(page).toHaveURL(/\/terms$/);
+    await expect(page.getByRole('heading', { level: 1, name: 'Terms of Service' })).toBeVisible();
+  });
+
   test('keeps the page a deep link asked for through the privacy policy detour', async ({ context, page }) => {
     await context.clearCookies();
     await page.goto('/login?callbackUrl=%2Fexecution');
 
     await page.getByRole('link', { name: 'Privacy Policy' }).click();
+    await expect(page).toHaveURL(/\/privacy\?callbackUrl=%2Fexecution$/);
+    await page.getByRole('link', { name: 'Back to sign in' }).click();
+    await expect(page).toHaveURL(/\/login\?callbackUrl=%2Fexecution$/);
+  });
+
+  test('keeps it through the terms, and from one legal page to the other', async ({ context, page }) => {
+    await context.clearCookies();
+    await page.goto('/login?callbackUrl=%2Fexecution');
+
+    await page.getByRole('link', { name: 'Terms of Service' }).click();
+    await expect(page).toHaveURL(/\/terms\?callbackUrl=%2Fexecution$/);
+    await page.locator('.pm-legal-footer').getByRole('link', { name: 'Privacy Policy' }).click();
     await expect(page).toHaveURL(/\/privacy\?callbackUrl=%2Fexecution$/);
     await page.getByRole('link', { name: 'Back to sign in' }).click();
     await expect(page).toHaveURL(/\/login\?callbackUrl=%2Fexecution$/);

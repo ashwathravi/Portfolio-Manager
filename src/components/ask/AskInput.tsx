@@ -105,6 +105,9 @@ export function AskInput({
                     <Send className="h-4 w-4" aria-hidden="true" />
                 </button>
             </div>
+            <p className="pm-ask-note" data-testid="ask-note">
+                Answers are information, not investment advice.
+            </p>
         </div>
     );
 }

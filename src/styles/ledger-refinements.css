@@ -745,11 +745,33 @@
 /* Body-colour links: the green accent is under 3:1 on the light card. */
 .pm-legal-doc a:not(.pm-legal-brand) { color: var(--pm-fg); text-decoration: underline; text-underline-offset: 2px; overflow-wrap: anywhere; }
 .pm-legal-updated { color: var(--pm-fg-muted); font-size: 13px; }
-.pm-legal-footer { padding-top: 20px; border-top: 1px solid var(--pm-border); font-size: 14px; }
+.pm-legal-footer { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 16px; padding-top: 20px; border-top: 1px solid var(--pm-border); font-size: 14px; }
 @media (max-width: 640px) {
   .pm-legal-page { padding: 16px 16px 40px; }
   .pm-legal-doc { padding: 20px; gap: 24px; }
   .pm-legal-doc h1 { font-size: 26px; }
+}
+
+/* --- In-app footer (i64): advice disclaimer, data sources, legal pages ---- */
+.pm-app-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px 20px;
+  margin-top: 8px;
+  padding: 16px 24px 24px;
+  border-top: 1px solid var(--pm-border);
+  color: var(--pm-fg-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.pm-app-footer p { margin: 0; max-width: 72ch; }
+.pm-app-footer nav { display: flex; flex-wrap: wrap; gap: 4px 16px; }
+.pm-app-footer a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
+.pm-app-footer a:hover { color: var(--pm-fg); }
+@media (max-width: 640px) {
+  .pm-app-footer { padding: 16px; }
 }
 
 /* --- Performance hero ------------------------------------------------------ */
