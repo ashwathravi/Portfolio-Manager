@@ -9,6 +9,7 @@ import { sectorFor, type Sector } from "@/lib/holdings/sector";
 import {
     computeBucketAllocation,
     computeThemeExposure,
+    employerSymbols,
     optionCurrentValue,
     policyBucketLabel,
     resolvePolicyBucketAssignment,
@@ -24,6 +25,7 @@ import {
     HoldingsFilterRow,
     type HoldingsSortKey,
 } from "./HoldingsFilterRow";
+import { useSettingsStore } from "@/lib/stores/settingsStore";
 import { HoldingsFullTable, type HoldingsTableRow } from "./HoldingsFullTable";
 import { HoldingsSummaryStrip } from "./HoldingsSummaryStrip";
 import { OptionsRiskLedgerCard } from "./OptionsRiskLedgerCard";
@@ -57,6 +59,8 @@ export interface HoldingsSeed {
     /** Optional sector override — if omitted we fall back to `sectorFor(symbol)`. */
     sector?: Sector;
     policyBucket?: PolicyBucketId;
+    /** The bucket its type suggests, until the user chooses one in Settings. */
+    defaultBucket?: PolicyBucketId | null;
     themeWeights?: readonly ThemeWeight[];
 }
 
@@ -86,9 +90,12 @@ export function HoldingsPageClient({
     );
     const { quotes } = useAutoRefreshQuotes(symbols);
     const todayEt = useEasternDate();
+    // The user's risk policy: their bucket choices, caps, and employer stock (launch item i54).
+    const riskPolicy = useSettingsStore((s) => s.riskPolicy);
 
     // ---- Enrich with live quote, then derive allocation + today% ----
     const enriched = useMemo(() => {
+        const employer = new Set(employerSymbols(riskPolicy));
         const withQuote = holdings.map((h) => {
             const q = quotes[h.symbol.toUpperCase()];
             const last = Number.isFinite(q?.price) ? q!.price : h.currentPrice;
@@ -104,13 +111,19 @@ export function HoldingsPageClient({
             const todayPct: number | null = todays ? q.changePercent : null;
             const todayChangeAbs = todays ? q.change * h.quantity : 0;
             const sector = h.sector ?? sectorFor(h.symbol);
-            const bucketAssignment = resolvePolicyBucketAssignment(h);
-            const themeWeights = themeWeightsForSymbol(h.symbol, h.themeWeights);
+            const ticker = h.symbol.toUpperCase();
+            const bucketAssignment = resolvePolicyBucketAssignment({
+                ...h,
+                policyBucket: h.policyBucket ?? riskPolicy.bucketAssignments[ticker],
+            });
+            const isEmployerStock = employer.has(ticker);
+            const themeWeights = themeWeightsForSymbol(h.symbol, h.themeWeights, { employer: isEmployerStock });
             return {
                 ...h,
                 sector,
                 policyBucket: bucketAssignment.bucket,
                 themeWeights,
+                isEmployerStock,
                 last,
                 marketValue,
                 costBasis,
@@ -126,7 +139,7 @@ export function HoldingsPageClient({
             allocationPct: totalMV > 0 ? (r.marketValue / totalMV) * 100 : 0,
         }));
         return { rows: enrichedRows, totalMV };
-    }, [holdings, quotes, todayEt]);
+    }, [holdings, quotes, todayEt, riskPolicy]);
 
     const { rows, totalMV } = enriched;
 
@@ -169,8 +182,14 @@ export function HoldingsPageClient({
         };
     }, [rows, totalMV]);
 
-    const policySummary = useMemo(() => computeBucketAllocation(rows), [rows]);
-    const themeSummary = useMemo(() => computeThemeExposure(rows), [rows]);
+    const policySummary = useMemo(
+        () => computeBucketAllocation(rows, riskPolicy.bucketPolicies),
+        [rows, riskPolicy.bucketPolicies],
+    );
+    const themeSummary = useMemo(
+        () => computeThemeExposure(rows, riskPolicy.themeCaps),
+        [rows, riskPolicy.themeCaps],
+    );
     const optionsCurrentValue = useMemo(
         () => optionPositions.reduce((sum, position) => sum + optionCurrentValue(position), 0),
         [optionPositions],

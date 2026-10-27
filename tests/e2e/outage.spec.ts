@@ -50,6 +50,25 @@ test.describe('Database outage', () => {
         });
     }
 
+    test('Trade says the risk policy can\'t be checked, and asks for a reason', async ({ page }) => {
+        // Launch item i54: a failed load is not an empty portfolio that passes every check.
+        await page.goto('/execution');
+        await page.getByLabel('Ticker').fill('NVDA');
+        await page.getByLabel('Quantity').fill('10');
+        await page.getByLabel('Limit price').fill('500');
+        const policy = page.getByTestId('risk-policy-impact');
+        await expect(policy).toContainText("Your holdings couldn't be loaded, so this order can't be checked against your risk policy.");
+        await expect(policy).toContainText('Override needed');
+        await expect(policy.getByLabel('Override reason')).toBeVisible();
+        await expect(page.locator('.pm-exec-guardrails')).toContainText("Your holdings couldn't be loaded");
+    });
+
+    test('the Settings risk previews say the holdings couldn\'t be loaded', async ({ page }) => {
+        await page.goto('/settings');
+        await expect(page.getByTestId('bucket-holdings-unavailable')).toBeVisible();
+        await expect(page.getByTestId('bucket-holdings-empty')).toHaveCount(0);
+    });
+
     test('the notice still comes promptly after many failed reads', async ({ page, request }) => {
         // Every render tries the database and fails. The pool used to wait
         // longer before each new connect (up to 20 s), so an outage page got

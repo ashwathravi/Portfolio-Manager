@@ -92,7 +92,7 @@ export function plan(question: string): PlannerResult {
     // --- Risk Policy Engine ------------------------------------------
     if (/\bwhat happens if\b|\bstress\b|\bscenario\b|\bdrawdown\b|\bdrops?\b|\bfalls?\b/.test(q)) {
         let scenarioId = 'broad_market_20_tech_beta';
-        if (/\bgoogl?\b/.test(q)) scenarioId = 'goog_40_down';
+        if (/\bgoogl?\b/.test(q)) scenarioId = 'employer_40_down';
         else if (/\bai\b/.test(q)) scenarioId = 'ai_basket_30_down';
         else if (/\bsemi|semiconductor|chip\b/.test(q)) scenarioId = 'semis_35_down';
         else if (/\bcrypto|risk on|liquidity\b/.test(q)) scenarioId = 'crypto_liquidity_50_down';

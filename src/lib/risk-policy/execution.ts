@@ -34,6 +34,8 @@ export const PRE_TRADE_RISK_POLICY_RULE_TYPES = [
     "no_add_to_breached_position",
     "stale_thesis",
     "missing_bucket_classification",
+    // The user's holdings couldn't be loaded, so nothing was checked.
+    "portfolio_unavailable",
 ] as const;
 
 export type PreTradeRiskPolicyRuleType = (typeof PRE_TRADE_RISK_POLICY_RULE_TYPES)[number];
@@ -73,6 +75,13 @@ export interface PreTradeRiskPolicyInput {
     thesisMaxAgeDays?: number;
     overrideReason?: string;
     asOf?: Date | string;
+    /** The tickers the user named as their employer's (the employer plan's symbols). */
+    employerSymbols?: readonly string[];
+    /**
+     * The user's holdings couldn't be loaded. Nothing can be checked, so the
+     * order needs a reason to go ahead, as a policy exception does.
+     */
+    portfolioUnavailable?: boolean;
 }
 
 export interface PreTradeRiskPolicyCheck {
@@ -123,7 +132,7 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 export function evaluatePreTradeRiskPolicy(input: PreTradeRiskPolicyInput): PreTradeRiskPolicyImpact {
     const asOf = normalizeDate(input.asOf);
-    const holdings = normalizeHoldings(input.holdings);
+    const holdings = normalizeHoldings(input.holdings, input.employerSymbols ?? []);
     const trade = normalizeTrade(input.trade);
     const portfolioValue = safeMoney(
         input.portfolioValue ??
@@ -135,8 +144,12 @@ export function evaluatePreTradeRiskPolicy(input: PreTradeRiskPolicyInput): PreT
         ? safeMoney(trade.optionPremiumAtRisk ?? trade.marketValue)
         : safeMoney(trade.marketValue);
 
-    if (!trade.ticker || portfolioValue <= 0 || tradeValue <= 0) {
-        return emptyImpact("Risk policy needs ticker, price, quantity, and portfolio value.");
+    if (!trade.ticker || tradeValue <= 0) {
+        return emptyImpact("Risk policy needs ticker, price, and quantity.");
+    }
+    if (input.portfolioUnavailable) return unavailableImpact(trade.ticker, overrideReason, asOf);
+    if (portfolioValue <= 0) {
+        return emptyImpact("Add holdings to an account to check orders against your risk policy.");
     }
 
     const currentHoldingValue = valueForSymbol(holdings, trade.ticker);
@@ -151,7 +164,8 @@ export function evaluatePreTradeRiskPolicy(input: PreTradeRiskPolicyInput): PreT
         portfolioValue,
     });
 
-    const tradeHolding = holdingForTrade(trade, tradeValue);
+    const employerSymbols = new Set((input.employerSymbols ?? []).map(normalizeSymbol).filter(Boolean));
+    const tradeHolding = holdingForTrade(trade, tradeValue, holdings, employerSymbols);
     const bucketAssignment = resolvePolicyBucketAssignment(tradeHolding);
     const currentBucketAllocation = computeBucketAllocation(holdings, input.bucketPolicies ?? DEFAULT_BUCKET_POLICIES);
     const postHoldings = buildPostTradeHoldings(holdings, tradeHolding, tradeValue, trade.side);
@@ -173,7 +187,9 @@ export function evaluatePreTradeRiskPolicy(input: PreTradeRiskPolicyInput): PreT
             portfolioValue,
             currentThemeExposure,
             postThemeExposure,
-            tradeWeights: themeWeightsForSymbol(trade.ticker, trade.themeWeights),
+            tradeWeights: themeWeightsForSymbol(trade.ticker, trade.themeWeights, {
+                employer: tradeHolding.isEmployerStock,
+            }),
         }),
         buildOptionsCheck({
             trade,
@@ -565,6 +581,11 @@ function buildStaleThesisCheck({
     };
 }
 
+/**
+ * The holdings after the trade, which applies once however many accounts
+ * hold the ticker: a buy adds to the first of them, a sale comes out of
+ * them in turn.
+ */
 function buildPostTradeHoldings(
     holdings: readonly NormalizedHolding[],
     tradeHolding: PolicyClassifiableHolding & ThemeExposureHolding,
@@ -573,15 +594,19 @@ function buildPostTradeHoldings(
 ): NormalizedHolding[] {
     const symbol = normalizeSymbol(tradeHolding.symbol);
     let matched = false;
+    let toSell = tradeValue;
     const next = holdings.map((holding) => {
         if (normalizeSymbol(holding.symbol) !== symbol) return holding;
+        const value = safeMoney(holding.marketValue);
+        if (side === "buy") {
+            if (matched) return holding;
+            matched = true;
+            return { ...holding, marketValue: value + tradeValue };
+        }
         matched = true;
-        return {
-            ...holding,
-            marketValue: side === "buy"
-                ? safeMoney(holding.marketValue) + tradeValue
-                : Math.max(0, safeMoney(holding.marketValue) - tradeValue),
-        };
+        const sold = Math.min(value, toSell);
+        toSell -= sold;
+        return { ...holding, marketValue: value - sold };
     });
     if (!matched && side === "buy") {
         next.push({
@@ -593,18 +618,29 @@ function buildPostTradeHoldings(
     return next;
 }
 
+/**
+ * The trade as a holding. A stock order goes in the bucket of the ticker
+ * held; an option is classified as an option, whatever bucket its
+ * underlying is in.
+ */
 function holdingForTrade(
     trade: NormalizedTrade,
     tradeValue: number,
+    holdings: readonly NormalizedHolding[],
+    employerSymbols: ReadonlySet<string>,
 ): PolicyClassifiableHolding & ThemeExposureHolding {
+    const held = holdings.find((holding) => holding.symbol === trade.ticker);
+    const heldBucket = trade.instrumentType === "equity" ? held : undefined;
     return {
         id: `trade-${trade.ticker}`,
         symbol: trade.ticker,
         name: trade.ticker,
         marketValue: tradeValue,
-        policyBucket: trade.policyBucket,
+        policyBucket: trade.policyBucket ?? heldBucket?.policyBucket,
+        defaultBucket: heldBucket?.defaultBucket,
         instrumentType: trade.instrumentType === "option" ? "option" : "equity",
-        themeWeights: trade.themeWeights,
+        themeWeights: trade.themeWeights ?? held?.themeWeights,
+        isEmployerStock: held?.isEmployerStock ?? employerSymbols.has(trade.ticker),
     };
 }
 
@@ -632,6 +668,38 @@ function summarizeDirection(checks: readonly PreTradeRiskPolicyCheck[]): PreTrad
     if (checks.some((check) => check.status !== "pass" && check.direction === "risk_increasing")) return "risk_increasing";
     if (checks.some((check) => check.direction === "risk_reducing")) return "risk_reducing";
     return "neutral";
+}
+
+/**
+ * Holdings that couldn't be loaded: nothing is checked, so the order needs
+ * a reason, kept with it as an exception like any other override.
+ */
+function unavailableImpact(ticker: string, overrideReason: string, asOf: Date): PreTradeRiskPolicyImpact {
+    const overrideAccepted = overrideReason.length >= OVERRIDE_MIN_CHARS;
+    return {
+        decision: "override_required",
+        blocksSubmit: !overrideAccepted,
+        requiresOverride: true,
+        overrideAccepted,
+        direction: "missing_data",
+        summary: overrideAccepted
+            ? "Your holdings couldn't be loaded; override captured."
+            : "Your holdings couldn't be loaded, so this order can't be checked against your risk policy.",
+        checks: [],
+        failedChecks: [],
+        exceptionPreview: overrideAccepted
+            ? [{
+                ruleType: "portfolio_unavailable",
+                symbol: normalizeSymbol(ticker),
+                reason: overrideReason,
+                currentPct: 0,
+                postPct: 0,
+                thresholdPct: 0,
+                message: "Holdings couldn't be loaded, so the order wasn't checked against the risk policy.",
+                capturedAt: asOf.toISOString(),
+            }]
+            : [],
+    };
 }
 
 function emptyImpact(summary: string): PreTradeRiskPolicyImpact {
@@ -663,12 +731,20 @@ interface NormalizedTrade extends Required<Pick<PreTradeRiskPolicyTrade, "ticker
     optionPremiumAtRisk?: number;
 }
 
-function normalizeHoldings(holdings: readonly PreTradeRiskPolicyHolding[]): NormalizedHolding[] {
-    return holdings.map((holding) => ({
-        ...holding,
-        symbol: normalizeSymbol(holding.symbol ?? holding.ticker),
-        marketValue: safeMoney(holding.marketValue),
-    }));
+function normalizeHoldings(
+    holdings: readonly PreTradeRiskPolicyHolding[],
+    employerSymbols: readonly string[],
+): NormalizedHolding[] {
+    const employer = new Set(employerSymbols.map(normalizeSymbol).filter(Boolean));
+    return holdings.map((holding) => {
+        const symbol = normalizeSymbol(holding.symbol ?? holding.ticker);
+        return {
+            ...holding,
+            symbol,
+            marketValue: safeMoney(holding.marketValue),
+            isEmployerStock: holding.isEmployerStock ?? employer.has(symbol),
+        };
+    });
 }
 
 function normalizeTrade(trade: PreTradeRiskPolicyTrade): NormalizedTrade {

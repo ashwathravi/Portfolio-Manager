@@ -2,6 +2,7 @@ import { test, describe, before, beforeEach } from 'node:test';
 import assert from 'node:assert';
 import type { ConnectedAccount, Tag } from './settingsStore';
 import type { PlaidConnectedAccountInput } from '@/lib/plaid/types';
+import { DEFAULT_EMPLOYER_STOCK_DERISKING_PLAN, DEFAULT_SELL_DISCIPLINE_RULES } from '@/lib/risk-policy';
 
 type SettingsStoreHook = typeof import('./settingsStore').useSettingsStore;
 
@@ -218,7 +219,8 @@ describe('settingsStore', () => {
             assert.strictEqual(riskPolicy.cashDeploymentRule.enabled, false);
             assert.strictEqual(riskPolicy.cashDeploymentRule.percentOfExcess, 25);
             assert.strictEqual(riskPolicy.employerStockPlan.targetAllocationPct, 20);
-            assert.deepStrictEqual(riskPolicy.employerStockPlan.symbols, ['GOOG', 'GOOGL']);
+            // No employer stock until the user names it (launch item i52).
+            assert.deepStrictEqual(riskPolicy.employerStockPlan.symbols, []);
             assert.strictEqual(riskPolicy.employerStockPlan.state, 'draft');
             assert.strictEqual(riskPolicy.optionsRiskPolicy.maxPositionPremiumPct, 2);
             assert.strictEqual(riskPolicy.optionsRiskPolicy.maxTotalPremiumPct, 5);
@@ -227,6 +229,18 @@ describe('settingsStore', () => {
             assert.strictEqual(riskPolicy.churnPolicy.windowDays, 90);
             assert.strictEqual(riskPolicy.churnPolicy.watchRepeatSymbols, 1);
             assert.strictEqual(riskPolicy.churnPolicy.breachRepeatSymbols, 3);
+            assert.deepStrictEqual(riskPolicy.bucketAssignments, {});
+        });
+
+        test('should replace bucket choices whole, keeping the rest of the policy', () => {
+            useSettingsStore.getState().updateRiskPolicy({ bucketAssignments: { AAPL: 'core', TSLA: 'speculative' } });
+            useSettingsStore.getState().updateRiskPolicy({ churnPolicy: { windowDays: 30, watchRepeatSymbols: 1, breachRepeatSymbols: 3 } });
+            assert.deepStrictEqual(useSettingsStore.getState().riskPolicy.bucketAssignments, { AAPL: 'core', TSLA: 'speculative' });
+
+            useSettingsStore.getState().updateRiskPolicy({ bucketAssignments: { TSLA: 'speculative' } });
+            const riskPolicy = useSettingsStore.getState().riskPolicy;
+            assert.deepStrictEqual(riskPolicy.bucketAssignments, { TSLA: 'speculative' });
+            assert.strictEqual(riskPolicy.churnPolicy.windowDays, 30);
         });
 
         test('should update bucket policies without clobbering theme caps', () => {
@@ -367,6 +381,12 @@ describe('settingsStore', () => {
                     windowDays: 45,
                     watchRepeatSymbols: 2,
                     breachRepeatSymbols: 4,
+                },
+            });
+            useSettingsStore.getState().updateRiskPolicy({
+                employerStockPlan: {
+                    ...useSettingsStore.getState().riskPolicy.employerStockPlan,
+                    symbols: ['GOOG', 'GOOGL'],
                 },
             });
             useSettingsStore.getState().updateRiskPolicy({
@@ -846,6 +866,37 @@ describe('settingsStore', () => {
 
             assert.strictEqual(migrated.preferences?.defaultLandingPage, '/portfolios/holdings');
             assert.strictEqual(migrated.demo?.showSampleData, true);
+        });
+
+        test('brings a v15 risk policy to v16 with no bucket chosen', async () => {
+            const { migrateSettings } = await import('./settingsStore');
+            const riskPolicy = { churnPolicy: { windowDays: 30, watchRepeatSymbols: 1, breachRepeatSymbols: 3 } };
+            const migrated = migrateSettings({ riskPolicy }, 15);
+
+            assert.deepStrictEqual(migrated.riskPolicy?.bucketAssignments, {});
+            assert.strictEqual(migrated.riskPolicy?.churnPolicy.windowDays, 30);
+            // A document without the slice keeps the defaults.
+            assert.strictEqual(migrateSettings({ demo: { showSampleData: false } }, 15).riskPolicy, undefined);
+        });
+
+        test('regression: a v15 document loses the employer stock it was seeded with', async () => {
+            const { migrateSettings, normalizeSettings } = await import('./settingsStore');
+            const seededPlan = {
+                ...DEFAULT_EMPLOYER_STOCK_DERISKING_PLAN,
+                label: 'GOOG employer stock de-risking',
+                symbols: ['GOOG', 'GOOGL'],
+            };
+            const seededBand = { id: 'sell-goog-employer-cap', type: 'allocation_cap', label: 'GOOG employer-stock trim band', action: 'trim', state: 'active', symbol: 'GOOG', thresholdPct: 25, noAdd: true };
+            const migrated = normalizeSettings(migrateSettings({ riskPolicy: { employerStockPlan: seededPlan, sellDisciplineRules: [seededBand] } }, 15));
+
+            assert.deepStrictEqual(migrated.riskPolicy?.employerStockPlan.symbols, []);
+            assert.strictEqual(migrated.riskPolicy?.employerStockPlan.label, 'Employer stock de-risking');
+            assert.deepStrictEqual(migrated.riskPolicy?.sellDisciplineRules, [DEFAULT_SELL_DISCIPLINE_RULES[0]]);
+
+            // Activated, it was the user's choice: GOOG stays.
+            const active = migrateSettings({ riskPolicy: { employerStockPlan: { ...seededPlan, state: 'active' }, sellDisciplineRules: [seededBand] } }, 15);
+            assert.deepStrictEqual(active.riskPolicy?.employerStockPlan.symbols, ['GOOG', 'GOOGL']);
+            assert.strictEqual(active.riskPolicy?.sellDisciplineRules[0].symbol, 'GOOG');
         });
 
         test('leaves a current document as it is', async () => {

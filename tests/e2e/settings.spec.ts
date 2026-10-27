@@ -1,9 +1,21 @@
 import { readFileSync } from 'node:fs';
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 import { clickUntil, gotoAppPage, openPolicyChecks, reloadAppPage } from './helpers/app';
-import { accountRowsLeft, signInAsFreshUser } from './helpers/users';
+import { accountRowsLeft, databaseAuthEnabled, signInAsFreshUser } from './helpers/users';
 
-const databaseAuthEnabled = Boolean(process.env.CI || process.env.E2E_DATABASE_AUTH === '1');
+/** The next save of the user's settings whose risk policy passes `check`. */
+function savedRiskPolicy(page: Page, check: (riskPolicy: Record<string, unknown>) => boolean) {
+    return page.waitForResponse((response) => {
+        if (!response.url().endsWith('/api/settings') || response.request().method() !== 'PUT' || !response.ok()) return false;
+        return check(response.request().postDataJSON()?.settings?.riskPolicy ?? {});
+    });
+}
+
+/** The risk policy previews run on the user's holdings: without any, there's nothing to check. */
+async function hasPolicyHoldings(page: Page): Promise<boolean> {
+    await expect(page.getByTestId('bucket-holdings')).toBeVisible();
+    return !(await page.getByTestId('bucket-holdings-empty').isVisible());
+}
 
 /**
  * Phase 9 (AR-94) Settings tests, refreshed for JournalPlus (AR-109).
@@ -33,7 +45,7 @@ test.describe('Settings page', () => {
             await expect(rail.getByRole('link', { name: label, exact: true })).toBeVisible();
         }
         await expect(rail.getByRole('link', { name: 'Help & glossary' })).toHaveAttribute('href', '/help');
-        for (const title of [/^Profile$/, /^Connected accounts$/i, /^Appearance$/, /^Guardrails$/, /^Execution$/, /^Bucket policy/, /^GOOG de-risking/, /^Trading activity/, /^Cash jobs$/, /^Sell discipline/]) {
+        for (const title of [/^Profile$/, /^Connected accounts$/i, /^Appearance$/, /^Guardrails$/, /^Execution$/, /^Bucket policy/, /^Employer stock/, /^Trading activity/, /^Cash jobs$/, /^Sell discipline/]) {
             await expect(page.locator('.pm-settings-card-title', { hasText: title })).toBeVisible();
         }
     });
@@ -492,6 +504,7 @@ test.describe('Settings page', () => {
     });
 
     test('bucket policy targets can be edited and reset', async ({ page }) => {
+        test.skip(!(await hasPolicyHoldings(page)), 'the bucket preview needs holdings');
 
         const card = page.getByTestId('bucket-policy-card');
         await expect(card).toBeVisible();
@@ -525,10 +538,86 @@ test.describe('Settings page', () => {
         await expect(page.getByLabel('Churn breach repeated names')).toHaveValue('3');
     });
 
-    test('GOOG de-risking plan can be activated and surfaced on the dashboard', async ({ page }) => {
+    test('regression: the previews are the user\'s own portfolio, not example data', async ({ page }) => {
+        for (const card of ['bucket-policy-card', 'employer-stock-plan-card', 'churn-policy-card', 'sell-discipline-card']) {
+            await expect(page.getByTestId(card)).toBeVisible();
+            await expect(page.getByTestId(card).getByTestId('sample-tag')).toHaveCount(0);
+        }
+        test.skip(!(await hasPolicyHoldings(page)), 'the previews need holdings');
+        // User A's holdings, in the bucket each one's type suggests.
+        const holdings = page.getByTestId('bucket-holding');
+        await expect(holdings).toHaveCount(6);
+        await expect(page.getByLabel('AAPL bucket')).toHaveValue('');
+        await expect(page.getByLabel('AAPL bucket').locator('option:checked')).toHaveText('Active idea / satellite (default)');
+        await expect(page.getByLabel('TSLA bucket').locator('option:checked')).toHaveText('Speculative/options (default)');
+        await expect(page.getByTestId('bucket-policy-row').filter({ hasText: 'Speculative/options' }).first()).toContainText('from TSLA');
+    });
 
+    test('a holding\'s bucket can be chosen; Today\'s checks follow it, and it can go back to its default', async ({ page }) => {
+        test.skip(!databaseAuthEnabled, 'Today reads the policy saved to the server');
+        test.skip(!(await hasPolicyHoldings(page)), 'the bucket choices need holdings');
+        // Settings, Today, Settings, Holdings and Settings again.
+        test.slow();
+
+        // TSLA is the only speculative holding: 12% of the portfolio, over the 5% cap.
+        await gotoAppPage(page, '/');
+        await expect(page.getByTestId('today-triage-item').filter({ hasText: 'Speculative/options' })).toHaveCount(1);
+
+        await gotoAppPage(page, '/settings');
+        const tsla = page.getByLabel('TSLA bucket');
+        const saved = savedRiskPolicy(page, (riskPolicy) => (riskPolicy.bucketAssignments as Record<string, string>)?.TSLA === 'core');
+        await clickUntil(tsla, async () => {
+            await tsla.selectOption('core');
+            await expect(tsla).toHaveValue('core', { timeout: 1000 });
+        });
+        await saved;
+        await expect(page.getByTestId('bucket-policy-row').filter({ hasText: 'Core' }).first()).toContainText('TSLA');
+        await expect(page.getByTestId('bucket-policy-row').filter({ hasText: 'Speculative/options' }).first()).toHaveAttribute('data-status', 'inside');
+
+        await reloadAppPage(page);
+        await expect(page.getByLabel('TSLA bucket')).toHaveValue('core');
+
+        // Today evaluates the saved policy on the server: no speculative breach left.
+        await gotoAppPage(page, '/');
+        await expect(page.getByTestId('today-triage')).toBeVisible();
+        await expect(page.getByTestId('today-triage-item').filter({ hasText: 'Speculative/options' })).toHaveCount(0);
+        expect(await openPolicyChecks(page)).toBe(true);
+        await expect(
+            page.locator('[data-testid="risk-policy-dimension"][data-policy-id="speculative_options_exposure"]'),
+        ).toHaveAttribute('data-status', 'inside');
+
+        // Holdings files it under the bucket chosen.
+        await gotoAppPage(page, '/portfolios/holdings');
+        const bucketFilter = page.getByLabel('Filter holdings by policy bucket');
+        await bucketFilter.selectOption('core');
+        await expect(page.getByTestId('holdings-table').getByRole('row').filter({ hasText: 'TSLA' })).toContainText('Core');
+        await bucketFilter.selectOption('speculative');
+        await expect(page.getByTestId('holdings-table').getByRole('row').filter({ hasText: 'TSLA' })).toHaveCount(0);
+
+        await gotoAppPage(page, '/settings');
+        const back = savedRiskPolicy(page, (riskPolicy) => !('TSLA' in ((riskPolicy.bucketAssignments as object) ?? {})));
+        const tslaAgain = page.getByLabel('TSLA bucket');
+        // The saved choice shows once the page has hydrated with the user's settings.
+        await expect(tslaAgain).toHaveValue('core');
+        await tslaAgain.selectOption('');
+        await back;
+        await expect(page.getByLabel('TSLA bucket').locator('option:checked')).toHaveText('Speculative/options (default)');
+    });
+
+    test('employer stock is none until named; the plan for the tickers named surfaces on Today', async ({ page }) => {
         const card = page.getByTestId('employer-stock-plan-card');
         await expect(card).toBeVisible();
+        await expect(card.locator('.pm-settings-card-sub')).toHaveText('none named');
+        await expect(page.getByTestId('employer-stock-note')).toContainText("If you hold your employer's stock");
+        await expect(page.getByLabel('Employer stock tickers')).toHaveValue('');
+
+        const tickers = page.getByLabel('Employer stock tickers');
+        await clickUntil(tickers, async () => {
+            await tickers.fill('googl, $$$');
+            await tickers.press('Enter');
+            await expect(tickers).toHaveValue('GOOGL', { timeout: 1000 });
+        });
+        await expect(page.getByTestId('employer-stock-note')).toContainText('GOOGL is kept apart from other concentration');
 
         await expect(async () => {
             await page.getByLabel('Employer-stock plan state').selectOption('active');
@@ -545,13 +634,25 @@ test.describe('Settings page', () => {
         await expect(page.getByLabel('Employer target allocation')).toHaveValue('5');
         await expect(card).toContainText('Planning output only');
 
+        // Resetting the plan keeps the tickers.
+        await page.getByRole('button', { name: 'Reset plan' }).click();
+        await expect(page.getByLabel('Employer-stock plan state')).toHaveValue('draft');
+        await expect(page.getByLabel('Employer stock tickers')).toHaveValue('GOOGL');
+        await page.getByLabel('Employer-stock plan state').selectOption('active');
+        await page.getByLabel('Employer target allocation').fill('5');
+        await page.getByLabel('Employer next action date').fill('2026-05-01');
+
         await gotoAppPage(page, '/');
         test.skip(!(await openPolicyChecks(page)), 'risk policy checks need holdings');
         await expect(page.getByTestId('employer-stock-plan-task')).toBeVisible();
-        await expect(page.getByTestId('employer-stock-plan-task')).toContainText(/GOOG trim due|Review GOOG/);
+        await expect(page.getByTestId('employer-stock-plan-task')).toContainText(/GOOGL trim due|Review GOOGL/);
+        await expect(
+            page.locator('[data-testid="risk-policy-dimension"][data-policy-id="employer_stock_concentration"]'),
+        ).toContainText('Employer stock (GOOGL)');
     });
 
     test('sell discipline rules can be created, triggered, snoozed, resolved, and used as execution guardrails', async ({ page }) => {
+        test.skip(!(await hasPolicyHoldings(page)), 'the rules are previewed on the user\'s holdings');
 
         const card = page.getByTestId('sell-discipline-card');
         await expect(card).toBeVisible();

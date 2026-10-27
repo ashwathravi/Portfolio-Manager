@@ -2,6 +2,7 @@ import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
+    DEFAULT_SELL_DISCIPLINE_RULES,
     evaluateSellDiscipline,
     reactivateSellDisciplineRule,
     resolveSellDisciplineRule,
@@ -58,6 +59,100 @@ function rule(patch: Partial<SellDisciplineRule>): SellDisciplineRule {
 }
 
 describe("sell discipline policy engine", () => {
+    test("the default trim band watches the employer stock the user named, and nothing else", () => {
+        const band = DEFAULT_SELL_DISCIPLINE_RULES.find((candidate) => candidate.id === "sell-goog-employer-cap")!;
+        assert.equal(band.symbol, undefined);
+        assert.equal(band.label, "Employer-stock trim band");
+
+        // AAPL is 45% of the portfolio, but nobody named an employer.
+        const unnamed = evaluateSellDiscipline({
+            holdings: HOLDINGS.map((holding) => ({ ...holding, isEmployerStock: false })),
+            portfolioValue: 250_000,
+            rules: [band],
+            asOf: "2026-05-15",
+        });
+        assert.equal(unnamed.triggeredCount, 0);
+
+        const named = evaluateSellDiscipline({
+            holdings: HOLDINGS.map((holding) => ({ ...holding, isEmployerStock: holding.symbol === "AAPL" })),
+            portfolioValue: 250_000,
+            rules: [band],
+            asOf: "2026-05-15",
+        });
+        assert.equal(named.tasks[0]?.symbol, "AAPL");
+    });
+
+    test("regression: the trim band weighs every employer ticker together and blocks adds to each", () => {
+        const band = DEFAULT_SELL_DISCIPLINE_RULES.find((candidate) => candidate.id === "sell-goog-employer-cap")!;
+        const summary = evaluateSellDiscipline({
+            holdings: [
+                { symbol: "GOOGL", marketValue: 2_500, isEmployerStock: true },
+                { symbol: "GOOG", marketValue: 100_000, isEmployerStock: true },
+                { symbol: "VTI", marketValue: 147_500 },
+            ],
+            portfolioValue: 250_000,
+            rules: [band],
+            asOf: "2026-05-15",
+        });
+        assert.equal(summary.triggeredCount, 1);
+        const [task] = summary.tasks;
+        assert.equal(task.symbol, "GOOG");
+        assert.deepEqual(task.symbols, ["GOOG", "GOOGL"]);
+        assert.equal(task.currentPct, 41);
+        assert.match(task.message, /^GOOG and GOOGL are 41% of portfolio/);
+        assert.equal(sellDisciplineBlocksAdd(summary.tasks, "googl")?.ruleId, band.id);
+        assert.equal(sellDisciplineBlocksAdd(summary.tasks, "VTI"), undefined);
+    });
+
+    test("regression: a position held in several accounts is one position to the rules", () => {
+        const summary = evaluateSellDiscipline({
+            holdings: [
+                { symbol: "AAPL", marketValue: 20_000, quantity: 100, avgCost: 160 },
+                { symbol: "aapl", marketValue: 20_000, quantity: 100, avgCost: 60 },
+                { symbol: "VTI", marketValue: 160_000 },
+            ],
+            portfolioValue: 200_000,
+            rules: [
+                rule({ id: "aapl-cap", symbol: "AAPL", thresholdPct: 15 }),
+                rule({ id: "aapl-doubled", type: "position_doubled", symbol: "AAPL", action: "recover_cost" }),
+            ],
+            asOf: "2026-05-15",
+        });
+        // 20% across the two accounts, over a 15% cap; each alone is 10%.
+        // Doubled in one account ($6,000 cost), not across both ($22,000).
+        assert.deepEqual(summary.tasks.map((task) => task.ruleId), ["aapl-cap"]);
+        assert.equal(summary.tasks[0].currentPct, 20);
+        assert.equal(summary.tasks[0].symbols, undefined);
+    });
+
+    test("regression: a ticker's archived thesis gives way to its replacement, whatever the order", () => {
+        const archived = { id: "th-old", ticker: "AMZN", status: "archived", dateUpdated: "2026-01-01", healthScore: 10 };
+        const current = { id: "th-new", ticker: "AMZN", status: "active", dateUpdated: "2026-05-01", healthScore: 80 };
+        for (const theses of [[archived, current], [current, archived]]) {
+            const summary = evaluateSellDiscipline({
+                holdings: [{ symbol: "AMZN", marketValue: 50_000 }],
+                theses,
+                portfolioValue: 100_000,
+                rules: [
+                    rule({ id: "no-add", type: "missing_thesis_no_add", symbol: "AMZN", action: "no_add", noAdd: true }),
+                    rule({ id: "break", type: "thesis_break", symbol: "AMZN", action: "exit", thresholdPct: 50 }),
+                ],
+                asOf: "2026-05-15",
+            });
+            assert.deepEqual(summary.tasks, []);
+        }
+    });
+
+    test("regression: an employer vest without a symbol or employer stock fires nothing", () => {
+        const summary = evaluateSellDiscipline({
+            holdings: HOLDINGS.map((holding) => ({ ...holding, isEmployerStock: false })),
+            portfolioValue: 250_000,
+            rules: [rule({ type: "employer_vest", vestDate: "2026-05-01" })],
+            asOf: "2026-05-15",
+        });
+        assert.equal(summary.triggeredCount, 0);
+    });
+
     test("triggers allocation caps and no-add blocks", () => {
         const summary = evaluateSellDiscipline({
             holdings: HOLDINGS,

@@ -1,30 +1,29 @@
 "use client";
 
-import { SampleTag } from "@/components/data-display/SampleTag";
 import { useMemo } from "react";
 import { Repeat2 } from "lucide-react";
-import { mockTransactions } from "@/lib/mockData";
-import { computeChurnAnalysis } from "@/lib/risk-policy";
+import { computeChurnAnalysis, DEFAULT_CHURN_POLICY } from "@/lib/risk-policy";
+import { usePolicyPortfolio } from "@/components/providers/PolicyPortfolioProvider";
+import { useRequestTime } from "@/components/providers/RequestTimeProvider";
 import { useSettingsStore } from "@/lib/stores/settingsStore";
-
-const DEFAULT_CHURN_POLICY = {
-    windowDays: 90,
-    watchRepeatSymbols: 1,
-    breachRepeatSymbols: 3,
-};
 
 export function ChurnPolicyCard() {
     const riskPolicy = useSettingsStore((s) => s.riskPolicy);
     const updateRiskPolicy = useSettingsStore((s) => s.updateRiskPolicy);
+    // The preview: the user's own buys and sells.
+    const { portfolio } = usePolicyPortfolio();
+    const requestTime = useRequestTime();
     const policy = riskPolicy.churnPolicy ?? DEFAULT_CHURN_POLICY;
     const summary = useMemo(
         () =>
-            computeChurnAnalysis(mockTransactions, {
+            computeChurnAnalysis(portfolio.trades, {
+                // The window ends today, not at the last trade.
+                asOf: new Date(requestTime),
                 windowDays: policy.windowDays,
                 watchRepeatSymbols: policy.watchRepeatSymbols,
                 breachRepeatSymbols: policy.breachRepeatSymbols,
             }),
-        [policy.windowDays, policy.watchRepeatSymbols, policy.breachRepeatSymbols],
+        [portfolio.trades, requestTime, policy.windowDays, policy.watchRepeatSymbols, policy.breachRepeatSymbols],
     );
     const status = summary.status;
 
@@ -55,7 +54,6 @@ export function ChurnPolicyCard() {
                         className="pm-settings-card-title"
                     >
                         Trading activity
-                        <SampleTag label="Example preview" title="The preview runs your rule against example holdings until an account is connected." />
                     </h2>
                 </div>
                 <span className="pm-settings-card-sub">

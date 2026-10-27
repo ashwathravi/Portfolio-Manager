@@ -79,6 +79,8 @@ export interface SellDisciplineTask {
     action: SellDisciplineAction;
     state: SellDisciplineRuleState;
     symbol?: string;
+    /** Every ticker the task covers, when it's more than `symbol`: the employer's, for a rule without one. */
+    symbols?: string[];
     thesisId?: string;
     message: string;
     currentValue?: number;
@@ -124,13 +126,13 @@ export const SELL_DISCIPLINE_TRIGGER_LABELS: Record<SellDisciplineTriggerType, s
 };
 
 export const DEFAULT_SELL_DISCIPLINE_RULES: readonly SellDisciplineRule[] = [
+    // Without a symbol it watches the employer stock the user named, if any.
     {
         id: "sell-goog-employer-cap",
         type: "allocation_cap",
-        label: "GOOG employer-stock trim band",
+        label: "Employer-stock trim band",
         action: "trim",
         state: "active",
-        symbol: "GOOG",
         thresholdPct: 25,
         noAdd: true,
     },
@@ -147,7 +149,7 @@ export const DEFAULT_SELL_DISCIPLINE_RULES: readonly SellDisciplineRule[] = [
 
 export function evaluateSellDiscipline(input: SellDisciplineInput): SellDisciplineSummary {
     const asOf = normalizeDate(input.asOf);
-    const holdings = input.holdings.map(normalizeHolding);
+    const holdings = combineBySymbol(input.holdings.map(normalizeHolding));
     const theses = input.theses ?? [];
     const portfolioValue = safeMoney(
         input.portfolioValue ?? holdings.reduce((sum, holding) => sum + holding.marketValue, 0),
@@ -239,7 +241,7 @@ export function sellDisciplineBlocksAdd(
     symbol: string,
 ): SellDisciplineTask | undefined {
     const normalized = normalizeSymbol(symbol);
-    return tasks.find((task) => task.noAdd && normalizeSymbol(task.symbol) === normalized);
+    return tasks.find((task) => task.noAdd && (task.symbols ?? [task.symbol]).some((covered) => normalizeSymbol(covered) === normalized));
 }
 
 function evaluateRule({
@@ -257,7 +259,10 @@ function evaluateRule({
     asOf: Date;
     defaultThesisMaxAgeDays: number;
 }): SellDisciplineTask | null {
-    const holding = findHolding(holdings, rule.symbol);
+    // An allocation rule without a symbol weighs all the employer's tickers together.
+    const holding = !normalizeSymbol(rule.symbol) && (rule.type === "allocation_cap" || rule.type === "target_allocation")
+        ? employerPosition(holdings)
+        : findHolding(holdings, rule.symbol);
     const thesis = findThesis(theses, rule, holding?.symbol);
     const thresholdPct = safePercent(rule.thresholdPct);
     const targetPrice = safeMoney(rule.targetPrice ?? thesis?.targetPrice);
@@ -270,8 +275,9 @@ function evaluateRule({
             if (currentPct <= thresholdPct) return null;
             return task(rule, {
                 symbol: holding.symbol,
+                symbols: holding.tickers,
                 thesisId: thesis?.id,
-                message: `${holding.symbol} is ${fmtPct(currentPct)} of portfolio; policy cap is ${fmtPct(thresholdPct)}.`,
+                message: `${positionName(holding)} ${holding.tickers ? "are" : "is"} ${fmtPct(currentPct)} of portfolio; policy cap is ${fmtPct(thresholdPct)}.`,
                 currentValue: holding.marketValue,
                 thresholdValue: valueFromPct(thresholdPct, portfolioValue),
                 currentPct,
@@ -287,8 +293,9 @@ function evaluateRule({
             if (currentPct <= targetPct) return null;
             return task(rule, {
                 symbol: holding.symbol,
+                symbols: holding.tickers,
                 thesisId: thesis?.id,
-                message: `${holding.symbol} is above its ${fmtPct(targetPct)} target allocation.`,
+                message: `${positionName(holding)} ${holding.tickers ? "are" : "is"} above ${holding.tickers ? "their" : "its"} ${fmtPct(targetPct)} target allocation.`,
                 currentValue: holding.marketValue,
                 thresholdValue: valueFromPct(targetPct, portfolioValue),
                 currentPct,
@@ -301,7 +308,8 @@ function evaluateRule({
             if (!rule.vestDate) return null;
             const vestDate = normalizeDate(rule.vestDate);
             if (vestDate.getTime() > asOf.getTime()) return null;
-            const symbol = normalizeSymbol(rule.symbol) || "GOOG";
+            const symbol = normalizeSymbol(rule.symbol) || holding?.symbol;
+            if (!symbol) return null;
             return task(rule, {
                 symbol,
                 thesisId: thesis?.id,
@@ -425,6 +433,8 @@ interface NormalizedSellHolding extends SellDisciplineHolding {
     avgCost: number;
     currentPrice: number;
     costBasis: number;
+    /** Several tickers weighed as one position (the employer's), largest first. */
+    tickers?: string[];
 }
 
 function normalizeHolding(holding: SellDisciplineHolding): NormalizedSellHolding {
@@ -443,13 +453,62 @@ function normalizeHolding(holding: SellDisciplineHolding): NormalizedSellHolding
     };
 }
 
+/** One row per ticker: a position held in several accounts is one position to the rules. */
+function combineBySymbol(holdings: readonly NormalizedSellHolding[]): NormalizedSellHolding[] {
+    const bySymbol = new Map<string, NormalizedSellHolding>();
+    for (const holding of holdings) {
+        const existing = bySymbol.get(holding.symbol);
+        if (!existing) {
+            bySymbol.set(holding.symbol, { ...holding });
+            continue;
+        }
+        const quantity = existing.quantity + holding.quantity;
+        const costBasis = existing.costBasis + holding.costBasis;
+        bySymbol.set(holding.symbol, {
+            ...existing,
+            quantity,
+            costBasis,
+            avgCost: quantity > 0 && costBasis > 0 ? costBasis / quantity : existing.avgCost,
+            currentPrice: existing.currentPrice || holding.currentPrice,
+            marketValue: existing.marketValue + holding.marketValue,
+            isEmployerStock: existing.isEmployerStock || holding.isEmployerStock,
+        });
+    }
+    return [...bySymbol.values()];
+}
+
+/**
+ * The employer's tickers as one position: their combined value, under the
+ * largest one's symbol. Undefined without employer stock.
+ */
+function employerPosition(holdings: readonly NormalizedSellHolding[]): NormalizedSellHolding | undefined {
+    const employer = holdings
+        .filter((holding) => holding.isEmployerStock)
+        .sort((a, b) => b.marketValue - a.marketValue);
+    if (employer.length <= 1) return employer[0];
+    return {
+        ...employer[0],
+        tickers: employer.map((holding) => holding.symbol),
+        marketValue: employer.reduce((sum, holding) => sum + holding.marketValue, 0),
+        quantity: 0,
+        costBasis: employer.reduce((sum, holding) => sum + holding.costBasis, 0),
+    };
+}
+
+/** "GOOG", or "GOOG and GOOGL" for the employer's tickers together. */
+function positionName(holding: NormalizedSellHolding): string {
+    const tickers = holding.tickers ?? [holding.symbol];
+    return tickers.length <= 2 ? tickers.join(" and ") : `${tickers.slice(0, -1).join(", ")} and ${tickers.at(-1)}`;
+}
+
 function findHolding(
     holdings: readonly NormalizedSellHolding[],
     symbol: string | undefined,
 ): NormalizedSellHolding | undefined {
     const normalized = normalizeSymbol(symbol);
     if (normalized) return holdings.find((holding) => holding.symbol === normalized);
-    return holdings.find((holding) => holding.isEmployerStock) ?? holdings[0];
+    // A rule without a symbol is about the employer stock, when there is one.
+    return holdings.find((holding) => holding.isEmployerStock);
 }
 
 function findThesis(
@@ -459,7 +518,9 @@ function findThesis(
 ): SellDisciplineThesis | undefined {
     if (rule.thesisId) return theses.find((thesis) => thesis.id === rule.thesisId);
     const symbol = normalizeSymbol(rule.symbol ?? fallbackSymbol);
-    return theses.find((thesis) => normalizeSymbol(thesis.ticker) === symbol);
+    const forTicker = theses.filter((thesis) => normalizeSymbol(thesis.ticker) === symbol);
+    // A ticker's current thesis: one archived and replaced is the replacement.
+    return forTicker.find((thesis) => thesis.status !== "archived") ?? forTicker[0];
 }
 
 function isSnoozed(rule: SellDisciplineRule, asOf: Date): boolean {

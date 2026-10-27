@@ -4,33 +4,24 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import { ArrowUpRight, ShieldAlert } from "lucide-react";
 import {
-    computeRiskPolicyDashboard,
+    evaluateRiskPolicy,
     SELL_DISCIPLINE_ACTION_LABELS,
-    type OptionRiskPosition,
     type EmployerStockDeRiskingSummary,
-    type RiskPolicyDashboardHolding,
-    type RiskPolicyDashboardTrade,
+    type PolicyPortfolio,
     RiskPolicyDashboardSummary,
     RiskPolicyDimension,
     RiskPolicyDimensionStatus,
     RiskPolicyNextAction,
     type SellDisciplineTask,
-    type SellDisciplineThesis,
     type StressScenarioResult,
 } from "@/lib/risk-policy";
 import { useSettingsStore } from "@/lib/stores/settingsStore";
-
-export interface RiskPolicyDashboardCardInput {
-    holdings: RiskPolicyDashboardHolding[];
-    cashTotal: number;
-    trades?: RiskPolicyDashboardTrade[];
-    optionPositions?: OptionRiskPosition[];
-    theses?: SellDisciplineThesis[];
-}
+import { useRequestTime } from "@/components/providers/RequestTimeProvider";
 
 export interface RiskPolicyDashboardCardProps {
     summary: RiskPolicyDashboardSummary;
-    input?: RiskPolicyDashboardCardInput;
+    /** The user's portfolio: with it, the checks follow the policy as it's edited. */
+    portfolio?: PolicyPortfolio;
 }
 
 const STATUS_LABELS: Record<RiskPolicyDimensionStatus, string> = {
@@ -42,35 +33,15 @@ const STATUS_LABELS: Record<RiskPolicyDimensionStatus, string> = {
 
 export function RiskPolicyDashboardCard({
     summary: initialSummary,
-    input,
+    portfolio,
 }: RiskPolicyDashboardCardProps) {
     const riskPolicy = useSettingsStore((s) => s.riskPolicy);
-    const summary = useMemo(() => {
-        if (!input) return initialSummary;
-        const churnPolicy = riskPolicy.churnPolicy ?? {
-            windowDays: 90,
-            watchRepeatSymbols: 1,
-            breachRepeatSymbols: 3,
-        };
-
-        return computeRiskPolicyDashboard({
-            ...input,
-            bucketPolicies: riskPolicy.bucketPolicies,
-            themeCaps: riskPolicy.themeCaps,
-            cashJobs: riskPolicy.cashJobs,
-            cashDeploymentRule: riskPolicy.cashDeploymentRule,
-            employerStockPlan: riskPolicy.employerStockPlan,
-            optionPositions: input.optionPositions,
-            optionsRiskPolicy: riskPolicy.optionsRiskPolicy,
-            sellDisciplineRules: riskPolicy.sellDisciplineRules,
-            theses: input.theses,
-            options: {
-                churnWindowDays: churnPolicy.windowDays,
-                churnWatchRepeatSymbols: churnPolicy.watchRepeatSymbols,
-                churnBreachRepeatSymbols: churnPolicy.breachRepeatSymbols,
-            },
-        });
-    }, [initialSummary, input, riskPolicy]);
+    // Today's date, the same on the server and in the browser.
+    const requestTime = useRequestTime();
+    const summary = useMemo(
+        () => (portfolio ? evaluateRiskPolicy(portfolio, riskPolicy, { asOf: new Date(requestTime) }) : initialSummary),
+        [initialSummary, portfolio, riskPolicy, requestTime],
+    );
     const headline = buildHeadline(summary);
 
     return (
@@ -294,7 +265,7 @@ function SellDisciplineTaskCard({ task }: { task: SellDisciplineTask }) {
             data-state={task.state}
         >
             <header className="pm-sell-task-head">
-                <span className="pm-sell-task-kicker">{task.symbol ?? "Portfolio"}</span>
+                <span className="pm-sell-task-kicker">{task.symbols?.join(" / ") ?? task.symbol ?? "Portfolio"}</span>
                 <span className="pm-risk-policy-status" data-status="breached">
                     {action}
                 </span>

@@ -1,7 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
 import { clickUntil, gotoAppPage, reloadAppPage } from './helpers/app';
 import { researchLoaded } from './helpers/research';
-import { signInAsFreshUser } from './helpers/users';
+import { databaseAuthEnabled, signInAsFreshUser } from './helpers/users';
 
 /**
  * Phase 9 (AR-94) Execution tests.
@@ -757,5 +757,65 @@ test.describe('Trade — phone layout', () => {
             return main ? main.scrollWidth - main.clientWidth : 0;
         });
         expect(overflow).toBeLessThanOrEqual(1);
+    });
+});
+
+/**
+ * Launch item i54: the ticket's risk-policy checks run on the user's own
+ * holdings and the theses they wrote, not example data.
+ */
+test.describe('Trade › risk policy on the user\'s own portfolio', () => {
+    test.skip(!databaseAuthEnabled, 'the holdings and theses are in the database');
+
+    // These change settings and write theses: each test has a user of its own.
+    test.beforeEach(async ({ context }) => {
+        await signInAsFreshUser(context);
+    });
+
+    test('the checks see the user\'s holdings: TSLA is already over the speculative cap', async ({ page }) => {
+        await gotoAppPage(page, '/execution');
+        await page.getByLabel('Ticker').fill('TSLA');
+        await page.getByLabel('Quantity').fill('1');
+        await page.getByLabel('Limit price').fill('250');
+
+        const policy = page.getByTestId('risk-policy-impact');
+        await expect(policy).toContainText('Override needed');
+        await expect(policy).toContainText('Speculative/options cap');
+        // User A's TSLA is 12% of their portfolio and cash.
+        await expect(policy).toContainText(/worsens from 12(\.\d)?%/);
+    });
+
+    test('regression: a no-add rule for a ticker without a thesis lifts once the user writes one', async ({ page }) => {
+        await gotoAppPage(page, '/settings');
+        // Settings sections hydrate inside a Suspense boundary, and a form
+        // filled before then is reset: the ticker field upper-cases what's
+        // typed once it's hydrated.
+        const ticker = page.getByLabel('Sell discipline ticker');
+        await expect(async () => {
+            await ticker.fill('amzn');
+            await expect(ticker).toHaveValue('AMZN', { timeout: 500 });
+        }).toPass({ timeout: 10_000 });
+        await page.getByLabel('Sell discipline trigger type').selectOption('missing_thesis_no_add');
+        await page.getByLabel('Sell discipline action').selectOption('no_add');
+        await page.getByRole('button', { name: 'Add sell rule' }).click();
+        const rule = page.getByTestId('sell-discipline-rule').filter({ hasText: 'AMZN Missing thesis no-add' });
+        await expect(rule).toHaveCount(1);
+        await expect(rule).toHaveAttribute('data-state', 'triggered');
+
+        const loaded = researchLoaded(page, 'theses');
+        await gotoAppPage(page, '/execution');
+        await loaded;
+        await page.getByLabel('Ticker').fill('AMZN');
+        await page.getByLabel('Quantity').fill('1');
+        await page.getByLabel('Limit price').fill('170');
+        const guardrails = page.locator('.pm-exec-guardrails');
+        await expect(guardrails).toContainText('No-add rule triggered: AMZN Missing thesis no-add');
+
+        // The thesis the user writes here is the one the rule looks for.
+        const panel = page.getByTestId('pre-trade-rationale');
+        await panel.getByRole('button', { name: /New thesis/ }).click();
+        await panel.getByPlaceholder(/Why buy AMZN\?/).fill('AWS margins keep compounding');
+        await panel.getByRole('button', { name: 'Create', exact: true }).click();
+        await expect(guardrails).not.toContainText('No-add rule triggered: AMZN');
     });
 });

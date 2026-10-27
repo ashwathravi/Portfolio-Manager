@@ -32,6 +32,27 @@ describe("risk policy / theme exposure engine", () => {
         assert.equal(weights[1].weight, 0.25);
     });
 
+    test("an employer's stock counts a fifth as employer-linked wealth, the rest as the company's themes", () => {
+        const company = themeWeightsForSymbol("GOOG");
+        assert.equal(company.some((weight) => weight.theme === "employer_linked_wealth"), false);
+
+        const employer = themeWeightsForSymbol("GOOG", undefined, { employer: true });
+        assert.deepStrictEqual(
+            employer.map((weight) => [weight.theme, Number(weight.weight.toFixed(4))]),
+            [
+                ["mega_cap_growth", 0.35],
+                ["cloud_platforms", 0.25],
+                ["ai_infrastructure", 0.2],
+                ["employer_linked_wealth", 0.2],
+            ],
+        );
+        // A ticker without theme data keeps its unknown share.
+        assert.deepStrictEqual(
+            themeWeightsForSymbol("ZZZZ", undefined, { employer: true }).map((weight) => [weight.theme, weight.weight]),
+            [["unknown", 0.8], ["employer_linked_wealth", 0.2]],
+        );
+    });
+
     test("surfaces unknown theme metadata instead of dropping holdings", () => {
         const weights = themeWeightsForSymbol("ZZZZ");
 
@@ -52,8 +73,8 @@ describe("risk policy / theme exposure engine", () => {
         const broad = exposure.rows.find((row) => row.theme === "broad_core_index")!;
 
         assert.equal(exposure.totalMarketValue, 300_000);
-        assert.equal(ai.marketValue, 65_000);
-        assert.equal(Number(ai.percentOfPortfolio.toFixed(2)), 21.67);
+        assert.equal(ai.marketValue, 70_000);
+        assert.equal(Number(ai.percentOfPortfolio.toFixed(2)), 23.33);
         assert.equal(ai.contributors[0].symbol, "NVDA");
         assert.equal(ai.bucketBreakdown[0].bucket, "active");
         assert.equal(broad.marketValue, 100_000);
@@ -62,7 +83,7 @@ describe("risk policy / theme exposure engine", () => {
 
     test("flags theme caps and unknown metadata states", () => {
         const exposure = computeThemeExposure([
-            { symbol: "GOOG", marketValue: 900_000 },
+            { symbol: "GOOG", marketValue: 900_000, isEmployerStock: true },
             { symbol: "ZZZZ", marketValue: 100_000 },
         ]);
         const employer = exposure.rows.find((row) => row.theme === "employer_linked_wealth")!;

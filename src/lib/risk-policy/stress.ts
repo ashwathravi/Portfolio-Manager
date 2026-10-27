@@ -8,6 +8,7 @@ import {
     computeThemeExposure,
     themeWeightsForSymbol,
 } from "./themes";
+import { employerStockName } from "./de-risking";
 import { sectorFor, type Sector } from "@/lib/holdings/sector";
 
 export type StressTargetKind = "ticker" | "theme" | "bucket" | "sector" | "portfolio";
@@ -36,6 +37,8 @@ export interface StressHolding {
     policyBucket?: PolicyBucketId | null;
     themeWeights?: ReturnType<typeof themeWeightsForSymbol> | null;
     sector?: Sector | string | null;
+    /** Named as the employer's: part of it is employer-linked wealth, as on Today. */
+    isEmployerStock?: boolean;
 }
 
 export interface StressContributor {
@@ -75,29 +78,37 @@ export interface StressScenarioInput {
     scenario: StressScenario;
 }
 
+/**
+ * The employer-stock scenarios, for the tickers the user named as their
+ * employer's (Settings › Employer stock); none until they name one.
+ */
+export function employerStressScenarios(symbols: readonly string[]): StressScenario[] {
+    const tickers = [...new Set(symbols.map(normalizeSymbol).filter(Boolean))];
+    if (tickers.length === 0) return [];
+    const name = employerStockName(tickers);
+    const shocked = (shockPct: number) => tickers.map((ticker) => ({ kind: "ticker" as const, value: ticker, shockPct, label: ticker }));
+    return [
+        {
+            id: "employer_40_down",
+            label: `${name} -40%`,
+            description: "Single-employer concentration drawdown.",
+            targets: shocked(-40),
+            assumption: `${tickers.join("/")} ${tickers.length === 1 ? "is" : "are"} shocked down 40%; other holdings are unchanged.`,
+            mitigationHref: "/settings",
+        },
+        {
+            id: "employer_job_risk",
+            label: "Employer stock + job-risk placeholder",
+            description: `${name} drawdown plus income-risk flag.`,
+            targets: shocked(-35),
+            assumption: "Applies a 35% employer-stock shock and labels job/income risk qualitatively; salary impact is not modeled.",
+            mitigationHref: "/settings",
+        },
+    ];
+}
+
+/** Scenarios for any portfolio; `stressScenariosFor` adds the employer's. */
 export const BUILT_IN_STRESS_SCENARIOS: readonly StressScenario[] = [
-    {
-        id: "goog_40_down",
-        label: "GOOG -40%",
-        description: "Single-employer concentration drawdown.",
-        targets: [
-            { kind: "ticker", value: "GOOG", shockPct: -40, label: "GOOG" },
-            { kind: "ticker", value: "GOOGL", shockPct: -40, label: "GOOGL" },
-        ],
-        assumption: "GOOG/GOOGL are shocked down 40%; other holdings are unchanged.",
-        mitigationHref: "/settings",
-    },
-    {
-        id: "employer_job_risk",
-        label: "Employer stock + job-risk placeholder",
-        description: "GOOG drawdown plus income-risk flag.",
-        targets: [
-            { kind: "ticker", value: "GOOG", shockPct: -35, label: "GOOG" },
-            { kind: "ticker", value: "GOOGL", shockPct: -35, label: "GOOGL" },
-        ],
-        assumption: "Applies a 35% employer-stock shock and labels job/income risk qualitatively; salary impact is not modeled.",
-        mitigationHref: "/settings",
-    },
     {
         id: "ai_basket_30_down",
         label: "AI basket -30%",
@@ -153,16 +164,22 @@ export const BUILT_IN_STRESS_SCENARIOS: readonly StressScenario[] = [
     },
 ];
 
-export function findStressScenario(id: string | undefined): StressScenario {
-    return BUILT_IN_STRESS_SCENARIOS.find((scenario) => scenario.id === id)
-        ?? BUILT_IN_STRESS_SCENARIOS[0];
+/** Every scenario for a user whose employer's tickers are `employerSymbols`. */
+export function stressScenariosFor(employerSymbols: readonly string[] = []): StressScenario[] {
+    return [...employerStressScenarios(employerSymbols), ...BUILT_IN_STRESS_SCENARIOS];
+}
+
+export function findStressScenario(id: string | undefined, employerSymbols: readonly string[] = []): StressScenario {
+    const scenarios = stressScenariosFor(employerSymbols);
+    return scenarios.find((scenario) => scenario.id === id) ?? scenarios[0];
 }
 
 export function runBuiltInStressScenarios(
-    input: Omit<StressScenarioInput, "scenario">,
+    input: Omit<StressScenarioInput, "scenario"> & { employerSymbols?: readonly string[] },
 ): StressScenarioResult[] {
-    return BUILT_IN_STRESS_SCENARIOS.map((scenario) =>
-        runStressScenario({ ...input, scenario }),
+    const { employerSymbols, ...rest } = input;
+    return stressScenariosFor(employerSymbols).map((scenario) =>
+        runStressScenario({ ...rest, scenario }),
     );
 }
 
@@ -308,7 +325,7 @@ function targetShockForHolding(
     }
     if (target.kind === "theme") {
         const targetTheme = target.value as ThemeId | undefined;
-        const weight = themeWeightsForSymbol(holding.symbol, holding.themeWeights)
+        const weight = themeWeightsForSymbol(holding.symbol, holding.themeWeights, { employer: holding.isEmployerStock })
             .find((candidate) => candidate.theme === targetTheme)?.weight ?? 0;
         return target.shockPct * weight;
     }
@@ -369,7 +386,7 @@ function buildMissingDataNotes(
 
     const unknownThemeValue = holdings
         .filter((holding) =>
-            themeWeightsForSymbol(holding.symbol, holding.themeWeights)
+            themeWeightsForSymbol(holding.symbol, holding.themeWeights, { employer: holding.isEmployerStock })
                 .some((weight) => weight.theme === "unknown"),
         )
         .reduce((sum, holding) => sum + holding.marketValue, 0);

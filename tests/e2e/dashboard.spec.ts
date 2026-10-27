@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { userKey } from './helpers/storage';
 import { clickUntil, collectConsoleErrors, gotoAppPage, openPolicyChecks, reloadAppPage } from './helpers/app';
-import { signInAsFreshUser, signInAsNewUser } from './helpers/users';
+import { databaseAuthEnabled, signInAsFreshUser, signInAsNewUser } from './helpers/users';
 
 /**
  * Today (/) — formerly the Dashboard.
@@ -13,10 +13,11 @@ import { signInAsFreshUser, signInAsNewUser } from './helpers/users';
  *   Needs your attention .. ranked triage list (policy, theses, review)
  *   Risk policy strip ..... one line; full checks behind a disclosure
  *                           (only when there are holdings)
+ *   Equity curve .......... from nightly valuations, once there are two
  *   Holdings + allocation . real data, only when there are holdings
  *   Recent activity ....... real transactions
- *   Review & research ..... example-data cards (weekly review, equity curve,
- *                           theses, patterns, Alpha Radar)
+ *   Review & research ..... example-data cards (weekly review, theses,
+ *                           patterns, Alpha Radar)
  */
 
 async function hasHoldings(page: import('@playwright/test').Page): Promise<boolean> {
@@ -81,6 +82,27 @@ test.describe('Today page', () => {
         await expect(page.getByTestId('risk-policy-dashboard')).toBeHidden();
         await openPolicyChecks(page);
         await expect(page.getByTestId('risk-policy-dimension')).toHaveCount(12);
+    });
+
+    test('regression: no employer stock is assumed until the user names it', async ({ page }) => {
+        test.skip(!(await hasHoldings(page)), 'no holdings in this database');
+        await openPolicyChecks(page);
+        // User A holds GOOGL, but hasn't named an employer.
+        const employer = page.locator('[data-testid="risk-policy-dimension"][data-policy-id="employer_stock_concentration"]');
+        await expect(employer).toHaveAttribute('data-status', 'inside');
+        await expect(employer).toContainText('Employer stock');
+        await expect(employer).toContainText('None named');
+        await expect(page.getByTestId('risk-policy-dashboard')).not.toContainText('GOOG -40%');
+    });
+
+    test('with valuation history: a real equity curve, outside the example section', async ({ page }) => {
+        test.skip(!databaseAuthEnabled, 'the history is in the database');
+        const curve = page.getByTestId('today-equity-curve');
+        await expect(curve).toBeVisible();
+        await expect(curve.locator('.pm-card-title')).toHaveText('Equity curve');
+        await expect(curve.getByTestId('performance-hero')).toContainText('time-weighted');
+        await expect(page.getByTestId('today-examples').getByTestId('today-equity-curve')).toHaveCount(0);
+        await expect(page.getByTestId('today-examples').getByLabel('Equity curve')).toHaveCount(0);
     });
 
     test('needs-your-attention lists ranked items, each with one link', async ({ page }) => {
@@ -357,7 +379,7 @@ test.describe('Dashboard console hygiene', () => {
     test('regression: charts do not log invalid <svg> height errors', async ({ page }) => {
         const errors = collectConsoleErrors(page);
         await gotoAppPage(page, '/');
-        // The example equity curve and pattern feed render the shared SVG charts.
+        // The pattern feed renders the shared SVG charts.
         await expect(page.getByTestId('today-examples').locator('svg').first()).toBeVisible();
         await page.waitForTimeout(500);
         expect(errors.filter((e) => e.includes('<svg> attribute height'))).toEqual([]);
@@ -501,6 +523,8 @@ test.describe('Today › First run', () => {
         await signInAsNewUser(context);
         await gotoAppPage(page, '/');
         await expect(page.getByTestId('today-hero')).toHaveAttribute('data-empty', 'true');
+        // No valuations yet: no equity curve.
+        await expect(page.getByTestId('today-equity-curve')).toHaveCount(0);
         await expect(steps(page)).toHaveCount(2);
         await expect(steps(page).nth(0)).toHaveAttribute('data-done', 'false');
         await expect(steps(page).nth(0)).toContainText('Add an account');

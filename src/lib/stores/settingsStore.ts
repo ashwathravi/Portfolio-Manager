@@ -1,21 +1,17 @@
 import { create } from 'zustand';
 import { PERSISTED_SETTINGS_SLICES, SETTINGS_VERSION } from '@/lib/settings/document';
 import { sanitizeSettings } from '@/lib/validators/settings-slices';
-import { migrateLandingPage, stripSeededDemoAccounts, type LandingPage } from './settingsMigrations';
+import { migrateLandingPage, stripSeededDemoAccounts, unseedEmployerStock, type LandingPage } from './settingsMigrations';
 import {
     DEFAULT_BUCKET_POLICIES,
     DEFAULT_CASH_DEPLOYMENT_RULE,
+    DEFAULT_CHURN_POLICY,
     DEFAULT_EMPLOYER_STOCK_DERISKING_PLAN,
     DEFAULT_SELL_DISCIPLINE_RULES,
     DEFAULT_OPTIONS_RISK_POLICY,
     DEFAULT_THEME_CAPS,
-    type CashDeploymentRule,
-    type CashJob,
-    type EmployerStockDeRiskingPlan,
-    type OptionsRiskPolicy,
-    type PolicyBucketPolicy,
-    type SellDisciplineRule,
-    type ThemeId,
+    type ChurnPolicySettings,
+    type RiskPolicySettings,
 } from '@/lib/risk-policy';
 import { connectedPlaidAccountsMatch } from '@/lib/plaid/link';
 import type { PlaidCapability, PlaidConnectedAccountInput } from '@/lib/plaid/types';
@@ -206,22 +202,7 @@ export interface ExecutionSettings {
     cooldownSeconds: CooldownSeconds;
 }
 
-export interface RiskPolicySettings {
-    bucketPolicies: PolicyBucketPolicy[];
-    themeCaps: Partial<Record<ThemeId, number>>;
-    cashJobs: CashJob[];
-    cashDeploymentRule: CashDeploymentRule;
-    employerStockPlan: EmployerStockDeRiskingPlan;
-    optionsRiskPolicy: OptionsRiskPolicy;
-    sellDisciplineRules: SellDisciplineRule[];
-    churnPolicy: ChurnPolicySettings;
-}
-
-export interface ChurnPolicySettings {
-    windowDays: number;
-    watchRepeatSymbols: number;
-    breachRepeatSymbols: number;
-}
+export type { ChurnPolicySettings, RiskPolicySettings };
 
 /**
  * Example-data display. Sample-backed cards always carry a "Sample" tag;
@@ -414,11 +395,8 @@ const defaultRiskPolicy: RiskPolicySettings = {
     },
     optionsRiskPolicy: { ...DEFAULT_OPTIONS_RISK_POLICY },
     sellDisciplineRules: DEFAULT_SELL_DISCIPLINE_RULES.map((rule) => ({ ...rule })),
-    churnPolicy: {
-        windowDays: 90,
-        watchRepeatSymbols: 1,
-        breachRepeatSymbols: 3,
-    },
+    churnPolicy: { ...DEFAULT_CHURN_POLICY },
+    bucketAssignments: {},
 };
 
 const defaultDemo: DemoSettings = { showSampleData: DEFAULT_SHOW_SAMPLE_DATA };
@@ -727,6 +705,10 @@ export const useSettingsStore = create<SettingsState>()(
                             ...updates.churnPolicy,
                         }
                         : state.riskPolicy.churnPolicy ?? defaultRiskPolicy.churnPolicy,
+                    // Replaced whole: removing a choice leaves the ticker out.
+                    bucketAssignments: updates.bucketAssignments
+                        ? { ...updates.bucketAssignments }
+                        : state.riskPolicy.bucketAssignments ?? {},
                 },
             })),
 
@@ -1065,6 +1047,12 @@ export function migrateSettings(persistedState: unknown, version: number): Parti
                 defaultLandingPage: migrateLandingPage(s.preferences.defaultLandingPage),
             };
         }
+    }
+    if (version < 16 && s.riskPolicy) {
+        s.riskPolicy = unseedEmployerStock({ ...s.riskPolicy, bucketAssignments: {} }, {
+            planLabel: DEFAULT_EMPLOYER_STOCK_DERISKING_PLAN.label,
+            trimBandLabel: DEFAULT_SELL_DISCIPLINE_RULES.find((rule) => rule.id === 'sell-goog-employer-cap')?.label ?? 'Employer-stock trim band',
+        });
     }
     return s as Partial<PersistedSettings>;
 }

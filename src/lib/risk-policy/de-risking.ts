@@ -97,10 +97,14 @@ export interface ComputeEmployerStockDeRiskingInput {
     asOf?: Date | string;
 }
 
+/**
+ * No employer stock until the user names it (launch item i52): `symbols` is
+ * the setting every employer-stock check reads.
+ */
 export const DEFAULT_EMPLOYER_STOCK_DERISKING_PLAN: EmployerStockDeRiskingPlan = {
     id: "goog-derisk-v1",
-    label: "GOOG employer stock de-risking",
-    symbols: ["GOOG", "GOOGL"],
+    label: "Employer stock de-risking",
+    symbols: [],
     state: "draft",
     targetAllocationPct: 20,
     intermediateTargetPct: 25,
@@ -371,7 +375,7 @@ function buildNextAction({
         return {
             dueDate,
             overdue,
-            label: "Review GOOG de-risking plan",
+            label: `Review ${employerStockName(plan.symbols)} de-risking plan`,
             detail: status === "inside"
                 ? `Target reached at ${currentAllocationPct.toFixed(1)}% vs ${targetPct}% cap. Decide whether to keep, pause, or complete the plan.`
                 : "Plan is active but needs current holdings or trim assumptions before a schedule can be generated.",
@@ -384,12 +388,19 @@ function buildNextAction({
     return {
         dueDate: first.dueDate,
         overdue,
-        label: overdue ? "GOOG trim due" : "Next GOOG trim",
+        label: overdue
+            ? `${employerStockName(plan.symbols).replace(/^e/, "E")} trim due`
+            : `Next ${employerStockName(plan.symbols)} trim`,
         detail: `${formatCurrency(first.sellUsd)} to ${first.destinationLabel}; projected allocation ${first.projectedAllocationPct.toFixed(1)}%.`,
         sellUsd: first.sellUsd,
         estimatedTaxReserveUsd: first.estimatedTaxReserveUsd,
         href: "/settings",
     };
+}
+
+/** The first ticker named ("GOOG" for GOOG and GOOGL), or "employer stock" before any is. */
+export function employerStockName(symbols: readonly string[]): string {
+    return symbols.map(normalizeSymbol).find(Boolean) ?? "employer stock";
 }
 
 function allocateSaleAcrossHoldings(

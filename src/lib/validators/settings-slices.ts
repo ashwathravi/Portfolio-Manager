@@ -10,6 +10,7 @@ import {
 } from '@/lib/risk-policy/de-risking';
 import { SELL_DISCIPLINE_TRIGGER_TYPES } from '@/lib/risk-policy/sell-discipline';
 import { THEME_IDS } from '@/lib/risk-policy/themes';
+import { ASSIGNABLE_POLICY_BUCKETS, MAX_BUCKET_ASSIGNMENTS } from '@/lib/risk-policy/user-policy';
 import type { PersistedSettingsSlice } from '@/lib/settings/document';
 
 import { preferencesSchema } from './settings';
@@ -236,6 +237,15 @@ const churnPolicySchema = z.strictObject({
     breachRepeatSymbols: whole(1, 25),
 });
 
+/** A holding's ticker as the app stores it: AAPL, BRK.B, BTC-USD. */
+const ticker = z.string().max(10).regex(/^[A-Z0-9]+(?:[.-][A-Z0-9]+)*$/, { error: 'must be a ticker such as AAPL or BRK.B' });
+
+const bucketAssignmentsSchema = z
+    .partialRecord(ticker, z.enum(ASSIGNABLE_POLICY_BUCKETS))
+    .refine((assignments) => Object.keys(assignments).length <= MAX_BUCKET_ASSIGNMENTS, {
+        error: `must hold at most ${MAX_BUCKET_ASSIGNMENTS} tickers`,
+    });
+
 export const riskPolicySettingsSchema = z.strictObject({
     bucketPolicies: z.array(bucketPolicySchema),
     themeCaps: z.partialRecord(z.enum(THEME_IDS), percent.optional()),
@@ -245,6 +255,7 @@ export const riskPolicySettingsSchema = z.strictObject({
     optionsRiskPolicy: optionsRiskPolicySchema,
     sellDisciplineRules: z.array(sellDisciplineRuleSchema),
     churnPolicy: churnPolicySchema,
+    bucketAssignments: bucketAssignmentsSchema,
 });
 
 export const demoSettingsSchema = z.strictObject({
@@ -287,7 +298,9 @@ export interface SettingsIssue {
  * save from an older version (a tab not reloaded since the deploy) may leave
  * out the fields added after it, and nothing else.
  */
-export const FIELDS_ADDED_IN: Readonly<Record<number, readonly string[]>> = {};
+export const FIELDS_ADDED_IN: Readonly<Record<number, readonly string[]>> = {
+    16: ['riskPolicy.bucketAssignments'],
+};
 
 /**
  * The first field of `settings` the app could not have written at

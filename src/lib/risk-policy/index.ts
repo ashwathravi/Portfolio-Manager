@@ -8,3 +8,4 @@ export * from "./options";
 export * from "./sell-discipline";
 export * from "./stress";
 export * from "./themes";
+export * from "./user-policy";

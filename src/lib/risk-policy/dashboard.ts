@@ -69,8 +69,10 @@ export interface RiskPolicyDashboardHolding {
     quantity?: number;
     avgCost?: number;
     currentPrice?: number;
+    /** Defaults to whether the employer plan names its symbol. */
     isEmployerStock?: boolean;
     policyBucket?: PolicyBucketId | null;
+    defaultBucket?: PolicyBucketId | null;
     instrumentType?: string | null;
     themeWeights?: readonly ThemeWeight[] | null;
 }
@@ -168,7 +170,9 @@ export function computeRiskPolicyDashboard(
     input: RiskPolicyDashboardInput,
 ): RiskPolicyDashboardSummary {
     const options = { ...DEFAULT_OPTIONS, ...input.options };
-    const holdings = normalizeHoldings(input.holdings);
+    // The employer's tickers are a setting (the plan's symbols), never assumed.
+    const employerSymbols = new Set((input.employerStockPlan?.symbols ?? []).map(normalizeSymbol).filter(Boolean));
+    const holdings = normalizeHoldings(input.holdings, employerSymbols);
     const cashTotal = safePositive(input.cashTotal ?? 0);
     const optionPositions = input.optionPositions ?? [];
     const optionHoldings = optionPositions
@@ -235,6 +239,7 @@ export function computeRiskPolicyDashboard(
     const stressTests = runBuiltInStressScenarios({
         holdings: policyHoldings,
         cashTotal: cashTotal,
+        employerSymbols: [...employerSymbols],
     });
 
     const dimensions: RiskPolicyDimension[] = [
@@ -268,15 +273,11 @@ export function computeRiskPolicyDashboard(
             nextAction: "Check whether new buys would add to already-dominant names.",
             href: "/portfolios/holdings",
         }),
-        buildConcentrationDimension({
-            id: "employer_stock_concentration",
-            label: "GOOG / employer-linked stock",
-            holdings: holdings.filter((holding) => isGoogleSymbol(holding.symbol)),
+        buildEmployerStockDimension({
+            employerSymbols: [...employerSymbols],
+            holdings: holdings.filter((holding) => holding.isEmployerStock),
             totalMarketValue,
             maxPct: options.employerStockMaxPct,
-            explanation: "GOOG and GOOGL are separated from generic concentration because portfolio and income risk can overlap.",
-            nextAction: "Set an employer-stock target and review trim pacing.",
-            href: "/portfolios/holdings",
         }),
         buildThemeDimension({
             id: "ai_infrastructure_exposure",
@@ -390,6 +391,55 @@ function buildConcentrationDimension({
         overLimitPct,
         overLimitUsd: Math.max(0, currentValueUsd - (maxPct / 100) * totalMarketValue),
     };
+}
+
+/**
+ * Employer stock, kept apart from other concentration because the user's
+ * portfolio and income depend on the same company. Inside policy until the
+ * user names their employer's tickers: holding none is the usual case.
+ */
+function buildEmployerStockDimension({
+    employerSymbols,
+    holdings,
+    totalMarketValue,
+    maxPct,
+}: {
+    employerSymbols: readonly string[];
+    holdings: readonly NormalizedRiskHolding[];
+    totalMarketValue: number;
+    maxPct: number;
+}): RiskPolicyDimension {
+    const explanation = "Your employer's stock is kept apart from other concentration because your portfolio and your income depend on the same company.";
+    if (employerSymbols.length === 0) {
+        return {
+            id: "employer_stock_concentration",
+            label: "Employer stock",
+            group: "concentration",
+            status: "inside",
+            currentLabel: "None named",
+            targetLabel: `≤ ${maxPct}%`,
+            explanation,
+            nextAction: "If you hold your employer's stock, name it in Settings.",
+            href: "/settings#employer-stock",
+            impactedSymbols: [],
+            overLimitPct: 0,
+            overLimitUsd: 0,
+        };
+    }
+    const dimension = buildConcentrationDimension({
+        id: "employer_stock_concentration",
+        label: `Employer stock (${employerSymbols.join(", ")})`,
+        holdings,
+        totalMarketValue,
+        maxPct,
+        explanation,
+        nextAction: "Set an employer-stock target and review trim pacing.",
+        href: "/settings#employer-stock",
+    });
+    // Named but not held: nothing to measure, and nothing missing.
+    return holdings.length === 0 && totalMarketValue > 0
+        ? { ...dimension, status: "inside", currentLabel: "Not held", nextAction: "Keep monitoring before adding risk." }
+        : dimension;
 }
 
 function buildThemeDimension({
@@ -679,12 +729,14 @@ interface NormalizedRiskHolding {
     currentPrice?: number;
     isEmployerStock?: boolean;
     policyBucket?: PolicyBucketId | null;
+    defaultBucket?: PolicyBucketId | null;
     instrumentType?: string | null;
     themeWeights?: readonly ThemeWeight[] | null;
 }
 
 function normalizeHoldings(
     holdings: readonly RiskPolicyDashboardHolding[],
+    employerSymbols: ReadonlySet<string>,
 ): NormalizedRiskHolding[] {
     return holdings
         .map((holding) => ({
@@ -695,8 +747,9 @@ function normalizeHoldings(
             quantity: safePositive(holding.quantity ?? 0),
             avgCost: safePositive(holding.avgCost ?? 0),
             currentPrice: safePositive(holding.currentPrice ?? 0),
-            isEmployerStock: holding.isEmployerStock ?? isGoogleSymbol(holding.symbol),
+            isEmployerStock: holding.isEmployerStock ?? employerSymbols.has(normalizeSymbol(holding.symbol)),
             policyBucket: holding.policyBucket,
+            defaultBucket: holding.defaultBucket,
             instrumentType: holding.instrumentType,
             themeWeights: holding.themeWeights,
         }))
@@ -705,11 +758,6 @@ function normalizeHoldings(
 
 function normalizeSymbol(symbol: string | null | undefined): string {
     return symbol?.trim().toUpperCase() ?? "";
-}
-
-function isGoogleSymbol(symbol: string | null | undefined): boolean {
-    const normalized = normalizeSymbol(symbol);
-    return normalized === "GOOG" || normalized === "GOOGL";
 }
 
 function formatOptionName(position: OptionRiskPosition): string {
