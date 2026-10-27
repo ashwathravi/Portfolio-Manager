@@ -174,6 +174,9 @@ export function AskSheet({ onClose, variant = 'sheet', initialQuestion = null }:
     }, [loaded, initialQuestion, handleSubmit]);
 
     const handleClear = async () => {
+        // Not while a question is being answered: its answer would be saved
+        // after the clear and bring the cleared conversation back.
+        if (pending) return;
         if (!inAccount) {
             const fresh = clearHistory();
             setConversation({ messages: fresh.history, questionsToday: fresh.dayCount, limit: DAILY_LIMIT });
@@ -220,6 +223,7 @@ export function AskSheet({ onClose, variant = 'sheet', initialQuestion = null }:
                             type="button"
                             className="pm-ask-head-btn"
                             onClick={handleClear}
+                            disabled={pending}
                             aria-label="Clear conversation"
                             data-testid="ask-clear"
                             title="Clear conversation"

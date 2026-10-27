@@ -48,6 +48,8 @@ export interface AskContext {
     activity: ActivityRow[];
     /** Sales matched against the buys before them, newest first. */
     closedTrades: ClosedTrade[];
+    /** Tickers left out of them: a trade off today's share scale, as after a split. */
+    closedTradesLeftOut?: string[];
     /** The risk policy the user saved: caps, bucket choices, employer tickers, cash jobs. */
     policy: RiskPolicySettings;
     /** Sectors from the securities master, by ticker; `sectorFor` for the rest. */

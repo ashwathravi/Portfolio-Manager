@@ -194,6 +194,22 @@ test.describe('Ask Ledger — dedicated /ask page', () => {
         expect(JSON.parse(raw!).history).toHaveLength(2);
     });
 
+    test('regression: Clear waits for the answer being loaded, so it can\'t bring the conversation back', async ({ page }) => {
+        await page.goto('/ask');
+        let release!: () => void;
+        const held = new Promise<void>((resolve) => { release = resolve; });
+        await page.route('**/api/ask', async (route) => {
+            if (route.request().method() === 'POST') await held;
+            await route.continue();
+        });
+        await page.getByTestId('ask-suggestion').first().click();
+        await expect(page.getByTestId('ask-pending')).toBeVisible();
+        await expect(page.getByTestId('ask-clear')).toBeDisabled();
+        release();
+        await expect(page.getByTestId('ask-msg-assistant')).toHaveCount(1);
+        await expect(page.getByTestId('ask-clear')).toBeEnabled();
+    });
+
     test('Clear button wipes the conversation', async ({ page }) => {
         await page.goto('/ask');
         await page.getByTestId('ask-suggestion').first().click();

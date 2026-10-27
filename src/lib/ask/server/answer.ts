@@ -11,7 +11,7 @@ import { isDatabaseConfigured } from "@/db/connection-options";
 import { DrizzleAlphaRadarSemanticMemoryRepository } from "@/lib/alpha-radar/memory-repository";
 import { closeOn } from "@/lib/performance/holdings-returns";
 import { storedClosesLoader, type ClosesLoader } from "@/lib/performance/return-history";
-import { closedTrades, type ClosedTrade } from "@/lib/portfolio/closed-trades";
+import { closedTrades, tickersLeftOut, type ClosedTrade } from "@/lib/portfolio/closed-trades";
 import { EMPTY_POLICY_PORTFOLIO, normalizeTicker } from "@/lib/risk-policy";
 import { loadPolicyData, loadUserRiskPolicy } from "@/lib/risk-policy/server";
 import { storedRiskPolicy } from "@/lib/settings/risk-policy";
@@ -74,8 +74,9 @@ export async function loadAskContext(
     }
 
     // Closed trades, for the questions about them: sales matched against
-    // earlier buys, on today's share scale by the split-adjusted closes.
+    // earlier buys, leaving out tickers a split may have put on another scale.
     let trades: ClosedTrade[] = [];
+    let leftOut: string[] = [];
     if (uses("pnl_attribution") || uses("trades_matching")) {
         const sold = new Set(data.activity.filter((row) => row.side === "SELL" && row.symbol).map((row) => row.symbol!));
         const firstTrade = data.activity
@@ -83,7 +84,9 @@ export async function loadAskContext(
             .reduce<string | null>((first, row) => (first === null || row.date < first ? row.date : first), null);
         if (sold.size > 0 && firstTrade) {
             const adjusted = await sources.loadCloses([...sold], firstTrade.slice(0, 10), now.toISOString().slice(0, 10));
-            trades = closedTrades(data.activity, { adjustedClose: (symbol, date) => closeOn(adjusted.get(symbol), date) });
+            const options = { adjustedClose: (symbol: string, date: string) => closeOn(adjusted.get(symbol), date) };
+            trades = closedTrades(data.activity, options);
+            leftOut = tickersLeftOut(data.activity, options);
         }
     }
 
@@ -94,6 +97,7 @@ export async function loadAskContext(
         portfolio: data.portfolio,
         activity: data.activity,
         closedTrades: trades,
+        closedTradesLeftOut: leftOut,
         policy,
         sectors,
         closes,

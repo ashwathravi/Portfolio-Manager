@@ -162,6 +162,14 @@ describe('Ask Ledger answers from the user\'s data', () => {
         assert.match(answer.text, /Realized P&L over the last 30 days nets \+\$100/);
     });
 
+    test('a closed-trade answer says which tickers it left out, and why', () => {
+        const answer = runAsk("Where did last month's P&L come from?", context({ closedTradesLeftOut: ['NVDA'] }));
+        assert.match(answer.text, /_Left out: NVDA\. Its trade prices don't match its stored closes, as happens after a split/);
+        const several = runAsk('Show my winning trades this month', context({ closedTradesLeftOut: ['A', 'B', 'C', 'D'] }));
+        assert.match(several.text, /_Left out: A, B, C and 1 more\. Their trade prices/);
+        assert.doesNotMatch(runAsk('Am I overexposed to AI?', context({ closedTradesLeftOut: ['NVDA'] })).text, /Left out/);
+    });
+
     test('winning and losing trades are the closed ones', () => {
         assert.deepStrictEqual(runAsk('Show my winning trades this month', context()).toolRuns[0].rows.map((r) => [r.label, r.value]), [['Sold 100 KO', '+$600']]);
         assert.deepStrictEqual(runAsk('Show my losing trades this month', context()).toolRuns[0].rows.map((r) => [r.label, r.value]), [['Sold 50 PG', '-$500']]);

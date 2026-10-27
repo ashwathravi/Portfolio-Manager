@@ -11,11 +11,12 @@
  *   its average cost, say) have no known cost, so that part of the sale
  *   isn't a closed trade.
  * - Splits: transactions keep the share scale of their day, and no split
- *   events are stored, but stored closes are split-adjusted. A trade whose
- *   price is a split ratio away from that day's adjusted close was made
- *   before the split, and is put on today's scale (10 shares at $100 before
- *   a 2-for-1 split are 20 at $50). A ticker with a split whose scale can't
- *   be told for every trade (no close that day) is left out.
+ *   events are stored, so a buy and a sale either side of a split can't be
+ *   put on one scale. Stored closes are split-adjusted, though: a trade
+ *   whose price is far from its day's adjusted close (more than a quarter
+ *   either way) was likely made before a split, or at least can't be
+ *   trusted against it, so its ticker is left out rather than matched on
+ *   a guessed ratio (`tickersLeftOut` names them).
  */
 
 import type { ActivityRow } from './activity';
@@ -45,24 +46,15 @@ interface Lot {
 
 const round = (value: number) => Math.round(value * 100) / 100;
 
-/** Split ratios (and their reverses) a trade's price can be off by. */
-const SPLIT_RATIOS = [1.5, 2, 3, 4, 5, 6, 7, 8, 10, 12, 15, 20, 25, 30, 40, 50, 100];
-
 /**
- * How many of today's shares one share of a trade on its day is: 1 when its
- * price is within a quarter of the day's adjusted close, the split ratio it
- * is within a tenth of, or null when neither (or there's no close).
+ * Whether a trade's price is too far from its day's split-adjusted close to
+ * be on today's share scale: more than a quarter either way. Without a
+ * close there's nothing to tell by.
  */
-export function shareScale(price: number, adjustedClose: number | null): number | null {
-    if (!(price > 0) || adjustedClose === null || !(adjustedClose > 0)) return null;
+export function offScale(price: number, adjustedClose: number | null): boolean {
+    if (adjustedClose === null || !(adjustedClose > 0) || !(price > 0)) return false;
     const ratio = price / adjustedClose;
-    if (ratio >= 0.8 && ratio <= 1.25) return 1;
-    for (const split of SPLIT_RATIOS) {
-        for (const scale of [split, 1 / split]) {
-            if (Math.abs(ratio / scale - 1) <= 0.1) return scale;
-        }
-    }
-    return null;
+    return ratio < 0.8 || ratio > 1.25;
 }
 
 export interface ClosedTradeOptions {
@@ -70,31 +62,32 @@ export interface ClosedTradeOptions {
     adjustedClose?: (symbol: string, date: string) => number | null;
 }
 
-/** Each ticker's trades on today's share scale; a ticker that split and can't be put on it is left out. */
-function onTodaysScale(trades: readonly ActivityRow[], adjustedClose: ClosedTradeOptions['adjustedClose']): ActivityRow[] {
-    if (!adjustedClose) return [...trades];
-    const bySymbol = new Map<string, ActivityRow[]>();
-    for (const trade of trades) bySymbol.set(trade.symbol!, [...(bySymbol.get(trade.symbol!) ?? []), trade]);
-    return [...bySymbol.values()].flatMap((own) => {
-        const scales = own.map((trade) => shareScale(trade.price!, adjustedClose(trade.symbol!, trade.date.slice(0, 10))));
-        if (scales.every((scale) => scale === 1 || scale === null)) return own;
-        if (scales.some((scale) => scale === null)) return [];
-        return own.map((trade, i) => ({ ...trade, quantity: trade.quantity! * scales[i]!, price: trade.price! / scales[i]! }));
-    });
+function trades(rows: readonly ActivityRow[]): ActivityRow[] {
+    return rows
+        .filter((row) => (row.side === 'BUY' || row.side === 'SELL') && row.symbol && row.currency === 'USD')
+        .filter((row) => row.quantity !== null && Math.abs(row.quantity) > 0 && row.price !== null && row.price >= 0);
+}
+
+/** Tickers left out of closed trades: one of their trades is off today's share scale. */
+export function tickersLeftOut(rows: readonly ActivityRow[], { adjustedClose }: ClosedTradeOptions = {}): string[] {
+    if (!adjustedClose) return [];
+    const left = new Set<string>();
+    for (const trade of trades(rows)) {
+        if (offScale(trade.price!, adjustedClose(trade.symbol!, trade.date.slice(0, 10)))) left.add(trade.symbol!);
+    }
+    return [...left].sort();
 }
 
 /** Closed trades, newest first. `rows` can be in any order. */
-export function closedTrades(rows: readonly ActivityRow[], { adjustedClose }: ClosedTradeOptions = {}): ClosedTrade[] {
+export function closedTrades(rows: readonly ActivityRow[], options: ClosedTradeOptions = {}): ClosedTrade[] {
     const lots = new Map<string, Lot[]>();
     const closed: ClosedTrade[] = [];
-    const trades = onTodaysScale(
-        rows
-            .filter((row) => (row.side === 'BUY' || row.side === 'SELL') && row.symbol && row.currency === 'USD')
-            .filter((row) => row.quantity !== null && Math.abs(row.quantity) > 0 && row.price !== null && row.price >= 0),
-        adjustedClose,
-    ).sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.side === 'BUY' && b.side === 'SELL' ? -1 : 0));
+    const leftOut = new Set(tickersLeftOut(rows, options));
+    const matched = trades(rows)
+        .filter((row) => !leftOut.has(row.symbol!))
+        .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.side === 'BUY' && b.side === 'SELL' ? -1 : 0));
 
-    for (const row of trades) {
+    for (const row of matched) {
         const key = `${row.account}\u0000${row.symbol}`;
         const quantity = Math.abs(row.quantity!);
         const fees = Math.max(0, row.fees ?? 0);

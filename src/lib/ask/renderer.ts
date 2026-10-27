@@ -44,6 +44,18 @@ function citationFor(run: AskToolRun, index: number): AskCitation {
 export interface AnswerSource {
     /** The user holds at least one position. */
     hasHoldings: boolean;
+    /** Tickers left out of the closed trades (their trades are off today's share scale). */
+    closedTradesLeftOut?: readonly string[];
+}
+
+const FROM_CLOSED_TRADES = new Set<PlannerResult['intent']>(['pnl_source', 'pnl_sector', 'trades_win', 'trades_loss']);
+
+/** Says which tickers a closed-trade answer leaves out, and why. */
+function leftOutNote(intent: PlannerResult['intent'], source: AnswerSource): string {
+    const left = source.closedTradesLeftOut ?? [];
+    if (!FROM_CLOSED_TRADES.has(intent) || left.length === 0) return '';
+    const names = left.length <= 3 ? left.join(', ') : `${left.slice(0, 3).join(', ')} and ${left.length - 3} more`;
+    return `\n\n_Left out: ${names}. ${left.length === 1 ? 'Its' : 'Their'} trade prices don't match ${left.length === 1 ? 'its' : 'their'} stored closes, as happens after a split, so ${left.length === 1 ? 'its' : 'their'} sales can't be matched to what ${left.length === 1 ? 'it' : 'they'} cost._`;
 }
 
 /** Intents answered from the user's holdings: with none, that's what the answer says. */
@@ -170,7 +182,7 @@ export function renderAnswer(
     const run = runs[0];
     const ledeText = lede(plan.intent, run, source);
     const body = run && run.rows.length > 0 ? `\n\n${kvList(run.rows, run)}` : '';
-    const text = `${ledeText}${body}`;
+    const text = `${ledeText}${body}${leftOutNote(plan.intent, source)}`;
 
     const citations: AskCitation[] = [];
     runs.forEach((r) => {
