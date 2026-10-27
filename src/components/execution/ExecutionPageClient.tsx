@@ -1,9 +1,10 @@
 "use client";
 
+import Link from "next/link";
+
 import { usePageHeader } from "@/components/layout/PageHeaderContext";
-import { SampleDataNotice } from "@/components/data-display/SampleDataNotice";
-import { SampleEmptyState } from "@/components/data-display/SampleEmptyState";
-import { useShowSampleData } from "@/lib/hooks/useShowSampleData";
+import { DataUnavailableNotice } from "@/components/data-display/DataUnavailableNotice";
+import type { TradeTicketData } from "@/lib/execution/ticket";
 import { FocusVariant } from "./FocusVariant";
 
 /**
@@ -13,38 +14,49 @@ import { FocusVariant } from "./FocusVariant";
  * The design review retired the Checkout and Terminal variants — users
  * shouldn't have to pick a layout to place an order.
  *
- * Orders never route to a broker from here: tickets draft into the
- * blotter for review, and the blotter, buying power, and prices are
- * example data until a brokerage is connected.
+ * On the user's own data (launch item i53): an order is drafted for one of
+ * their accounts, against its cash and positions, and saved for them to
+ * place at their broker. Without an account there's nothing to draft
+ * against, so the page says to add one.
  */
 
 const HEADER = {
     title: "Trade",
-    subtitle: "Draft orders, check them against your rules, then route them yourself",
+    subtitle: "Draft orders, check them against your rules, then place them yourself",
     crumbs: ["Trade"],
 };
 
-export function ExecutionPageClient() {
+export function ExecutionPageClient({ ticket }: { ticket: TradeTicketData }) {
     usePageHeader(HEADER);
-    const showSample = useShowSampleData();
 
-    if (!showSample) {
+    if (ticket.unavailable) {
         return (
             <div className="pm-exec-page">
-                <SampleEmptyState
-                    title="No brokerage connected"
-                    body="The order ticket needs live prices and buying power from a connected brokerage. Example orders and prices are hidden."
-                />
+                <DataUnavailableNotice what="your accounts and orders" />
+            </div>
+        );
+    }
+
+    if (ticket.accounts.length === 0) {
+        return (
+            <div className="pm-exec-page">
+                <section className="pm-card pm-empty-card" data-testid="trade-needs-account">
+                    <h2>Add an account to draft orders</h2>
+                    <p>
+                        Each order is drafted for one of your accounts and checked against its cash and positions.
+                        Atlas never places orders: you place them at your broker.
+                    </p>
+                    <div className="pm-empty-actions">
+                        <Link href="/portfolios/accounts" className="pm-btn pm-btn-primary">Add an account</Link>
+                    </div>
+                </section>
             </div>
         );
     }
 
     return (
         <div className="pm-exec-page" data-variant="focus">
-            <SampleDataNotice>
-                Prices, buying power, and the order blotter are examples. Drafted orders stay in this tab.
-            </SampleDataNotice>
-            <FocusVariant />
+            <FocusVariant ticket={ticket} />
         </div>
     );
 }

@@ -31,6 +31,7 @@ test.describe('Database outage', () => {
         { path: '/portfolios/holdings', what: 'your holdings', container: '.pm-holdings-stack' },
         { path: '/portfolios/accounts', what: 'your accounts', container: '.pm-page' },
         { path: '/performance', what: 'your return history', container: '.pm-perf-stack' },
+        { path: '/execution', what: 'your accounts and orders', container: '.pm-exec-page' },
     ];
 
     for (const { path, what, container } of pages) {
@@ -50,17 +51,13 @@ test.describe('Database outage', () => {
         });
     }
 
-    test('Trade says the risk policy can\'t be checked, and asks for a reason', async ({ page }) => {
-        // Launch item i54: a failed load is not an empty portfolio that passes every check.
+    test('Trade shows no ticket: no order can be checked or saved, and the user has accounts', async ({ page }) => {
+        // Launch items i53/i54: a failed load is not an empty portfolio that
+        // passes every check, nor a user without accounts.
         await page.goto('/execution');
-        await page.getByLabel('Ticker').fill('NVDA');
-        await page.getByLabel('Quantity').fill('10');
-        await page.getByLabel('Limit price').fill('500');
-        const policy = page.getByTestId('risk-policy-impact');
-        await expect(policy).toContainText("Your holdings couldn't be loaded, so this order can't be checked against your risk policy.");
-        await expect(policy).toContainText('Override needed');
-        await expect(policy.getByLabel('Override reason')).toBeVisible();
-        await expect(page.locator('.pm-exec-guardrails')).toContainText("Your holdings couldn't be loaded");
+        await expect(page.getByTestId('data-unavailable')).toBeVisible();
+        await expect(page.locator('.pm-exec-form')).toHaveCount(0);
+        await expect(page.getByTestId('trade-needs-account')).toHaveCount(0);
     });
 
     test('the Settings risk previews say the holdings couldn\'t be loaded', async ({ page }) => {
@@ -98,6 +95,8 @@ test.describe('Unusable DATABASE_URL', () => {
         { path: '/portfolios/accounts', empty: (page: Page) => page.getByTestId('accounts-empty') },
         // No history without a database: the labelled example series.
         { path: '/performance', empty: (page: Page) => page.getByTestId('sample-data-notice') },
+        // No accounts to draft an order for.
+        { path: '/execution', empty: (page: Page) => page.getByTestId('trade-needs-account') },
     ];
 
     for (const { path, empty } of pages) {

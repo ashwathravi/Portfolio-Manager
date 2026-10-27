@@ -15,6 +15,7 @@ import {
     authUsers,
     holdings,
     journalEntries,
+    orderPlans,
     plaidAccounts,
     plaidItems,
     portfolioSnapshotPositions,
@@ -27,6 +28,8 @@ import {
     userSettings,
     watchlistItems,
 } from "@/db/schema";
+
+import { orderFromRow } from "@/lib/execution/orders";
 
 import { ACCOUNT_EXPORT_FORMAT, ACCOUNT_EXPORT_VERSION, type AccountExport, type ExportedValuationPosition } from "./export-data";
 
@@ -52,11 +55,13 @@ export async function buildAccountExport(userId: string, database: Database = db
 
         const accounts = await tx.select().from(portfolios).where(eq(portfolios.userId, userId)).orderBy(asc(portfolios.name), asc(portfolios.id));
         const ids = accounts.map((a) => a.id);
-        const [held, activity, history, historyPositions] = ids.length === 0 ? [[], [], [], []] : await Promise.all([
+        const [held, activity, history, historyPositions, plans] = ids.length === 0 ? [[], [], [], [], []] : await Promise.all([
             tx.select().from(holdings).where(inArray(holdings.portfolioId, ids)).orderBy(asc(holdings.symbol)),
             tx.select().from(transactions).where(inArray(transactions.portfolioId, ids)).orderBy(asc(transactions.timestamp), asc(transactions.id)),
             tx.select().from(portfolioSnapshots).where(inArray(portfolioSnapshots.portfolioId, ids)).orderBy(asc(portfolioSnapshots.date)),
             tx.select().from(portfolioSnapshotPositions).where(inArray(portfolioSnapshotPositions.portfolioId, ids)).orderBy(asc(portfolioSnapshotPositions.symbol)),
+            tx.select().from(orderPlans).where(and(eq(orderPlans.userId, userId), inArray(orderPlans.portfolioId, ids)))
+                .orderBy(asc(orderPlans.createdAt), asc(orderPlans.id)),
         ]);
         const positionsOn = new Map<string, ExportedValuationPosition[]>();
         for (const p of historyPositions) {
@@ -139,6 +144,7 @@ export async function buildAccountExport(userId: string, database: Database = db
                     costBasis: Number(v.costBasis),
                     positions: positionsOn.get(`${account.id}|${v.date}`) ?? [],
                 })),
+                orderPlans: plans.filter((p) => p.portfolioId === account.id).map(orderFromRow),
             })),
             linkedConnections: items.map((item) => ({
                 institutionName: item.institutionName,

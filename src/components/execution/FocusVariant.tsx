@@ -9,20 +9,33 @@ import {
 } from "react";
 import { Check, AlertTriangle, X } from "lucide-react";
 import { useSearchParams } from "next/navigation";
-import { parseOrderPrefill, sortOrdersNewestFirst } from "@/lib/execution/blotter";
+import { toast } from "sonner";
+import { useQuotesQuery } from "@/lib/api/market-data/queries";
+import { formatPlanTime, parseOrderPrefill, sortOrdersNewestFirst } from "@/lib/execution/blotter";
+import { ORDER_STATUS_LABELS, type OrderStatusChange } from "@/lib/execution/order-status";
 import {
     TICKET_SHORTCUTS,
     isEditableElement,
     resolveTicketShortcut,
 } from "@/lib/execution/shortcuts";
-import { useUiStore } from "@/lib/stores/uiStore";
 import {
-    BUYING_POWER_USD,
-    COMMISSION_PER_TRADE_USD,
-    CURRENT_POSITIONS,
-    LIVE_PRICES,
-    SEED_ORDERS,
-} from "@/lib/execution/seed";
+    OPTION_CONTRACT_MULTIPLIER,
+    cashAfterOrder,
+    defaultTicketAccountId,
+    describeTicketPrice,
+    orderDisplayPrice,
+    orderNeedsApproval,
+    orderPlanInput,
+    orderValue,
+    positionIn,
+    ticketPriceFromQuote,
+    type TicketAccount,
+    type TicketPrice,
+    type TradeTicketData,
+} from "@/lib/execution/ticket";
+import { useEasternDate } from "@/lib/hooks/useEasternDate";
+import { useUiStore } from "@/lib/stores/uiStore";
+import { tickerSchema } from "@/lib/validators/market-data";
 import {
     chosenBucketForTrade,
     employerSymbols,
@@ -45,6 +58,7 @@ import { usePolicyPortfolio } from "@/components/providers/PolicyPortfolioProvid
 import type {
     Order,
     OrderInstrumentType,
+    OrderPlanInput,
     OrderSide,
     OrderStatus,
     OrderType,
@@ -62,7 +76,6 @@ import { RationaleSummary } from "./RationaleSummary";
 import { AdherencePanel } from "./AdherencePanel";
 import {
     SEED_ADHERENCE_RULES,
-    SEED_SECTOR_BY_TICKER,
     SEED_THESIS_TO_STRATEGY,
 } from "@/lib/adherence/seed";
 import type { TradeContext } from "@/lib/adherence/evaluate";
@@ -75,30 +88,38 @@ import { SEED_STRATEGIES } from "@/lib/strategies/seed";
  * right. One screen, everything visible, no modals. Calm.
  *
  * Left card "New order":
- *   - Buy / Sell segmented toggle (green / red)
- *   - Ticker + live price hint
+ *   - Account (one of the user's), Buy / Sell segmented toggle (green / red)
+ *   - Ticker + its last price, labelled with where it came from (a stored
+ *     close or the price stored with the holding; never live)
  *   - Quantity input
  *   - Order type select (market / limit / stop / stop_limit)
  *   - Limit price (conditional on limit / stop_limit)
  *   - Stop price (conditional on stop / stop_limit)
  *   - TIF segmented pill row (DAY / GTC / IOC / FOK)
- *   - Preview rows: Notional, Est. commission, Buying power after, Position after
- *   - Guardrail list with green/warn dots (concentration, sector, buying power, volatility)
+ *   - Preview rows: Notional, Cash after, Position after (the account's)
+ *   - Guardrail list with green/warn dots (price, cash, concentration)
  *   - Foot (sticky): one-line order summary + Review & submit (primary on
  *     buy, danger on sell). "Save draft" was removed — it never saved.
  *
- * Right card "Today's orders":
- *   - Filter chips: All / Working / Filled / Rejected
+ * Right card "Your orders":
+ *   - Filter chips: All / Ready / Placed / Cancelled
  *   - Orders table with side pill + status pill
- *   - Approval queue banner when there are orders above the threshold
+ *   - Approval queue banner when plans wait for the user's approval
  *
- * All state is client-local. Submitting an order pushes into the local
- * list — the actual broker round-trip lands when the backend API is
- * wired in a follow-up. The backend shape matches `Order` so it's a
- * drop-in.
+ * On the user's own data (launch item i53): accounts, cash, positions and
+ * plans come from the server, and a submitted plan is saved to it. Atlas
+ * never routes an order: the user places it at their broker and marks it
+ * placed here.
  */
 
-type BlotterFilter = "all" | "working" | "filled" | "rejected";
+type BlotterFilter = "all" | "ready" | "placed" | "cancelled";
+
+const FILTER_LABELS: Record<BlotterFilter, string> = {
+    all: "All",
+    ready: "Ready",
+    placed: "Placed",
+    cancelled: "Cancelled",
+};
 
 const ORDER_TYPE_LABELS: Record<OrderType, string> = {
     market: "Market",
@@ -117,8 +138,6 @@ const OPTION_CONTRACT_LABELS: Record<OptionContractType, string> = {
     put: "Put",
 };
 
-const OPTION_CONTRACT_MULTIPLIER = 100;
-const EXECUTION_NAV_USD = 250_000;
 const TIF_OPTIONS: TimeInForce[] = ["day", "gtc", "ioc", "fok"];
 const TIF_LABELS: Record<TimeInForce, string> = {
     day: "DAY",
@@ -127,20 +146,11 @@ const TIF_LABELS: Record<TimeInForce, string> = {
     fok: "FOK",
 };
 
-const STATUS_LABELS: Record<OrderStatus, string> = {
-    pending: "Pending",
-    working: "Working",
-    filled: "Filled",
-    cancelled: "Cancelled",
-    rejected: "Rejected",
-};
-
 const STATUS_CLASS: Record<OrderStatus, string> = {
-    pending: "pm-exec-status-pending",
-    working: "pm-exec-status-working",
-    filled: "pm-exec-status-filled",
+    pending_approval: "pm-exec-status-pending",
+    ready: "pm-exec-status-ready",
+    placed: "pm-exec-status-placed",
     cancelled: "pm-exec-status-cancelled",
-    rejected: "pm-exec-status-rejected",
 };
 
 // --------------------------------------------------------------------- //
@@ -156,77 +166,98 @@ function formatUsd(n: number, digits = 2): string {
     });
 }
 
-/** Blotter times in market time (ET), like the app clock — also keeps the
- *  server render and hydration identical across viewer timezones. */
-function formatTime(d: Date): string {
-    return d.toLocaleTimeString("en-US", {
-        hour: "2-digit",
-        minute: "2-digit",
-        hour12: false,
-        timeZone: "America/New_York",
-    });
+/** The per-share price a draft order is sized at: its limit or stop, else the last price. */
+function effectivePrice(type: OrderType, limit: number, stop: number, lastPrice: number | undefined): number {
+    if ((type === "limit" || type === "stop_limit") && limit > 0) return limit;
+    if (type === "stop" && stop > 0) return stop;
+    return lastPrice ?? 0;
 }
 
-/** Resolve the effective per-share price for a draft order. */
-function effectivePrice(ticker: string, type: OrderType, limit?: number, stop?: number): number {
-    if ((type === "limit" || type === "stop_limit") && limit && limit > 0) return limit;
-    if (type === "stop" && stop && stop > 0) return stop;
-    return LIVE_PRICES[ticker] ?? 0;
-}
+const round2 = (n: number) => Math.round(n * 100) / 100;
 
-function orderExposureUsd(order: Order): number {
-    if (order.instrumentType === "option" && order.optionDetails) {
-        return order.optionDetails.premiumAtRisk;
-    }
-    return (order.limitPrice ?? order.averageFillPrice ?? LIVE_PRICES[order.ticker] ?? 0) * order.quantity;
-}
-
-function orderDisplayPrice(order: Order): number | undefined {
-    if (order.instrumentType === "option" && order.optionDetails) {
-        return order.optionDetails.premium;
-    }
-    return order.type === "market"
-        ? order.averageFillPrice ?? LIVE_PRICES[order.ticker]
-        : order.limitPrice ?? order.stopPrice;
+function isSavedOrder(value: unknown): value is Order {
+    const order = value as Partial<Order> | null;
+    return typeof order?.id === "string" && typeof order.ticker === "string" && typeof order.status === "string";
 }
 
 // --------------------------------------------------------------------- //
 // FocusVariant
 // --------------------------------------------------------------------- //
 
-export function FocusVariant() {
-    const [orders, setOrders] = useState<Order[]>(SEED_ORDERS);
+export function FocusVariant({ ticket }: { ticket: TradeTicketData }) {
+    const [orders, setOrders] = useState<Order[]>(ticket.orders);
     const [filter, setFilter] = useState<BlotterFilter>("all");
+    const [busyIds, setBusyIds] = useState<ReadonlySet<string>>(() => new Set());
+    const accountNames = useMemo(
+        () => new Map(ticket.accounts.map((account) => [account.id, account.name])),
+        [ticket.accounts],
+    );
 
-    const onSubmitOrder = (draft: Order) => {
-        setOrders((prev) => [draft, ...prev]);
+    /** Saves the plan; true once the server has it. */
+    const saveOrder = async (input: OrderPlanInput): Promise<boolean> => {
+        try {
+            const response = await fetch("/api/orders", {
+                method: "POST",
+                credentials: "same-origin",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(input),
+            });
+            const body = await response.json().catch(() => ({}));
+            if (!response.ok || !isSavedOrder(body?.data)) {
+                toast.error(typeof body?.error === "string" ? body.error : "Couldn't save the order. Try again.");
+                return false;
+            }
+            const saved = body.data;
+            setOrders((prev) => [saved, ...prev.filter((o) => o.id !== saved.id)]);
+            const what = `${saved.side === "buy" ? "Buy" : "Sell"} ${saved.quantity.toLocaleString("en-US")} ${saved.ticker}`;
+            toast.success(saved.status === "pending_approval"
+                ? `${what} saved. It's over your approval threshold: approve it before you place it.`
+                : `${what} saved, ready to place at your broker.`);
+            return true;
+        } catch {
+            toast.error("Couldn't save the order. Check your connection and try again.");
+            return false;
+        }
     };
 
-    const onCancel = (id: string) => {
-        setOrders((prev) =>
-            prev.map((o) =>
-                o.id === id ? { ...o, status: "cancelled", updatedAt: new Date() } : o,
-            ),
-        );
-    };
-
-    const onApprove = (id: string) => {
-        setOrders((prev) =>
-            prev.map((o) =>
-                o.id === id ? { ...o, status: "working", updatedAt: new Date() } : o,
-            ),
-        );
+    const changeStatus = async (order: Order, status: OrderStatusChange) => {
+        if (busyIds.has(order.id)) return;
+        setBusyIds((prev) => new Set(prev).add(order.id));
+        try {
+            const response = await fetch(`/api/orders/${order.id}`, {
+                method: "PATCH",
+                credentials: "same-origin",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ status }),
+            });
+            const body = await response.json().catch(() => ({}));
+            // A conflict answers with the plan as it is now: show that.
+            const updated = isSavedOrder(body?.data) && body.data.id === order.id ? body.data : undefined;
+            if (updated) setOrders((prev) => prev.map((o) => (o.id === order.id ? updated : o)));
+            if (!response.ok) {
+                toast.error(typeof body?.error === "string" ? body.error : "Couldn't update the order. Try again.");
+            }
+        } catch {
+            toast.error("Couldn't update the order. Check your connection and try again.");
+        } finally {
+            setBusyIds((prev) => {
+                const next = new Set(prev);
+                next.delete(order.id);
+                return next;
+            });
+        }
     };
 
     return (
         <div className="pm-exec-focus">
-            <OrderForm onSubmit={onSubmitOrder} />
+            <OrderForm accounts={ticket.accounts} prices={ticket.prices} onSubmit={saveOrder} />
             <OrdersPanel
                 orders={orders}
+                accountNames={accountNames}
+                busyIds={busyIds}
                 filter={filter}
                 onFilter={setFilter}
-                onCancel={onCancel}
-                onApprove={onApprove}
+                onChangeStatus={changeStatus}
             />
         </div>
     );
@@ -237,29 +268,39 @@ export function FocusVariant() {
 // --------------------------------------------------------------------- //
 
 interface OrderFormProps {
-    onSubmit: (order: Order) => void;
+    accounts: readonly TicketAccount[];
+    /** The last price of each ticker the user holds, by upper-case ticker. */
+    prices: Readonly<Record<string, TicketPrice>>;
+    /** Saves the plan; resolves true once the server has it. */
+    onSubmit: (order: OrderPlanInput) => Promise<boolean>;
 }
 
-function OrderForm({ onSubmit }: OrderFormProps) {
+/** How long typing pauses before the ticket looks up a price. */
+const PRICE_LOOKUP_DELAY_MS = 300;
+
+function OrderForm({ accounts, prices, onSubmit }: OrderFormProps) {
     // `?symbol=NVDA&side=sell` (from position detail, Ask, etc.) pre-fills the ticket.
     const searchParams = useSearchParams();
     const [prefill] = useState(() => parseOrderPrefill(searchParams ?? new URLSearchParams()));
+    const [accountId, setAccountId] = useState<string | undefined>(() => defaultTicketAccountId(accounts, prefill.ticker));
     const [instrumentType, setInstrumentType] = useState<OrderInstrumentType>("equity");
     const [side, setSide] = useState<OrderSide>(prefill.side ?? "buy");
-    const [ticker, setTicker] = useState<string>(prefill.ticker ?? "AAPL");
-    const [quantity, setQuantity] = useState<number>(prefill.ticker ? 10 : 50);
+    const [ticker, setTicker] = useState<string>(prefill.ticker ?? "");
+    const [quantity, setQuantity] = useState<number>(1);
     const [type, setType] = useState<OrderType>("limit");
-    const [limitPrice, setLimitPrice] = useState<number>(() =>
-        prefill.ticker ? Math.round((LIVE_PRICES[prefill.ticker] ?? 0) * 100) / 100 : 225.0,
-    );
-    const [stopPrice, setStopPrice] = useState<number>(220.0);
+    // Until the user types one, a share's limit and stop follow its last price.
+    const [limitPrice, setLimitPrice] = useState<number>(0);
+    const [limitTouched, setLimitTouched] = useState(false);
+    const [stopPrice, setStopPrice] = useState<number>(0);
+    const [stopTouched, setStopTouched] = useState(false);
     const [tif, setTif] = useState<TimeInForce>("day");
     const [showShortcuts, setShowShortcuts] = useState(false);
+    const [saving, setSaving] = useState(false);
     const tickerInputRef = useRef<HTMLInputElement>(null);
     const quantityInputRef = useRef<HTMLInputElement>(null);
     const [optionContractType, setOptionContractType] = useState<OptionContractType>("call");
-    const [optionStrike, setOptionStrike] = useState<number>(250);
-    const [optionExpiry, setOptionExpiry] = useState<string>("2027-01-15");
+    const [optionStrike, setOptionStrike] = useState<number>(0);
+    const [optionExpiry, setOptionExpiry] = useState<string>("");
     const [maxLossAcknowledged, setMaxLossAcknowledged] = useState(false);
     const [whatMustBeTrueByExpiry, setWhatMustBeTrueByExpiry] = useState("");
     const [plannedExitRule, setPlannedExitRule] = useState("");
@@ -272,15 +313,14 @@ function OrderForm({ onSubmit }: OrderFormProps) {
     const optionsRiskPolicy = riskPolicy.optionsRiskPolicy;
     const sellDisciplineRules = riskPolicy.sellDisciplineRules;
     // The risk policy checks the order against the user's own holdings and
-    // the theses they wrote (launch item i54); prices and buying power are
-    // still examples until a brokerage is connected.
-    // When they couldn't be loaded, the checks say so and the order needs a reason.
+    // the theses they wrote (launch item i54). When they couldn't be loaded,
+    // the checks say so and the order needs a reason.
     const { portfolio: policyPortfolio, unavailable: policyUnavailable } = usePolicyPortfolio();
     const policyHoldingRows = useMemo(
         () => policyHoldings(policyPortfolio.holdings, riskPolicy),
         [policyPortfolio.holdings, riskPolicy],
     );
-    const policyValue = policyPortfolioValue(policyPortfolio);
+    const policyValue = useMemo(() => policyPortfolioValue(policyPortfolio), [policyPortfolio]);
     const policyEmployerSymbols = useMemo(() => employerSymbols(riskPolicy), [riskPolicy]);
     const { theses } = useThesisStore();
     // AR-109: JournalPlus pre-trade rationale. When `rationaleRequired`
@@ -295,31 +335,11 @@ function OrderForm({ onSubmit }: OrderFormProps) {
         (s) => s.execution.cooldownSeconds,
     );
 
-    const handleInstrumentChange = (next: OrderInstrumentType) => {
-        setInstrumentType(next);
-        if (next === "option") {
-            setSide("buy");
-            setType("limit");
-            setQuantity(5);
-            setLimitPrice(4.5);
-            setStopPrice(3.5);
-            setOptionContractType("call");
-            setOptionStrike(250);
-            setOptionExpiry("2027-01-15");
-            setMaxLossAcknowledged(false);
-            setWhatMustBeTrueByExpiry("");
-            setPlannedExitRule("");
-            setRiskPolicyOverrideReason("");
-            return;
-        }
-
-        setQuantity(50);
-        setLimitPrice(225.0);
-        setStopPrice(220.0);
-        setMaxLossAcknowledged(false);
-        setWhatMustBeTrueByExpiry("");
-        setPlannedExitRule("");
-        setRiskPolicyOverrideReason("");
+    const handleTickerChange = (value: string) => {
+        setTicker(value.toUpperCase());
+        // A new ticker's limit and stop start from its own last price.
+        setLimitTouched(false);
+        setStopTouched(false);
     };
 
     // Rationale draft owned here so the parent can finalize it on
@@ -398,41 +418,102 @@ function OrderForm({ onSubmit }: OrderFormProps) {
 
     const isOptionOrder = instrumentType === "option";
     const tickerUpper = ticker.toUpperCase();
-    const livePrice = LIVE_PRICES[tickerUpper];
+    const account = useMemo(() => accounts.find((a) => a.id === accountId), [accounts, accountId]);
+    const todayEt = useEasternDate();
+
+    // The ticker's last price: the server sent the held ones; any other is
+    // looked up from the same price store once typing pauses.
+    const [lookupTicker, setLookupTicker] = useState(prefill.ticker ?? "");
+    useEffect(() => {
+        const id = window.setTimeout(() => setLookupTicker(tickerUpper), PRICE_LOOKUP_DELAY_MS);
+        return () => window.clearTimeout(id);
+    }, [tickerUpper]);
+    const knownPrice = prices[tickerUpper];
+    const lookupReady = lookupTicker === tickerUpper && tickerSchema.safeParse(lookupTicker).success;
+    const quoteQuery = useQuotesQuery(lookupReady && !knownPrice ? [lookupTicker] : [], {
+        staleTime: 5 * 60_000,
+        retry: false,
+    });
+    const fetchedQuote = lookupReady && !knownPrice ? quoteQuery.data?.[lookupTicker] : undefined;
+    const tickerPrice: TicketPrice | undefined = knownPrice ?? (fetchedQuote ? ticketPriceFromQuote(fetchedQuote) : undefined);
+    const lastPrice = tickerPrice?.price;
+    const priceLookupPending = !knownPrice && tickerUpper !== "" && (lookupTicker !== tickerUpper || quoteQuery.isFetching);
+    const priceNote = !tickerUpper
+        ? undefined
+        : priceLookupPending
+            ? "Looking up the last close…"
+            : describeTicketPrice(tickerPrice, todayEt);
+
+    const handleInstrumentChange = (next: OrderInstrumentType) => {
+        setInstrumentType(next);
+        setQuantity(1);
+        setMaxLossAcknowledged(false);
+        setWhatMustBeTrueByExpiry("");
+        setPlannedExitRule("");
+        setRiskPolicyOverrideReason("");
+        if (next === "option") {
+            // No options prices yet: the user enters the premium, strike and expiry.
+            setSide("buy");
+            setType("limit");
+            setLimitPrice(0);
+            setLimitTouched(true);
+            setOptionContractType("call");
+            setOptionStrike(lastPrice ? Math.round(lastPrice) : 0);
+            setOptionExpiry("");
+            return;
+        }
+        setLimitTouched(false);
+        setStopTouched(false);
+    };
+
+    const suggestedPrice = lastPrice ? round2(lastPrice) : 0;
+    const limitValue = isOptionOrder || limitTouched ? limitPrice : suggestedPrice;
+    const stopValue = stopTouched ? stopPrice : suggestedPrice;
+
     const orderTypeOptions = isOptionOrder
         ? (["limit"] as OrderType[])
         : (Object.keys(ORDER_TYPE_LABELS) as OrderType[]);
     const price = isOptionOrder
-        ? limitPrice
-        : effectivePrice(tickerUpper, type, limitPrice, stopPrice);
+        ? limitValue
+        : effectivePrice(type, limitValue, stopValue, lastPrice);
     const cleanQuantity = Number.isFinite(quantity) ? quantity : 0;
     const exposureMultiplier = isOptionOrder ? OPTION_CONTRACT_MULTIPLIER : 1;
     const notional = price * cleanQuantity * exposureMultiplier;
-    const commission = COMMISSION_PER_TRADE_USD;
-    const buyingPowerAfter =
-        side === "buy"
-            ? BUYING_POWER_USD - notional - commission
-            : BUYING_POWER_USD + notional - commission;
+    const cash = account?.cash ?? 0;
+    const cashAfter = cashAfterOrder(cash, side, notional);
 
-    const currentPos = CURRENT_POSITIONS[tickerUpper];
-    const currentQty = isOptionOrder ? 0 : currentPos?.qty ?? 0;
-    const qtyDelta = side === "buy" ? quantity : -quantity;
+    const currentQty = useMemo(
+        () => (isOptionOrder ? 0 : positionIn(account, tickerUpper).quantity),
+        [isOptionOrder, account, tickerUpper],
+    );
+    const qtyDelta = side === "buy" ? cleanQuantity : -cleanQuantity;
     const positionAfter = currentQty + qtyDelta;
 
     const showLimit = type === "limit" || type === "stop_limit";
     const showStop = type === "stop" || type === "stop_limit";
 
+    // What the user holds of the ticker across every account, valued as Today values it.
+    const heldValue = useMemo(
+        () => policyPortfolio.holdings
+            .filter((holding) => holding.symbol.toUpperCase() === tickerUpper)
+            .reduce((sum, holding) => sum + holding.marketValue, 0),
+        [policyPortfolio.holdings, tickerUpper],
+    );
+
     const baseGuardrails = useGuardrails({
         side,
-        notional,
-        buyingPowerAfter,
-        positionAfter,
+        orderType: type,
+        isOptionOrder,
         ticker: tickerUpper,
+        priceKnown: lastPrice !== undefined,
+        priceLookupPending,
+        accountName: account?.name ?? "the account",
+        cashAfter,
+        positionAfter,
+        postPositionValue: isOptionOrder ? notional : heldValue + (side === "buy" ? notional : -notional),
+        portfolioValue: policyValue,
         concentrationCapEnabled: guardrailPrefs.concentrationCapEnabled,
         concentrationCapPct: guardrailPrefs.concentrationCapPct,
-        positionMarketValueOverride: isOptionOrder
-            ? Math.abs(positionAfter) * price * OPTION_CONTRACT_MULTIPLIER
-            : undefined,
         shortUnitLabel: isOptionOrder ? "contract" : "share",
     });
 
@@ -561,12 +642,11 @@ function OrderForm({ onSubmit }: OrderFormProps) {
     // rationale's thesis id — the rationale chip row commits thesisId
     // synchronously when the user picks or creates a thesis, so by the
     // time the user is finalizing conviction/mood the mapping is stable.
+    // (Strategies are still examples until launch item i55.)
     //
     // We pass a fully-formed `TradeContext` rather than threading raw
     // form state so the evaluator stays ignorant of the ticket shape.
-    // `nav` is hardcoded to match the seed execution fixture (matches
-    // the 250k baseline used by the concentration guardrail above); once
-    // a live portfolio balance lands this reads the store.
+    // `nav` is the user's portfolio, holdings and cash.
     const resolvedStrategyId = rationaleDraft.thesisId
         ? SEED_THESIS_TO_STRATEGY[rationaleDraft.thesisId]
         : undefined;
@@ -579,25 +659,13 @@ function OrderForm({ onSubmit }: OrderFormProps) {
     }, [resolvedStrategyId]);
 
     const liveContext = useMemo<TradeContext>(() => {
-        const nav = EXECUTION_NAV_USD;
-        // Post-trade market value of the subject position. Uses live price
-        // (or effective limit/stop) so the % is computed against the same
-        // dollar figure the user sees in the preview.
+        const nav = policyValue > 0 ? policyValue : undefined;
+        // Post-trade market value of the subject position. Uses the last
+        // price (or effective limit/stop) so the % is computed against the
+        // same dollar figure the user sees in the preview.
         const postMarketValue = isOptionOrder
             ? positionAfter * price * OPTION_CONTRACT_MULTIPLIER
             : positionAfter * price;
-        const sector = SEED_SECTOR_BY_TICKER[tickerUpper];
-        // Sector exposure post-trade. The existing concentration guardrail
-        // fakes a 47% tech weight; we mirror that here so the two panels
-        // don't disagree on reality. A real wire-up reads from holdings.
-        const sectorExposurePct = sector === 'Technology' ? 0.47
-            : sector === 'Financials' ? 0.18
-            : sector === 'Energy' ? 0.08
-            : sector === 'Consumer Staples' ? 0.12
-            : sector === 'Consumer Discretionary' ? 0.10
-            : sector === 'Health Care' ? 0.09
-            : sector === 'Communication Services' ? 0.06
-            : 0;
         // Rationale is finalized only when the draft is complete; partial
         // drafts won't satisfy `thesis_required` or `min_conviction`,
         // which is the honest answer mid-compose.
@@ -609,26 +677,29 @@ function OrderForm({ onSubmit }: OrderFormProps) {
             side,
             nav,
             postMarketValue,
-            sector,
-            sectorExposurePct,
+            // The example strategies' sector caps name sectors the
+            // securities master doesn't use; unknown sectors pass.
+            sector: undefined,
+            sectorExposurePct: undefined,
             // No live earnings data yet; evaluator treats this as neutral
             // pass so the row renders "—" instead of crying wolf.
             daysUntilEarnings: null,
             // Stop price only exists on stop / stop_limit orders. Passing
             // `undefined` on market / limit is the whole point of the rule
             // firing: the discipline check asks "did you set a stop?"
-            stopLoss: showStop ? stopPrice : undefined,
+            stopLoss: showStop ? stopValue : undefined,
             rationale,
             executedAt: new Date().toISOString(),
         };
     }, [
+        policyValue,
         tickerUpper,
         side,
         isOptionOrder,
         positionAfter,
         price,
         showStop,
-        stopPrice,
+        stopValue,
         rationaleDraft,
     ]);
 
@@ -662,18 +733,20 @@ function OrderForm({ onSubmit }: OrderFormProps) {
             : 0;
 
     const submitDisabled =
+        !account ||
         !tickerUpper ||
         !Number.isFinite(quantity) ||
         quantity <= 0 ||
-        (showLimit && (!limitPrice || limitPrice <= 0)) ||
-        (showStop && (!stopPrice || stopPrice <= 0)) ||
+        (showLimit && !(limitValue > 0)) ||
+        (showStop && !(stopValue > 0)) ||
         (isOptionOrder && (!optionStrike || optionStrike <= 0 || !optionExpiry.trim())) ||
         guardrails.some((g) => g.level === "fail") ||
         rationaleBlocksSubmit ||
-        cooldownActive;
+        cooldownActive ||
+        saving;
 
-    const handleSubmit = () => {
-        if (submitDisabled) return;
+    const handleSubmit = async () => {
+        if (submitDisabled || !account) return;
         // AR-110 cooldown gate. If the user tagged a caution mood and
         // the cooldown preset is non-zero, the first Submit press
         // *starts* the timer instead of firing. Second press (after
@@ -710,33 +783,19 @@ function OrderForm({ onSubmit }: OrderFormProps) {
             ? finalizeRationale(rationaleDraft)
             : undefined;
 
-        const draft: Order = {
-            id: `o-${Date.now().toString(36)}`,
-            portfolioId: "p-growth",
+        const plan = orderPlanInput({
+            portfolioId: account.id,
+            instrumentType,
             ticker: tickerUpper,
             side,
             type,
             quantity,
-            limitPrice: showLimit ? limitPrice : undefined,
-            stopPrice: showStop ? stopPrice : undefined,
-            status:
-                guardrailPrefs.approvalThresholdEnabled &&
-                notional > guardrailPrefs.approvalThresholdUsd
-                    ? "pending"
-                    : "working",
-            filledQuantity: 0,
+            limitPrice: limitValue,
+            stopPrice: stopValue,
             timeInForce: tif,
-            placedAt: new Date(),
-            updatedAt: new Date(),
+            price: tickerPrice,
+            needsApproval: orderNeedsApproval(isOptionOrder ? optionOrderPolicy.premiumAtRisk : notional, guardrailPrefs),
             rationale,
-            instrumentType,
-            riskPolicyImpact,
-            policyExceptions: riskPolicyImpact.exceptionPreview.length > 0
-                ? riskPolicyImpact.exceptionPreview
-                : undefined,
-            riskPolicyOverrideReason: riskPolicyImpact.exceptionPreview.length > 0
-                ? riskPolicyOverrideReason.trim()
-                : undefined,
             optionDetails: isOptionOrder
                 ? {
                     underlying: tickerUpper,
@@ -752,7 +811,14 @@ function OrderForm({ onSubmit }: OrderFormProps) {
                     plannedExitRule: plannedExitRule.trim(),
                 }
                 : undefined,
-        };
+            policy: riskPolicyImpact,
+            overrideReason: riskPolicyOverrideReason,
+        });
+        setSaving(true);
+        const saved = await onSubmit(plan);
+        setSaving(false);
+        // Not saved: the ticket stays as it was so the user can try again.
+        if (!saved) return;
         if (rationale) {
             track("trade.rationale.submitted", {
                 ticker: tickerUpper,
@@ -778,7 +844,6 @@ function OrderForm({ onSubmit }: OrderFormProps) {
                 reason: "setting_off",
             });
         }
-        onSubmit(draft);
         // Reset the rationale so the next ticket renders with a fresh
         // `capturedAt` and an empty form.
         setRationaleDraft(createRationaleDraft());
@@ -822,7 +887,7 @@ function OrderForm({ onSubmit }: OrderFormProps) {
                     (action.field === "ticker" ? tickerInputRef : quantityInputRef).current?.select();
                     break;
                 case "submit":
-                    current.handleSubmit();
+                    void current.handleSubmit();
                     break;
                 case "help":
                     setShowShortcuts((v) => !v);
@@ -843,10 +908,12 @@ function OrderForm({ onSubmit }: OrderFormProps) {
         return () => window.removeEventListener("keydown", onKey);
     }, []);
 
-    const baseSubmitLabel = side === "buy" ? "Review & buy" : "Review & sell";
+    const baseSubmitLabel = side === "buy" ? "Save buy order" : "Save sell order";
     const submitLabel = cooldownActive
         ? `Hold on\u2026 ${cooldownRemainingSec}s`
-        : baseSubmitLabel;
+        : saving
+            ? "Saving\u2026"
+            : baseSubmitLabel;
     const submitClass = `pm-btn ${
         side === "buy" ? "pm-btn-primary" : "pm-btn-danger"
     } pm-exec-submit`;
@@ -869,7 +936,7 @@ function OrderForm({ onSubmit }: OrderFormProps) {
             <header className="pm-exec-form-head">
                 <h3 className="pm-exec-form-title">New order</h3>
                 <span className="pm-exec-form-sub">
-                    Draft routes to review. Never fills on click.
+                    Saved for you to place at your broker. Atlas never places orders.
                 </span>
                 <button
                     type="button"
@@ -898,6 +965,21 @@ function OrderForm({ onSubmit }: OrderFormProps) {
                     <p>Letters work when you are not typing in a field. Reviewing still checks your rules.</p>
                 </div>
             )}
+
+            {/* Account */}
+            <label className="pm-exec-field">
+                <span className="pm-exec-field-label">Account</span>
+                <select
+                    className="pm-exec-input"
+                    aria-label="Account"
+                    value={accountId ?? ""}
+                    onChange={(e) => setAccountId(e.target.value)}
+                >
+                    {accounts.map((a) => (
+                        <option key={a.id} value={a.id}>{a.name}</option>
+                    ))}
+                </select>
+            </label>
 
             {/* Instrument toggle */}
             <div className="pm-exec-instrument" role="tablist" aria-label="Instrument type">
@@ -946,15 +1028,21 @@ function OrderForm({ onSubmit }: OrderFormProps) {
                         type="text"
                         className="pm-exec-input"
                         aria-label="Ticker"
+                        aria-describedby={priceNote ? "exec-price-note" : undefined}
                         value={ticker}
-                        onChange={(e) => setTicker(e.target.value.toUpperCase())}
+                        onChange={(e) => handleTickerChange(e.target.value)}
                         placeholder="AAPL"
-                        maxLength={6}
+                        maxLength={10}
                     />
-                    <span className="pm-exec-field-hint num">
-                        {livePrice ? formatUsd(livePrice) : "—"}
+                    <span className="pm-exec-field-hint num" data-testid="ticker-price">
+                        {lastPrice ? formatUsd(lastPrice) : "—"}
                     </span>
                 </div>
+                {priceNote && (
+                    <span id="exec-price-note" className="pm-exec-field-note" data-testid="ticker-price-note">
+                        {priceNote}
+                    </span>
+                )}
             </label>
 
             {/* Qty + Type */}
@@ -995,9 +1083,13 @@ function OrderForm({ onSubmit }: OrderFormProps) {
                             <input
                                 type="number"
                                 className="pm-exec-input num"
-                                value={limitPrice}
+                                value={limitValue || ""}
+                                min={0}
                                 step={0.01}
-                                onChange={(e) => setLimitPrice(Number(e.target.value))}
+                                onChange={(e) => {
+                                    setLimitPrice(Number(e.target.value));
+                                    setLimitTouched(true);
+                                }}
                             />
                         </label>
                     )}
@@ -1007,9 +1099,13 @@ function OrderForm({ onSubmit }: OrderFormProps) {
                             <input
                                 type="number"
                                 className="pm-exec-input num"
-                                value={stopPrice}
+                                value={stopValue || ""}
+                                min={0}
                                 step={0.01}
-                                onChange={(e) => setStopPrice(Number(e.target.value))}
+                                onChange={(e) => {
+                                    setStopPrice(Number(e.target.value));
+                                    setStopTouched(true);
+                                }}
                             />
                         </label>
                     )}
@@ -1045,7 +1141,7 @@ function OrderForm({ onSubmit }: OrderFormProps) {
                             <input
                                 type="number"
                                 className="pm-exec-input num"
-                                value={optionStrike}
+                                value={optionStrike || ""}
                                 min={0.01}
                                 step={0.01}
                                 onChange={(e) => setOptionStrike(Number(e.target.value))}
@@ -1132,13 +1228,9 @@ function OrderForm({ onSubmit }: OrderFormProps) {
                     value={formatUsd(notional)}
                 />
                 <PreviewRow
-                    label="Est. commission"
-                    value={commission === 0 ? "Free" : formatUsd(commission)}
-                />
-                <PreviewRow
-                    label="Buying power after"
-                    value={formatUsd(buyingPowerAfter)}
-                    tone={buyingPowerAfter < 0 ? "pm-num-neg" : ""}
+                    label="Cash after"
+                    value={formatUsd(cashAfter)}
+                    tone={cashAfter < 0 ? "pm-num-neg" : ""}
                 />
                 <PreviewRow
                     label="Position after"
@@ -1201,7 +1293,7 @@ function OrderForm({ onSubmit }: OrderFormProps) {
                     type="button"
                     className={submitClass}
                     disabled={submitDisabled}
-                    onClick={handleSubmit}
+                    onClick={() => void handleSubmit()}
                     title={submitTitle}
                     data-cooldown={cooldownActive ? "true" : undefined}
                     style={
@@ -1348,130 +1440,124 @@ interface Guardrail {
 
 function useGuardrails({
     side,
-    notional,
-    buyingPowerAfter,
-    positionAfter,
+    orderType,
+    isOptionOrder,
     ticker,
+    priceKnown,
+    priceLookupPending,
+    accountName,
+    cashAfter,
+    positionAfter,
+    postPositionValue,
+    portfolioValue,
     concentrationCapEnabled,
     concentrationCapPct,
-    positionMarketValueOverride,
     shortUnitLabel = "share",
 }: {
     side: OrderSide;
-    notional: number;
-    buyingPowerAfter: number;
-    positionAfter: number;
+    orderType: OrderType;
+    isOptionOrder: boolean;
     ticker: string;
+    /** Atlas has a last price for the ticker. */
+    priceKnown: boolean;
+    priceLookupPending: boolean;
+    accountName: string;
+    cashAfter: number;
+    positionAfter: number;
+    /** The user's position in the ticker across every account once placed, in dollars. */
+    postPositionValue: number;
+    /** Holdings and cash across every account. */
+    portfolioValue: number;
     concentrationCapEnabled: boolean;
     concentrationCapPct: number;
-    positionMarketValueOverride?: number;
     shortUnitLabel?: string;
 }): Guardrail[] {
     return useMemo(() => {
-        const bp: Guardrail =
-            buyingPowerAfter < 0
+        // A market order is sized at the last price: without one there's
+        // nothing to check it against, so the user sets a limit instead.
+        const priceCheck: Guardrail | null =
+            ticker && !isOptionOrder && orderType === "market" && !priceKnown && !priceLookupPending
                 ? {
-                    label: "Buying power",
-                    message: `Short ${formatUsd(Math.abs(buyingPowerAfter))}`,
+                    label: "Price",
+                    message: `No price for ${ticker} yet. Use a limit order to size it.`,
                     level: "fail",
                 }
-                : buyingPowerAfter < BUYING_POWER_USD * 0.05
-                    ? {
-                        label: "Buying power",
-                        message: `Thin: ${formatUsd(buyingPowerAfter)} left`,
-                        level: "warn",
-                    }
-                    : {
-                        label: "Buying power",
-                        message: `${formatUsd(buyingPowerAfter)} available after`,
-                        level: "ok",
-                    };
+                : null;
 
-        // Concentration — post-trade position value as a % of NAV.
-        // Thresholds come from the user's Settings › Guardrails card
-        // (AR-89). When the toggle is off we surface a neutral chip so
-        // the user still sees that the check ran — just with no ceiling.
-        // The warn band kicks in at 80% of the hard cap so big names
-        // light up amber before they block the order.
-        const navUsd = 250_000;
-        const postPosValue = positionMarketValueOverride ?? positionAfter * (LIVE_PRICES[ticker] ?? 0);
-        const concentrationPct = Math.abs(postPosValue) / navUsd;
-        const capFrac = concentrationCapPct / 100;
-        const warnFrac = capFrac * 0.8;
-        const conc: Guardrail = !concentrationCapEnabled
-            ? {
-                label: "Concentration",
-                message: `${(concentrationPct * 100).toFixed(1)}% of NAV (cap off)`,
-                level: "ok",
-            }
-            : concentrationPct > capFrac
+        // The account's cash as Atlas has it. Many accounts don't track
+        // cash here (or trade on margin), so running short only warns.
+        const cash: Guardrail =
+            cashAfter < 0
                 ? {
-                    label: "Concentration",
-                    message: `${(concentrationPct * 100).toFixed(1)}% of NAV (cap ${concentrationCapPct}%)`,
-                    level: "fail",
-                }
-                : concentrationPct > warnFrac
-                    ? {
-                        label: "Concentration",
-                        message: `${(concentrationPct * 100).toFixed(1)}% of NAV`,
-                        level: "warn",
-                    }
-                    : {
-                        label: "Concentration",
-                        message: `${(concentrationPct * 100).toFixed(1)}% of NAV`,
-                        level: "ok",
-                    };
-
-        // Sector cap — faked from the ticker. Real impl joins to holdings.
-        const techTickers = new Set(["AAPL", "MSFT", "NVDA", "GOOGL", "META", "AMD", "TSLA"]);
-        const sectorHit = techTickers.has(ticker);
-        const sector: Guardrail = sectorHit
-            ? {
-                label: "Sector cap",
-                message: "Tech 47% of NAV (cap 55%)",
-                level: "ok",
-            }
-            : {
-                label: "Sector cap",
-                message: "Within sector caps",
-                level: "ok",
-            };
-
-        // Volatility — uses notional size as a proxy. Again, replaced by
-        // real ATR/IV checks when the backend lands.
-        const vol: Guardrail =
-            notional > 50_000
-                ? {
-                    label: "Volatility",
-                    message: "Size > 2× avg daily bar",
+                    label: "Cash",
+                    message: `${formatUsd(Math.abs(cashAfter))} more than ${accountName}'s cash`,
                     level: "warn",
                 }
                 : {
-                    label: "Volatility",
-                    message: "Within normal volatility band",
+                    label: "Cash",
+                    message: `${formatUsd(cashAfter)} left in ${accountName}`,
                     level: "ok",
                 };
 
-        // Short-sale check.
+        // Concentration — the post-trade position, across accounts, as a %
+        // of the portfolio. Thresholds come from the user's Settings ›
+        // Guardrails card (AR-89). When the toggle is off we surface a
+        // neutral chip so the user still sees that the check ran — just
+        // with no ceiling. The warn band kicks in at 80% of the hard cap so
+        // big names light up amber before they block the order.
+        const concentrationPct = portfolioValue > 0 ? Math.max(0, postPositionValue) / portfolioValue : null;
+        const capFrac = concentrationCapPct / 100;
+        const warnFrac = capFrac * 0.8;
+        const share = concentrationPct === null ? "" : `${(concentrationPct * 100).toFixed(1)}% of your portfolio`;
+        const conc: Guardrail = concentrationPct === null
+            ? {
+                label: "Concentration",
+                message: "No portfolio value to compare with yet",
+                level: "ok",
+            }
+            : !concentrationCapEnabled
+                ? {
+                    label: "Concentration",
+                    message: `${share} (cap off)`,
+                    level: "ok",
+                }
+                : concentrationPct > capFrac
+                    ? {
+                        label: "Concentration",
+                        message: `${share} (cap ${concentrationCapPct}%)`,
+                        level: "fail",
+                    }
+                    : {
+                        label: "Concentration",
+                        message: share,
+                        level: concentrationPct > warnFrac ? "warn" : "ok",
+                    };
+
+        // Short-sale check: selling more than the account holds.
         const shortCheck: Guardrail | null =
             side === "sell" && positionAfter < 0
                 ? {
                     label: "Short sale",
-                    message: `Would open ${Math.abs(positionAfter)} ${shortUnitLabel} short`,
+                    message: `Would open ${Math.abs(positionAfter)} ${shortUnitLabel} short in ${accountName}`,
                     level: "warn",
                 }
                 : null;
 
-        return [bp, conc, sector, vol, ...(shortCheck ? [shortCheck] : [])];
+        return [...(priceCheck ? [priceCheck] : []), cash, conc, ...(shortCheck ? [shortCheck] : [])];
     }, [
         side,
-        notional,
-        buyingPowerAfter,
-        positionAfter,
+        orderType,
+        isOptionOrder,
         ticker,
+        priceKnown,
+        priceLookupPending,
+        accountName,
+        cashAfter,
+        positionAfter,
+        postPositionValue,
+        portfolioValue,
         concentrationCapEnabled,
         concentrationCapPct,
-        positionMarketValueOverride,
         shortUnitLabel,
     ]);
 }
@@ -1583,35 +1669,34 @@ function formatPolicyPct(value: number): string {
 
 interface OrdersPanelProps {
     orders: Order[];
+    accountNames: ReadonlyMap<string, string>;
+    /** Plans with a status change on its way. */
+    busyIds: ReadonlySet<string>;
     filter: BlotterFilter;
     onFilter: (f: BlotterFilter) => void;
-    onCancel: (id: string) => void;
-    onApprove: (id: string) => void;
+    onChangeStatus: (order: Order, status: OrderStatusChange) => void;
 }
 
 function OrdersPanel({
     orders,
+    accountNames,
+    busyIds,
     filter,
     onFilter,
-    onCancel,
-    onApprove,
+    onChangeStatus,
 }: OrdersPanelProps) {
-    // AR-89: the approval queue threshold is user-configurable. Reading
-    // the slice here (not at FocusVariant) keeps prop plumbing shallow
-    // and colocates the read with the only two places that need it:
-    // the `approvalQueue` filter below and the banner's copy.
-    const guardrailPrefs = useSettingsStore((s) => s.guardrails);
+    // AR-89: the approval threshold is user-configurable; the banner names it.
+    const approvalThresholdUsd = useSettingsStore((s) => s.guardrails.approvalThresholdUsd);
+    const todayEt = useEasternDate();
     const counts = useMemo(() => {
         const c: Record<BlotterFilter, number> = {
             all: orders.length,
-            working: 0,
-            filled: 0,
-            rejected: 0,
+            ready: 0,
+            placed: 0,
+            cancelled: 0,
         };
         for (const o of orders) {
-            if (o.status === "working") c.working += 1;
-            else if (o.status === "filled") c.filled += 1;
-            else if (o.status === "rejected") c.rejected += 1;
+            if (o.status === "ready" || o.status === "placed" || o.status === "cancelled") c[o.status] += 1;
         }
         return c;
     }, [orders]);
@@ -1622,31 +1707,20 @@ function OrdersPanel({
     }, [orders, filter]);
 
     const approvalQueue = useMemo(
-        () =>
-            orders.filter(
-                (o) =>
-                    o.status === "pending" ||
-                    (o.status === "working" &&
-                        guardrailPrefs.approvalThresholdEnabled &&
-                        orderExposureUsd(o) > guardrailPrefs.approvalThresholdUsd),
-            ),
-        [
-            orders,
-            guardrailPrefs.approvalThresholdEnabled,
-            guardrailPrefs.approvalThresholdUsd,
-        ],
+        () => sortOrdersNewestFirst(orders.filter((o) => o.status === "pending_approval")),
+        [orders],
     );
 
     return (
         <section
             className="pm-exec-blotter pm-card"
-            aria-label="Today's orders"
+            aria-label="Your orders"
             aria-live="polite"
         >
             <header className="pm-exec-blotter-head">
-                <h3 className="pm-exec-blotter-title">Today&rsquo;s orders</h3>
+                <h3 className="pm-exec-blotter-title">Your orders</h3>
                 <div className="pm-exec-chips" role="tablist" aria-label="Order filter">
-                    {(["all", "working", "filled", "rejected"] as BlotterFilter[]).map((f) => (
+                    {(["all", "ready", "placed", "cancelled"] as BlotterFilter[]).map((f) => (
                         <button
                             key={f}
                             type="button"
@@ -1655,13 +1729,7 @@ function OrdersPanel({
                             className={`pm-exec-chip${filter === f ? " is-active" : ""}`}
                             onClick={() => onFilter(f)}
                         >
-                            {f === "all"
-                                ? "All"
-                                : f === "working"
-                                    ? "Working"
-                                    : f === "filled"
-                                        ? "Filled"
-                                        : "Rejected"}
+                            {FILTER_LABELS[f]}
                             <span className="pm-exec-chip-count">{counts[f]}</span>
                         </button>
                     ))}
@@ -1671,13 +1739,20 @@ function OrdersPanel({
             {approvalQueue.length > 0 && (
                 <ApprovalBanner
                     orders={approvalQueue}
-                    threshold={guardrailPrefs.approvalThresholdUsd}
-                    onCancel={onCancel}
-                    onApprove={onApprove}
+                    threshold={approvalThresholdUsd}
+                    busyIds={busyIds}
+                    onChangeStatus={onChangeStatus}
                 />
             )}
 
-            <OrdersTable orders={filtered} onCancel={onCancel} />
+            <OrdersTable
+                orders={filtered}
+                accountNames={accountNames}
+                busyIds={busyIds}
+                todayEt={todayEt}
+                empty={orders.length === 0 ? "No orders yet. Orders you save appear here." : "No orders in this view."}
+                onChangeStatus={onChangeStatus}
+            />
         </section>
     );
 }
@@ -1685,13 +1760,13 @@ function OrdersPanel({
 function ApprovalBanner({
     orders,
     threshold,
-    onCancel,
-    onApprove,
+    busyIds,
+    onChangeStatus,
 }: {
     orders: Order[];
     threshold: number;
-    onCancel: (id: string) => void;
-    onApprove: (id: string) => void;
+    busyIds: ReadonlySet<string>;
+    onChangeStatus: (order: Order, status: OrderStatusChange) => void;
 }) {
     return (
         <div
@@ -1704,18 +1779,18 @@ function ApprovalBanner({
                 <AlertTriangle className="pm-exec-approval-icon" aria-hidden="true" />
                 <div className="pm-exec-approval-text">
                     <div className="pm-exec-approval-title">
-                        {orders.length} order{orders.length > 1 ? "s" : ""} above {formatUsd(threshold, 0)} threshold
+                        {orders.length} order{orders.length > 1 ? "s" : ""} need{orders.length > 1 ? "" : "s"} your approval
                     </div>
                     <div className="pm-exec-approval-sub">
-                        Cancel or approve before routing to the broker.
+                        Over your {formatUsd(threshold, 0)} approval threshold. Approve before you place {orders.length > 1 ? "them" : "it"} at your broker, or cancel.
                     </div>
                 </div>
             </div>
             <ul className="pm-exec-approval-list" role="list">
                 {orders.map((o) => {
-                    const price = orderDisplayPrice(o) ?? 0;
-                    const notional = orderExposureUsd(o);
+                    const price = orderDisplayPrice(o);
                     const unit = o.instrumentType === "option" ? "ct" : "sh";
+                    const busy = busyIds.has(o.id);
                     return (
                         <li key={o.id} className="pm-exec-approval-row">
                             <span className={`pm-exec-side-pill is-${o.side}`}>
@@ -1723,23 +1798,25 @@ function ApprovalBanner({
                             </span>
                             <span className="pm-exec-approval-ticker">{o.ticker}</span>
                             <span className="pm-exec-approval-qty num">
-                                {o.quantity.toLocaleString()} {unit} @ {formatUsd(price)}
+                                {o.quantity.toLocaleString()} {unit} @ {price ? formatUsd(price) : "—"}
                             </span>
                             <span className="pm-exec-approval-notional num">
-                                {formatUsd(notional)}
+                                {formatUsd(orderValue(o))}
                             </span>
                             <div className="pm-exec-approval-actions">
                                 <button
                                     type="button"
                                     className="pm-btn pm-btn-ghost pm-exec-btn-sm"
-                                    onClick={() => onCancel(o.id)}
+                                    disabled={busy}
+                                    onClick={() => onChangeStatus(o, "cancelled")}
                                 >
                                     Cancel
                                 </button>
                                 <button
                                     type="button"
                                     className="pm-btn pm-btn-primary pm-exec-btn-sm"
-                                    onClick={() => onApprove(o.id)}
+                                    disabled={busy}
+                                    onClick={() => onChangeStatus(o, "ready")}
                                 >
                                     <Check className="pm-exec-btn-icon" aria-hidden="true" />
                                     Approve
@@ -1755,15 +1832,23 @@ function ApprovalBanner({
 
 function OrdersTable({
     orders,
-    onCancel,
+    accountNames,
+    busyIds,
+    todayEt,
+    empty,
+    onChangeStatus,
 }: {
     orders: Order[];
-    onCancel: (id: string) => void;
+    accountNames: ReadonlyMap<string, string>;
+    busyIds: ReadonlySet<string>;
+    todayEt: string;
+    empty: string;
+    onChangeStatus: (order: Order, status: OrderStatusChange) => void;
 }) {
     if (orders.length === 0) {
         return (
             <div className="pm-exec-empty">
-                No orders in this view.
+                {empty}
             </div>
         );
     }
@@ -1790,13 +1875,14 @@ function OrdersTable({
                             ? ` ${o.optionDetails.strike}${o.optionDetails.contractType === "call" ? "C" : "P"}`
                             : "";
                         const quantityUnit = o.instrumentType === "option" ? " ct" : "";
+                        const busy = busyIds.has(o.id);
                         // AR-109: orders placed with a rationale render
                         // a subordinate summary row beneath the main
                         // row. Stays out of the scannable column flow
                         // but keeps the "why" one glance away.
                         return [
-                            <tr key={o.id}>
-                                <td className="num">{formatTime(o.placedAt)}</td>
+                            <tr key={o.id} data-order-id={o.id} data-created-at={o.createdAt} data-status={o.status}>
+                                <td className="num">{formatPlanTime(o.createdAt, todayEt)}</td>
                                 <td>
                                     <span className={`pm-exec-side-pill is-${o.side}`}>
                                         {o.side.toUpperCase()}
@@ -1804,6 +1890,7 @@ function OrdersTable({
                                 </td>
                                 <td className="pm-exec-table-ticker">
                                     {o.ticker}{optionSuffix}
+                                    <span className="pm-exec-table-account">{accountNames.get(o.portfolioId) ?? ""}</span>
                                 </td>
                                 <td>{ORDER_TYPE_LABELS[o.type]}</td>
                                 <td className="num-col num">
@@ -1814,16 +1901,30 @@ function OrdersTable({
                                 </td>
                                 <td>
                                     <span className={`pm-exec-status ${STATUS_CLASS[o.status]}`}>
-                                        {STATUS_LABELS[o.status]}
+                                        {ORDER_STATUS_LABELS[o.status]}
                                     </span>
                                 </td>
                                 <td className="pm-exec-table-action">
-                                    {o.status === "working" && (
+                                    {o.status === "ready" && (
+                                        <button
+                                            type="button"
+                                            className="pm-exec-place"
+                                            disabled={busy}
+                                            onClick={() => onChangeStatus(o, "placed")}
+                                            aria-label={`Mark ${o.ticker} order placed`}
+                                            title="Mark placed at your broker"
+                                        >
+                                            <Check className="pm-exec-cancel-icon" aria-hidden="true" />
+                                        </button>
+                                    )}
+                                    {o.status !== "cancelled" && (
                                         <button
                                             type="button"
                                             className="pm-exec-cancel"
-                                            onClick={() => onCancel(o.id)}
+                                            disabled={busy}
+                                            onClick={() => onChangeStatus(o, "cancelled")}
                                             aria-label={`Cancel ${o.ticker} order`}
+                                            title={o.status === "placed" ? "Cancelled at your broker" : "Cancel"}
                                         >
                                             <X className="pm-exec-cancel-icon" aria-hidden="true" />
                                         </button>

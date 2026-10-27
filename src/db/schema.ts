@@ -793,6 +793,54 @@ export const thesisEvidence = pgTable("thesis_evidence", {
     appRuntimeAccess: appRuntimeAccessPolicy(),
 })).enableRLS();
 
+/**
+ * Orders the user drafted on Trade (launch item i53). Atlas never routes
+ * one: a plan above the user's approval threshold waits for their approval
+ * ("pending_approval"), then it's "ready" for them to place at their
+ * broker, and they mark it "placed" or "cancelled". It goes with its
+ * account. The rationale, option details and risk-policy record are kept
+ * as the ticket captured them (src/types/execution.ts).
+ */
+export const orderPlans = pgTable("order_plans", {
+    id: uuid("id").default(sql`gen_random_uuid()`).primaryKey(),
+    userId: text("user_id")
+        .notNull()
+        .references(() => authUsers.id, { onDelete: "cascade" }),
+    portfolioId: uuid("portfolio_id")
+        .notNull()
+        .references(() => portfolios.id, { onDelete: "cascade" }),
+    instrumentType: text("instrument_type").notNull(),
+    // The ticker, or an option's underlying.
+    symbol: text("symbol").notNull(),
+    side: text("side").notNull(),
+    orderType: text("order_type").notNull(),
+    // Shares, or option contracts.
+    quantity: numeric("quantity").notNull(),
+    limitPrice: numeric("limit_price"),
+    stopPrice: numeric("stop_price"),
+    timeInForce: text("time_in_force").notNull(),
+    status: text("status").notNull(),
+    // The price the ticket sized the plan at, and that close's date when it was one.
+    referencePrice: doublePrecision("reference_price"),
+    referencePriceDate: date("reference_price_date", { mode: "string" }),
+    rationale: jsonb("rationale"),
+    optionDetails: jsonb("option_details"),
+    policy: jsonb("policy"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => ({
+    userCreatedIdx: index("order_plans_user_created_idx").on(table.userId, table.createdAt),
+    portfolioIdIdx: index("order_plans_portfolio_id_idx").on(table.portfolioId),
+    instrumentTypeCheck: check("order_plans_instrument_type_check", sql`${table.instrumentType} in ('equity', 'option')`),
+    sideCheck: check("order_plans_side_check", sql`${table.side} in ('buy', 'sell')`),
+    orderTypeCheck: check("order_plans_order_type_check", sql`${table.orderType} in ('market', 'limit', 'stop', 'stop_limit')`),
+    timeInForceCheck: check("order_plans_time_in_force_check", sql`${table.timeInForce} in ('day', 'gtc', 'ioc', 'fok')`),
+    statusCheck: check("order_plans_status_check", sql`${table.status} in ('pending_approval', 'ready', 'placed', 'cancelled')`),
+    quantityCheck: check("order_plans_quantity_check", sql`${table.quantity} > 0`),
+    serverOnlyNoClientAccess: serverOnlyNoClientAccessPolicy(),
+    appRuntimeAccess: appRuntimeAccessPolicy(),
+})).enableRLS();
+
 // ---------------------------------------------------------------------------
 // Ask (launch item i56)
 // ---------------------------------------------------------------------------
