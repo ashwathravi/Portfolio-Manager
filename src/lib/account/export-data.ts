@@ -38,6 +38,18 @@ export interface ExportedValuation {
     holdingsValue: number;
     cash: number;
     costBasis: number;
+    /** What was held that day and what each was valued at. */
+    positions: ExportedValuationPosition[];
+}
+
+export interface ExportedValuationPosition {
+    symbol: string;
+    quantity: number;
+    costBasis: number;
+    /** Null when it had no price; otherwise the close it was valued at, and that close's date. */
+    close: number | null;
+    closeDate: string | null;
+    marketValue: number | null;
 }
 
 export interface ExportedAccount {

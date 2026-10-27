@@ -15,6 +15,7 @@ import {
     journalEntries,
     plaidAccounts,
     plaidItems,
+    portfolioSnapshotPositions,
     portfolioSnapshots,
     portfolios,
     theses,
@@ -25,7 +26,7 @@ import {
     watchlistItems,
 } from "@/db/schema";
 
-import { ACCOUNT_EXPORT_FORMAT, ACCOUNT_EXPORT_VERSION, type AccountExport } from "./export-data";
+import { ACCOUNT_EXPORT_FORMAT, ACCOUNT_EXPORT_VERSION, type AccountExport, type ExportedValuationPosition } from "./export-data";
 
 type Database = typeof db;
 
@@ -49,11 +50,19 @@ export async function buildAccountExport(userId: string, database: Database = db
 
         const accounts = await tx.select().from(portfolios).where(eq(portfolios.userId, userId)).orderBy(asc(portfolios.name), asc(portfolios.id));
         const ids = accounts.map((a) => a.id);
-        const [held, activity, history] = ids.length === 0 ? [[], [], []] : await Promise.all([
+        const [held, activity, history, historyPositions] = ids.length === 0 ? [[], [], [], []] : await Promise.all([
             tx.select().from(holdings).where(inArray(holdings.portfolioId, ids)).orderBy(asc(holdings.symbol)),
             tx.select().from(transactions).where(inArray(transactions.portfolioId, ids)).orderBy(asc(transactions.timestamp), asc(transactions.id)),
             tx.select().from(portfolioSnapshots).where(inArray(portfolioSnapshots.portfolioId, ids)).orderBy(asc(portfolioSnapshots.date)),
+            tx.select().from(portfolioSnapshotPositions).where(inArray(portfolioSnapshotPositions.portfolioId, ids)).orderBy(asc(portfolioSnapshotPositions.symbol)),
         ]);
+        const positionsOn = new Map<string, ExportedValuationPosition[]>();
+        for (const p of historyPositions) {
+            const key = `${p.portfolioId}|${p.date}`;
+            const day = positionsOn.get(key) ?? [];
+            day.push({ symbol: p.symbol, quantity: Number(p.quantity), costBasis: p.costBasis, close: p.close, closeDate: p.closeDate, marketValue: p.marketValue });
+            positionsOn.set(key, day);
+        }
 
         const items = await tx
             .select({ id: plaidItems.id, institutionName: plaidItems.institutionName, status: plaidItems.status, createdAt: plaidItems.createdAt })
@@ -124,6 +133,7 @@ export async function buildAccountExport(userId: string, database: Database = db
                     holdingsValue: Number(v.holdingsValue),
                     cash: Number(v.cash),
                     costBasis: Number(v.costBasis),
+                    positions: positionsOn.get(`${account.id}|${v.date}`) ?? [],
                 })),
             })),
             linkedConnections: items.map((item) => ({

@@ -55,6 +55,7 @@ describe('account deletion and export', { skip: !DATABASE_URL && 'SCRIPTS_TEST_D
         await sql`INSERT INTO holdings (portfolio_id, symbol, name, quantity, avg_cost, current_price) VALUES (${p.id}, 'AAPL', 'Apple', 10, 80, 100)`;
         await sql`INSERT INTO transactions (portfolio_id, symbol, type, quantity, price, timestamp, amount, notes) VALUES (${p.id}, 'AAPL', 'BUY', 10, 80, '2026-03-05 12:00', 800, 'starter')`;
         await sql`INSERT INTO portfolio_snapshots (portfolio_id, date, holdings_value, cash, total_value, cost_basis, positions, unpriced) VALUES (${p.id}, '2026-10-23', 1000, 250, 1250, 800, 1, '{}')`;
+        await sql`INSERT INTO portfolio_snapshot_positions (portfolio_id, date, symbol, quantity, cost_basis, close, close_date, market_value) VALUES (${p.id}, '2026-10-23', 'AAPL', 10, 800, 100, '2026-10-23', 1000)`;
         await sql`INSERT INTO user_settings (user_id, version, settings) VALUES (${user}, 15, ${JSON.stringify({ demo: { showSampleData: false } })}::jsonb)`;
         await sql`INSERT INTO watchlist_items (user_id, id, ticker, company_name, reason, notes, added_at, write_session, write_seq) VALUES (${user}, 'w-1', 'MSFT', 'Microsoft', 'cloud', 'n', '2026-03-01', 'session-1', 1)`;
         await sql`INSERT INTO watchlist_items (user_id, id, ticker, company_name, reason, notes, added_at, dismissed, write_session, write_seq) VALUES (${user}, 'w-2', 'TSLA', '', '', '', '2026-03-01', true, 'session-1', 2)`;
@@ -79,6 +80,7 @@ describe('account deletion and export', { skip: !DATABASE_URL && 'SCRIPTS_TEST_D
                 (SELECT count(*) FROM auth_verification_tokens WHERE identifier = ${`${user}@example.test`})::int AS tokens,
                 (SELECT count(*) FROM portfolios WHERE user_id = ${user})::int AS portfolios,
                 (SELECT count(*) FROM holdings h JOIN portfolios p ON p.id = h.portfolio_id WHERE p.user_id = ${user})::int AS holdings,
+                (SELECT count(*) FROM portfolio_snapshot_positions s JOIN portfolios p ON p.id = s.portfolio_id WHERE p.user_id = ${user})::int AS snapshot_positions,
                 (SELECT count(*) FROM user_settings WHERE user_id = ${user})::int AS settings,
                 (SELECT count(*) FROM watchlist_items WHERE user_id = ${user})::int AS watchlist,
                 (SELECT count(*) FROM journal_entries WHERE user_id = ${user})::int AS journal,
@@ -115,7 +117,12 @@ describe('account deletion and export', { skip: !DATABASE_URL && 'SCRIPTS_TEST_D
         assert.deepEqual(account.transactions.map((t) => [t.date, t.type, t.symbol, t.quantity, t.price, t.amount, t.notes]), [
             ['2026-03-05T12:00:00.000Z', 'BUY', 'AAPL', 10, 80, 800, 'starter'],
         ]);
-        assert.deepEqual(account.valuationHistory, [{ date: '2026-10-23', totalValue: 1250, holdingsValue: 1000, cash: 250, costBasis: 800 }]);
+        // Each day's positions too: Returns is computed from them, and the
+        // totals alone can't rebuild them.
+        assert.deepEqual(account.valuationHistory, [{
+            date: '2026-10-23', totalValue: 1250, holdingsValue: 1000, cash: 250, costBasis: 800,
+            positions: [{ symbol: 'AAPL', quantity: 10, costBasis: 800, close: 100, closeDate: '2026-10-23', marketValue: 1000 }],
+        }]);
         assert.deepEqual(data.linkedConnections.map((c) => [c.institutionName, c.accounts.map((a) => [a.name, a.mask, a.syncing])]), [['Fidelity', [['Individual', '1234', true]]]]);
         // A removed watchlist ticker is a marker, not the user's data.
         assert.deepEqual(data.watchlist.map((w) => w.ticker), ['MSFT']);

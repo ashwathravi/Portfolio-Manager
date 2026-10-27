@@ -5,6 +5,8 @@ import { requireSessionApiUserScope } from "@/lib/api/session-security";
 import {
     discoveredPlaidAccountFingerprint,
     exchangePlaidPublicToken,
+    PlaidApiError,
+    postPlaid,
     resolvePlaidEnvironment,
     sanitizePlaidExchangeForClient,
 } from "@/lib/plaid/link";
@@ -35,9 +37,11 @@ export async function POST(request: Request) {
             requestId: requestIdFrom(request.headers),
             userScoped: true,
         });
+        const credentials = plaidCredentialsFromEnv();
+        const environment = resolvePlaidEnvironment(process.env.PLAID_ENV);
         const exchange = await exchangePlaidPublicToken({
-            credentials: plaidCredentialsFromEnv(),
-            environment: resolvePlaidEnvironment(process.env.PLAID_ENV),
+            credentials,
+            environment,
             publicToken,
             linkMetadata: parsePlaidMetadata(body.metadata),
             products: readListEnv("PLAID_PRODUCTS", ["investments", "transactions"]),
@@ -47,8 +51,20 @@ export async function POST(request: Request) {
             exchange,
             userId: auth.context.userId,
         });
-        if (!tokenStorage.stored && process.env.NODE_ENV === "production") {
-            return apiError("Plaid token storage is not configured.", "PLAID_TOKEN_STORAGE_NOT_CONFIGURED", 503);
+        if (!tokenStorage.stored) {
+            // Without its token Atlas could never sync this connection or end
+            // it (storage not set up, or the account deleted while it was
+            // being linked): end it at Plaid now rather than leave its access
+            // open.
+            try {
+                await postPlaid({ endpoint: "/item/remove", environment, credentials, fetchImpl: fetch, body: { access_token: exchange.accessToken } });
+            } catch (error) {
+                console.warn(
+                    "Plaid exchange: couldn't end a connection that wasn't saved.",
+                    error instanceof PlaidApiError ? error.errorCode ?? error.name : error instanceof Error ? error.name : "error",
+                );
+            }
+            return apiError("Atlas couldn't save this connection, so it was ended. Try linking it again.", "PLAID_CONNECTION_NOT_SAVED", 503);
         }
         // Accounts the user already has through another connection (the same
         // brokerage linked again, its accounts under new IDs) aren't offered
