@@ -9,8 +9,8 @@
  * (or to disconnect them first). Then, in one transaction, the user's
  * accounts (their holdings, transactions and valuation history cascade)
  * and the user row, which takes everything else that cascades from it:
- * sign-in records and sessions, settings, watchlist, journal, theses and
- * Plaid connections. Alpha Radar's tracked filers are shared by every
+ * sign-in records and sessions, settings, watchlist, journal, theses, Ask
+ * history and Plaid connections. Alpha Radar's tracked filers are shared by every
  * account during the beta, not the user's, so they stay.
  */
 

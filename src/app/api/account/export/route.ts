@@ -3,7 +3,8 @@
  *
  * Everything Atlas holds for the signed-in user, as JSON (launch item i65):
  * accounts with their holdings, transactions and valuation history,
- * settings, linked connections (no tokens), watchlist, journal and theses.
+ * settings, linked connections (no tokens), watchlist, journal, theses and
+ * the Ask conversation.
  * Settings › Data downloads it, and builds the holdings and transactions
  * CSV files from it.
  *

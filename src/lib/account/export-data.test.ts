@@ -9,7 +9,7 @@ const account = (name: string, fields: Partial<ExportedAccount> = {}): ExportedA
 });
 const exported = (accounts: ExportedAccount[]): AccountExport => ({
     format: 'atlas-wealth-export', version: 1, exportedAt: '2026-10-26T18:00:00.000Z', profile: { name: null, email: null }, settings: null,
-    accounts, linkedConnections: [], watchlist: [], journal: [], theses: [],
+    accounts, linkedConnections: [], watchlist: [], journal: [], theses: [], askHistory: [],
 });
 const trade = (date: string, symbol: string) => ({ date, type: 'BUY', symbol, quantity: 2, price: 10.5, amount: 21, fees: null, currency: 'USD', notes: null, source: 'csv' });
 
