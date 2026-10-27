@@ -64,6 +64,9 @@ describe('account deletion and export', { skip: !DATABASE_URL && 'SCRIPTS_TEST_D
         await sql`INSERT INTO theses (user_id, id, ticker, title, description, type, status, conviction, target_price, date_created, date_updated, write_session, write_seq) VALUES (${user}, 't-1', 'AAPL', 'Services', 'd', 'bull', 'active', 'HIGH', 250, '2026-03-01', '2026-03-01', 'session-1', 4)`;
         await sql`INSERT INTO thesis_catalysts (user_id, thesis_id, id, position, title, impact) VALUES (${user}, 't-1', 'c-1', 0, 'Earnings', 'high')`;
         await sql`INSERT INTO thesis_evidence (user_id, thesis_id, id, position, title, type, url) VALUES (${user}, 't-1', 'e-1', 0, 'Filing', 'report', 'https://example.test/10k')`;
+        await sql`INSERT INTO ask_messages (user_id, id, role, content, cleared, created_at) VALUES (${user}, 'q-0', 'user', 'An earlier question', true, '2026-10-22 09:00')`;
+        await sql`INSERT INTO ask_messages (user_id, id, role, content, created_at) VALUES (${user}, 'q-1', 'user', 'Where did P&L come from?', '2026-10-23 09:00')`;
+        await sql`INSERT INTO ask_messages (user_id, id, role, content, citations, created_at) VALUES (${user}, 'a-1', 'assistant', 'Mostly AAPL.', '[{"label":"Closed trades"}]', '2026-10-23 09:00:01')`;
         const [item] = await sql<{ id: string }[]>`
             INSERT INTO plaid_items (user_id, plaid_item_id, institution_id, institution_name, access_token_ciphertext, access_token_iv, access_token_auth_tag)
             VALUES (${user}, ${`item-${user}`}, 'ins_1', 'Fidelity', 'secret-cipher', 'i', 't') RETURNING id`;
@@ -89,6 +92,7 @@ describe('account deletion and export', { skip: !DATABASE_URL && 'SCRIPTS_TEST_D
                 (SELECT count(*) FROM theses WHERE user_id = ${user})::int AS theses,
                 (SELECT count(*) FROM thesis_catalysts WHERE user_id = ${user})::int AS catalysts,
                 (SELECT count(*) FROM thesis_evidence WHERE user_id = ${user})::int AS evidence,
+                (SELECT count(*) FROM ask_messages WHERE user_id = ${user})::int AS ask_messages,
                 (SELECT count(*) FROM plaid_items WHERE user_id = ${user})::int AS plaid_items,
                 (SELECT count(*) FROM plaid_accounts WHERE user_id = ${user})::int AS plaid_accounts`;
         return { ...counts };
@@ -134,9 +138,14 @@ describe('account deletion and export', { skip: !DATABASE_URL && 'SCRIPTS_TEST_D
         assert.deepEqual(data.watchlist.map((w) => w.ticker), ['MSFT']);
         assert.deepEqual(data.journal.map((j) => j.rationale), ['cheap']);
         assert.deepEqual(data.theses.map((t) => [t.title, (t.catalysts as unknown[]).length, (t.evidence as unknown[]).length]), [['Services', 1, 1]]);
+        // The Ask conversation as the user sees it: a cleared question is only kept to count towards the day's limit.
+        assert.deepEqual(data.askHistory.map((m) => [m.id, m.role, m.content, m.citations]), [
+            ['q-1', 'user', 'Where did P&L come from?', []],
+            ['a-1', 'assistant', 'Mostly AAPL.', [{ label: 'Closed trades' }]],
+        ]);
 
         const text = JSON.stringify(data);
-        for (const leak of ['userId', 'writeSession', 'writeSeq', 'dismissed', 'secret-cipher', 'item-u-export', 'acc-u-export', 'u-other']) {
+        for (const leak of ['userId', 'writeSession', 'writeSeq', 'dismissed', 'cleared', 'An earlier question', 'secret-cipher', 'item-u-export', 'acc-u-export', 'u-other']) {
             assert.ok(!text.includes(leak), leak);
         }
     });

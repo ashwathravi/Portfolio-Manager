@@ -91,6 +91,8 @@ export interface AccountExport {
     watchlist: Record<string, unknown>[];
     journal: Record<string, unknown>[];
     theses: Record<string, unknown>[];
+    /** The Ask conversation: each question and its answer, oldest first. */
+    askHistory: Record<string, unknown>[];
 }
 
 /** One row per holding, across the user's accounts. */

@@ -10007,6 +10007,11 @@ a:focus-visible,
   font-size: 12.5px;
   margin: 0;
 }
+.pm-ask-pending {
+  margin: 14px 0 0;
+  color: var(--pm-fg-muted);
+  font-size: 12.5px;
+}
 
 /* Message list / bubble */
 .pm-ask-list {

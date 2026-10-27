@@ -32,7 +32,7 @@ test.describe('Privacy policy', () => {
     }
   });
 
-  test('says the watchlist, journal and theses are saved with the account, not only in the browser', async ({ page }) => {
+  test('says the watchlist, journal, theses and Ask conversation are saved with the account, not only in the browser', async ({ page }) => {
     const collected = page.getByRole('region', { name: 'What we collect' });
     const added = collected.getByRole('listitem').filter({ hasText: 'Data you add.' });
     await expect(added).toContainText('your watchlist');
@@ -40,15 +40,19 @@ test.describe('Privacy policy', () => {
     await expect(added).toContainText('your research theses');
     // Launch item i53: orders drafted on Trade are kept with the account too.
     await expect(added).toContainText('orders you draft on Trade');
+    // Launch item i56.
+    await expect(added).toContainText('the questions you ask Ask and its answers (the last 25 of each)');
     const browserOnly = collected.getByText(/stored only in your browser/);
     await expect(browserOnly).not.toContainText('watchlist,');
     await expect(browserOnly).not.toContainText('journal');
     await expect(browserOnly).not.toContainText('theses,');
+    await expect(browserOnly).not.toContainText('Ask');
   });
 
   test('says what stays when you remove a watchlist ticker, journal entry or thesis', async ({ page }) => {
     const retention = page.getByRole('region', { name: 'Keeping and deleting your data' });
-    await expect(retention).toContainText('drafted orders, value history, watchlist, journal, theses and settings');
+    await expect(retention).toContainText('drafted orders, value history, watchlist, journal, theses, Ask questions and settings');
+    await expect(retention).toContainText('When you clear your Ask conversation it disappears straight away. Its questions and answers are deleted once they’re a day old, by the next nightly cleanup');
     await expect(retention.getByText(/When you remove a watchlist ticker or delete a journal entry or thesis/)).toContainText('notes and reasoning are erased');
   });
 

@@ -1,34 +1,39 @@
 /**
  * AR-115 — fixed tool catalogue for Ask Ledger.
  *
- * Deliberately narrow: the planner may only invoke one of these five
+ * Deliberately narrow: the planner may only invoke one of these
  * functions, and every return shape is `AskRow[]`. That shape shows up
  * in the rendered answer as a `kv` table without the renderer needing
  * tool-specific knowledge.
  *
- * All tools are pure: they read from the context (seed journal + mock
- * portfolios) and return deterministic numbers. When the real LLM lands
- * in v2 we swap the planner — the tools stay identical.
+ * All tools are pure: they read the user's own data from the context
+ * (launch item i56) — their holdings, cash, transactions and closed
+ * trades, the theses they wrote, and the risk policy they saved — which
+ * the server loads (./server/context.ts). They never fill a gap with
+ * example data: no data is an empty answer, which the renderer says.
  */
-import type { JournalEntry } from '@/types/trade';
-import type { Holding, Portfolio, Transaction } from '@/lib/mockData';
 import { sectorFor } from '@/lib/holdings/sector';
 import { searchAlphaRadarSemanticChunks, type AlphaRadarSemanticChunk } from '@/lib/alpha-radar/memory';
-import { findThesisByTicker, getDefaultTheses, type Thesis } from '@/lib/research/thesis';
+import type { ActivityRow } from '@/lib/portfolio/activity';
+import type { ClosedTrade } from '@/lib/portfolio/closed-trades';
+import type { StoredClose } from '@/lib/portfolio/valuation-snapshots';
 import {
-    DEFAULT_CASH_DEPLOYMENT_RULE,
+    buildCustomStressScenario,
     computeCashPolicySummary,
     computeChurnAnalysis,
-    computeRiskPolicyDashboard,
     computeThemeExposure,
     computeTrimAmountToTarget,
+    employerStockName,
+    employerSymbols,
+    evaluateRiskPolicy,
     findStressScenario,
+    normalizeTicker,
+    policyHoldings,
+    policyPortfolioValue,
     runStressScenario,
-    type CashDeploymentRule,
-    type CashJob,
-    type ChurnTrade,
-    type RiskPolicyDashboardHolding,
-    type StressHolding,
+    type PolicyPortfolio,
+    type RiskPolicySettings,
+    type ThemeExposureHolding,
 } from '@/lib/risk-policy';
 import type {
     AskRow,
@@ -37,13 +42,20 @@ import type {
 } from './types';
 
 export interface AskContext {
-    portfolios: Portfolio[];
-    holdings: Holding[];
-    transactions?: Transaction[];
-    entries: JournalEntry[];
-    theses?: Thesis[];
-    cashJobs?: CashJob[];
-    cashDeploymentRule?: CashDeploymentRule;
+    /** Holdings valued as Today values them, cash, the last year's buys and sells, and the user's theses. */
+    portfolio: PolicyPortfolio;
+    /** Every transaction, newest first. */
+    activity: ActivityRow[];
+    /** Sales matched against the buys before them, newest first. */
+    closedTrades: ClosedTrade[];
+    /** Tickers left out of them: a trade off today's share scale, as after a split. */
+    closedTradesLeftOut?: string[];
+    /** The risk policy the user saved: caps, bucket choices, employer tickers, cash jobs. */
+    policy: RiskPolicySettings;
+    /** Sectors from the securities master, by ticker; `sectorFor` for the rest. */
+    sectors?: Readonly<Record<string, string>>;
+    /** Stored daily closes, oldest first, for the tickers a correlation needs. */
+    closes?: ReadonlyMap<string, readonly StoredClose[]>;
     alphaRadarMemory?: AlphaRadarSemanticChunk[];
     /** Unix ms. Frozen per run so outputs are stable. */
     now: number;
@@ -67,28 +79,89 @@ function usdSigned(n: number): string {
     return `${sign}$${abs}`;
 }
 
+/** An amount in its own currency: "$1,000", "CA$1,000". */
+function money(n: number, currency: string): string {
+    if (currency === 'USD') return usd(n);
+    try {
+        return new Intl.NumberFormat('en-US', { style: 'currency', currency, maximumFractionDigits: 0 }).format(n);
+    } catch {
+        return `${Math.round(n).toLocaleString('en-US')} ${currency}`;
+    }
+}
+
 function pct(n: number): string {
     if (!Number.isFinite(n)) return '0%';
     return `${n >= 0 ? '+' : ''}${n.toFixed(1)}%`;
 }
 
-function msBetween(a: string, b: number): number {
-    return b - Date.parse(a);
-}
-
-function inRange(entry: JournalEntry, rangeDays: number, now: number): boolean {
+function inRange(trade: ClosedTrade, rangeDays: number, now: number): boolean {
     if (rangeDays <= 0) return true; // all time
-    const ms = msBetween(entry.closedAt, now);
+    const ms = now - Date.parse(trade.closedAt);
     return ms >= 0 && ms <= rangeDays * 86_400_000;
 }
+
+function sectorOf(ctx: AskContext, symbol: string): string {
+    return ctx.sectors?.[normalizeTicker(symbol)] ?? sectorFor(symbol);
+}
+
+interface Position {
+    symbol: string;
+    name: string;
+    quantity: number;
+    costBasis: number;
+    marketValue: number;
+}
+
+/** One position per ticker, across the user's accounts. */
+function positions(ctx: AskContext): Position[] {
+    const bySymbol = new Map<string, Position>();
+    for (const holding of ctx.portfolio.holdings) {
+        const symbol = normalizeTicker(holding.symbol);
+        const position = bySymbol.get(symbol) ?? { symbol, name: holding.name, quantity: 0, costBasis: 0, marketValue: 0 };
+        position.quantity += holding.quantity;
+        position.costBasis += holding.quantity * holding.avgCost;
+        position.marketValue += holding.marketValue;
+        bySymbol.set(symbol, position);
+    }
+    return [...bySymbol.values()];
+}
+
+/** The user's holdings as the policy sees them, cash included, as on Today. */
+function policyExposureHoldings(ctx: AskContext): ThemeExposureHolding[] {
+    const cash = ctx.portfolio.cashTotal;
+    return [
+        ...policyHoldings(ctx.portfolio.holdings, ctx.policy),
+        ...(cash > 0
+            ? [{
+                id: 'cash-reserve',
+                symbol: 'USD',
+                name: 'Cash reserve',
+                marketValue: cash,
+                policyBucket: 'cash_reserve' as const,
+                themeWeights: [{ theme: 'bonds_treasuries_cash_equivalent' as const, weight: 1, source: 'fallback' as const }],
+            }]
+            : []),
+    ];
+}
+
+export const NO_EMPLOYER_LABEL = 'No employer stock named';
+
+/** The answer to an employer-stock question before the user has named theirs. */
+const NO_EMPLOYER_ROW: AskRow = {
+    label: NO_EMPLOYER_LABEL,
+    value: 'None',
+    sub: "Name your employer's tickers in Settings › Employer stock, or ask about a ticker",
+    tone: 'neutral',
+    href: '/settings#employer-stock',
+};
 
 // --------------------------------------------------------------------- //
 // 1. top_alpha_contributors
 // --------------------------------------------------------------------- //
 
 /**
- * Who moved the number most? Rank holdings by realized total return and
- * return the top N. Used by "what's helped / hurt alpha" questions.
+ * Who moved the number most? Rank positions by unrealized return (value
+ * less cost) and return the top N. Used by "what's helped / hurt" questions.
  */
 export function top_alpha_contributors(
     ctx: AskContext,
@@ -96,36 +169,27 @@ export function top_alpha_contributors(
 ): AskRow[] {
     const topN = args.topN ?? 5;
     const direction = args.direction ?? 'all';
+    const gain = (p: Position) => p.marketValue - p.costBasis;
 
     // Different directions want different sorts. For "negative" we want
     // the WORST performers first; when the book is all-green that means
     // the weakest winners ("relative drags"), not an empty reply.
-    let pool = [...ctx.holdings];
+    let pool = positions(ctx).filter((p) => p.costBasis > 0);
     if (direction === 'positive') {
-        pool = pool.filter((h) => h.totalReturn >= 0);
-        pool.sort((a, b) => {
-            const diff = b.totalReturn - a.totalReturn;
-            return diff !== 0 ? diff : a.ticker.localeCompare(b.ticker);
-        });
+        pool = pool.filter((p) => gain(p) >= 0);
+        pool.sort((a, b) => gain(b) - gain(a) || a.symbol.localeCompare(b.symbol));
     } else if (direction === 'negative') {
-        // Ascending by totalReturn: losses first, then weakest winners.
-        pool.sort((a, b) => {
-            const diff = a.totalReturn - b.totalReturn;
-            return diff !== 0 ? diff : a.ticker.localeCompare(b.ticker);
-        });
+        pool.sort((a, b) => gain(a) - gain(b) || a.symbol.localeCompare(b.symbol));
     } else {
-        pool.sort((a, b) => {
-            const diff = Math.abs(b.totalReturn) - Math.abs(a.totalReturn);
-            return diff !== 0 ? diff : a.ticker.localeCompare(b.ticker);
-        });
+        pool.sort((a, b) => Math.abs(gain(b)) - Math.abs(gain(a)) || a.symbol.localeCompare(b.symbol));
     }
 
-    return pool.slice(0, topN).map((h) => ({
-        label: h.ticker,
-        value: usdSigned(h.totalReturn),
-        sub: `${pct(h.totalReturnPercent)} · ${h.name}`,
-        tone: h.totalReturn >= 0 ? 'pos' : 'neg',
-        href: `/portfolios/holdings`,
+    return pool.slice(0, topN).map((p) => ({
+        label: p.symbol,
+        value: usdSigned(gain(p)),
+        sub: `${pct((gain(p) / p.costBasis) * 100)} · ${p.name}`,
+        tone: gain(p) >= 0 ? 'pos' : 'neg',
+        href: `/portfolios/detail/${encodeURIComponent(p.symbol)}`,
     }));
 }
 
@@ -134,8 +198,9 @@ export function top_alpha_contributors(
 // --------------------------------------------------------------------- //
 
 /**
- * Where did P&L come from over the last `rangeDays`? Groups the journal's
- * round-trip entries by `sector | ticker | setup` and sums realized P&L.
+ * Where did P&L come from over the last `rangeDays`? Groups the closed
+ * trades by `sector | ticker | setup` and sums the realized gain. No setup
+ * is recorded with a transaction, so by setup they are all "No setup recorded".
  */
 export function pnl_attribution(
     ctx: AskContext,
@@ -143,37 +208,25 @@ export function pnl_attribution(
 ): AskRow[] {
     const rangeDays = args.rangeDays ?? 30;
     const groupBy = args.groupBy ?? 'sector';
-    const windowed = ctx.entries.filter((e) => inRange(e, rangeDays, ctx.now));
+    const windowed = ctx.closedTrades.filter((t) => inRange(t, rangeDays, ctx.now));
 
     const bucket = new Map<string, number>();
-    for (const e of windowed) {
-        let key: string;
-        switch (groupBy) {
-            case 'ticker':
-                key = e.ticker;
-                break;
-            case 'setup':
-                key = e.rationale?.setupType ?? 'other';
-                break;
-            default:
-                key = sectorFor(e.ticker);
-        }
-        bucket.set(key, (bucket.get(key) ?? 0) + (e.realizedPnlUsd || 0));
+    for (const t of windowed) {
+        const key = groupBy === 'ticker' ? t.symbol : groupBy === 'setup' ? 'No setup recorded' : sectorOf(ctx, t.symbol);
+        bucket.set(key, (bucket.get(key) ?? 0) + t.realizedPnl);
     }
 
-    const rows = Array.from(bucket.entries())
-        .map(([k, v]) => ({ k, v }))
-        .sort((a, b) => b.v - a.v);
-
-    return rows.map((r) => ({
-        label: r.k,
-        value: usdSigned(r.v),
-        tone: r.v >= 0 ? 'pos' : 'neg',
-        href:
-            groupBy === 'sector'
-                ? `/portfolios/holdings?sector=${encodeURIComponent(r.k)}`
-                : `/portfolios/activity`,
-    }));
+    return Array.from(bucket.entries())
+        .sort((a, b) => b[1] - a[1])
+        .map(([label, value]) => ({
+            label,
+            value: usdSigned(value),
+            tone: value >= 0 ? 'pos' : 'neg',
+            href:
+                groupBy === 'sector'
+                    ? `/portfolios/holdings?sector=${encodeURIComponent(label)}`
+                    : `/portfolios/activity`,
+        }));
 }
 
 // --------------------------------------------------------------------- //
@@ -185,10 +238,10 @@ export function sector_exposure(ctx: AskContext, _args: Record<string, unknown> 
     void _args;
     const bucket = new Map<string, number>();
     let total = 0;
-    for (const h of ctx.holdings) {
-        const s = sectorFor(h.ticker);
-        bucket.set(s, (bucket.get(s) ?? 0) + h.marketValue);
-        total += h.marketValue;
+    for (const p of positions(ctx)) {
+        const sector = sectorOf(ctx, p.symbol);
+        bucket.set(sector, (bucket.get(sector) ?? 0) + p.marketValue);
+        total += p.marketValue;
     }
     if (total === 0) return [];
     return Array.from(bucket.entries())
@@ -211,11 +264,11 @@ export function sector_exposure(ctx: AskContext, _args: Record<string, unknown> 
 // --------------------------------------------------------------------- //
 
 /**
- * Journal entries that match a filter. v1 supports:
- *   - `setup` (setupType name)
+ * Closed trades that match a filter:
  *   - `ticker` (exact match, case-insensitive)
  *   - `rangeDays`
  *   - `outcome` ('win' | 'loss')
+ *   - `setup`: no setup is recorded with a transaction, so nothing matches
  */
 export function trades_matching(
     ctx: AskContext,
@@ -226,64 +279,111 @@ export function trades_matching(
         outcome?: 'win' | 'loss';
     } = {},
 ): AskRow[] {
+    if (args.setup) return [];
     const rangeDays = args.rangeDays ?? 0;
-    const filtered = ctx.entries.filter((e) => {
-        if (!inRange(e, rangeDays, ctx.now)) return false;
-        if (args.setup && e.rationale?.setupType !== args.setup) return false;
-        if (args.ticker && e.ticker.toUpperCase() !== args.ticker.toUpperCase()) return false;
-        if (args.outcome === 'win' && e.realizedPnlUsd <= 0) return false;
-        if (args.outcome === 'loss' && e.realizedPnlUsd >= 0) return false;
-        return true;
-    });
-    return filtered
-        .sort((a, b) => Date.parse(b.closedAt) - Date.parse(a.closedAt))
+    return ctx.closedTrades
+        .filter((t) => {
+            if (!inRange(t, rangeDays, ctx.now)) return false;
+            if (args.ticker && t.symbol !== normalizeTicker(args.ticker)) return false;
+            if (args.outcome === 'win' && t.realizedPnl <= 0) return false;
+            if (args.outcome === 'loss' && t.realizedPnl >= 0) return false;
+            return true;
+        })
         .slice(0, 10)
-        .map((e) => ({
-            label: `${e.side === 'buy' ? 'Bought' : 'Sold'} ${Math.abs(Math.round(e.quantity))} ${e.ticker}`,
-            value: usdSigned(e.realizedPnlUsd),
-            sub: new Date(e.closedAt).toLocaleDateString('en-US', {
-                month: 'short',
-                day: 'numeric',
-            }),
-            tone: e.realizedPnlUsd >= 0 ? 'pos' : 'neg',
+        .map((t) => ({
+            label: `Sold ${formatShares(t.quantity)} ${t.symbol}`,
+            value: usdSigned(t.realizedPnl),
+            sub: `${new Date(t.closedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })} · ${t.account}`,
+            tone: t.realizedPnl >= 0 ? 'pos' : 'neg',
             href: `/portfolios/activity`,
         }));
+}
+
+function formatShares(quantity: number): string {
+    return Number.isInteger(quantity) ? quantity.toLocaleString('en-US') : quantity.toFixed(4).replace(/0+$/, '');
 }
 
 // --------------------------------------------------------------------- //
 // 5. correlation_with
 // --------------------------------------------------------------------- //
 
+/** Most recent daily returns the correlation is measured over. */
+export const CORRELATION_SESSIONS = 90;
+/** Fewest shared daily returns worth a correlation. */
+export const MIN_CORRELATION_RETURNS = 20;
+
 /**
- * Heuristic "how close" the requested ticker's sector neighbors move —
- * the seed era has no price series, so we return the neighbors' allocation
- * share with a stub correlation coefficient derived from the shared
- * sector. This satisfies the UI contract and slots a real corr() call in
- * when the live price series lands.
+ * Both tickers' returns over the same intervals: between consecutive dates
+ * both have a close for, the last CORRELATION_SESSIONS of them. A session
+ * one of them is missing is spanned by both, so a return is never paired
+ * with one over different days.
+ */
+function alignedReturns(
+    a: readonly StoredClose[] | undefined,
+    b: readonly StoredClose[] | undefined,
+): { a: number[]; b: number[] } {
+    const closeOf = new Map((b ?? []).map((close) => [close.date, close.close]));
+    const shared = (a ?? [])
+        .filter((close) => close.close > 0 && (closeOf.get(close.date) ?? 0) > 0)
+        .sort((x, y) => (x.date < y.date ? -1 : 1))
+        .slice(-(CORRELATION_SESSIONS + 1));
+    const out = { a: [] as number[], b: [] as number[] };
+    for (let i = 1; i < shared.length; i++) {
+        out.a.push(shared[i].close / shared[i - 1].close - 1);
+        out.b.push(closeOf.get(shared[i].date)! / closeOf.get(shared[i - 1].date)! - 1);
+    }
+    return out;
+}
+
+function pearson(xs: readonly number[], ys: readonly number[]): number | null {
+    const n = xs.length;
+    const mx = xs.reduce((s, x) => s + x, 0) / n;
+    const my = ys.reduce((s, y) => s + y, 0) / n;
+    let sxy = 0;
+    let sxx = 0;
+    let syy = 0;
+    for (let i = 0; i < n; i++) {
+        sxy += (xs[i] - mx) * (ys[i] - my);
+        sxx += (xs[i] - mx) ** 2;
+        syy += (ys[i] - my) ** 2;
+    }
+    return sxx > 0 && syy > 0 ? sxy / Math.sqrt(sxx * syy) : null;
+}
+
+/**
+ * How each holding's daily returns moved with the requested ticker's over
+ * the last CORRELATION_SESSIONS sessions of stored closes both have. A
+ * holding with fewer than MIN_CORRELATION_RETURNS shared returns is left out.
  */
 export function correlation_with(
     ctx: AskContext,
     args: { symbol?: string } = {},
 ): AskRow[] {
-    const target = (args.symbol ?? '').toUpperCase();
+    const target = normalizeTicker(args.symbol);
     if (!target) return [];
-    const targetSector = sectorFor(target);
-    return ctx.holdings
-        .filter((h) => h.ticker.toUpperCase() !== target)
-        .map((h) => {
-            const sameSector = sectorFor(h.ticker) === targetSector;
-            // Deterministic stub: same-sector peers show higher correlation.
-            const coef = sameSector ? 0.78 : 0.12;
-            return {
-                label: h.ticker,
-                value: coef.toFixed(2),
-                sub: `${sectorFor(h.ticker)} · ${pct(h.allocation)} of NAV`,
-                tone: coef >= 0.6 ? 'warn' : 'neutral',
-                href: `/portfolios/holdings`,
-            } as AskRow;
+    const targetCloses = ctx.closes?.get(target);
+    const total = positions(ctx).reduce((s, p) => s + p.marketValue, 0);
+    return positions(ctx)
+        .filter((p) => p.symbol !== target)
+        .flatMap((p): Array<{ coef: number; row: AskRow }> => {
+            const returns = alignedReturns(targetCloses, ctx.closes?.get(p.symbol));
+            if (returns.a.length < MIN_CORRELATION_RETURNS) return [];
+            const coef = pearson(returns.a, returns.b);
+            if (coef === null) return [];
+            return [{
+                coef,
+                row: {
+                    label: p.symbol,
+                    value: coef.toFixed(2),
+                    sub: `${returns.a.length} sessions · ${total > 0 ? ((p.marketValue / total) * 100).toFixed(1) : '0.0'}% of holdings`,
+                    tone: coef >= 0.6 ? 'warn' : 'neutral',
+                    href: `/portfolios/detail/${encodeURIComponent(p.symbol)}`,
+                },
+            }];
         })
-        .sort((a, b) => parseFloat(b.value) - parseFloat(a.value))
-        .slice(0, 5);
+        .sort((a, b) => b.coef - a.coef)
+        .slice(0, 5)
+        .map(({ row }) => row);
 }
 
 // --------------------------------------------------------------------- //
@@ -319,11 +419,8 @@ export function alpha_radar_evidence_search(
 
 export function policy_breaches(ctx: AskContext, _args: Record<string, unknown> = {}): AskRow[] {
     void _args;
-    const dashboard = computeRiskPolicyDashboard({
-        holdings: riskHoldings(ctx),
-        cashTotal: cashTotal(ctx),
-        trades: ctx.transactions ?? [],
-    });
+    if (ctx.portfolio.holdings.length === 0) return [];
+    const dashboard = evaluateRiskPolicy(ctx.portfolio, ctx.policy, { asOf: new Date(ctx.now) });
 
     return dashboard.dimensions
         .filter((dimension) => dimension.status !== 'inside')
@@ -341,16 +438,26 @@ export function policy_breaches(ctx: AskContext, _args: Record<string, unknown> 
 // 8. stress_test
 // --------------------------------------------------------------------- //
 
+/**
+ * A built-in scenario, the employer's when the user named theirs, or a
+ * 40% drop in one ticker (`symbol`).
+ */
 export function stress_test(
     ctx: AskContext,
-    args: { scenarioId?: string } = {},
+    args: { scenarioId?: string; symbol?: string } = {},
 ): AskRow[] {
+    if (ctx.portfolio.holdings.length === 0) return [];
+    const employer = employerSymbols(ctx.policy);
+    const symbol = normalizeTicker(args.symbol);
+    const wantsEmployer = (symbol !== '' && employer.includes(symbol)) || (!symbol && args.scenarioId === 'employer_40_down');
+    if (wantsEmployer && employer.length === 0) return [NO_EMPLOYER_ROW];
+    const scenario = symbol && !wantsEmployer
+        ? buildCustomStressScenario({ id: 'ticker_40_down', label: `${symbol} -40%`, kind: 'ticker', value: symbol, shockPct: -40 })
+        : findStressScenario(wantsEmployer ? 'employer_40_down' : args.scenarioId, employer);
     const result = runStressScenario({
-        holdings: stressHoldings(ctx),
-        cashTotal: cashTotal(ctx),
-        // Ask answers from the example portfolio, whose employer stock is
-        // GOOG; launch item i56 moves it to the user's own.
-        scenario: findStressScenario(args.scenarioId, ['GOOG', 'GOOGL']),
+        holdings: policyHoldings(ctx.portfolio.holdings, ctx.policy),
+        cashTotal: ctx.portfolio.cashTotal,
+        scenario,
     });
 
     const rows: AskRow[] = [
@@ -378,7 +485,8 @@ export function stress_test(
 
 export function theme_exposure(ctx: AskContext, _args: Record<string, unknown> = {}): AskRow[] {
     void _args;
-    const exposure = computeThemeExposure(riskHoldings(ctx));
+    if (ctx.portfolio.holdings.length === 0) return [];
+    const exposure = computeThemeExposure(policyExposureHoldings(ctx), ctx.policy.themeCaps);
     return exposure.rows
         .filter((row) => row.marketValue > 0 && row.theme !== 'unknown')
         .sort((a, b) => b.marketValue - a.marketValue)
@@ -396,33 +504,44 @@ export function theme_exposure(ctx: AskContext, _args: Record<string, unknown> =
 // 10. trim_to_target
 // --------------------------------------------------------------------- //
 
+/**
+ * How much of a ticker to sell to bring it to a share of the portfolio.
+ * Without a ticker it's the employer stock the user named (all its
+ * tickers together), against their plan's target unless one is asked for.
+ */
 export function trim_to_target(
     ctx: AskContext,
     args: { symbol?: string; targetPct?: number } = {},
 ): AskRow[] {
-    const symbol = (args.symbol ?? 'GOOG').toUpperCase();
-    const targetPct = typeof args.targetPct === 'number' ? args.targetPct : 25;
-    const symbols = symbol === 'GOOG' ? new Set(['GOOG', 'GOOGL']) : new Set([symbol]);
-    const currentValueUsd = ctx.holdings
-        .filter((holding) => symbols.has(holding.ticker.toUpperCase()))
+    const employer = employerSymbols(ctx.policy);
+    const requested = normalizeTicker(args.symbol);
+    const isEmployer = requested ? employer.includes(requested) : employer.length > 0;
+    if (!requested && !isEmployer) return [NO_EMPLOYER_ROW];
+    const symbols = new Set(isEmployer ? employer : [requested]);
+    const name = isEmployer ? employerStockName(employer) : requested;
+    const targetPct = typeof args.targetPct === 'number'
+        ? args.targetPct
+        : isEmployer ? ctx.policy.employerStockPlan.targetAllocationPct : 25;
+    const currentValueUsd = ctx.portfolio.holdings
+        .filter((holding) => symbols.has(normalizeTicker(holding.symbol)))
         .reduce((sum, holding) => sum + holding.marketValue, 0);
-    const totalValue = portfolioValue(ctx);
+    if (currentValueUsd <= 0) return [];
     const result = computeTrimAmountToTarget({
         currentValueUsd,
-        portfolioValue: totalValue,
+        portfolioValue: policyPortfolioValue(ctx.portfolio),
         targetAllocationPct: targetPct,
     });
 
     return [
         {
-            label: `${symbol} trim required`,
+            label: `${name} trim required`,
             value: usd(result.sellUsd),
             sub: `${result.currentAllocationPct.toFixed(1)}% now · target ${targetPct}%`,
             tone: result.sellUsd > 0 ? 'warn' : 'neutral',
-            href: '/settings',
+            href: isEmployer ? '/settings#employer-stock' : '/portfolios/holdings',
         },
         {
-            label: `${symbol} target value`,
+            label: `${name} target value`,
             value: usd(result.targetValueUsd),
             sub: `${result.breachPct.toFixed(1)} percentage points over target`,
             tone: result.breachPct > 0 ? 'warn' : 'neutral',
@@ -437,15 +556,19 @@ export function trim_to_target(
 
 export function missing_theses(ctx: AskContext, _args: Record<string, unknown> = {}): AskRow[] {
     void _args;
-    const theses = ctx.theses ?? getDefaultTheses(ctx.now);
-    return ctx.holdings
-        .filter((holding) => !findThesisByTicker(theses, holding.ticker))
+    const covered = new Set(
+        ctx.portfolio.theses
+            .filter((thesis) => thesis.status !== 'archived')
+            .map((thesis) => normalizeTicker(thesis.ticker)),
+    );
+    return positions(ctx)
+        .filter((p) => !covered.has(p.symbol))
         .sort((a, b) => b.marketValue - a.marketValue)
         .slice(0, 10)
-        .map((holding) => ({
-            label: holding.ticker,
-            value: usd(holding.marketValue),
-            sub: `${holding.name} · no active written thesis found`,
+        .map((p) => ({
+            label: p.symbol,
+            value: usd(p.marketValue),
+            sub: `${p.name} · no active written thesis found`,
             tone: 'warn',
             href: '/research',
         }));
@@ -458,9 +581,9 @@ export function missing_theses(ctx: AskContext, _args: Record<string, unknown> =
 export function cash_jobs(ctx: AskContext, _args: Record<string, unknown> = {}): AskRow[] {
     void _args;
     const summary = computeCashPolicySummary({
-        totalCash: cashTotal(ctx),
-        jobs: ctx.cashJobs ?? [],
-        deploymentRule: ctx.cashDeploymentRule ?? DEFAULT_CASH_DEPLOYMENT_RULE,
+        totalCash: ctx.portfolio.cashTotal,
+        jobs: [...ctx.policy.cashJobs],
+        deploymentRule: ctx.policy.cashDeploymentRule,
         asOf: new Date(ctx.now),
     });
 
@@ -495,9 +618,11 @@ export function cash_jobs(ctx: AskContext, _args: Record<string, unknown> = {}):
 
 export function churn_risks(ctx: AskContext, _args: Record<string, unknown> = {}): AskRow[] {
     void _args;
-    const analysis = computeChurnAnalysis(churnTrades(ctx), {
+    const analysis = computeChurnAnalysis(ctx.portfolio.trades, {
         asOf: new Date(ctx.now),
-        windowDays: 90,
+        windowDays: ctx.policy.churnPolicy.windowDays,
+        watchRepeatSymbols: ctx.policy.churnPolicy.watchRepeatSymbols,
+        breachRepeatSymbols: ctx.policy.churnPolicy.breachRepeatSymbols,
     });
 
     return analysis.rows.slice(0, 8).map((row) => ({
@@ -513,80 +638,27 @@ export function churn_risks(ctx: AskContext, _args: Record<string, unknown> = {}
 // 14. trade_policy_impact
 // --------------------------------------------------------------------- //
 
+/** Recent buys of names a breached or watched policy check points at. */
 export function trade_policy_impact(ctx: AskContext, _args: Record<string, unknown> = {}): AskRow[] {
     void _args;
-    const dashboard = computeRiskPolicyDashboard({
-        holdings: riskHoldings(ctx),
-        cashTotal: cashTotal(ctx),
-        trades: ctx.transactions ?? [],
-    });
-    const breachedSymbols = new Set(
+    if (ctx.portfolio.holdings.length === 0) return [];
+    const dashboard = evaluateRiskPolicy(ctx.portfolio, ctx.policy, { asOf: new Date(ctx.now) });
+    const flagged = new Set(
         dashboard.dimensions
             .filter((dimension) => dimension.status === 'breached' || dimension.status === 'watch')
-            .flatMap((dimension) => dimension.impactedSymbols),
+            .flatMap((dimension) => dimension.impactedSymbols.map(normalizeTicker)),
     );
 
-    return (ctx.transactions ?? [])
-        .filter((transaction) => transaction.ticker && transaction.type === 'buy')
-        .filter((transaction) => breachedSymbols.has(transaction.ticker!.toUpperCase()))
+    return ctx.activity
+        .filter((row) => row.side === 'BUY' && row.symbol && flagged.has(row.symbol))
         .slice(0, 8)
-        .map((transaction) => ({
-            label: `${transaction.type.toUpperCase()} ${transaction.ticker}`,
-            value: usd(Math.abs(transaction.amount)),
-            sub: 'Added to a name already referenced by a breached/watch policy dimension',
+        .map((row) => ({
+            label: `BUY ${row.symbol}`,
+            value: money(row.value, row.currency),
+            sub: `${new Date(row.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })} · added to a name a breached or watched policy check points at`,
             tone: 'warn',
             href: '/execution',
         }));
-}
-
-function riskHoldings(ctx: AskContext): RiskPolicyDashboardHolding[] {
-    return ctx.holdings.map((holding) => ({
-        id: holding.id,
-        symbol: holding.ticker,
-        name: holding.name,
-        marketValue: holding.marketValue,
-        quantity: holding.quantity,
-        avgCost: holding.avgCost,
-        currentPrice: holding.currentPrice,
-        policyBucket: holding.policyBucket,
-        themeWeights: holding.themeWeights,
-        isEmployerStock: holding.ticker === 'GOOG' || holding.ticker === 'GOOGL',
-    }));
-}
-
-function stressHoldings(ctx: AskContext): StressHolding[] {
-    return ctx.holdings.map((holding) => ({
-        id: holding.id,
-        symbol: holding.ticker,
-        name: holding.name,
-        marketValue: holding.marketValue,
-        policyBucket: holding.policyBucket,
-        themeWeights: holding.themeWeights,
-    }));
-}
-
-function cashTotal(ctx: AskContext): number {
-    return ctx.portfolios.reduce((sum, portfolio) => sum + portfolio.cashBalance, 0);
-}
-
-function portfolioValue(ctx: AskContext): number {
-    return cashTotal(ctx) + ctx.holdings.reduce((sum, holding) => sum + holding.marketValue, 0);
-}
-
-function churnTrades(ctx: AskContext): ChurnTrade[] {
-    return (ctx.transactions ?? []).map((transaction) => ({
-        id: transaction.id,
-        date: transaction.date,
-        type: transaction.type,
-        ticker: transaction.ticker,
-        amount: transaction.amount,
-        quantity: transaction.quantity,
-        price: transaction.price,
-        thesisId: transaction.ticker && transaction.notes?.toLowerCase().includes('thesis')
-            ? `thesis-${transaction.ticker}`
-            : undefined,
-        notes: transaction.notes,
-    }));
 }
 
 function statusRank(status: string): number {
@@ -632,9 +704,10 @@ export function runTool(
     // that makes sense.
     let headline: string | undefined;
     if (name === 'pnl_attribution') {
+        // "-$1,200" parses to -1200 once the "$" and "," go.
         const total = rows.reduce((s, r) => {
             const n = parseFloat(r.value.replace(/[+$,]/g, ''));
-            return s + (Number.isFinite(n) ? (r.value.startsWith('-') ? -n : n) : 0);
+            return s + (Number.isFinite(n) ? n : 0);
         }, 0);
         headline = usdSigned(total);
     } else if (rows.length > 0) {

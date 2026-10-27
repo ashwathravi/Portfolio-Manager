@@ -40,7 +40,7 @@ describe("GET /api/cron/daily", () => {
     });
 
     test("runs the session cleanup, the linked-account sync, the price ingest, then the snapshots valued at those prices, with room for the budgets", () => {
-        assert.deepEqual(DAILY_JOBS.map((job) => job.name), ["expired-sessions", "plaid", "prices", "snapshots"]);
+        assert.deepEqual(DAILY_JOBS.map((job) => job.name), ["expired-sessions", "ask-history", "plaid", "prices", "snapshots"]);
         assert.equal(maxDuration, 300);
         // The sync and the price backfill each stop at their budget, together
         // short of the limit, leaving the cleanup and snapshots room.

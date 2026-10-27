@@ -12,10 +12,10 @@ import { db } from "@/db";
 import { isDatabaseConfigured } from "@/db/connection-options";
 import { theses } from "@/db/schema";
 import { getSecurityProfiles } from "@/lib/markets/price-store";
-import { loadSecurityProfiles } from "@/lib/markets/security-profile";
+import { loadSecurityProfiles, type SecurityProfile } from "@/lib/markets/security-profile";
 import { loggableError } from "@/lib/observability/loggable-error";
 import { buildDashboardPortfoliosQuery, buildUserTransactionsQuery } from "@/lib/portfolio-repository";
-import { toActivityRows } from "@/lib/portfolio/activity";
+import { toActivityRows, type ActivityRow } from "@/lib/portfolio/activity";
 import { isSeedThesis } from "@/lib/research/thesis";
 import { loadQuotes } from "@/lib/services/market-data-service";
 import { storedRiskPolicy } from "@/lib/settings/risk-policy";
@@ -52,6 +52,35 @@ export async function loadPolicyTheses(userId: string, database: Pick<Database, 
         .map(({ currentPrice, ...row }) => ({ ...row, currentPrice: currentPrice ?? undefined }));
 }
 
+/** What the server loads for the risk policy, and what else Ask reads of it. */
+export interface PolicyData {
+    portfolio: PolicyPortfolio;
+    /** Every transaction, newest first. */
+    activity: ActivityRow[];
+    /** Securities master profiles of the held tickers. */
+    profiles: Map<string, SecurityProfile>;
+}
+
+/** The user's portfolio and transactions; throws when the database fails. */
+export async function loadPolicyData(userId: string, now: Date = new Date()): Promise<PolicyData> {
+    const [accounts, transactions, policyTheses] = await Promise.all([
+        buildDashboardPortfoliosQuery(userId),
+        buildUserTransactionsQuery(userId),
+        loadPolicyTheses(userId),
+    ]);
+    const symbols = accounts.flatMap((account) => account.holdings.map((holding) => holding.symbol));
+    const [quotes, profiles] = await Promise.all([
+        loadQuotes(symbols),
+        loadSecurityProfiles(symbols, getSecurityProfiles),
+    ]);
+    const activity = toActivityRows(transactions);
+    return {
+        portfolio: buildPolicyPortfolio({ accounts, quotes, profiles, activity, theses: policyTheses, asOf: now }),
+        activity,
+        profiles,
+    };
+}
+
 export interface LoadedPolicyPortfolio {
     portfolio: PolicyPortfolio;
     /** A configured database failed to answer: views say so instead of showing an empty portfolio. */
@@ -68,27 +97,7 @@ export async function loadPolicyPortfolio(
 ): Promise<LoadedPolicyPortfolio> {
     if (!databaseConfigured) return { portfolio: EMPTY_POLICY_PORTFOLIO, unavailable: false };
     try {
-        const [accounts, transactions, policyTheses] = await Promise.all([
-            buildDashboardPortfoliosQuery(userId),
-            buildUserTransactionsQuery(userId),
-            loadPolicyTheses(userId),
-        ]);
-        const symbols = accounts.flatMap((account) => account.holdings.map((holding) => holding.symbol));
-        const [quotes, profiles] = await Promise.all([
-            loadQuotes(symbols),
-            loadSecurityProfiles(symbols, getSecurityProfiles),
-        ]);
-        return {
-            portfolio: buildPolicyPortfolio({
-                accounts,
-                quotes,
-                profiles,
-                activity: toActivityRows(transactions),
-                theses: policyTheses,
-                asOf: now,
-            }),
-            unavailable: false,
-        };
+        return { portfolio: (await loadPolicyData(userId, now)).portfolio, unavailable: false };
     } catch (error) {
         // Logged during a render, so an AggregateError can't go to the console as is.
         console.error("Risk policy portfolio fetch failed — showing the outage notice.", loggableError(error));

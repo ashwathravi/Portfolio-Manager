@@ -2,14 +2,16 @@
  * Building the account export (launch item i65): everything Atlas holds
  * for the user, as they'd recognize it, read in one snapshot. Left out:
  * internal fields (user IDs, write order), removal markers kept only so
- * other devices learn of a deletion, and anything secret (Plaid tokens,
- * and Plaid's own IDs for connections and accounts).
+ * other devices learn of a deletion, Ask messages already cleared (kept
+ * only so they count towards the day's question limit), and anything
+ * secret (Plaid tokens, and Plaid's own IDs for connections and accounts).
  */
 
 import { and, asc, eq, inArray, isNull, ne } from "drizzle-orm";
 
 import { db } from "@/db";
 import {
+    askMessages,
     authUsers,
     holdings,
     journalEntries,
@@ -33,7 +35,7 @@ import { ACCOUNT_EXPORT_FORMAT, ACCOUNT_EXPORT_VERSION, type AccountExport, type
 
 type Database = typeof db;
 
-const INTERNAL = new Set(["userId", "writeSession", "writeSeq", "dismissed"]);
+const INTERNAL = new Set(["userId", "writeSession", "writeSeq", "dismissed", "cleared"]);
 
 /** A row without its internal fields, dates as ISO strings. */
 function plain(row: Record<string, unknown>): Record<string, unknown> {
@@ -97,6 +99,8 @@ export async function buildAccountExport(userId: string, database: Database = db
             tx.select().from(thesisCatalysts).where(eq(thesisCatalysts.userId, userId)).orderBy(asc(thesisCatalysts.position)),
             tx.select().from(thesisEvidence).where(eq(thesisEvidence.userId, userId)).orderBy(asc(thesisEvidence.position)),
         ]);
+        const asked = await tx.select().from(askMessages)
+            .where(and(eq(askMessages.userId, userId), eq(askMessages.cleared, false))).orderBy(asc(askMessages.createdAt), asc(askMessages.id));
 
         return {
             format: ACCOUNT_EXPORT_FORMAT,
@@ -161,6 +165,7 @@ export async function buildAccountExport(userId: string, database: Database = db
                 catalysts: catalysts.filter((c) => c.thesisId === thesis.id).map((c) => plain({ ...c, thesisId: undefined })),
                 evidence: evidence.filter((e) => e.thesisId === thesis.id).map((e) => plain({ ...e, thesisId: undefined })),
             })),
+            askHistory: asked.map(plain),
         };
     }, { isolationLevel: "repeatable read", accessMode: "read only" });
 }

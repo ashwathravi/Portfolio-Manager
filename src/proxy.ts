@@ -175,6 +175,7 @@ function isSessionBackedApiRoute(pathname: string, method: string): boolean {
     if (/^\/api\/portfolio\/[^/]+\/value$/.test(pathname) && method === "GET") return true;
     if (pathname === "/api/portfolio/import" && method === "POST") return true;
     if (pathname === "/api/settings" && method === "PUT") return true;
+    if (pathname === "/api/ask" && (method === "GET" || method === "POST" || method === "DELETE")) return true;
     if (pathname === "/api/research/watchlist" && method === "GET") return true;
     if (pathname === "/api/research/watchlist/import" && method === "POST") return true;
     if (/^\/api\/research\/watchlist\/(?!import$)[^/]+$/.test(pathname) && method === "PUT") return true;

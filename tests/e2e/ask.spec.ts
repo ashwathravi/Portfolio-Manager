@@ -1,47 +1,54 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { userKey } from './helpers/storage';
 import { gotoAppPage } from './helpers/app';
+import { databaseAuthEnabled, signInAsFreshUser } from './helpers/users';
 
 /**
- * AR-115 — Ask Ledger (NL queries with tool-calling).
+ * AR-115 — Ask Ledger (NL queries with tool-calling), answered from the
+ * user's own data (launch item i56).
  *
  * Coverage:
  *   - ⌘K / the top-bar search box opens the command palette; questions
  *     are handed to the Ask overlay; Escape closes
  *   - Dedicated `/ask` page renders the sheet inline
- *   - Suggested prompts submit and produce a recognisable answer
- *   - History persists across reload under `pm-ask-v1`
- *   - Clear button wipes history
+ *   - Answers come from the user's holdings, trades and policy (POST
+ *     /api/ask), never example data: with no holdings the answer says so
+ *   - With a database the conversation is kept in the account: it survives
+ *     reload, follows the user to another browser, clears, and counts
+ *     against a daily limit; another account never sees it. Without one,
+ *     this browser keeps it under `pm-ask-v1`
  *   - Sidebar nav item + Beta pill are visible
  *
- * Tests are deterministic: the planner + tool layer run against frozen
- * seed data, so the assistant reply is the same on every run.
+ * Tests that ask sign in as a fresh user (a copy of fixture user A): the
+ * conversation is kept per user on the server.
  */
 
 const modifier = () => (process.platform === 'darwin' ? 'Meta' : 'Control');
 
 /** ⌘K → choose "Ask Ledger" (first item for an empty query). */
-async function openAskOverlay(page: import('@playwright/test').Page) {
+async function openAskOverlay(page: Page) {
     await page.keyboard.press(`${modifier()}+KeyK`);
     await expect(page.getByTestId('command-palette')).toBeVisible();
     await page.keyboard.press('Enter');
     await expect(page.getByTestId('ask-overlay')).toBeVisible();
 }
 
+async function ask(page: Page, question: string) {
+    const input = page.getByTestId('ask-input');
+    await input.fill(question);
+    await page.getByTestId('ask-send').click();
+}
+
+/** Another browser, signed in with the same session. */
+async function anotherBrowser(browser: Browser, context: BrowserContext): Promise<Page> {
+    const other = await browser.newContext();
+    await other.addCookies(await context.cookies());
+    return other.newPage();
+}
+
 test.describe('Ask Ledger — ⌘K command palette', () => {
-    test.beforeEach(async ({ page }) => {
-        // Reset persisted chat so every test starts with an empty sheet.
-        await page.addInitScript((key) => {
-            try {
-                const done = window.sessionStorage.getItem('__pm_test_ask_wipe');
-                if (!done) {
-                    window.localStorage.removeItem(key);
-                    window.sessionStorage.setItem('__pm_test_ask_wipe', '1');
-                }
-            } catch {
-                /* ignore */
-            }
-        }, userKey('pm-ask-v1'));
+    test.beforeEach(async ({ context, page }) => {
+        await signInAsFreshUser(context);
         await gotoAppPage(page, '/');
     });
 
@@ -88,45 +95,26 @@ test.describe('Ask Ledger — ⌘K command palette', () => {
         await expect(page.getByTestId('ask-overlay')).toHaveCount(0);
     });
 
-    test('Suggested prompt produces a deterministic assistant reply', async ({ page }) => {
+    test('a suggested prompt is answered from the user\'s holdings', async ({ page }) => {
         await openAskOverlay(page);
+        await page.getByTestId('ask-suggestion').filter({ hasText: /hurt my alpha/i }).click();
 
-        // Click the "hurt my alpha" suggestion — keyword planner routes
-        // this to `top_alpha_contributors` with direction=negative.
-        await page
-            .getByTestId('ask-suggestion')
-            .filter({ hasText: /hurt my alpha/i })
-            .click();
-
-        // Both turns should now exist.
         await expect(page.getByTestId('ask-msg-user')).toHaveCount(1);
-        await expect(page.getByTestId('ask-msg-assistant')).toHaveCount(1);
-
-        // Assistant lede for the alpha_hurt intent starts with "Your
-        // biggest alpha drags…" (see renderer.ts).
-        await expect(page.getByTestId('ask-msg-assistant')).toContainText(
-            /biggest alpha drags/i,
-        );
-        // And the tool-chip footer names the tool that ran.
-        await expect(page.getByTestId('ask-msg-assistant')).toContainText(
-            'top_alpha_contributors',
-        );
+        const answer = page.getByTestId('ask-msg-assistant');
+        await expect(answer).toHaveCount(1);
+        await expect(answer).toContainText('top_alpha_contributors');
+        if (databaseAuthEnabled) {
+            // User A is up on everything: the weakest gain leads, by unrealized gain or loss.
+            await expect(answer).toContainText(/biggest drags right now, by unrealized gain or loss/);
+        } else {
+            await expect(answer).toContainText(/no holdings to answer from yet/);
+        }
     });
 });
 
 test.describe('Ask Ledger — dedicated /ask page', () => {
-    test.beforeEach(async ({ page }) => {
-        await page.addInitScript((key) => {
-            try {
-                const done = window.sessionStorage.getItem('__pm_test_ask_wipe');
-                if (!done) {
-                    window.localStorage.removeItem(key);
-                    window.sessionStorage.setItem('__pm_test_ask_wipe', '1');
-                }
-            } catch {
-                /* ignore */
-            }
-        }, userKey('pm-ask-v1'));
+    test.beforeEach(async ({ context }) => {
+        await signInAsFreshUser(context);
     });
 
     test('/ask renders the AskSheet inline (page variant)', async ({ page }) => {
@@ -135,53 +123,91 @@ test.describe('Ask Ledger — dedicated /ask page', () => {
         const sheet = page.getByTestId('ask-sheet');
         await expect(sheet).toBeVisible();
         await expect(sheet).toHaveAttribute('data-variant', 'page');
+        await expect(sheet).not.toContainText(/example data/i);
+        // The empty state's worked example is labelled as one.
+        await expect(page.getByTestId('ask-example')).toContainText('Example');
     });
 
-    test('sending a custom question via the input works', async ({ page }) => {
+    test('a P&L question is answered from closed trades', async ({ page }) => {
         await page.goto('/ask');
-        const input = page.getByTestId('ask-input');
-        await input.fill('Where did last month P&L come from?');
-        await page.getByTestId('ask-send').click();
-
-        await expect(page.getByTestId('ask-msg-assistant')).toContainText(
-            /P&L .* nets/i,
-        );
-        // Tool chip should mention pnl_attribution.
-        await expect(page.getByTestId('ask-msg-assistant')).toContainText(
-            'pnl_attribution',
-        );
+        await ask(page, 'Where did last month P&L come from?');
+        const answer = page.getByTestId('ask-msg-assistant');
+        await expect(answer).toContainText('pnl_attribution');
+        // User A has bought but never sold: nothing closed.
+        await expect(answer).toContainText(/No closed trades in that window/);
     });
 
-    test('risk-policy stress questions produce cited tool output', async ({ page }) => {
+    test('a stress question runs on the user\'s own position', async ({ page }) => {
+        test.skip(!databaseAuthEnabled, 'the holdings are in the database');
         await page.goto('/ask');
-        const input = page.getByTestId('ask-input');
-        await input.fill('What happens if GOOG drops 40%?');
-        await page.getByTestId('ask-send').click();
-
-        const assistant = page.getByTestId('ask-msg-assistant');
-        await expect(assistant).toContainText(/GOOG -40%/);
-        await expect(assistant).toContainText(/stress_test/);
-        await expect(assistant.getByTestId('ask-cite').first()).toBeVisible();
+        await ask(page, 'What happens if NVDA drops 40%?');
+        const answer = page.getByTestId('ask-msg-assistant');
+        // User A holds $102,560 of NVDA.
+        await expect(answer).toContainText('NVDA -40%');
+        await expect(answer).toContainText('-$41,024');
+        await expect(answer).toContainText(/stress_test/);
+        await expect(answer.getByTestId('ask-cite').first()).toBeVisible();
     });
 
-    test('history persists across reload under pm-ask-v1', async ({ page }) => {
+    test('regression: no employer stock is assumed', async ({ page }) => {
+        test.skip(!databaseAuthEnabled, 'the holdings are in the database');
         await page.goto('/ask');
-        await page
-            .getByTestId('ask-suggestion')
-            .filter({ hasText: /overexposed/i })
-            .click();
+        await ask(page, 'What happens if my employer stock drops?');
+        const answer = page.getByTestId('ask-msg-assistant');
+        await expect(answer).toContainText("You haven't named your employer's stock yet");
+        await expect(answer.getByTestId('ask-cite').first()).toHaveAttribute('href', '/settings#employer-stock');
+        await expect(answer).not.toContainText('GOOG');
+    });
+
+    test('the conversation is kept in the account: reload, another browser, clear', async ({ browser, context, page }) => {
+        test.skip(!databaseAuthEnabled, 'the conversation is kept in the database');
+        await page.goto('/ask');
+        await page.getByTestId('ask-suggestion').filter({ hasText: /overexposed/i }).click();
         await expect(page.getByTestId('ask-msg-assistant')).toHaveCount(1);
 
         await page.reload();
         await expect(page.getByTestId('ask-msg-user')).toHaveCount(1);
         await expect(page.getByTestId('ask-msg-assistant')).toHaveCount(1);
+        expect(await page.evaluate((key) => window.localStorage.getItem(key), userKey('pm-ask-v1'))).toBeNull();
 
+        const elsewhere = await anotherBrowser(browser, context);
+        await elsewhere.goto('/ask');
+        await expect(elsewhere.getByTestId('ask-msg-user')).toContainText('Am I overexposed to AI?');
+        await elsewhere.context().close();
+
+        await page.getByTestId('ask-clear').click();
+        await expect(page.getByTestId('ask-msg-assistant')).toHaveCount(0);
+        await expect(page.getByTestId('ask-empty')).toBeVisible();
+        await page.reload();
+        await expect(page.getByTestId('ask-empty')).toBeVisible();
+        await expect(page.getByTestId('ask-msg-user')).toHaveCount(0);
+    });
+
+    test('without a database, this browser keeps the conversation', async ({ page }) => {
+        test.skip(databaseAuthEnabled, 'with a database the account keeps it');
+        await page.goto('/ask');
+        await page.getByTestId('ask-suggestion').filter({ hasText: /overexposed/i }).click();
+        await expect(page.getByTestId('ask-msg-assistant')).toHaveCount(1);
+        await page.reload();
+        await expect(page.getByTestId('ask-msg-assistant')).toHaveCount(1);
         const raw = await page.evaluate((key) => window.localStorage.getItem(key), userKey('pm-ask-v1'));
-        expect(raw).not.toBeNull();
-        const parsed = JSON.parse(raw!);
-        expect(Array.isArray(parsed.history)).toBe(true);
-        expect(parsed.history.length).toBe(2); // user + assistant turns
-        expect(parsed.dayCount).toBeGreaterThanOrEqual(1);
+        expect(JSON.parse(raw!).history).toHaveLength(2);
+    });
+
+    test('regression: Clear waits for the answer being loaded, so it can\'t bring the conversation back', async ({ page }) => {
+        await page.goto('/ask');
+        let release!: () => void;
+        const held = new Promise<void>((resolve) => { release = resolve; });
+        await page.route('**/api/ask', async (route) => {
+            if (route.request().method() === 'POST') await held;
+            await route.continue();
+        });
+        await page.getByTestId('ask-suggestion').first().click();
+        await expect(page.getByTestId('ask-pending')).toBeVisible();
+        await expect(page.getByTestId('ask-clear')).toBeDisabled();
+        release();
+        await expect(page.getByTestId('ask-msg-assistant')).toHaveCount(1);
+        await expect(page.getByTestId('ask-clear')).toBeEnabled();
     });
 
     test('Clear button wipes the conversation', async ({ page }) => {
@@ -191,6 +217,66 @@ test.describe('Ask Ledger — dedicated /ask page', () => {
         await page.getByTestId('ask-clear').click();
         await expect(page.getByTestId('ask-msg-assistant')).toHaveCount(0);
         await expect(page.getByTestId('ask-empty')).toBeVisible();
+    });
+
+    test('a day\'s questions are limited, and clearing doesn\'t reset the count', async ({ page }) => {
+        test.skip(!databaseAuthEnabled, 'the count is kept in the database');
+        for (let asked = 0; asked < 30; asked++) {
+            const response = await page.request.post('/api/ask', { data: { question: 'How much cash is unassigned to jobs?' } });
+            expect(response.status()).toBe(200);
+        }
+        expect((await page.request.delete('/api/ask')).status()).toBe(200);
+        const refused = await page.request.post('/api/ask', { data: { question: 'Am I overexposed to AI?' } });
+        expect(refused.status()).toBe(429);
+        expect((await refused.json()).code).toBe('ASK_DAILY_LIMIT');
+
+        await page.goto('/ask');
+        await expect(page.getByText("You've asked 30 questions in the last 24 hours. Try again later.")).toBeVisible();
+        await expect(page.getByTestId('ask-input')).toBeDisabled();
+    });
+});
+
+test.describe('Ask Ledger — the API', () => {
+    test.skip(!databaseAuthEnabled, 'requires the database-auth E2E mode');
+
+    test('refuses a question that isn\'t one, and signed-out callers', async ({ context, page, playwright }) => {
+        await signInAsFreshUser(context);
+        const empty = await page.request.post('/api/ask', { data: { question: '   ' } });
+        expect(empty.status()).toBe(400);
+        expect(await empty.json()).toMatchObject({ code: 'INVALID_QUESTION', error: 'Ask a question' });
+        const long = await page.request.post('/api/ask', { data: { question: 'x'.repeat(501) } });
+        expect(long.status()).toBe(400);
+        const extra = await page.request.post('/api/ask', { data: { question: 'Hi', history: [] } });
+        expect(extra.status()).toBe(400);
+
+        // A request context of its own, without the configured session cookie.
+        const signedOut = await playwright.request.newContext({
+            baseURL: 'http://localhost:3000',
+            storageState: { cookies: [], origins: [] },
+        });
+        expect((await signedOut.get('/api/ask')).status()).toBe(401);
+        expect((await signedOut.post('/api/ask', { data: { question: 'Am I overexposed to AI?' } })).status()).toBe(401);
+        expect((await signedOut.delete('/api/ask')).status()).toBe(401);
+        await signedOut.dispose();
+    });
+
+    test('one account\'s conversation never reaches another', async ({ browser, context, page }) => {
+        await signInAsFreshUser(context);
+        const asked = await page.request.post('/api/ask', { data: { question: 'Which positions have no written thesis?' } });
+        expect(asked.status()).toBe(200);
+        const { data } = await asked.json();
+        expect(data.stored).toBe(true);
+        expect(data.messages.map((m: { role: string }) => m.role)).toEqual(['user', 'assistant']);
+
+        const other = await browser.newContext();
+        await signInAsFreshUser(other);
+        const history = await (await other.request.get('/api/ask')).json();
+        expect(history.data.messages).toEqual([]);
+        await other.close();
+
+        const own = await (await page.request.get('/api/ask')).json();
+        expect(own.data.messages.map((m: { content: string }) => m.content)[0]).toBe('Which positions have no written thesis?');
+        expect(own.data.questionsToday).toBe(1);
     });
 });
 
