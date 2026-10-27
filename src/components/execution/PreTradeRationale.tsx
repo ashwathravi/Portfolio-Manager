@@ -102,7 +102,8 @@ export function finalizeRationale(draft: RationaleDraft): TradeRationale {
         mood: draft.mood,
         rationale: draft.rationale.trim(),
         capturedAt: draft.capturedAt,
-        timeToDecisionMs: Date.now() - Date.parse(draft.capturedAt),
+        // Never negative, even if the clock moved back: the server refuses it.
+        timeToDecisionMs: Math.max(0, Date.now() - Date.parse(draft.capturedAt)),
     };
 }
 

@@ -38,6 +38,8 @@ test.describe('Privacy policy', () => {
     await expect(added).toContainText('your watchlist');
     await expect(added).toContainText('your decision journal');
     await expect(added).toContainText('your research theses');
+    // Launch item i53: orders drafted on Trade are kept with the account too.
+    await expect(added).toContainText('orders you draft on Trade');
     const browserOnly = collected.getByText(/stored only in your browser/);
     await expect(browserOnly).not.toContainText('watchlist,');
     await expect(browserOnly).not.toContainText('journal');
@@ -46,7 +48,7 @@ test.describe('Privacy policy', () => {
 
   test('says what stays when you remove a watchlist ticker, journal entry or thesis', async ({ page }) => {
     const retention = page.getByRole('region', { name: 'Keeping and deleting your data' });
-    await expect(retention).toContainText('watchlist, journal, theses and settings');
+    await expect(retention).toContainText('drafted orders, value history, watchlist, journal, theses and settings');
     await expect(retention.getByText(/When you remove a watchlist ticker or delete a journal entry or thesis/)).toContainText('notes and reasoning are erased');
   });
 

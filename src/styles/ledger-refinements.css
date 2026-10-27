@@ -359,9 +359,9 @@
 .pm-exec-form-foot > .pm-btn { flex: 0 1 auto; min-width: 160px; }
 .pm-exec-foot-summary { flex: 1; font-size: 13px; font-weight: 600; color: var(--pm-fg); }
 
-/* Working orders are neutral (in the market, nothing happened yet);
-   green is reserved for fills. */
-.pm-exec-status-working {
+/* Orders ready to place are neutral (nothing happened yet); green is
+   reserved for ones the user placed. */
+.pm-exec-status-ready {
   background: var(--pm-neutral-100);
   color: var(--pm-fg);
   border-color: var(--pm-border);
@@ -861,6 +861,8 @@
 .pm-exec-kbd-keys { display: inline-flex; gap: 3px; min-width: 52px; }
 .pm-exec-kbd-sheet p { margin: 0; font-size: 12px; color: var(--pm-fg-muted); }
 .pm-exec-submit { gap: 8px; }
+/* Looks unavailable until the order can be saved (the cooldown has its own countdown look). */
+.pm-exec-submit:disabled:not([data-cooldown="true"]) { opacity: .45; cursor: not-allowed; }
 .pm-exec-submit .pm-exec-submit-kbd { background: transparent; border-color: currentColor; color: inherit; opacity: .7; }
 @media (pointer: coarse) { .pm-exec-kbd-toggle, .pm-exec-submit-kbd { display: none; } .pm-exec-form-head { padding-right: 0; } }
 

@@ -132,7 +132,7 @@ test.describe('Portfolio › Accounts — managing accounts', () => {
         await page.getByRole('button', { name: 'Actions for Main Portfolio' }).click();
         await page.getByRole('menuitem', { name: 'Delete account' }).click();
         await expect(row(page, 'Main Portfolio')).toHaveCount(0);
-        expect(dialogs[0]).toContain('Delete Main Portfolio? Its 6 positions, transactions and value history go with it.');
+        expect(dialogs[0]).toContain('Delete Main Portfolio? Its 6 positions, transactions, drafted orders and value history go with it.');
 
         await gotoAppPage(page, '/portfolios/holdings');
         await expect(page.getByRole('cell', { name: 'NVDA', exact: true })).toHaveCount(0);
