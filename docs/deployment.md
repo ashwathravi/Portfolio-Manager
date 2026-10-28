@@ -107,6 +107,10 @@ vercel env add AUTH_ALLOWED_EMAILS production
 openssl rand -hex 32 | tr -d '\n' | vercel env add CRON_SECRET production
 ```
 
+## Backups
+
+`.github/workflows/database-backup.yml` dumps production every night, keeps the dump encrypted as a GitHub Actions artifact for 30 days, and restores it into a scratch database in the same run to check every table. The setup, the restore drill and the steps for recovering production are in `docs/backups.md`.
+
 ## Rolling back
 
 Promote the previous deployment in the Vercel dashboard (Deployments → ⋯ → Promote) or run `vercel rollback`. This rolls back code only; a migration that already ran stays applied, which the add-first rule above makes safe.
