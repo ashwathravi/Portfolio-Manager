@@ -17,10 +17,10 @@ import { PatternRow } from "./PatternRow";
 /**
  * AR-112 Pattern feed card.
  *
- * Client-only. Pulls the seed journal (swap to a Zustand store once
- * live trade data lands), runs the deterministic detectors, renders
- * the ranked list. The card replaces the old static Daily Brief on
- * the dashboard's bottom 3-col strip.
+ * Client-only. Runs the deterministic detectors over the user's closed
+ * trades (or the example journal), renders the ranked list. The card
+ * replaces the old static Daily Brief on the dashboard's bottom 3-col
+ * strip.
  *
  * State:
  *   - `patterns`   — ranked list (up to MAX)
@@ -43,16 +43,21 @@ import { PatternRow } from "./PatternRow";
 const MAX_COLLAPSED = 6;
 
 export interface PatternFeedProps {
-    /** Override the journal source — keeps the component pure for tests. */
+    /** The user's closed trades (launch item i51); the example journal when omitted. */
     entries?: JournalEntry[];
     /** Approximate NAV — drives the %-of-NAV detectors. */
     nav?: number;
 }
 
+/** Sector drift is for the example journal only: closed trades aren't holdings, and the risk policy checks those. */
+const NO_SECTORS: Record<string, string> = {};
+
 export function PatternFeed({
-    entries = getSeedJournal(),
+    entries: given,
     nav = DEFAULT_NAV,
 }: PatternFeedProps) {
+    const entries = useMemo(() => given ?? getSeedJournal(), [given]);
+    const sectorByTicker = given ? NO_SECTORS : SEED_SECTOR_BY_TICKER;
     const [patterns, setPatterns] = useState<Pattern[]>([]);
     const [loading, setLoading] = useState(true);
     const [refreshKey, setRefreshKey] = useState(0);
@@ -69,7 +74,7 @@ export function PatternFeed({
         setLoading(true);
         generatePatterns(entries, {
             nav,
-            sectorByTicker: SEED_SECTOR_BY_TICKER,
+            sectorByTicker,
             sectorTargets: DEFAULT_SECTOR_TARGETS,
             limit: MAX_COLLAPSED * 3, // generate more than we show so expand has room
         }).then((next) => {
@@ -81,7 +86,7 @@ export function PatternFeed({
         return () => {
             cancelled = true;
         };
-    }, [entries, nav, refreshKey]);
+    }, [entries, nav, sectorByTicker, refreshKey]);
 
     // Filter snoozed. `snoozedAt` is a trigger so the dismiss handler
     // can force a re-evaluation without re-running detectors.

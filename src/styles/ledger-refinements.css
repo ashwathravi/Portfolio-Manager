@@ -499,6 +499,8 @@
 .pm-today-section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .pm-today-section-title { margin: 0; font-size: 15px; font-weight: 600; color: var(--pm-fg); }
 .pm-today-examples { display: flex; flex-direction: column; gap: 20px; padding-top: 8px; border-top: 1px solid var(--pm-border); }
+/* The weekly review and patterns from the user's own closed trades (launch item i51). */
+.pm-today-review { display: flex; flex-direction: column; gap: 20px; }
 
 .pm-triage-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
 .pm-triage-list li {

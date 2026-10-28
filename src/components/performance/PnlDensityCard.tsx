@@ -73,6 +73,8 @@ export function PnlDensityCard({ trades, now }: PnlDensityCardProps) {
     }, [trades, range.days, now]);
 
     const isEmpty = total === 0;
+    // Imported, linked and hand-entered trades carry dates, not times.
+    const untimed = trades.length > 0 && trades.every((t) => t.dateOnly);
 
     return (
         <section
@@ -111,7 +113,16 @@ export function PnlDensityCard({ trades, now }: PnlDensityCardProps) {
                 </div>
             </header>
 
-            {isEmpty ? (
+            {untimed ? (
+                <div className="pm-heat-empty" data-testid="pnl-density-untimed">
+                    <p>Your trades have dates but no times of day.</p>
+                    <p className="pm-heat-empty-sub">
+                        Imports, linked accounts and trades entered by hand record the day of a trade, not
+                        the hour, so this map stays empty rather than guess. The trading calendar above shows
+                        P&amp;L by day.
+                    </p>
+                </div>
+            ) : isEmpty ? (
                 <div className="pm-heat-empty" data-testid="pnl-density-empty">
                     <p>No executions in this range.</p>
                     <p className="pm-heat-empty-sub">

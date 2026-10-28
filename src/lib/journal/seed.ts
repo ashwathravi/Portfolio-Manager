@@ -17,11 +17,13 @@
  *     hand-tuned to feel lived-in rather than synthetic. Round numbers
  *     would scream "mock data".
  *
- * The shape is stable, but the *contents* are fixtures — this file
- * disappears once brokerage import lands and real closed positions
- * feed the journal.
+ * The shape is stable, but the *contents* are fixtures: the example
+ * journal Behaviour and Today's review and patterns show, labelled,
+ * until the user has closed trades of their own (launch item i51,
+ * `./trades.ts`). Strategies still reads it until saved strategies
+ * land (i55).
  */
-import type { JournalEntry } from '@/types/trade';
+import type { JournalEntry, TradeRationale } from '@/types/trade';
 import { evaluateRules, type TradeContext } from '@/lib/adherence/evaluate';
 import {
     SEED_ADHERENCE_RULES,
@@ -63,7 +65,7 @@ function entry(
     exitPrice: number,
     openedDaysAgo: number,
     heldDays: number,
-    rationale: AtAnchor<JournalEntry['rationale']>,
+    rationale: AtAnchor<TradeRationale>,
 ): AtAnchor<JournalEntry> {
     const notionalUsd = quantity * entryPrice;
     // Long: profit when exit > entry. Short trades live in the same
@@ -96,14 +98,14 @@ function entry(
  * the research store rehydrated at module load.
  */
 function rat(
-    setupType: JournalEntry['rationale']['setupType'],
-    mood: JournalEntry['rationale']['mood'],
+    setupType: TradeRationale['setupType'],
+    mood: TradeRationale['mood'],
     conviction: number,
     rationale: string,
     capturedDaysAgo: number,
     timeToDecisionMs: number,
     thesisKey: string,
-): AtAnchor<JournalEntry['rationale']> {
+): AtAnchor<TradeRationale> {
     return (anchorMs) => ({
         thesisId: `seed-${thesisKey}`,
         setupType,

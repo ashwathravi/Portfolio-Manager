@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { CalendarClock, CheckCircle2, BellOff } from "lucide-react";
 import type { JournalEntry } from "@/types/trade";
 import { getSeedJournal } from "@/lib/journal/seed";
-import { generateReview } from "@/lib/reviews/generate";
+import { DEFAULT_NAV, generateReview } from "@/lib/reviews/generate";
 import { currentWeekBounds, formatWeekRange } from "@/lib/reviews/weeks";
 import {
     acknowledgeReview,
@@ -35,18 +35,23 @@ import {
  */
 
 export interface WeeklyReviewCardProps {
-    /** Override the journal source. Defaults to the seed. */
+    /** The user's closed trades (launch item i51); the example journal
+     *  when omitted. A week the user closed no trades in has no card. */
     entries?: JournalEntry[];
+    /** The user's net worth, for the week's P&L as a share of it. */
+    nav?: number | null;
     /** Test seam: freeze "now" so the week bounds stay deterministic
      *  across runs. Defaults to `new Date()` at mount time. */
     now?: Date;
 }
 
-export function WeeklyReviewCard({ entries, now }: WeeklyReviewCardProps) {
+export function WeeklyReviewCard({ entries, nav = null, now }: WeeklyReviewCardProps) {
     const bounds = useMemo(() => currentWeekBounds(now), [now]);
     const review = useMemo(
-        () => generateReview(entries ?? getSeedJournal(now?.getTime()), bounds),
-        [entries, now, bounds],
+        () => entries
+            ? generateReview(entries, bounds, { nav })
+            : generateReview(getSeedJournal(now?.getTime()), bounds, { nav: DEFAULT_NAV }),
+        [entries, nav, now, bounds],
     );
 
     // Hydration-safe: start as `false` so the server + first client
@@ -84,6 +89,7 @@ export function WeeklyReviewCard({ entries, now }: WeeklyReviewCardProps) {
     // SSR + pre-mount: render nothing. Also render nothing if not
     // active — a satisfied/dismissed review keeps the dashboard clean.
     if (!mounted || !active) return null;
+    if (entries && review.stats.tradeCount.total === 0) return null;
 
     const { stats } = review;
     const pnlPositive = stats.realizedPnlUsd >= 0;
@@ -134,15 +140,19 @@ export function WeeklyReviewCard({ entries, now }: WeeklyReviewCardProps) {
                 <StatTile
                     label="Realized P&L"
                     value={formatUsdSigned(stats.realizedPnlUsd)}
-                    sub={`${formatPctSigned(stats.navPctChange)} of NAV`}
+                    sub={stats.navPctChange === null
+                        ? `${stats.tradeCount.total} closed ${stats.tradeCount.total === 1 ? "trade" : "trades"}`
+                        : `${formatPctSigned(stats.navPctChange)} of net worth`}
                     tone={pnlPositive ? "pos" : "neg"}
                     testId="weekly-review-pnl"
                 />
                 <StatTile
                     label="Rule adherence"
-                    value={`${stats.ruleAdherence}/100`}
-                    sub={`${stats.exceptions} ${stats.exceptions === 1 ? "exception" : "exceptions"}`}
-                    tone={stats.ruleAdherence >= 80 ? "pos" : stats.ruleAdherence >= 60 ? "warn" : "neg"}
+                    value={stats.ruleAdherence === null ? "—" : `${stats.ruleAdherence}/100`}
+                    sub={stats.ruleAdherence === null
+                        ? "No reasons recorded on Trade"
+                        : `${stats.exceptions} ${stats.exceptions === 1 ? "exception" : "exceptions"}`}
+                    tone={adherenceTone(stats.ruleAdherence)}
                     testId="weekly-review-adherence"
                 />
                 <StatTile
@@ -160,7 +170,7 @@ export function WeeklyReviewCard({ entries, now }: WeeklyReviewCardProps) {
 
             <div className="pm-review-note">
                 <p className="pm-review-note-lede">
-                    <strong>This week you…</strong> {review.narrative}
+                    <strong>In short:</strong> {review.narrative}
                 </p>
                 <label
                     className="pm-review-reflect-label"
@@ -192,6 +202,11 @@ function formatUsdSigned(n: number): string {
     if (n === 0) return "$0";
     const sign = n > 0 ? "+$" : "-$";
     return `${sign}${Math.abs(Math.round(n)).toLocaleString("en-US")}`;
+}
+
+function adherenceTone(score: number | null): StatTileProps["tone"] {
+    if (score === null) return "neutral";
+    return score >= 80 ? "pos" : score >= 60 ? "warn" : "neg";
 }
 
 function formatPctSigned(n: number): string {

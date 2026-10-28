@@ -37,12 +37,14 @@ export interface BestDecision {
 
 export interface ReviewStats {
     realizedPnlUsd: number;
-    /** Pct change of a nominal NAV used for the review card. Signed. */
-    navPctChange: number;
+    /** Realized P&L as a percent of net worth. Signed; null when net
+     *  worth isn't known. */
+    navPctChange: number | null;
     /** 0–100. Hygiene measure: fraction of trades with thesisId,
-     *  conviction ≥ 5, and a non-`none` setup type. */
-    ruleAdherence: number;
-    /** Count of trades that fell short of the adherence bar. */
+     *  conviction ≥ 5, and a non-`none` setup type. Only trades with a
+     *  rationale recorded on Trade are scored; null when none are. */
+    ruleAdherence: number | null;
+    /** Count of scored trades that fell short of the adherence bar. */
     exceptions: number;
     /** Count of captured Risk Policy Engine overrides in the review window. */
     policyExceptions: number;

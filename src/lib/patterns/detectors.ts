@@ -88,6 +88,8 @@ export const detectLateDayLosses: PatternDetector = (entries, ctx) => {
         { wins: number; losses: number; ids: string[]; totalLoss: number }
     >();
     for (const e of entries) {
+        // The hour the decision was recorded; trades without one have none.
+        if (!e.rationale) continue;
         const h = new Date(e.rationale.capturedAt).getHours();
         const b = buckets.get(h) ?? { wins: 0, losses: 0, ids: [], totalLoss: 0 };
         if (isWin(e)) b.wins += 1;
@@ -216,6 +218,7 @@ export const detectSizeCreepAfterWins: PatternDetector = (entries, ctx) => {
 export const detectHighWinSetup: PatternDetector = (entries, ctx) => {
     const groups = new Map<string, { wins: number; losses: number; ids: string[]; totalPnl: number }>();
     for (const e of entries) {
+        if (!e.rationale) continue;
         const k = e.rationale.setupType;
         const g = groups.get(k) ?? { wins: 0, losses: 0, ids: [], totalPnl: 0 };
         if (isWin(e)) g.wins += 1;
@@ -332,7 +335,7 @@ export const detectSectorDrift: PatternDetector = (entries, ctx) => {
  */
 export const detectNegativeMoodCost: PatternDetector = (entries, ctx) => {
     const cautionIds = ['fomo', 'revenge'];
-    const hits = entries.filter((e) => cautionIds.includes(e.rationale.mood));
+    const hits = entries.filter((e) => e.rationale && cautionIds.includes(e.rationale.mood));
     if (hits.length === 0) return [];
     const netPnl = hits.reduce((s, e) => s + e.realizedPnlUsd, 0);
     // Only flag when the caution-mood bucket is a net drain on the

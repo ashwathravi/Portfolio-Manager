@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { userKey } from './helpers/storage';
 import { clickUntil, collectConsoleErrors, gotoAppPage, openPolicyChecks, reloadAppPage } from './helpers/app';
+import { seedClosedTrades } from './helpers/trades';
 import { databaseAuthEnabled, signInAsFreshUser, signInAsNewUser } from './helpers/users';
 
 /**
@@ -372,6 +373,51 @@ test.describe('Weekly review ritual (AR-114)', () => {
         await expect(page.getByTestId('weekly-review-card')).toBeHidden();
         await reloadAppPage(page);
         await expect(page.getByTestId('weekly-review-card')).toBeHidden();
+    });
+});
+
+/**
+ * Launch item i51: once the user has closed trades, the weekly review and
+ * pattern feed are theirs, outside the example section (which a first
+ * sign-in hides anyway).
+ */
+test.describe('Today › Weekly review from your closed trades (launch item i51)', () => {
+    test.skip(!databaseAuthEnabled, 'closed trades come from the database');
+
+    test('the review, its triage item and the pattern feed come from your trades', async ({ context, page }) => {
+        await signInAsNewUser(context, { firstSignIn: true });
+        const seeded = await seedClosedTrades(page);
+        await gotoAppPage(page, '/');
+
+        const section = page.getByTestId('today-review');
+        const card = section.getByTestId('weekly-review-card');
+        await expect(card).toHaveAttribute('data-week-id', seeded.weekId);
+        await expect(card.getByTestId('weekly-review-pnl')).toContainText(seeded.todayInWeek ? '-$50' : '-$100');
+        await expect(card.getByTestId('weekly-review-pnl')).toContainText('of net worth');
+        if (!seeded.todayInWeek) {
+            await expect(card.getByTestId('weekly-review-adherence')).toContainText('No reasons recorded on Trade');
+            await expect(card).toContainText('This week you closed 1 trade.');
+        }
+        await expect(section.getByTestId('pattern-feed')).toContainText('From 2 trades');
+        await expect(page.getByTestId('today-examples')).toHaveCount(0);
+
+        const review = page.getByTestId('today-triage-item').filter({ hasText: "This week's review is ready" });
+        await expect(review).toBeVisible();
+        await expect(review.getByTestId('sample-tag')).toHaveCount(0);
+
+        // Done hides the card and clears the triage item.
+        await card.getByTestId('weekly-review-acknowledge').click();
+        await expect(card).toHaveCount(0);
+        await reloadAppPage(page);
+        await expect(page.getByTestId('weekly-review-card')).toHaveCount(0);
+        await expect(page.getByTestId('today-triage-item').filter({ hasText: "This week's review is ready" })).toHaveCount(0);
+    });
+
+    test('without closed trades the example review stays in the example section', async ({ context, page }) => {
+        await signInAsNewUser(context);
+        await gotoAppPage(page, '/');
+        await expect(page.getByTestId('today-review')).toHaveCount(0);
+        await expect(page.getByTestId('today-examples').getByTestId('sample-data-notice')).toContainText('The weekly review, patterns');
     });
 });
 

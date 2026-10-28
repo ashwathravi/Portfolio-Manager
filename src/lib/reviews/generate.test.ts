@@ -131,4 +131,45 @@ describe('generateReview', () => {
         assert.deepEqual(review.stats.churnSymbols, ['NVDA']);
         assert.match(review.narrative, /1 churn warning \(NVDA\)/);
     });
+
+    test('measures P&L against the net worth given, and leaves the share out without one', () => {
+        const withNav = generateReview([entry()], BOUNDS, { nav: 40_000 });
+        assert.equal(withNav.stats.navPctChange, 1);
+        assert.match(withNav.narrative, /Realised P&L of \+\$400 \(\+1\.0% of net worth\)\./);
+
+        const without = generateReview([entry()], BOUNDS);
+        assert.equal(without.stats.navPctChange, null);
+        assert.match(without.narrative, /Realised P&L of \+\$400\./);
+        assert.doesNotMatch(without.narrative, /net worth|NAV/);
+        assert.equal(generateReview([entry()], BOUNDS, { nav: 0 }).stats.navPctChange, null);
+    });
+
+    test('scores only trades with a rationale recorded on Trade (launch item i51)', () => {
+        const unrecorded = entry({ id: 'j-imported', rationale: undefined, realizedPnlUsd: -50 });
+        const review = generateReview([unrecorded], BOUNDS);
+        assert.equal(review.stats.ruleAdherence, null);
+        assert.equal(review.stats.exceptions, 0);
+        assert.equal(review.stats.tradeCount.total, 1);
+        assert.match(review.narrative, /^This week you closed 1 trade\./);
+        assert.doesNotMatch(review.narrative, /adherence/);
+
+        // Mixed: the unrecorded trade neither raises nor lowers the score.
+        const mixed = generateReview([unrecorded, entry({ rationale: { ...entry().rationale!, conviction: 3 } })], BOUNDS);
+        assert.equal(mixed.stats.ruleAdherence, 67);
+        assert.equal(mixed.stats.exceptions, 1);
+    });
+
+    test('breaks closed trades down only when they were of more than one kind', () => {
+        assert.match(generateReview([entry(), entry({ id: 'j-2' })], BOUNDS).narrative, /^This week you closed 2 trades\./);
+        assert.match(
+            generateReview([entry(), entry({ id: 'j-short', side: 'sell' })], BOUNDS).narrative,
+            /^This week you closed 2 trades \(1 long, 1 short\)\./,
+        );
+    });
+
+    test('a week with no closed trades still scores 100 and says so', () => {
+        const review = generateReview([], BOUNDS);
+        assert.equal(review.stats.ruleAdherence, 100);
+        assert.match(review.narrative, /no trades closed/);
+    });
 });

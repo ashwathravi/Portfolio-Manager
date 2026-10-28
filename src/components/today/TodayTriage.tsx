@@ -12,6 +12,7 @@ import { generateReview } from "@/lib/reviews/generate";
 import { getReviewState, isReviewActive } from "@/lib/reviews/storage";
 import { getSeedJournal } from "@/lib/journal/seed";
 import { SampleTag } from "@/components/data-display/SampleTag";
+import type { JournalEntry } from "@/types/trade";
 import { useShowSampleData } from "@/lib/hooks/useShowSampleData";
 
 const SEVERITY_LABEL = { breach: "Breach", warn: "Review", info: "FYI" } as const;
@@ -22,7 +23,14 @@ const SEVERITY_LABEL = { breach: "Breach", warn: "Review", info: "FYI" } as cons
  * weekly review. Each row has one link. Items derived from example data
  * carry a Sample tag (and disappear when examples are hidden).
  */
-export function TodayTriage({ policyActions }: { policyActions: RiskPolicyNextAction[] }) {
+export function TodayTriage({
+    policyActions,
+    reviewEntries,
+}: {
+    policyActions: RiskPolicyNextAction[];
+    /** The user's closed trades (launch item i51); the example journal's review when omitted. */
+    reviewEntries?: JournalEntry[];
+}) {
     const { theses } = useThesisStore();
     const showSample = useShowSampleData();
     const [mountedNow, setMountedNow] = useState<number | null>(null);
@@ -30,11 +38,13 @@ export function TodayTriage({ policyActions }: { policyActions: RiskPolicyNextAc
 
     useEffect(() => {
         const now = Date.now();
-        const review = generateReview(getSeedJournal(now), currentWeekBounds(new Date(now)));
+        const review = generateReview(reviewEntries ?? getSeedJournal(now), currentWeekBounds(new Date(now)));
+        // A week the user closed no trades in has nothing to review.
+        const quiet = reviewEntries !== undefined && review.stats.tradeCount.total === 0;
         // eslint-disable-next-line react-hooks/set-state-in-effect -- client-only clock + localStorage state
         setMountedNow(now);
-        setReviewDue(isReviewActive(getReviewState(review.id), now));
-    }, []);
+        setReviewDue(!quiet && isReviewActive(getReviewState(review.id), now));
+    }, [reviewEntries]);
 
     const items = useMemo(() => {
         if (mountedNow === null) return null;
@@ -43,10 +53,10 @@ export function TodayTriage({ policyActions }: { policyActions: RiskPolicyNextAc
             theses,
             isSampleThesis: isSeedThesis,
             reviewDue,
-            reviewIsSample: true,
+            reviewIsSample: reviewEntries === undefined,
             now: mountedNow,
         }).filter((item) => showSample || !item.sample);
-    }, [policyActions, theses, reviewDue, mountedNow, showSample]);
+    }, [policyActions, theses, reviewDue, reviewEntries, mountedNow, showSample]);
 
     return (
         <section className="pm-card pm-card-stack pm-today-triage" data-testid="today-triage" aria-labelledby="pm-today-triage-head">

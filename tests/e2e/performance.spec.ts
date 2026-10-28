@@ -2,7 +2,8 @@ import { readFile } from 'node:fs/promises';
 import { test, expect, type Page } from '@playwright/test';
 import { gotoAppPage } from './helpers/app';
 import { userKey } from './helpers/storage';
-import { signInAsFreshUser } from './helpers/users';
+import { ABNB_REASON, DIS_REASON, seedClosedTrades } from './helpers/trades';
+import { databaseAuthEnabled, signInAsFreshUser, signInAsNewUser } from './helpers/users';
 
 /**
  * Performance tests.
@@ -488,6 +489,99 @@ test.describe('Performance › Behaviour \u2014 P&L density (AR-113)', () => {
         await expect(
             callouts.locator('[data-testid^="pnl-density-callout-"]').first(),
         ).toBeVisible();
+    });
+});
+
+/**
+ * Launch item i51: Behaviour from the user's own closed trades. A brand-new
+ * user (example data off) with two (tests/e2e/helpers/trades.ts) sees them,
+ * with the reasons they recorded, never the example journal.
+ */
+test.describe('Performance › Behaviour — from your closed trades (launch item i51)', () => {
+    test.skip(!databaseAuthEnabled, 'closed trades come from the database');
+
+    test('shows your closed trades and their reasons, not the example journal', async ({ context, page }) => {
+        await signInAsNewUser(context, { firstSignIn: true });
+        const seeded = await seedClosedTrades(page);
+        await gotoAppPage(page, '/performance/behaviour');
+
+        await expect(page.getByTestId('sample-data-notice')).toHaveCount(0);
+        const calendar = page.getByTestId('trading-calendar');
+        await expect(calendar).toBeVisible();
+        await expect(calendar.getByTestId('sample-tag')).toHaveCount(0);
+        await expect(calendar.locator('[role="gridcell"]:not([data-level="0"])').first()).toHaveAttribute('aria-label', /trade/);
+
+        const closed = page.getByTestId('closed-trades');
+        await expect(closed.getByTestId('closed-trades-summary')).toContainText('2 sales matched against the buys before them');
+        await expect(closed.getByTestId('closed-trades-summary')).toContainText('2 with a reason you recorded');
+        const rows = closed.getByTestId('closed-trade');
+        await expect(rows).toHaveCount(2);
+        // Newest first: today's ABNB, with the rationale and mood recorded on Trade.
+        await expect(rows.first()).toContainText('ABNB · Trading');
+        await expect(rows.first()).toContainText('same day');
+        await expect(rows.first()).toContainText('Calm');
+        await expect(rows.first().getByTestId('closed-trade-why')).toHaveText(ABNB_REASON);
+        await expect(rows.first().getByTestId('closed-trade-pnl')).toHaveText('+$50.00');
+        // DIS, with the entry decision written in Research › Journal.
+        await expect(rows.nth(1)).toContainText('DIS · Trading');
+        await expect(rows.nth(1)).toContainText('held 2 days');
+        await expect(rows.nth(1).getByTestId('closed-trade-why')).toHaveText(DIS_REASON);
+        await expect(rows.nth(1).getByTestId('closed-trade-pnl')).toHaveText('−$100.00');
+        await expect(closed.getByTestId('closed-trades-hint')).toHaveCount(0);
+
+        // One trade has a mood: not enough to read anything into.
+        const mood = page.getByTestId('mood-breakdown');
+        await mood.getByRole('tab', { name: 'ALL' }).click();
+        await expect(mood.getByTestId('mood-breakdown-empty')).toContainText('Pick a mood when you draft an order on Trade');
+        await expect(mood.getByTestId('mood-breakdown-empty')).toContainText('1 / 10 so far');
+
+        // Trades carry dates, not times: no hour-of-day map.
+        const density = page.getByTestId('pnl-density-card');
+        await expect(density.getByTestId('pnl-density-untimed')).toBeVisible();
+        await expect(density.getByTestId('pnl-density-grid')).toHaveCount(0);
+
+        // The review week DIS was sold in.
+        const week = page.getByTestId('reviews-archive').locator(`[data-week-id="${seeded.weekId}"]`);
+        await expect(week).toHaveAttribute('data-empty', 'false');
+        if (seeded.todayInWeek) {
+            await expect(week).toContainText('This week you closed 2 trades.');
+            await expect(week).toContainText('-$50');
+        } else {
+            await expect(week).toContainText('This week you closed 1 trade. Realised P&L of -$100');
+            // Nothing recorded on Trade for DIS: no adherence score.
+            await expect(week.locator('.pm-reviews-archive-mini', { hasText: 'Adherence' })).toContainText('—');
+        }
+    });
+
+    test('a trade with nothing recorded says where a reason comes from', async ({ context, page }) => {
+        await signInAsNewUser(context, { firstSignIn: true });
+        const created = await page.request.post('/api/portfolios', { data: { name: 'Imported' } });
+        const portfolioId = (await created.json()).data.id;
+        for (const transaction of [
+            { type: 'BUY', date: '2026-03-02', symbol: 'KO', quantity: 4, price: 60, fees: 1 },
+            { type: 'SELL', date: '2026-03-09', symbol: 'KO', quantity: 4, price: 62, fees: 1 },
+        ]) {
+            expect((await page.request.post('/api/transactions', { data: { portfolioId, transaction } })).status()).toBe(201);
+        }
+        await gotoAppPage(page, '/performance/behaviour');
+
+        const closed = page.getByTestId('closed-trades');
+        await expect(closed.getByTestId('closed-trade')).toHaveCount(1);
+        // Fees count: 4 × (62 − 60) − 2.
+        await expect(closed.getByTestId('closed-trade-pnl')).toHaveText('+$6.00');
+        await expect(closed.getByTestId('closed-trade-why')).toHaveCount(0);
+        await expect(closed.getByTestId('closed-trades-summary')).toContainText('0 with a reason you recorded');
+        await expect(closed.getByTestId('closed-trades-hint')).toContainText('mark it placed');
+        await expect(closed.getByTestId('closed-trades-hint').getByRole('link', { name: 'Research › Journal' })).toHaveAttribute('href', '/research?tab=journal');
+    });
+
+    test('another user sees none of your trades', async ({ context, page }) => {
+        await signInAsNewUser(context, { firstSignIn: true });
+        await seedClosedTrades(page);
+        await signInAsNewUser(context, { firstSignIn: true });
+        await gotoAppPage(page, '/performance/behaviour');
+        await expect(page.getByTestId('closed-trades')).toHaveCount(0);
+        await expect(page.getByText('No closed trades yet')).toBeVisible();
     });
 });
 
