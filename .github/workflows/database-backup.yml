@@ -1,0 +1,185 @@
+name: Database backup
+
+# Launch item i68; the runbook is docs/backups.md.
+#
+# Nightly (and on demand from master): dumps production, keeps the dump as an
+# artifact for 30 days encrypted to the backup key (this repository is
+# public, and so are its artifacts), then restores it into a scratch Postgres
+# and checks every table's rows against the dump's manifest. A run that fails
+# emails whoever last changed this schedule.
+#
+# On a pull request that changes the backup, the migrations or this file,
+# the same steps run on a disposable database instead: no production, no
+# secrets, and a throwaway key.
+
+on:
+  schedule:
+    - cron: '41 6 * * *'
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/database-backup.yml'
+      - 'scripts/db/backup*'
+      - 'scripts/db/restore.ts'
+      - 'scripts/db/install-backup-tools.sh'
+      - 'scripts/db/init-local.sql'
+      - 'drizzle/**'
+
+permissions:
+  contents: read
+
+jobs:
+  backup:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # The owner connection lives in production, whose branch policy lets only
+    # master use it. (Not `deployment: false`: GitHub doesn't say that policy
+    # still applies then, so each run is recorded as a deployment instead.)
+    environment: production
+    concurrency:
+      group: database-backup
+      cancel-in-progress: false
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: restore_check
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d restore_check"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Check backup settings
+        env:
+          DATABASE_MIGRATION_URL: ${{ secrets.DATABASE_MIGRATION_URL }}
+        run: |
+          if [ -z "$DATABASE_MIGRATION_URL" ]; then
+            echo "::error::The production environment has no DATABASE_MIGRATION_URL secret. See docs/deployment.md."
+            exit 1
+          fi
+
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install the PostgreSQL client and age
+        run: bash ./scripts/db/install-backup-tools.sh
+
+      - name: Dump production
+        id: dump
+        env:
+          BACKUP_SOURCE_URL: ${{ secrets.DATABASE_MIGRATION_URL }}
+        run: node --import tsx scripts/db/backup.ts --out "$RUNNER_TEMP/backup"
+
+      # Kept even if the restore check below fails: a dump that won't restore
+      # cleanly still holds the data.
+      - name: Encrypt the backup
+        id: encrypt
+        env:
+          BACKUP_AGE_RECIPIENTS: ${{ vars.BACKUP_AGE_RECIPIENTS }}
+        run: |
+          if [ -z "$BACKUP_AGE_RECIPIENTS" ]; then
+            echo "::error::Set the repository variable BACKUP_AGE_RECIPIENTS to the backup key's public key, or this backup isn't kept. See docs/backups.md."
+            exit 1
+          fi
+          printf '%s\n' "$BACKUP_AGE_RECIPIENTS" > "$RUNNER_TEMP/recipients"
+          name="atlas-wealth-backup-$(date -u +%Y-%m-%dT%H%MZ)"
+          tar -C "$RUNNER_TEMP/backup" -cf - . | age --encrypt --recipients-file "$RUNNER_TEMP/recipients" --output "$RUNNER_TEMP/$name.tar.age"
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+
+      - name: Keep the encrypted backup for 30 days
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ${{ steps.encrypt.outputs.name }}
+          path: ${{ runner.temp }}/${{ steps.encrypt.outputs.name }}.tar.age
+          retention-days: 30
+          compression-level: 0
+          if-no-files-found: error
+
+      - name: Restore into a scratch database and check every table
+        if: ${{ !cancelled() && steps.dump.outcome == 'success' }}
+        env:
+          RESTORE_DATABASE_URL: postgres://postgres:postgres@localhost:5432/restore_check?sslmode=disable
+        run: node --import tsx scripts/db/restore.ts --from "$RUNNER_TEMP/backup"
+
+  rehearse:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: source
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d source"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      ADMIN_DATABASE_URL: postgres://postgres:postgres@localhost:5432/source?sslmode=disable
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install the PostgreSQL client and age
+        run: bash ./scripts/db/install-backup-tools.sh
+
+      - name: Build a disposable source database (the E2E fixtures)
+        env:
+          APP_DATABASE_URL: postgres://atlas_app_rehearsal:atlas-app-rehearsal@localhost:5432/source?sslmode=disable
+        run: node --import tsx scripts/e2e/prepare-database.ts
+
+      - name: Dump it
+        env:
+          BACKUP_SOURCE_URL: ${{ env.ADMIN_DATABASE_URL }}
+        run: node --import tsx scripts/db/backup.ts --out "$RUNNER_TEMP/backup"
+
+      - name: Encrypt and decrypt with a throwaway key
+        run: |
+          age-keygen -o "$RUNNER_TEMP/rehearsal.key" 2>/dev/null
+          age-keygen -y "$RUNNER_TEMP/rehearsal.key" > "$RUNNER_TEMP/recipients"
+          tar -C "$RUNNER_TEMP/backup" -cf - . | age --encrypt --recipients-file "$RUNNER_TEMP/recipients" --output "$RUNNER_TEMP/backup.tar.age"
+          mkdir "$RUNNER_TEMP/decrypted"
+          age --decrypt --identity "$RUNNER_TEMP/rehearsal.key" "$RUNNER_TEMP/backup.tar.age" | tar -C "$RUNNER_TEMP/decrypted" -xf -
+          diff -r "$RUNNER_TEMP/backup" "$RUNNER_TEMP/decrypted"
+
+      - name: Restore the decrypted copy and check every table
+        env:
+          RESTORE_DATABASE_URL: postgres://postgres:postgres@localhost:5432/restore_check?sslmode=disable
+        run: |
+          PGPASSWORD=postgres "$PG_BIN_DIR/psql" -h localhost -U postgres -d source -c 'CREATE DATABASE restore_check'
+          node --import tsx scripts/db/restore.ts --from "$RUNNER_TEMP/decrypted"

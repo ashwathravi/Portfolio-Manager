@@ -13,6 +13,8 @@
     "db:down": "docker compose stop db",
     "db:migrate": "node --import tsx scripts/db/init-local.ts && drizzle-kit migrate",
     "db:setup": "node --import tsx scripts/setup-local-db.ts && node --import tsx scripts/seed.ts",
+    "db:backup": "node --import tsx scripts/db/backup.ts",
+    "db:restore": "node --import tsx scripts/db/restore.ts",
     "keychain:store": "bash ./scripts/keychain-store-database-url.sh",
     "keychain:sync-github": "bash ./scripts/sync-keychain-to-github.sh",
     "lint": "eslint",
