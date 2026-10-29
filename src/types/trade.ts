@@ -196,16 +196,17 @@ export function isRationaleComplete(draft: RationaleDraftLike | null | undefined
 // --------------------------------------------------------------------- //
 
 /**
- * A closed round-trip trade with its captured rationale. Where
+ * A closed round-trip trade with what the user recorded about it. Where
  * `TradeRationale` is the "what was I thinking" snapshot, `JournalEntry`
  * is the "what happened" bookend — realized P&L once the position is
  * unwound, holding period, and the rationale that went in with it.
  *
- * Emitted into the journal at the moment a position closes (the fill
- * that brings quantity back to zero, or a manual close). The rationale
- * is copied in verbatim from the entry order — never reconstructed,
- * never edited after the fact. That immutability is the whole point of
- * JournalPlus: you grade the thesis against what you wrote, not a
+ * The user's closed trades come from their transactions, each sale
+ * matched against the buys before it (launch item i51,
+ * `src/lib/journal/trades.ts`). The rationale is copied in verbatim from
+ * the order drafted on Trade that opened the position — never
+ * reconstructed, never edited after the fact. That immutability is the
+ * whole point: you grade the thesis against what you wrote, not a
  * sanitized retelling.
  *
  * `holdingPeriodDays` is a convenience — it's just
@@ -218,6 +219,8 @@ export interface JournalEntry {
      *  because imported brokerage history won't always carry one. */
     orderId?: string;
     ticker: string;
+    /** The account it was held in. */
+    account?: string;
     side: 'buy' | 'sell';
     quantity: number;
     entryPrice: number;
@@ -232,11 +235,17 @@ export interface JournalEntry {
     holdingPeriodDays: number;
     openedAt: string;
     closedAt: string;
-    /** The pre-trade snapshot captured at entry. Required on journal
-     *  entries — if a trade didn't have a rationale captured, it won't
-     *  appear in the journal (the execution flow handles the skipped
-     *  case via analytics events, not by synthesizing a placeholder). */
-    rationale: TradeRationale;
+    /** Only the trade dates are known (imported, linked or typed in):
+     *  `openedAt` and `closedAt` are noon UTC on them, so their hour of
+     *  day means nothing. */
+    dateOnly?: boolean;
+    /** The pre-trade snapshot captured on Trade for the order that
+     *  opened the position. Absent when none was recorded — never
+     *  synthesized after the fact. */
+    rationale?: TradeRationale;
+    /** The decision-journal entry (Research › Journal) the user wrote
+     *  for the buy, when there is one. */
+    decision?: JournalDecisionNote;
     /** Frozen AR-111 adherence bundle — the rule-check result at submit
      *  time. Optional because older entries (and pre-AR-111 seed data)
      *  predate the freeze. When present, the trade detail and returns-
@@ -251,4 +260,14 @@ export interface JournalEntry {
     /** Sell-discipline audit events captured while managing trim,
      *  re-underwrite, snooze, and resolve decisions. */
     sellDisciplineEvents?: import('@/lib/risk-policy').SellDisciplineAuditEvent[];
+}
+
+/** A decision-journal entry, as a closed trade carries it. */
+export interface JournalDecisionNote {
+    id: string;
+    /** YYYY-MM-DD. */
+    date: string;
+    decision: string;
+    rationale: string;
+    thesisId?: string;
 }

@@ -6,8 +6,10 @@
  * are recomputed on every load so the numbers never drift out of
  * sync with the journal.
  *
- * Keyed by the review id (`wk:YYYY-MM-DD`). SSR-safe — every
- * function guards `typeof window`.
+ * Keyed by `reviewStateId`: the review id (`wk:YYYY-MM-DD`) for the
+ * example journal's review, `trades:wk:YYYY-MM-DD` for the review of
+ * the user's own closed trades. SSR-safe — every function guards
+ * `typeof window`.
  */
 import type { ReviewState } from './types';
 
@@ -19,6 +21,17 @@ export const REVIEWS_STORAGE_KEY = 'pm-weekly-reviews-v1';
 export const REMIND_LATER_MS = 86_400_000;
 
 type Store = Record<string, ReviewState>;
+
+/**
+ * Where a week's state is kept. The review of the user's closed trades
+ * (launch item i51) and the example journal's review of the same week
+ * keep theirs apart, so finishing or annotating the example never hides
+ * or speaks for the real one. Example reviews keep the plain week id
+ * they had before there were real ones.
+ */
+export function reviewStateId(weekId: string, source: 'trades' | 'example'): string {
+    return source === 'trades' ? `trades:${weekId}` : weekId;
+}
 
 function load(): Store {
     try {

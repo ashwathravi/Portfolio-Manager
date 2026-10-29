@@ -8,19 +8,20 @@ import { SEED_SECTOR_BY_TICKER } from "@/lib/adherence/seed";
 import {
     DEFAULT_NAV,
     DEFAULT_SECTOR_TARGETS,
+    PATTERN_WINDOW_DAYS,
     generatePatterns,
 } from "@/lib/patterns/generate";
 import type { Pattern } from "@/lib/patterns/types";
-import { getSnoozedIds, snoozePattern } from "@/lib/patterns/snooze";
+import { getSnoozedIds, snoozeId, snoozePattern } from "@/lib/patterns/snooze";
 import { PatternRow } from "./PatternRow";
 
 /**
  * AR-112 Pattern feed card.
  *
- * Client-only. Pulls the seed journal (swap to a Zustand store once
- * live trade data lands), runs the deterministic detectors, renders
- * the ranked list. The card replaces the old static Daily Brief on
- * the dashboard's bottom 3-col strip.
+ * Client-only. Runs the deterministic detectors over the user's closed
+ * trades (or the example journal), renders the ranked list. The card
+ * replaces the old static Daily Brief on the dashboard's bottom 3-col
+ * strip.
  *
  * State:
  *   - `patterns`   — ranked list (up to MAX)
@@ -43,16 +44,23 @@ import { PatternRow } from "./PatternRow";
 const MAX_COLLAPSED = 6;
 
 export interface PatternFeedProps {
-    /** Override the journal source — keeps the component pure for tests. */
+    /** The user's closed trades of the last PATTERN_WINDOW_DAYS (launch item i51:
+     *  `inPatternWindow`); the example journal when omitted. */
     entries?: JournalEntry[];
     /** Approximate NAV — drives the %-of-NAV detectors. */
     nav?: number;
 }
 
+/** Sector drift is for the example journal only: closed trades aren't holdings, and the risk policy checks those. */
+const NO_SECTORS: Record<string, string> = {};
+
 export function PatternFeed({
-    entries = getSeedJournal(),
+    entries: given,
     nav = DEFAULT_NAV,
 }: PatternFeedProps) {
+    const entries = useMemo(() => given ?? getSeedJournal(), [given]);
+    const sectorByTicker = given ? NO_SECTORS : SEED_SECTOR_BY_TICKER;
+    const source = given ? "trades" : "example";
     const [patterns, setPatterns] = useState<Pattern[]>([]);
     const [loading, setLoading] = useState(true);
     const [refreshKey, setRefreshKey] = useState(0);
@@ -69,7 +77,7 @@ export function PatternFeed({
         setLoading(true);
         generatePatterns(entries, {
             nav,
-            sectorByTicker: SEED_SECTOR_BY_TICKER,
+            sectorByTicker,
             sectorTargets: DEFAULT_SECTOR_TARGETS,
             limit: MAX_COLLAPSED * 3, // generate more than we show so expand has room
         }).then((next) => {
@@ -81,7 +89,7 @@ export function PatternFeed({
         return () => {
             cancelled = true;
         };
-    }, [entries, nav, refreshKey]);
+    }, [entries, nav, sectorByTicker, refreshKey]);
 
     // Filter snoozed. `snoozedAt` is a trigger so the dismiss handler
     // can force a re-evaluation without re-running detectors.
@@ -95,15 +103,15 @@ export function PatternFeed({
     }, [snoozedAt]);
 
     const visible = useMemo(
-        () => patterns.filter((p) => !snoozedIds.has(p.id)),
-        [patterns, snoozedIds],
+        () => patterns.filter((p) => !snoozedIds.has(snoozeId(p.id, source))),
+        [patterns, snoozedIds, source],
     );
     const shown = expanded ? visible : visible.slice(0, MAX_COLLAPSED);
 
     const onDismiss = useCallback((id: string) => {
-        snoozePattern(id);
+        snoozePattern(snoozeId(id, source));
         setSnoozedAt(Date.now());
-    }, []);
+    }, [source]);
 
     const onRefresh = useCallback(() => {
         setRefreshKey((k) => k + 1);
@@ -126,7 +134,7 @@ export function PatternFeed({
                         Pattern feed
                     </h3>
                     <p className="pm-pattern-feed-sub">
-                        From <strong>{entries.length}</strong> trades · last 90 days
+                        From <strong>{entries.length}</strong> trades · last {PATTERN_WINDOW_DAYS} days
                     </p>
                 </div>
                 <div className="pm-pattern-feed-actions">

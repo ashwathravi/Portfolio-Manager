@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { userKey } from './helpers/storage';
 import { clickUntil, collectConsoleErrors, gotoAppPage, openPolicyChecks, reloadAppPage } from './helpers/app';
+import { seedClosedTrades } from './helpers/trades';
 import { databaseAuthEnabled, signInAsFreshUser, signInAsNewUser } from './helpers/users';
 
 /**
@@ -372,6 +373,110 @@ test.describe('Weekly review ritual (AR-114)', () => {
         await expect(page.getByTestId('weekly-review-card')).toBeHidden();
         await reloadAppPage(page);
         await expect(page.getByTestId('weekly-review-card')).toBeHidden();
+    });
+});
+
+/**
+ * Launch item i51: once the user has closed trades, the weekly review and
+ * pattern feed are theirs, outside the example section (which a first
+ * sign-in hides anyway).
+ */
+test.describe('Today › Weekly review from your closed trades (launch item i51)', () => {
+    test.skip(!databaseAuthEnabled, 'closed trades come from the database');
+
+    test('the review, its triage item and the pattern feed come from your trades', async ({ context, page }) => {
+        await signInAsNewUser(context, { firstSignIn: true });
+        const seeded = await seedClosedTrades(page);
+        // A trade closed long before the pattern feed's 90 days: in the journal, not in the feed.
+        const longAgo = new Date(Date.now() - 200 * 86_400_000).toISOString().slice(0, 10);
+        for (const transaction of [
+            { type: 'BUY', date: longAgo, symbol: 'TGT', quantity: 2, price: 150 },
+            { type: 'SELL', date: longAgo, symbol: 'TGT', quantity: 2, price: 140 },
+        ]) {
+            expect((await page.request.post('/api/transactions', { data: { portfolioId: seeded.accountId, transaction } })).status()).toBe(201);
+        }
+        await gotoAppPage(page, '/');
+
+        // The example review of the same week, finished with a reflection, answers for nothing real.
+        const reviewsKey = userKey('pm-weekly-reviews-v1', (await page.locator('html').getAttribute('data-storage-scope'))!);
+        await page.evaluate(([key, weekId]) => {
+            window.localStorage.setItem(key, JSON.stringify({ [weekId]: { acknowledgedAt: new Date().toISOString(), reflection: 'Example week.' } }));
+        }, [reviewsKey, seeded.weekId] as const);
+        await reloadAppPage(page);
+
+        const section = page.getByTestId('today-review');
+        const card = section.getByTestId('weekly-review-card');
+        await expect(card).toHaveAttribute('data-week-id', seeded.weekId);
+        await expect(card.getByTestId('weekly-review-pnl')).toContainText(seeded.todayInWeek ? '-$50' : '-$100');
+        await expect(card.getByTestId('weekly-review-pnl')).toContainText('of net worth');
+        if (!seeded.todayInWeek) {
+            await expect(card.getByTestId('weekly-review-adherence')).toContainText('No reasons recorded on Trade');
+            await expect(card).toContainText('This week you closed 1 trade.');
+        }
+        await expect(section.getByTestId('pattern-feed')).toContainText('From 2 trades');
+        await expect(page.getByTestId('today-examples')).toHaveCount(0);
+
+        const review = page.getByTestId('today-triage-item').filter({ hasText: "This week's review is ready" });
+        await expect(review).toBeVisible();
+        await expect(review.getByTestId('sample-tag')).toHaveCount(0);
+
+        // Done hides the card and clears the triage item, apart from the example's state.
+        await card.getByTestId('weekly-review-acknowledge').click();
+        await expect(card).toHaveCount(0);
+        const stored = JSON.parse(await page.evaluate((key) => window.localStorage.getItem(key) ?? '{}', reviewsKey));
+        expect(stored[`trades:${seeded.weekId}`]?.acknowledgedAt).toBeTruthy();
+        expect(stored[seeded.weekId]?.reflection).toBe('Example week.');
+        await reloadAppPage(page);
+        await expect(page.getByTestId('weekly-review-card')).toHaveCount(0);
+        await expect(page.getByTestId('today-triage-item').filter({ hasText: "This week's review is ready" })).toHaveCount(0);
+
+        // The archive's row for the week is the real one, without the example's reflection.
+        await gotoAppPage(page, '/performance/behaviour');
+        const week = page.getByTestId('reviews-archive').locator(`[data-week-id="${seeded.weekId}"]`);
+        await expect(week).toHaveAttribute('data-empty', 'false');
+        await expect(week.getByTestId('reviews-archive-reflection')).toHaveCount(0);
+    });
+
+    test('dismissing an example pattern leaves the same pattern from your trades', async ({ context, page }) => {
+        await signInAsNewUser(context, { firstSignIn: true });
+        const created = await page.request.post('/api/portfolios', { data: { name: 'Mondays' } });
+        expect(created.status()).toBe(201);
+        const portfolioId = (await created.json()).data.id;
+        // Five wins, each bought and sold on one of the last five Mondays.
+        const start = new Date(Date.now() - 2 * 86_400_000);
+        start.setUTCDate(start.getUTCDate() - ((start.getUTCDay() + 6) % 7));
+        for (let week = 0; week < 5; week++) {
+            const monday = new Date(start.getTime() - week * 7 * 86_400_000).toISOString().slice(0, 10);
+            for (const transaction of [
+                { type: 'BUY', date: monday, symbol: 'NKE', quantity: 10, price: 100 },
+                { type: 'SELL', date: monday, symbol: 'NKE', quantity: 10, price: 110 },
+            ]) {
+                expect((await page.request.post('/api/transactions', { data: { portfolioId, transaction } })).status()).toBe(201);
+            }
+        }
+        await gotoAppPage(page, '/');
+
+        // The example feed's Monday pattern, dismissed under the id the example uses.
+        const snoozeKey = userKey('pm-pattern-snoozed', (await page.locator('html').getAttribute('data-storage-scope'))!);
+        await page.evaluate((key) => {
+            window.localStorage.setItem(key, JSON.stringify({ 'best_weekday_concentration:0': '2099-01-01T00:00:00.000Z' }));
+        }, snoozeKey);
+        await reloadAppPage(page);
+
+        const feed = page.getByTestId('today-review').getByTestId('pattern-feed');
+        const monday = feed.locator('[data-testid="pattern-row"][data-detector="best_weekday_concentration"]');
+        await expect(monday).toContainText('Monday');
+        await monday.getByTestId('pattern-row-dismiss').click();
+        await expect(monday).toHaveCount(0);
+        const stored = JSON.parse(await page.evaluate((key) => window.localStorage.getItem(key) ?? '{}', snoozeKey));
+        expect(Object.keys(stored).sort()).toEqual(['best_weekday_concentration:0', 'trades:best_weekday_concentration:0']);
+    });
+
+    test('without closed trades the example review stays in the example section', async ({ context, page }) => {
+        await signInAsNewUser(context);
+        await gotoAppPage(page, '/');
+        await expect(page.getByTestId('today-review')).toHaveCount(0);
+        await expect(page.getByTestId('today-examples').getByTestId('sample-data-notice')).toContainText('The weekly review, patterns');
     });
 });
 

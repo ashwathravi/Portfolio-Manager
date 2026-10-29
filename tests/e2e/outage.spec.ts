@@ -31,6 +31,7 @@ test.describe('Database outage', () => {
         { path: '/portfolios/holdings', what: 'your holdings', container: '.pm-holdings-stack' },
         { path: '/portfolios/accounts', what: 'your accounts', container: '.pm-page' },
         { path: '/performance', what: 'your return history', container: '.pm-perf-stack' },
+        { path: '/performance/behaviour', what: 'your trades', container: '.pm-perf-stack' },
         { path: '/execution', what: 'your accounts and orders', container: '.pm-exec-page' },
     ];
 
@@ -95,6 +96,8 @@ test.describe('Unusable DATABASE_URL', () => {
         { path: '/portfolios/accounts', empty: (page: Page) => page.getByTestId('accounts-empty') },
         // No history without a database: the labelled example series.
         { path: '/performance', empty: (page: Page) => page.getByTestId('sample-data-notice') },
+        // No closed trades: the labelled example journal.
+        { path: '/performance/behaviour', empty: (page: Page) => page.getByTestId('sample-data-notice') },
         // No accounts to draft an order for.
         { path: '/execution', empty: (page: Page) => page.getByTestId('trade-needs-account') },
     ];

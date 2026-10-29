@@ -212,8 +212,9 @@ function EmptyState({ count }: { count: number }) {
         <div className="pm-mood-empty" data-testid="mood-breakdown-empty">
             <p className="pm-mood-empty-title">Not enough tagged trades yet</p>
             <p className="pm-mood-empty-desc">
-                Capture a mood on {remaining} more {remaining === 1 ? "trade" : "trades"}{" "}
-                and this board fills in with a personal cost-of-emotion read-out.
+                Pick a mood when you draft an order on Trade, then mark it placed. {remaining} more{" "}
+                {remaining === 1 ? "trade" : "trades"} closed with a mood and this board fills in with a personal
+                cost-of-emotion read-out.
             </p>
             <p className="pm-mood-empty-progress">
                 {count} / {MIN_TRADES_FOR_ANALYTICS} so far

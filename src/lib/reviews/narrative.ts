@@ -43,30 +43,33 @@ export function buildNarrative(stats: ReviewStats): string {
         bestDecision,
     } = stats;
 
-    // Sentence 1 — trade volume breakdown.
+    // Sentence 1 — closed trades, broken down when they were of more than
+    // one kind (a buy closed by a sale is a long trade; the reverse, short).
     let s1: string;
     if (tradeCount.total === 0) {
-        s1 = 'This week you sat on your hands — no trades executed.';
+        s1 = 'This week you sat on your hands — no trades closed.';
     } else {
         const pieces: string[] = [];
-        if (tradeCount.buy > 0) pieces.push(plural(tradeCount.buy, 'buy'));
-        if (tradeCount.sell > 0) pieces.push(plural(tradeCount.sell, 'sell'));
+        if (tradeCount.buy > 0) pieces.push(`${tradeCount.buy} long`);
+        if (tradeCount.sell > 0) pieces.push(`${tradeCount.sell} short`);
         if (tradeCount.rebalance > 0) pieces.push(plural(tradeCount.rebalance, 'rebalance'));
-        s1 = `This week you executed ${plural(tradeCount.total, 'trade')}${
-            pieces.length > 0 ? ` (${pieces.join(', ')})` : ''
+        s1 = `This week you closed ${plural(tradeCount.total, 'trade')}${
+            pieces.length > 1 ? ` (${pieces.join(', ')})` : ''
         }.`;
     }
 
     // Sentence 2 — P&L line. Always render so the card always has a number.
     const s2 = tradeCount.total === 0
         ? `No realised P&L to tally.`
-        : `Realised P&L of ${signedUsd(realizedPnlUsd)} (${signedPct(navPctChange)} of NAV).`;
+        : navPctChange === null
+            ? `Realised P&L of ${signedUsd(realizedPnlUsd)}.`
+            : `Realised P&L of ${signedUsd(realizedPnlUsd)} (${signedPct(navPctChange)} of net worth).`;
 
     // Sentence 3 — adherence + best decision + exceptions, compressed
     // into a single line. Skip when nothing interesting happened.
     const parts3: string[] = [];
     if (tradeCount.total > 0) {
-        parts3.push(`Rule adherence averaged ${Math.round(ruleAdherence)}/100`);
+        if (ruleAdherence !== null) parts3.push(`Rule adherence averaged ${Math.round(ruleAdherence)}/100`);
         if (exceptions > 0) {
             parts3.push(
                 policyExceptions > 0

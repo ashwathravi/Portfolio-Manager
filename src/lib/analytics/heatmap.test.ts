@@ -1,6 +1,7 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert';
-import { colorFor, HEAT_COLORS } from './heatmap';
+import { buildHeatmap, colorFor, HEAT_COLORS, totalTrades } from './heatmap';
+import type { JournalEntry } from '@/types/trade';
 
 describe('colorFor', () => {
     test('maps the avg/scale ratio onto the five theme stops', () => {
@@ -26,5 +27,33 @@ describe('colorFor', () => {
 
     test('every stop is a theme token, never a literal colour', () => {
         for (const c of Object.values(HEAT_COLORS)) assert.match(c, /^var\(--pm-heat-/);
+    });
+});
+
+describe('buildHeatmap', () => {
+    const trade = (patch: Partial<JournalEntry>): JournalEntry => ({
+        id: 't',
+        ticker: 'AAPL',
+        side: 'buy',
+        quantity: 1,
+        entryPrice: 100,
+        exitPrice: 110,
+        notionalUsd: 100,
+        realizedPnlUsd: 10,
+        holdingPeriodDays: 1,
+        openedAt: '2026-10-05T12:00:00.000Z',
+        closedAt: '2026-10-06T15:00:00.000Z',
+        ...patch,
+    });
+
+    test('bins a timed trade by weekday and hour', () => {
+        const cells = buildHeatmap([trade({})], null);
+        assert.strictEqual(totalTrades(cells), 1);
+    });
+
+    test('leaves out trades with only a date: their hour means nothing (launch item i51)', () => {
+        const cells = buildHeatmap([trade({ dateOnly: true }), trade({ id: 'u', dateOnly: true })], null);
+        assert.strictEqual(cells.length, 144);
+        assert.strictEqual(totalTrades(cells), 0);
     });
 });

@@ -5,7 +5,7 @@ import { ListChecks } from "lucide-react";
 import type { JournalEntry } from "@/types/trade";
 import { generateReview } from "@/lib/reviews/generate";
 import { formatWeekRange, listRecentWeeks } from "@/lib/reviews/weeks";
-import { getReviewState } from "@/lib/reviews/storage";
+import { getReviewState, reviewStateId } from "@/lib/reviews/storage";
 import type { WeeklyReview } from "@/lib/reviews/types";
 
 /**
@@ -30,6 +30,10 @@ export interface ReviewsArchiveCardProps {
     entries: JournalEntry[];
     /** How many past weeks to render. Defaults to 8. */
     limit?: number;
+    /** Net worth, for each week's P&L as a share of it; omitted when not known. */
+    nav?: number | null;
+    /** The example journal's weeks, whose reflections are kept apart from the user's own. */
+    isSample?: boolean;
     /** Test seam: freeze "now" so bounds stay deterministic. */
     now?: Date;
 }
@@ -43,12 +47,14 @@ interface ArchiveRow {
 export function ReviewsArchiveCard({
     entries,
     limit = DEFAULT_LIMIT,
+    nav = null,
+    isSample = false,
     now,
 }: ReviewsArchiveCardProps) {
     const weeks = useMemo(() => listRecentWeeks(limit, now), [limit, now]);
     const reviews = useMemo(
-        () => weeks.map((bounds) => generateReview(entries, bounds)),
-        [entries, weeks],
+        () => weeks.map((bounds) => generateReview(entries, bounds, { nav })),
+        [entries, weeks, nav],
     );
 
     // Hydration-safe: render rows with empty reflections on SSR, then
@@ -62,7 +68,7 @@ export function ReviewsArchiveCard({
         // eslint-disable-next-line react-hooks/set-state-in-effect
         setRows(
             reviews.map((r) => {
-                const state = getReviewState(r.id);
+                const state = getReviewState(reviewStateId(r.id, isSample ? "example" : "trades"));
                 return {
                     review: r,
                     reflection: state.reflection,
@@ -70,7 +76,7 @@ export function ReviewsArchiveCard({
                 };
             }),
         );
-    }, [reviews]);
+    }, [reviews, isSample]);
 
     return (
         <section
@@ -152,14 +158,8 @@ export function ReviewsArchiveCard({
                                     />
                                     <MiniStat
                                         label="Adherence"
-                                        value={`${review.stats.ruleAdherence}/100`}
-                                        tone={
-                                            review.stats.ruleAdherence >= 80
-                                                ? "pos"
-                                                : review.stats.ruleAdherence >= 60
-                                                  ? "warn"
-                                                  : "neg"
-                                        }
+                                        value={review.stats.ruleAdherence === null ? "—" : `${review.stats.ruleAdherence}/100`}
+                                        tone={adherenceTone(review.stats.ruleAdherence)}
                                     />
                                     <MiniStat
                                         label="Trades"
@@ -204,6 +204,11 @@ function MiniStat({ label, value, tone }: MiniStatProps) {
             <span className="pm-reviews-archive-mini-value">{value}</span>
         </div>
     );
+}
+
+function adherenceTone(score: number | null): MiniStatProps["tone"] {
+    if (score === null) return "neutral";
+    return score >= 80 ? "pos" : score >= 60 ? "warn" : "neg";
 }
 
 function formatUsdSigned(n: number): string {
