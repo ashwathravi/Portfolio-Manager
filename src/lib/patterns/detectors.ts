@@ -73,6 +73,14 @@ function getWeekdayIndex(d: Date): number {
     return (d.getDay() + 6) % 7;
 }
 
+/** The weekday a trade closed on. One with only a date (launch item i51)
+ *  is on its date's weekday: its stored noon UTC is a placeholder, and
+ *  from UTC+12 it's already the next day locally. */
+function closedWeekdayIndex(e: JournalEntry): number {
+    const closed = new Date(e.closedAt);
+    return e.dateOnly ? (closed.getUTCDay() + 6) % 7 : getWeekdayIndex(closed);
+}
+
 // --------------------------------------------------------------------- //
 // Detector: late_day_losses
 // --------------------------------------------------------------------- //
@@ -400,7 +408,7 @@ export const detectBestWeekdayConcentration: PatternDetector = (entries, ctx) =>
         () => ({ pnl: 0, ids: [] }),
     );
     for (const e of winsOnly) {
-        const idx = getWeekdayIndex(new Date(e.closedAt));
+        const idx = closedWeekdayIndex(e);
         byWeekday[idx].pnl += e.realizedPnlUsd;
         byWeekday[idx].ids.push(e.id);
     }

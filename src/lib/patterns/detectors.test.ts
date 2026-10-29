@@ -62,6 +62,26 @@ describe('runAllDetectors', () => {
         assert.equal(runAllDetectors(trades, CTX).filter((p) => p.detector === 'negative_mood_cost').length, 0);
     });
 
+    test('a trade with only a date wins on its date\'s weekday, even where noon UTC is the next day (launch item i51)', () => {
+        const tz = process.env.TZ;
+        process.env.TZ = 'Pacific/Auckland';
+        try {
+            // Five Friday wins, Oct 2 to Oct 30, 2026: Saturday morning in Auckland at noon UTC.
+            const fridays = [2, 9, 16, 23, 30].map((d, i): JournalEntry => {
+                const date = `2026-10-${String(d).padStart(2, '0')}`;
+                return { ...imported(i), realizedPnlUsd: 25, exitPrice: 125, openedAt: `${date}T12:00:00.000Z`, closedAt: `${date}T12:00:00.000Z` };
+            });
+            assert.equal(new Date(fridays[0].closedAt).getDay(), 6);
+            const [pattern] = runAllDetectors(fridays, CTX).filter((p) => p.detector === 'best_weekday_concentration');
+            assert.ok(pattern);
+            assert.match(pattern.headline, /Friday/);
+            assert.match(pattern.body, /5 winning trades on Fridays/);
+        } finally {
+            if (tz === undefined) delete process.env.TZ;
+            else process.env.TZ = tz;
+        }
+    });
+
     test('an empty journal raises nothing', () => {
         assert.deepEqual(runAllDetectors([], CTX), []);
     });
