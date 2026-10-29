@@ -24,3 +24,30 @@ export const plaidSyncSchema = z.object({
 }).strict();
 
 export type PlaidSyncBody = z.infer<typeof plaidSyncSchema>;
+
+/**
+ * What Plaid Link reports in the browser after a sign-in, as the page sends
+ * it with the public token: the institution and the accounts picked. The
+ * browser can send anything, so only these fields, as strings within these
+ * lengths, are kept (launch item i69); Plaid's other fields are dropped.
+ * The institution's ID is taken from Plaid's own answer when it gives one
+ * (src/lib/plaid/link.ts).
+ */
+export const plaidLinkMetadataSchema = z.object({
+    institution: z.object({
+        name: z.string().trim().max(100).nullish(),
+        institution_id: plaidIdSchema.nullish(),
+    }).nullish(),
+    accounts: z.array(z.object({
+        id: plaidIdSchema,
+        name: z.string().max(200),
+        mask: z.string().max(8).nullish(),
+        type: z.string().max(40).nullish(),
+        subtype: z.string().max(60).nullish(),
+        verification_status: z.string().max(60).nullish(),
+    })).max(MAX_PLAID_ACCOUNTS_PER_ITEM).optional(),
+    link_session_id: z.string().max(128).nullish(),
+});
+
+/** Bytes POST /api/plaid/exchange-public-token reads: a token and Link's metadata. */
+export const PLAID_EXCHANGE_MAX_BYTES = 64 * 1024;

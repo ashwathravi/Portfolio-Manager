@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { readJsonBody } from "@/lib/api/body";
 import { apiError, internalServerError, logApiEvent } from "@/lib/api/security";
 import { requestIdFrom } from "@/lib/observability/request-id";
 import { requireSessionApiUserScope } from "@/lib/api/session-security";
@@ -13,6 +14,7 @@ import {
 import { plaidConnectionsInDatabase, storePlaidConnection } from "@/lib/plaid/server-token-vault";
 import { connectedAccountFingerprints } from "@/lib/plaid/sync";
 import type { PlaidLinkMetadata } from "@/lib/plaid/types";
+import { PLAID_EXCHANGE_MAX_BYTES, plaidLinkMetadataSchema } from "@/lib/validators/plaid-sync";
 
 export const dynamic = "force-dynamic";
 
@@ -21,7 +23,13 @@ export async function POST(request: Request) {
     if (!auth.ok) return auth.response;
 
     try {
-        const body = await request.json().catch(() => ({}));
+        const read = await readJsonBody(request, PLAID_EXCHANGE_MAX_BYTES);
+        if (!read.ok && read.reason === "too-large") {
+            return apiError("Request is too large.", "PLAID_EXCHANGE_TOO_LARGE", 413);
+        }
+        const body: Record<string, unknown> = read.ok && read.value && typeof read.value === "object" && !Array.isArray(read.value)
+            ? read.value as Record<string, unknown>
+            : {};
         const publicToken = typeof body.publicToken === "string" ? body.publicToken : "";
         if (!publicToken.trim()) {
             return apiError("Plaid public token is required.", "PLAID_PUBLIC_TOKEN_REQUIRED", 400);
@@ -130,7 +138,12 @@ function readListEnv(name: string, fallback: string[]): string[] {
     return entries.length > 0 ? entries : fallback;
 }
 
+/**
+ * Link's metadata, or nothing when it isn't what Link sends: Plaid's answer
+ * names the institution anyway, and refusing the request would spend the
+ * public token, which works once.
+ */
 function parsePlaidMetadata(value: unknown): PlaidLinkMetadata | undefined {
-    if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
-    return value as PlaidLinkMetadata;
+    const parsed = plaidLinkMetadataSchema.safeParse(value);
+    return parsed.success ? parsed.data : undefined;
 }

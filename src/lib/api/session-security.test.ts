@@ -1,7 +1,7 @@
 import { afterEach, describe, test } from "node:test";
 import assert from "node:assert/strict";
 
-import { requireSessionApiUserScope } from "./session-security";
+import { requireAdminApiUserScope, requireSessionApiUserScope } from "./session-security";
 import { resetApiSecurityForTests } from "./security";
 
 const USER_A = "11111111-1111-4111-8111-111111111111";
@@ -124,5 +124,52 @@ describe("session-backed API user scope", () => {
         });
         assert.equal(configured.ok, false);
         if (!configured.ok) assert.equal(configured.response.status, 401);
+    });
+});
+
+describe("admin-only API user scope", () => {
+    afterEach(() => resetApiSecurityForTests());
+
+    const env = { ...configuredEnv, AUTH_ALLOWED_EMAILS: "owner@example.com,friend@example.com", AUTH_ADMIN_EMAILS: "owner@example.com" };
+    const sessionFor = (email: string | null) => async () => ({
+        user: { id: USER_A, email },
+        expires: "2099-01-01T00:00:00.000Z",
+    });
+
+    test("lets an admin through as their own user", async () => {
+        const result = await requireAdminApiUserScope(request(), { env, getSession: sessionFor("Owner@example.com") });
+
+        assert.equal(result.ok, true);
+        if (result.ok) assert.equal(result.context.userId, USER_A);
+    });
+
+    test("refuses a signed-in user who isn't an admin with 403", async () => {
+        const result = await requireAdminApiUserScope(request(), { env, getSession: sessionFor("friend@example.com") });
+
+        assert.equal(result.ok, false);
+        if (!result.ok) {
+            assert.equal(result.response.status, 403);
+            assert.deepEqual(await result.response.json(), { error: "Only an admin can do this.", code: "ADMIN_REQUIRED" });
+        }
+    });
+
+    test("refuses everyone when no admin is named, and anonymous callers with 401", async () => {
+        const noAdmins = { ...env, AUTH_ADMIN_EMAILS: "" };
+        const signedIn = await requireAdminApiUserScope(request(), { env: noAdmins, getSession: sessionFor("owner@example.com") });
+        const anonymous = await requireAdminApiUserScope(request(), { env, getSession: async () => null });
+
+        assert.equal(signedIn.ok, false);
+        if (!signedIn.ok) assert.equal(signedIn.response.status, 403);
+        assert.equal(anonymous.ok, false);
+        if (!anonymous.ok) assert.equal(anonymous.response.status, 401);
+    });
+
+    test("lets the local developer through in the local bypass", async () => {
+        const result = await requireAdminApiUserScope(request(), {
+            env: { NODE_ENV: "development", AUTH_LOCAL_DEV_BYPASS: "1", AUTH_LOCAL_DEV_USER_ID: USER_A },
+            getSession: async () => { throw new Error("no session lookup in the local bypass"); },
+        });
+
+        assert.equal(result.ok, true);
     });
 });

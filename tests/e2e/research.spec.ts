@@ -272,6 +272,68 @@ test.describe('Research page', () => {
     });
 });
 
+// Alpha Radar's tracked filers are shared by every user, and a refresh calls
+// SEC EDGAR for them, so only an admin (AUTH_ADMIN_EMAILS: fixture user A in
+// E2E runs) may change either (launch item i69). The local developer is one.
+test.describe('Alpha Radar is managed by admins', () => {
+    test.skip(!databaseAuthEnabled, 'Without database sessions the only user is the local developer, an admin.');
+
+    const MISSING_FILER = '00000000-0000-4000-8000-0000000f0000';
+    const filer = { cik: '0001067983', name: 'Not Saved Capital', enabled: true };
+
+    test('a user who is not an admin sees no Refresh and is refused every change', async ({ page, context }) => {
+        await signInAsFreshUser(context);
+
+        await gotoAppPage(page, '/research?tab=alpha-radar');
+        await expect(page.getByTestId('alpha-radar-detail')).toBeVisible();
+        await expect(page.getByTestId('alpha-radar-help-link')).toBeVisible();
+        await expect(page.getByTestId('alpha-radar-refresh')).toHaveCount(0);
+
+        await gotoAppPage(page, '/');
+        await expect(page.getByTestId('alpha-radar-dashboard-card')).toBeVisible();
+        await expect(page.getByTestId('alpha-radar-dashboard-help')).toBeVisible();
+        await expect(page.getByTestId('alpha-radar-dashboard-refresh')).toHaveCount(0);
+
+        const refused = [
+            await page.request.post('/api/alpha-radar/filers', { data: filer }),
+            await page.request.patch(`/api/alpha-radar/filers/${MISSING_FILER}`, { data: { enabled: false } }),
+            await page.request.delete(`/api/alpha-radar/filers/${MISSING_FILER}`),
+            await page.request.post('/api/alpha-radar/refresh', { data: { force: true } }),
+            await page.request.post(`/api/alpha-radar/filers/${MISSING_FILER}/refresh`, { data: { force: true } }),
+        ];
+        for (const response of refused) {
+            expect(response.status(), response.url()).toBe(403);
+            expect(await response.json()).toEqual({ error: 'Only an admin can do this.', code: 'ADMIN_REQUIRED' });
+        }
+
+        // Reading stays open to every signed-in user.
+        expect((await page.request.get('/api/alpha-radar/filers')).status()).toBe(200);
+    });
+
+    test('an admin gets past the check, and a signed-out caller is refused', async ({ page, playwright }) => {
+        await gotoAppPage(page, '/research?tab=alpha-radar');
+        await expect(page.getByTestId('alpha-radar-refresh')).toBeVisible();
+
+        // A filer that doesn't exist: past the admin check, and nothing changes.
+        expect((await page.request.patch(`/api/alpha-radar/filers/${MISSING_FILER}`, { data: { enabled: false } })).status()).toBe(404);
+        expect((await page.request.delete(`/api/alpha-radar/filers/${MISSING_FILER}`)).status()).toBe(404);
+        // Bodies are read under a cap, and one that isn't JSON is refused, not a 500.
+        const oversized = await page.request.post('/api/alpha-radar/refresh', { data: { force: true, pad: 'x'.repeat(20_000) } });
+        expect(oversized.status()).toBe(413);
+        expect((await oversized.json()).code).toBe('REQUEST_TOO_LARGE');
+        const notJson = await page.request.post('/api/alpha-radar/filers', { headers: { 'content-type': 'application/json' }, data: '{"cik":' });
+        expect(notJson.status()).toBe(400);
+
+        const anonymous = await playwright.request.newContext({
+            baseURL: 'http://localhost:3000',
+            storageState: { cookies: [], origins: [] },
+        });
+        expect((await anonymous.post('/api/alpha-radar/filers', { data: filer })).status()).toBe(401);
+        expect((await anonymous.post('/api/alpha-radar/refresh', { data: {} })).status()).toBe(401);
+        await anonymous.dispose();
+    });
+});
+
 test.describe('Research thesis price strip', () => {
     const strip = (page: import('@playwright/test').Page) =>
         page.getByRole('region', { name: 'Price over the last 30 days' });

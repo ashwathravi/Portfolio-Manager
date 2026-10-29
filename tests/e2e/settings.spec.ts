@@ -207,6 +207,15 @@ test.describe('Settings page', () => {
         expect(syncRequests[1]).toEqual({ itemId: 'item-plaid-sandbox-investments' });
     });
 
+    test('the Plaid token exchange reads at most 64 KB (i69)', async ({ page }) => {
+        // Refused before anything reaches Plaid, which E2E never calls anyway.
+        const response = await page.request.post('/api/plaid/exchange-public-token', {
+            data: { publicToken: 'public-sandbox-e2e', metadata: { link_session_id: 'x'.repeat(70_000) } },
+        });
+        expect(response.status()).toBe(413);
+        expect((await response.json()).code).toBe('PLAID_EXCHANGE_TOO_LARGE');
+    });
+
     test('regression: connections that fail to load say so, with Try again, not "none connected"', async ({ page }) => {
         // The Codex finding on PR #163: an outage read as having no accounts.
         let fail = true;

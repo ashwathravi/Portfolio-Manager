@@ -209,15 +209,20 @@ function stripCdata(value: string): string {
     return value;
 }
 
+const NAMED_ENTITIES: Record<string, string> = { lt: '<', gt: '>', amp: '&', quot: '"', apos: "'" };
+
+/**
+ * One pass, so a decoded "&" never starts another entity ("&amp;#60;" is the
+ * text "&#60;"). Anything that isn't a valid entity is left as written.
+ */
 function decodeXmlEntities(value: string): string {
-    return value
-        .replace(/&lt;/g, '<')
-        .replace(/&gt;/g, '>')
-        .replace(/&amp;/g, '&')
-        .replace(/&quot;/g, '"')
-        .replace(/&apos;/g, "'")
-        .replace(/&#(\d+);/g, (_match, digits: string) => String.fromCodePoint(Number(digits)))
-        .replace(/&#x([0-9a-f]+);/gi, (_match, hex: string) => String.fromCodePoint(Number.parseInt(hex, 16)));
+    return value.replace(/&(lt|gt|amp|quot|apos|#\d+|#x[0-9a-f]+);/gi, (match, entity: string) => {
+        if (entity[0] !== '#') return NAMED_ENTITIES[entity] ?? match;
+        const codePoint = entity[1] === 'x' || entity[1] === 'X'
+            ? Number.parseInt(entity.slice(2), 16)
+            : Number(entity.slice(1));
+        return codePoint <= 0x10ffff ? String.fromCodePoint(codePoint) : match;
+    });
 }
 
 function parseNonNegativeNumber(

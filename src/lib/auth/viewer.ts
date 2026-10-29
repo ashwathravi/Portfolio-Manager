@@ -1,7 +1,7 @@
 import type { Session } from "next-auth";
 
 import { getRequestSession } from "@/lib/auth/session";
-import { authRuntimeMode, getLocalDevUserId, type AuthEnvironment } from "@/lib/auth/access";
+import { authRuntimeMode, getLocalDevUserId, isAdmin, type AuthEnvironment } from "@/lib/auth/access";
 import type { ViewerIdentity } from "@/lib/identity";
 
 /**
@@ -16,7 +16,7 @@ export async function resolveViewerIdentity({
     const mode = authRuntimeMode(env);
     if (mode === "invalid") return null;
     if (mode === "local-bypass") {
-        return { id: getLocalDevUserId(env), name: null, email: null, image: null, mode: "local-dev" };
+        return { id: getLocalDevUserId(env), name: null, email: null, image: null, mode: "local-dev", admin: true };
     }
     try {
         const session = await getSession();
@@ -28,6 +28,7 @@ export async function resolveViewerIdentity({
             email: user.email?.trim() || null,
             image: user.image?.trim() || null,
             mode: "signed-in",
+            admin: isAdmin(user.email, env),
         };
     } catch {
         return null;

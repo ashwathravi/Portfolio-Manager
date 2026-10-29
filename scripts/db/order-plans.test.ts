@@ -169,4 +169,17 @@ describe('order plans', { skip: !DATABASE_URL && 'SCRIPTS_TEST_DATABASE_URL is n
         await assert.rejects(insert('filled', 1), /order_plans_status_check/);
         await assert.rejects(insert('ready', 0), /order_plans_quantity_check/);
     });
+
+    test('the table refuses a plan filed under another user\'s account, whatever the code checks (i69)', async () => {
+        const mine = await seedUser('u-fk-plan-owner');
+        await seedUser('u-fk-plan-intruder');
+        await assert.rejects(sql`
+            INSERT INTO order_plans (user_id, portfolio_id, instrument_type, symbol, side, order_type, quantity, time_in_force, status)
+            VALUES ('u-fk-plan-intruder', ${mine}, 'equity', 'IBM', 'buy', 'market', 1, 'day', 'ready')`, /order_plans_portfolio_owner_fk/);
+
+        const [saved] = await sql<{ id: string }[]>`
+            INSERT INTO order_plans (user_id, portfolio_id, instrument_type, symbol, side, order_type, quantity, time_in_force, status)
+            VALUES ('u-fk-plan-owner', ${mine}, 'equity', 'IBM', 'buy', 'market', 1, 'day', 'ready') RETURNING id`;
+        await assert.rejects(sql`UPDATE order_plans SET user_id = 'u-fk-plan-intruder' WHERE id = ${saved.id}`, /order_plans_portfolio_owner_fk/);
+    });
 });

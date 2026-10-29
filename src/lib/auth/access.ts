@@ -20,6 +20,7 @@ export interface AuthEnvironment {
     AUTH_LOCAL_DEV_USER_ID?: string;
     AUTH_ALLOWED_EMAILS?: string;
     AUTH_ALLOWED_DOMAINS?: string;
+    AUTH_ADMIN_EMAILS?: string;
     INTERNAL_API_SECRET?: string;
 }
 
@@ -74,6 +75,22 @@ export function isSessionEmailAllowed(
     if (allowedEmails.length > 0 && !allowedEmails.includes(normalized)) return false;
     if (allowedDomains.length === 0) return true;
     return allowedDomains.includes(normalized.slice(normalized.lastIndexOf("@") + 1));
+}
+
+/**
+ * Whether a signed-in user may change what every user shares: Alpha Radar's
+ * tracked filers, and refreshes that call SEC EDGAR for all of them. Admins
+ * are named in AUTH_ADMIN_EMAILS; with none named, nobody is one. The local
+ * developer always is.
+ */
+export function isAdmin(email: unknown, env: AuthEnvironment = process.env): boolean {
+    const mode = authRuntimeMode(env);
+    if (mode === "local-bypass") return true;
+    if (mode !== "configured") return false;
+
+    const normalized = typeof email === "string" ? email.trim().toLowerCase() : "";
+    if (!normalized) return false;
+    return parseCsv(env.AUTH_ADMIN_EMAILS).some((entry) => entry.toLowerCase() === normalized);
 }
 
 export function authRuntimeMode(env: AuthEnvironment = process.env): AuthRuntimeMode {

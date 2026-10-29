@@ -4,6 +4,7 @@ import { auth } from "@/auth";
 import {
     authRuntimeMode,
     getLocalDevUserId,
+    isAdmin,
     type AuthEnvironment,
 } from "@/lib/auth/access";
 import {
@@ -36,10 +37,30 @@ interface SessionScopeOptions {
  */
 export async function requireSessionApiUserScope(
     request: ApiRequestLike,
+    options: SessionScopeOptions = {},
+): Promise<ScopedAuthSuccess | AuthFailure> {
+    return resolveSessionScope(request, options, false);
+}
+
+/**
+ * As {@link requireSessionApiUserScope}, for a route that changes what every
+ * user shares: a signed-in user who isn't an admin (AUTH_ADMIN_EMAILS) is
+ * refused with 403.
+ */
+export async function requireAdminApiUserScope(
+    request: ApiRequestLike,
+    options: SessionScopeOptions = {},
+): Promise<ScopedAuthSuccess | AuthFailure> {
+    return resolveSessionScope(request, options, true);
+}
+
+async function resolveSessionScope(
+    request: ApiRequestLike,
     {
         env = process.env,
         getSession = auth,
-    }: SessionScopeOptions = {},
+    }: SessionScopeOptions,
+    adminOnly: boolean,
 ): Promise<ScopedAuthSuccess | AuthFailure> {
     // Signed-in requests are limited per user only, so people behind one
     // shared IP (an office, a household) don't share a budget. Requests that
@@ -52,7 +73,14 @@ export async function requireSessionApiUserScope(
     if (mode === "configured") {
         const session = await getSession();
         if (session?.user?.id) {
-            return authorizeUser(request, session.user.id);
+            const scope = await authorizeUser(request, session.user.id);
+            if (scope.ok && adminOnly && !isAdmin(session.user.email, env)) {
+                return {
+                    ok: false,
+                    response: apiError("Only an admin can do this.", "ADMIN_REQUIRED", 403),
+                };
+            }
+            return scope;
         }
 
         return refuseAnonymous(request, apiError("Unauthorized", "UNAUTHORIZED", 401));

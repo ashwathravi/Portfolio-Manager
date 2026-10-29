@@ -12,6 +12,8 @@ export interface ViewerIdentity {
     image: string | null;
     /** `local-dev` when running with AUTH_LOCAL_DEV_BYPASS (no Google session). */
     mode: 'signed-in' | 'local-dev';
+    /** May change what every user shares, such as Alpha Radar's filers (isAdmin in lib/auth/access.ts). */
+    admin: boolean;
 }
 
 /**

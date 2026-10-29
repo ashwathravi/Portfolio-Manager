@@ -13,6 +13,9 @@ function safeTrimmedText(label: string, max = 200) {
         .refine(noStartingEquals, { message: FORMULA_ERROR });
 }
 
+/** Bytes a tracked-filer or refresh request may send: a few short fields. */
+export const ALPHA_RADAR_BODY_MAX_BYTES = 16 * 1024;
+
 export const alphaRadarReportPeriodSchema = z.string()
     .regex(/^\d{4}-Q[1-4]$/, 'Report period must use YYYY-QN format');
 
