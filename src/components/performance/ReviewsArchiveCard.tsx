@@ -5,7 +5,7 @@ import { ListChecks } from "lucide-react";
 import type { JournalEntry } from "@/types/trade";
 import { generateReview } from "@/lib/reviews/generate";
 import { formatWeekRange, listRecentWeeks } from "@/lib/reviews/weeks";
-import { getReviewState } from "@/lib/reviews/storage";
+import { getReviewState, reviewStateId } from "@/lib/reviews/storage";
 import type { WeeklyReview } from "@/lib/reviews/types";
 
 /**
@@ -32,6 +32,8 @@ export interface ReviewsArchiveCardProps {
     limit?: number;
     /** Net worth, for each week's P&L as a share of it; omitted when not known. */
     nav?: number | null;
+    /** The example journal's weeks, whose reflections are kept apart from the user's own. */
+    isSample?: boolean;
     /** Test seam: freeze "now" so bounds stay deterministic. */
     now?: Date;
 }
@@ -46,6 +48,7 @@ export function ReviewsArchiveCard({
     entries,
     limit = DEFAULT_LIMIT,
     nav = null,
+    isSample = false,
     now,
 }: ReviewsArchiveCardProps) {
     const weeks = useMemo(() => listRecentWeeks(limit, now), [limit, now]);
@@ -65,7 +68,7 @@ export function ReviewsArchiveCard({
         // eslint-disable-next-line react-hooks/set-state-in-effect
         setRows(
             reviews.map((r) => {
-                const state = getReviewState(r.id);
+                const state = getReviewState(reviewStateId(r.id, isSample ? "example" : "trades"));
                 return {
                     review: r,
                     reflection: state.reflection,
@@ -73,7 +76,7 @@ export function ReviewsArchiveCard({
                 };
             }),
         );
-    }, [reviews]);
+    }, [reviews, isSample]);
 
     return (
         <section

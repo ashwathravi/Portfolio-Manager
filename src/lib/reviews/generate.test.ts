@@ -9,6 +9,8 @@ const BOUNDS: WeekBounds = {
     id: 'wk:2026-05-04',
     weekStart: '2026-05-04T07:00:00.000Z',
     weekEnd: '2026-05-08T23:00:00.000Z',
+    firstDay: '2026-05-04',
+    lastDay: '2026-05-08',
 };
 
 function entry(patch: Partial<JournalEntry> = {}): JournalEntry {
@@ -165,6 +167,40 @@ describe('generateReview', () => {
             generateReview([entry(), entry({ id: 'j-short', side: 'sell' })], BOUNDS).narrative,
             /^This week you closed 2 trades \(1 long, 1 short\)\./,
         );
+    });
+
+    test('counts a trade with only a date on that date, wherever the week ends (launch item i51)', () => {
+        // Tokyo: Monday 00:00 to Friday 16:00 is Sunday 15:00Z to Friday 07:00Z,
+        // and a trade dated Friday is stored at noon UTC, after that close.
+        const tokyo: WeekBounds = {
+            id: 'wk:2026-10-19',
+            weekStart: '2026-10-18T15:00:00.000Z',
+            weekEnd: '2026-10-23T07:00:00.000Z',
+            firstDay: '2026-10-19',
+            lastDay: '2026-10-23',
+        };
+        const dated = (id: string, opened: string, closed: string, pnl: number) => entry({
+            id,
+            rationale: undefined,
+            dateOnly: true,
+            openedAt: `${opened}T12:00:00.000Z`,
+            closedAt: `${closed}T12:00:00.000Z`,
+            realizedPnlUsd: pnl,
+        });
+        const friday = dated('fri', '2026-10-22', '2026-10-23', -100);
+        const sunday = dated('sun', '2026-10-16', '2026-10-18', 40);
+        const nextMonday = dated('mon', '2026-10-23', '2026-10-26', 25);
+        const review = generateReview([friday, sunday, nextMonday], tokyo);
+        assert.equal(review.stats.tradeCount.total, 1);
+        assert.equal(review.stats.realizedPnlUsd, -100);
+
+        // Sold and bought back the same Friday: churn sees the trades the week counted.
+        const churn = generateReview([friday, dated('fri-2', '2026-10-23', '2026-10-23', -20)], tokyo);
+        assert.equal(churn.stats.tradeCount.total, 2);
+        assert.deepEqual(churn.stats.churnSymbols, ['NVDA']);
+
+        // A trade with a time of day still ends at the local Friday close.
+        assert.equal(generateReview([{ ...friday, dateOnly: undefined }], tokyo).stats.tradeCount.total, 0);
     });
 
     test('a week with no closed trades still scores 100 and says so', () => {

@@ -9,7 +9,7 @@ import { isSeedThesis } from "@/lib/research/thesis";
 import { buildTriage } from "@/lib/today/triage";
 import { currentWeekBounds } from "@/lib/reviews/weeks";
 import { generateReview } from "@/lib/reviews/generate";
-import { getReviewState, isReviewActive } from "@/lib/reviews/storage";
+import { getReviewState, isReviewActive, reviewStateId } from "@/lib/reviews/storage";
 import { getSeedJournal } from "@/lib/journal/seed";
 import { SampleTag } from "@/components/data-display/SampleTag";
 import type { JournalEntry } from "@/types/trade";
@@ -43,7 +43,7 @@ export function TodayTriage({
         const quiet = reviewEntries !== undefined && review.stats.tradeCount.total === 0;
         // eslint-disable-next-line react-hooks/set-state-in-effect -- client-only clock + localStorage state
         setMountedNow(now);
-        setReviewDue(!quiet && isReviewActive(getReviewState(review.id), now));
+        setReviewDue(!quiet && isReviewActive(getReviewState(reviewStateId(review.id, reviewEntries ? "trades" : "example")), now));
     }, [reviewEntries]);
 
     const items = useMemo(() => {

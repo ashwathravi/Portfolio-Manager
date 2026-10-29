@@ -34,6 +34,34 @@ describe('runAllDetectors', () => {
         }
     });
 
+    test('a FOMO loss with no net worth to weigh it by is said in dollars, not as a share of zero', () => {
+        const fomo = (i: number): JournalEntry => ({
+            ...imported(i),
+            dateOnly: undefined,
+            rationale: {
+                thesisId: '',
+                setupType: 'conviction_add',
+                conviction: 4,
+                mood: 'fomo',
+                rationale: 'Chasing the move.',
+                capturedAt: imported(i).openedAt,
+                timeToDecisionMs: 5_000,
+            },
+        });
+        const trades = [fomo(0), fomo(1)];
+        for (const nav of [0, -50]) {
+            const [pattern] = runAllDetectors(trades, { ...CTX, nav }).filter((p) => p.detector === 'negative_mood_cost');
+            assert.ok(pattern, `nav ${nav}`);
+            assert.equal(pattern.body, 'Net realized P&L on caution-mood entries is -$20.');
+            assert.doesNotMatch(pattern.body, /Infinity|NaN|NAV/);
+        }
+
+        // With a net worth: a share of it, and nothing under 1%.
+        const [weighed] = runAllDetectors(trades, { ...CTX, nav: 1_000 }).filter((p) => p.detector === 'negative_mood_cost');
+        assert.match(weighed.body, /about 2\.0% of current NAV/);
+        assert.equal(runAllDetectors(trades, CTX).filter((p) => p.detector === 'negative_mood_cost').length, 0);
+    });
+
     test('an empty journal raises nothing', () => {
         assert.deepEqual(runAllDetectors([], CTX), []);
     });

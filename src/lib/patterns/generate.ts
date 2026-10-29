@@ -57,6 +57,19 @@ export const DEFAULT_SECTOR_TARGETS: Record<string, number> = {
  */
 export const DEFAULT_NAV = 250_000;
 
+/** The pattern feed reads the closed trades of the last 90 days, as it says. */
+export const PATTERN_WINDOW_DAYS = 90;
+
+/** The trades closed in the pattern feed's window ending at `now`: older
+ *  history (launch item i51 loads all of it) doesn't raise today's patterns. */
+export function inPatternWindow<T extends Pick<JournalEntry, 'closedAt'>>(entries: readonly T[], now: Date): T[] {
+    const since = now.getTime() - PATTERN_WINDOW_DAYS * 86_400_000;
+    return entries.filter((entry) => {
+        const closed = Date.parse(entry.closedAt);
+        return Number.isFinite(closed) && closed >= since;
+    });
+}
+
 export async function generatePatterns(
     entries: ReadonlyArray<JournalEntry>,
     opts: GenerateOptions = {},

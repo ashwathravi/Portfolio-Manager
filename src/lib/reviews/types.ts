@@ -19,6 +19,10 @@ export interface WeekBounds {
      *  the review id. Avoids the ISO-week pitfalls around year
      *  boundaries (W52/W53/W01 etc.) by just using the Monday date. */
     id: string;
+    /** `YYYY-MM-DD` of the week's Monday and Friday: the days a trade
+     *  stored with a date and no time (launch item i51) counts on. */
+    firstDay: string;
+    lastDay: string;
 }
 
 /** Tallies broken out the way the narrative wants to read them. */

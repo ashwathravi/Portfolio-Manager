@@ -387,7 +387,22 @@ test.describe('Today › Weekly review from your closed trades (launch item i51)
     test('the review, its triage item and the pattern feed come from your trades', async ({ context, page }) => {
         await signInAsNewUser(context, { firstSignIn: true });
         const seeded = await seedClosedTrades(page);
+        // A trade closed long before the pattern feed's 90 days: in the journal, not in the feed.
+        const longAgo = new Date(Date.now() - 200 * 86_400_000).toISOString().slice(0, 10);
+        for (const transaction of [
+            { type: 'BUY', date: longAgo, symbol: 'TGT', quantity: 2, price: 150 },
+            { type: 'SELL', date: longAgo, symbol: 'TGT', quantity: 2, price: 140 },
+        ]) {
+            expect((await page.request.post('/api/transactions', { data: { portfolioId: seeded.accountId, transaction } })).status()).toBe(201);
+        }
         await gotoAppPage(page, '/');
+
+        // The example review of the same week, finished with a reflection, answers for nothing real.
+        const reviewsKey = userKey('pm-weekly-reviews-v1', (await page.locator('html').getAttribute('data-storage-scope'))!);
+        await page.evaluate(([key, weekId]) => {
+            window.localStorage.setItem(key, JSON.stringify({ [weekId]: { acknowledgedAt: new Date().toISOString(), reflection: 'Example week.' } }));
+        }, [reviewsKey, seeded.weekId] as const);
+        await reloadAppPage(page);
 
         const section = page.getByTestId('today-review');
         const card = section.getByTestId('weekly-review-card');
@@ -405,12 +420,21 @@ test.describe('Today › Weekly review from your closed trades (launch item i51)
         await expect(review).toBeVisible();
         await expect(review.getByTestId('sample-tag')).toHaveCount(0);
 
-        // Done hides the card and clears the triage item.
+        // Done hides the card and clears the triage item, apart from the example's state.
         await card.getByTestId('weekly-review-acknowledge').click();
         await expect(card).toHaveCount(0);
+        const stored = JSON.parse(await page.evaluate((key) => window.localStorage.getItem(key) ?? '{}', reviewsKey));
+        expect(stored[`trades:${seeded.weekId}`]?.acknowledgedAt).toBeTruthy();
+        expect(stored[seeded.weekId]?.reflection).toBe('Example week.');
         await reloadAppPage(page);
         await expect(page.getByTestId('weekly-review-card')).toHaveCount(0);
         await expect(page.getByTestId('today-triage-item').filter({ hasText: "This week's review is ready" })).toHaveCount(0);
+
+        // The archive's row for the week is the real one, without the example's reflection.
+        await gotoAppPage(page, '/performance/behaviour');
+        const week = page.getByTestId('reviews-archive').locator(`[data-week-id="${seeded.weekId}"]`);
+        await expect(week).toHaveAttribute('data-empty', 'false');
+        await expect(week.getByTestId('reviews-archive-reflection')).toHaveCount(0);
     });
 
     test('without closed trades the example review stays in the example section', async ({ context, page }) => {

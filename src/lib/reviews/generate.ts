@@ -31,7 +31,14 @@ export interface GenerateReviewOptions {
     nav?: number | null;
 }
 
-function inWindow(entry: JournalEntry, startMs: number, endMs: number): boolean {
+/** A trade with only a date (launch item i51) counts on that date: its
+ *  stored time, noon UTC, isn't when it happened, and east of UTC+4 it
+ *  falls after the local Friday close. */
+function inWindow(entry: JournalEntry, bounds: WeekBounds, startMs: number, endMs: number): boolean {
+    if (entry.dateOnly) {
+        const day = entry.closedAt.slice(0, 10);
+        return day >= bounds.firstDay && day <= bounds.lastDay;
+    }
     const t = Date.parse(entry.closedAt);
     return Number.isFinite(t) && t >= startMs && t <= endMs;
 }
@@ -123,9 +130,15 @@ function computeChurnWarnings(entries: JournalEntry[], bounds: WeekBounds): {
         holdingPeriodDays: entry.holdingPeriodDays,
         policyExceptions: entry.policyExceptions,
     }));
+    // A date-only Friday sale can be stored after the local close; the
+    // week's trades are already chosen, so the window must reach them all.
+    const asOf = entries.reduce(
+        (latest, entry) => Math.max(latest, Date.parse(entry.closedAt) || 0),
+        Date.parse(bounds.weekEnd),
+    );
     const analysis = computeChurnAnalysis(trades, {
         windowDays: 7,
-        asOf: bounds.weekEnd,
+        asOf: new Date(asOf),
         watchRepeatSymbols: 1,
         breachRepeatSymbols: 2,
     });
@@ -144,7 +157,7 @@ export function generateReview(
 ): WeeklyReview {
     const startMs = Date.parse(bounds.weekStart);
     const endMs = Date.parse(bounds.weekEnd);
-    const windowed = entries.filter((e) => inWindow(e, startMs, endMs));
+    const windowed = entries.filter((e) => inWindow(e, bounds, startMs, endMs));
 
     const realizedPnlUsd = Math.round(
         windowed.reduce((s, e) => s + (e.realizedPnlUsd || 0), 0) * 100,

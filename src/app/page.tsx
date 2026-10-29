@@ -29,6 +29,7 @@ import { getSecurityProfiles } from '@/lib/markets/price-store';
 import { holdingName, loadSecurityProfiles } from '@/lib/markets/security-profile';
 import { isDatabaseConfigured } from '@/db/connection-options';
 import { loadTradeJournalForPage } from '@/lib/journal/server';
+import { inPatternWindow } from '@/lib/patterns/generate';
 
 /**
  * Today (/).
@@ -92,6 +93,7 @@ export default async function Today() {
     loadTradeJournalForPage(userId, { accounts: allPortfolios, activity }),
   ]);
   const closedTrades = journal && journal.entries.length > 0 ? journal.entries : undefined;
+  const patternTrades = closedTrades && inPatternWindow(closedTrades, new Date());
 
   const cashTotal = allPortfolios.reduce((s, p) => s + (p.cashBalance || 0), 0);
   const allHoldings = allPortfolios.flatMap((p) =>
@@ -177,7 +179,7 @@ export default async function Today() {
           <div id="weekly-review">
             <WeeklyReviewCard entries={closedTrades} nav={journal.netWorth} />
           </div>
-          <PatternFeed entries={closedTrades} nav={journal.netWorth} />
+          <PatternFeed entries={patternTrades} nav={journal.netWorth} />
         </section>
       )}
 

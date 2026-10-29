@@ -11,6 +11,7 @@ import {
     getReviewState,
     isReviewActive,
     remindLater,
+    reviewStateId,
     saveReflection,
 } from "@/lib/reviews/storage";
 
@@ -53,6 +54,7 @@ export function WeeklyReviewCard({ entries, nav = null, now }: WeeklyReviewCardP
             : generateReview(getSeedJournal(now?.getTime()), bounds, { nav: DEFAULT_NAV }),
         [entries, nav, now, bounds],
     );
+    const stateId = reviewStateId(review.id, entries ? "trades" : "example");
 
     // Hydration-safe: start as `false` so the server + first client
     // render match (no visible card), then pull the real state
@@ -63,28 +65,28 @@ export function WeeklyReviewCard({ entries, nav = null, now }: WeeklyReviewCardP
     const [active, setActive] = useState(false);
 
     useEffect(() => {
-        const state = getReviewState(review.id);
+        const state = getReviewState(stateId);
         // Hydrates client-only review state from localStorage after mount.
         // eslint-disable-next-line react-hooks/set-state-in-effect
         setReflection(state.reflection ?? "");
         setActive(isReviewActive(state));
         setMounted(true);
-    }, [review.id]);
+    }, [stateId]);
 
     const onReflectionBlur = useCallback(() => {
         if (!reflection.trim()) return;
-        saveReflection(review.id, reflection);
-    }, [review.id, reflection]);
+        saveReflection(stateId, reflection);
+    }, [stateId, reflection]);
 
     const onAcknowledge = useCallback(() => {
-        acknowledgeReview(review.id, reflection);
+        acknowledgeReview(stateId, reflection);
         setActive(false);
-    }, [review.id, reflection]);
+    }, [stateId, reflection]);
 
     const onRemindLater = useCallback(() => {
-        remindLater(review.id);
+        remindLater(stateId);
         setActive(false);
-    }, [review.id]);
+    }, [stateId]);
 
     // SSR + pre-mount: render nothing. Also render nothing if not
     // active — a satisfied/dismissed review keeps the dashboard clean.

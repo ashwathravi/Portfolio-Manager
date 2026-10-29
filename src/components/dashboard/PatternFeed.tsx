@@ -8,6 +8,7 @@ import { SEED_SECTOR_BY_TICKER } from "@/lib/adherence/seed";
 import {
     DEFAULT_NAV,
     DEFAULT_SECTOR_TARGETS,
+    PATTERN_WINDOW_DAYS,
     generatePatterns,
 } from "@/lib/patterns/generate";
 import type { Pattern } from "@/lib/patterns/types";
@@ -43,7 +44,8 @@ import { PatternRow } from "./PatternRow";
 const MAX_COLLAPSED = 6;
 
 export interface PatternFeedProps {
-    /** The user's closed trades (launch item i51); the example journal when omitted. */
+    /** The user's closed trades of the last PATTERN_WINDOW_DAYS (launch item i51:
+     *  `inPatternWindow`); the example journal when omitted. */
     entries?: JournalEntry[];
     /** Approximate NAV — drives the %-of-NAV detectors. */
     nav?: number;
@@ -131,7 +133,7 @@ export function PatternFeed({
                         Pattern feed
                     </h3>
                     <p className="pm-pattern-feed-sub">
-                        From <strong>{entries.length}</strong> trades · last 90 days
+                        From <strong>{entries.length}</strong> trades · last {PATTERN_WINDOW_DAYS} days
                     </p>
                 </div>
                 <div className="pm-pattern-feed-actions">

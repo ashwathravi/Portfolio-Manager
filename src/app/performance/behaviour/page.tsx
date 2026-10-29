@@ -25,7 +25,7 @@ async function BehaviourContent() {
             </div>
         );
     }
-    return <BehaviourPageClient journal={journal && journal.entries.length > 0 ? journal : null} />;
+    return <BehaviourPageClient journal={journal} />;
 }
 
 export default function BehaviourPage() {

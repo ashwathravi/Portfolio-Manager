@@ -575,6 +575,26 @@ test.describe('Performance › Behaviour — from your closed trades (launch ite
         await expect(closed.getByTestId('closed-trades-hint').getByRole('link', { name: 'Research › Journal' })).toHaveAttribute('href', '/research?tab=journal');
     });
 
+    test('trades that can\'t be matched are named even when they are all there is', async ({ context, page }) => {
+        await signInAsNewUser(context, { firstSignIn: true });
+        const created = await page.request.post('/api/portfolios', { data: { name: 'Before the split' } });
+        const portfolioId = (await created.json()).data.id;
+        // IBM's stored closes are about $200 (scripts/e2e/fixtures.sql): trades at ten times
+        // that came before a split, so their buys and sales can't be matched.
+        const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(new Date());
+        for (const transaction of [
+            { type: 'BUY', date: today, symbol: 'IBM', quantity: 1, price: 2000 },
+            { type: 'SELL', date: today, symbol: 'IBM', quantity: 1, price: 2100 },
+        ]) {
+            expect((await page.request.post('/api/transactions', { data: { portfolioId, transaction } })).status()).toBe(201);
+        }
+        await gotoAppPage(page, '/performance/behaviour');
+
+        await expect(page.getByTestId('behaviour-left-out')).toContainText('Left out: IBM.');
+        await expect(page.getByText('No closed trades to show')).toBeVisible();
+        await expect(page.getByTestId('closed-trades')).toHaveCount(0);
+    });
+
     test('another user sees none of your trades', async ({ context, page }) => {
         await signInAsNewUser(context, { firstSignIn: true });
         await seedClosedTrades(page);

@@ -343,14 +343,20 @@ export const detectNegativeMoodCost: PatternDetector = (entries, ctx) => {
     // the user — surfacing it as a warn would be misleading.
     if (netPnl >= 0) return [];
     const magnitude = Math.abs(netPnl);
-    if (magnitude < ctx.nav * MOOD_LOSS_NAV_FRAC) return [];
+    // Real closed trades can sit in accounts with nothing left in them
+    // (launch item i51): without a positive NAV there is no share to
+    // weigh the loss by, so it stands on its dollars.
+    const nav = ctx.nav > 0 ? ctx.nav : null;
+    if (nav !== null && magnitude < nav * MOOD_LOSS_NAV_FRAC) return [];
     return [
         {
             id: 'negative_mood_cost',
             detector: 'negative_mood_cost',
             severity: 'warn',
             headline: `FOMO/revenge trades cost you <em>${usd(magnitude)}</em> across ${hits.length} trades.`,
-            body: `Net realized P&L on caution-mood entries is ${usd(netPnl)} — about ${((magnitude / ctx.nav) * 100).toFixed(1)}% of current NAV.`,
+            body: nav === null
+                ? `Net realized P&L on caution-mood entries is ${usd(netPnl)}.`
+                : `Net realized P&L on caution-mood entries is ${usd(netPnl)} — about ${((magnitude / nav) * 100).toFixed(1)}% of current NAV.`,
             actions: [
                 {
                     kind: 'link',

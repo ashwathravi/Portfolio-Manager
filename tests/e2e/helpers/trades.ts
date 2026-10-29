@@ -40,17 +40,16 @@ export async function seedClosedTrades(page: Page): Promise<SeededTrades> {
         monday.setHours(0, 0, 0, 0);
         const wednesday = new Date(monday);
         wednesday.setDate(monday.getDate() + 2);
-        const fridayClose = new Date(monday);
-        fridayClose.setDate(monday.getDate() + 4);
-        fridayClose.setHours(16, 0, 0, 0);
+        const friday = new Date(monday);
+        friday.setDate(monday.getDate() + 4);
         const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(now);
-        const todayNoon = Date.parse(`${today}T12:00:00Z`);
         return {
             weekBuy: iso(monday),
             weekSell: iso(wednesday),
             weekId: `wk:${iso(monday)}`,
             today,
-            todayInWeek: todayNoon >= monday.getTime() && todayNoon <= fridayClose.getTime(),
+            // Trades have dates, not times: a week counts them Monday to Friday by date.
+            todayInWeek: today >= iso(monday) && today <= iso(friday),
             dayBefore: iso(new Date(monday.getTime() - 86_400_000)),
         };
     });
