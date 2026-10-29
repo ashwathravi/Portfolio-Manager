@@ -28,6 +28,8 @@ import { toTodayActivity } from '@/lib/today/rows';
 import { getSecurityProfiles } from '@/lib/markets/price-store';
 import { holdingName, loadSecurityProfiles } from '@/lib/markets/security-profile';
 import { isDatabaseConfigured } from '@/db/connection-options';
+import { loadTradeJournalForPage } from '@/lib/journal/server';
+import { inPatternWindow } from '@/lib/patterns/generate';
 
 /**
  * Today (/).
@@ -39,7 +41,9 @@ import { isDatabaseConfigured } from '@/db/connection-options';
  *   3. A one-line risk-policy strip (full checks behind a disclosure).
  *   4. The equity curve from nightly valuations, holdings, allocation, and
  *      recent activity — all from the database.
- *   5. Review & research — example-data cards, labelled and hideable.
+ *   5. The weekly review and pattern feed from the user's closed trades
+ *      (launch item i51), once they have some.
+ *   6. Review & research — example-data cards, labelled and hideable.
  *
  * Every figure in 1–4 comes from the user's portfolios and transactions;
  * the risk policy is the user's saved one, evaluated on their holdings,
@@ -72,7 +76,7 @@ export default async function Today() {
   // Warm quotes for the first paint; the hero keeps polling client-side.
   // Without market data the stored prices stand.
   const heldSymbols = allPortfolios.flatMap((p) => p.holdings.map((h) => h.symbol));
-  const [liveQuotes, profiles, theses, riskPolicy] = await Promise.all([
+  const [liveQuotes, profiles, theses, riskPolicy, { journal }] = await Promise.all([
     loadQuotes(heldSymbols),
     // Company names from the securities master (launch item i34).
     loadSecurityProfiles(heldSymbols, getSecurityProfiles),
@@ -84,7 +88,12 @@ export default async function Today() {
       })
       : [],
     loadUserRiskPolicy(userId),
+    // Closed trades for the weekly review and patterns; without them (or
+    // when they can't be read) the example ones stand in.
+    loadTradeJournalForPage(userId, { accounts: allPortfolios, activity }),
   ]);
+  const closedTrades = journal && journal.entries.length > 0 ? journal.entries : undefined;
+  const patternTrades = closedTrades && inPatternWindow(closedTrades, new Date());
 
   const cashTotal = allPortfolios.reduce((s, p) => s + (p.cashBalance || 0), 0);
   const allHoldings = allPortfolios.flatMap((p) =>
@@ -140,7 +149,10 @@ export default async function Today() {
           accounts={allPortfolios.map((p) => ({ id: p.id, name: p.name }))}
         />
         {/* Policy checks only mean something once there are holdings to check. */}
-        <TodayTriage policyActions={allHoldings.length > 0 ? riskPolicySummary.nextActions : []} />
+        <TodayTriage
+          policyActions={allHoldings.length > 0 ? riskPolicySummary.nextActions : []}
+          reviewEntries={closedTrades}
+        />
       </div>
 
       {allHoldings.length > 0 && <PolicyStrip summary={riskPolicySummary} portfolio={policyPortfolio} />}
@@ -161,19 +173,33 @@ export default async function Today() {
         <WatchlistCard limit={6} />
       </div>
 
+      {closedTrades && journal && (
+        <section className="pm-today-review" aria-labelledby="pm-today-review-head" data-testid="today-review">
+          <h2 id="pm-today-review-head" className="sr-only">Your trading week</h2>
+          <div id="weekly-review">
+            <WeeklyReviewCard entries={closedTrades} nav={journal.netWorth} />
+          </div>
+          <PatternFeed entries={patternTrades} nav={journal.netWorth} />
+        </section>
+      )}
+
       <SampleGate>
         <section className="pm-today-examples" aria-labelledby="pm-today-examples-head" data-testid="today-examples">
           <header className="pm-today-section-head">
             <h2 id="pm-today-examples-head" className="pm-today-section-title">Review &amp; research</h2>
             <SampleDataNotice>
-              The weekly review, patterns, theses, and Alpha Radar below use example data.
+              {closedTrades
+                ? 'The theses and Alpha Radar below use example data.'
+                : 'The weekly review, patterns, theses, and Alpha Radar below use example data.'}
             </SampleDataNotice>
           </header>
-          <div id="weekly-review">
-            <WeeklyReviewCard />
-          </div>
+          {!closedTrades && (
+            <div id="weekly-review">
+              <WeeklyReviewCard />
+            </div>
+          )}
           <div className="pm-grid-2-63">
-            <PatternFeed />
+            {!closedTrades && <PatternFeed />}
             <TodayTheses limit={4} />
           </div>
           <AlphaRadarDashboardCard />

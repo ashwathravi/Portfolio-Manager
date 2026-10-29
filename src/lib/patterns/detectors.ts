@@ -73,6 +73,14 @@ function getWeekdayIndex(d: Date): number {
     return (d.getDay() + 6) % 7;
 }
 
+/** The weekday a trade closed on. One with only a date (launch item i51)
+ *  is on its date's weekday: its stored noon UTC is a placeholder, and
+ *  from UTC+12 it's already the next day locally. */
+function closedWeekdayIndex(e: JournalEntry): number {
+    const closed = new Date(e.closedAt);
+    return e.dateOnly ? (closed.getUTCDay() + 6) % 7 : getWeekdayIndex(closed);
+}
+
 // --------------------------------------------------------------------- //
 // Detector: late_day_losses
 // --------------------------------------------------------------------- //
@@ -88,6 +96,8 @@ export const detectLateDayLosses: PatternDetector = (entries, ctx) => {
         { wins: number; losses: number; ids: string[]; totalLoss: number }
     >();
     for (const e of entries) {
+        // The hour the decision was recorded; trades without one have none.
+        if (!e.rationale) continue;
         const h = new Date(e.rationale.capturedAt).getHours();
         const b = buckets.get(h) ?? { wins: 0, losses: 0, ids: [], totalLoss: 0 };
         if (isWin(e)) b.wins += 1;
@@ -216,6 +226,7 @@ export const detectSizeCreepAfterWins: PatternDetector = (entries, ctx) => {
 export const detectHighWinSetup: PatternDetector = (entries, ctx) => {
     const groups = new Map<string, { wins: number; losses: number; ids: string[]; totalPnl: number }>();
     for (const e of entries) {
+        if (!e.rationale) continue;
         const k = e.rationale.setupType;
         const g = groups.get(k) ?? { wins: 0, losses: 0, ids: [], totalPnl: 0 };
         if (isWin(e)) g.wins += 1;
@@ -332,7 +343,7 @@ export const detectSectorDrift: PatternDetector = (entries, ctx) => {
  */
 export const detectNegativeMoodCost: PatternDetector = (entries, ctx) => {
     const cautionIds = ['fomo', 'revenge'];
-    const hits = entries.filter((e) => cautionIds.includes(e.rationale.mood));
+    const hits = entries.filter((e) => e.rationale && cautionIds.includes(e.rationale.mood));
     if (hits.length === 0) return [];
     const netPnl = hits.reduce((s, e) => s + e.realizedPnlUsd, 0);
     // Only flag when the caution-mood bucket is a net drain on the
@@ -340,14 +351,20 @@ export const detectNegativeMoodCost: PatternDetector = (entries, ctx) => {
     // the user — surfacing it as a warn would be misleading.
     if (netPnl >= 0) return [];
     const magnitude = Math.abs(netPnl);
-    if (magnitude < ctx.nav * MOOD_LOSS_NAV_FRAC) return [];
+    // Real closed trades can sit in accounts with nothing left in them
+    // (launch item i51): without a positive NAV there is no share to
+    // weigh the loss by, so it stands on its dollars.
+    const nav = ctx.nav > 0 ? ctx.nav : null;
+    if (nav !== null && magnitude < nav * MOOD_LOSS_NAV_FRAC) return [];
     return [
         {
             id: 'negative_mood_cost',
             detector: 'negative_mood_cost',
             severity: 'warn',
             headline: `FOMO/revenge trades cost you <em>${usd(magnitude)}</em> across ${hits.length} trades.`,
-            body: `Net realized P&L on caution-mood entries is ${usd(netPnl)} — about ${((magnitude / ctx.nav) * 100).toFixed(1)}% of current NAV.`,
+            body: nav === null
+                ? `Net realized P&L on caution-mood entries is ${usd(netPnl)}.`
+                : `Net realized P&L on caution-mood entries is ${usd(netPnl)} — about ${((magnitude / nav) * 100).toFixed(1)}% of current NAV.`,
             actions: [
                 {
                     kind: 'link',
@@ -391,7 +408,7 @@ export const detectBestWeekdayConcentration: PatternDetector = (entries, ctx) =>
         () => ({ pnl: 0, ids: [] }),
     );
     for (const e of winsOnly) {
-        const idx = getWeekdayIndex(new Date(e.closedAt));
+        const idx = closedWeekdayIndex(e);
         byWeekday[idx].pnl += e.realizedPnlUsd;
         byWeekday[idx].ids.push(e.id);
     }

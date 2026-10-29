@@ -59,16 +59,20 @@ export function currentWeekBounds(now: Date = new Date()): WeekBounds {
         : // Jump back 7 days to land in last week's Mon..Fri range.
           new Date(now.getTime() - 7 * 86_400_000);
 
-    const mon = mondayOf(base);
+    return boundsFrom(mondayOf(base));
+}
+
+/** Monday 00:00 to Friday 16:00 local of the week starting `mon`. */
+function boundsFrom(mon: Date): WeekBounds {
     const fri = new Date(mon);
     fri.setDate(mon.getDate() + 4);
     fri.setHours(FRIDAY_CLOSE_HOUR, 0, 0, 0);
-
-    const id = `wk:${toLocalDateId(mon)}`;
     return {
-        id,
+        id: `wk:${toLocalDateId(mon)}`,
         weekStart: mon.toISOString(),
         weekEnd: fri.toISOString(),
+        firstDay: toLocalDateId(mon),
+        lastDay: toLocalDateId(fri),
     };
 }
 
@@ -81,14 +85,7 @@ export function pastWeekBounds(n: number, now: Date = new Date()): WeekBounds {
     const curMon = new Date(cur.weekStart);
     const mon = new Date(curMon);
     mon.setDate(curMon.getDate() - n * 7);
-    const fri = new Date(mon);
-    fri.setDate(mon.getDate() + 4);
-    fri.setHours(FRIDAY_CLOSE_HOUR, 0, 0, 0);
-    return {
-        id: `wk:${toLocalDateId(mon)}`,
-        weekStart: mon.toISOString(),
-        weekEnd: fri.toISOString(),
-    };
+    return boundsFrom(mon);
 }
 
 /**

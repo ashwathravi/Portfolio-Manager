@@ -7,13 +7,13 @@
  * archive (last N weeks).
  *
  * Scope calls:
- *   - `navPctChange` uses a fixed nominal NAV (configurable via ctx)
- *     because the seed era has no NAV series. Once live portfolio
- *     value lands, wire that through `ctx.nav`.
+ *   - `navPctChange` is realized P&L over the net worth the caller
+ *     passes (`nav`); without one it's null rather than a guess.
  *   - `ruleAdherence` averages the frozen `TradeAdherence.score` on
  *     every entry that carries one. Entries pre-dating AR-111 fall
  *     back to a "hygiene" heuristic (thesisId + conviction ≥ 5 +
  *     non-none setupType → 100; otherwise 0 per failing check).
+ *     Trades with no rationale recorded on Trade aren't scored.
  *   - `bestDecision` is the single highest-P&L winning trade in the
  *     window, labelled as `"<SIDE> <QTY> <TICKER>"`.
  */
@@ -22,17 +22,23 @@ import type { WeekBounds, WeeklyReview, ReviewStats, TradeCount, BestDecision } 
 import { buildNarrative } from './narrative';
 import { computeChurnAnalysis, type ChurnTrade } from '@/lib/risk-policy/churn';
 
-/** Fallback NAV. The JournalPlus seed + pattern feed already assume
- *  $250k — keeping it identical means all JournalPlus surfaces agree
- *  on what "1% of NAV" means. */
+/** The NAV the example journal assumes: the pattern feed's figure, so
+ *  every example surface agrees on what "1% of NAV" means. */
 export const DEFAULT_NAV = 250_000;
 
 export interface GenerateReviewOptions {
-    /** Nominal NAV used to compute `navPctChange`. Default 250k. */
-    nav?: number;
+    /** Net worth, for `navPctChange`; null or omitted when not known. */
+    nav?: number | null;
 }
 
-function inWindow(entry: JournalEntry, startMs: number, endMs: number): boolean {
+/** A trade with only a date (launch item i51) counts on that date: its
+ *  stored time, noon UTC, isn't when it happened, and east of UTC+4 it
+ *  falls after the local Friday close. */
+function inWindow(entry: JournalEntry, bounds: WeekBounds, startMs: number, endMs: number): boolean {
+    if (entry.dateOnly) {
+        const day = entry.closedAt.slice(0, 10);
+        return day >= bounds.firstDay && day <= bounds.lastDay;
+    }
     const t = Date.parse(entry.closedAt);
     return Number.isFinite(t) && t >= startMs && t <= endMs;
 }
@@ -49,10 +55,11 @@ function hygieneScore(entry: JournalEntry): number {
     return Math.round((ok / 3) * 100);
 }
 
-function entryAdherenceScore(entry: JournalEntry): number {
+/** Null for a trade with nothing recorded to score it by. */
+function entryAdherenceScore(entry: JournalEntry): number | null {
     const frozen = entry.adherence?.score;
     if (typeof frozen === 'number') return frozen;
-    return hygieneScore(entry);
+    return entry.rationale ? hygieneScore(entry) : null;
 }
 
 function labelTrade(e: JournalEntry): string {
@@ -123,9 +130,15 @@ function computeChurnWarnings(entries: JournalEntry[], bounds: WeekBounds): {
         holdingPeriodDays: entry.holdingPeriodDays,
         policyExceptions: entry.policyExceptions,
     }));
+    // A date-only Friday sale can be stored after the local close; the
+    // week's trades are already chosen, so the window must reach them all.
+    const asOf = entries.reduce(
+        (latest, entry) => Math.max(latest, Date.parse(entry.closedAt) || 0),
+        Date.parse(bounds.weekEnd),
+    );
     const analysis = computeChurnAnalysis(trades, {
         windowDays: 7,
-        asOf: bounds.weekEnd,
+        asOf: new Date(asOf),
         watchRepeatSymbols: 1,
         breachRepeatSymbols: 2,
     });
@@ -144,29 +157,27 @@ export function generateReview(
 ): WeeklyReview {
     const startMs = Date.parse(bounds.weekStart);
     const endMs = Date.parse(bounds.weekEnd);
-    const windowed = entries.filter((e) => inWindow(e, startMs, endMs));
+    const windowed = entries.filter((e) => inWindow(e, bounds, startMs, endMs));
 
     const realizedPnlUsd = Math.round(
         windowed.reduce((s, e) => s + (e.realizedPnlUsd || 0), 0) * 100,
     ) / 100;
 
-    const nav = opts.nav ?? DEFAULT_NAV;
-    const navPctChange = nav === 0 ? 0 : (realizedPnlUsd / nav) * 100;
+    const nav = opts.nav ?? null;
+    const navPctChange = nav !== null && nav > 0 ? Math.round((realizedPnlUsd / nav) * 100 * 100) / 100 : null;
 
-    let ruleAdherence = 100;
-    let exceptions = 0;
-    if (windowed.length > 0) {
-        const sum = windowed.reduce((s, e) => s + entryAdherenceScore(e), 0);
-        ruleAdherence = Math.round(sum / windowed.length);
-        exceptions = windowed.filter((e) => entryAdherenceScore(e) < 80).length;
-    }
+    const scores = windowed.map(entryAdherenceScore).filter((score): score is number => score !== null);
+    const ruleAdherence = windowed.length === 0
+        ? 100
+        : scores.length === 0 ? null : Math.round(scores.reduce((s, score) => s + score, 0) / scores.length);
+    const exceptions = scores.filter((score) => score < 80).length;
     const policyExceptions = countPolicyExceptions(windowed);
     const sellDisciplineEvents = countSellDisciplineEvents(entries, startMs, endMs);
     const churn = computeChurnWarnings(windowed, bounds);
 
     const stats: ReviewStats = {
         realizedPnlUsd,
-        navPctChange: Math.round(navPctChange * 100) / 100,
+        navPctChange,
         ruleAdherence,
         exceptions: exceptions + policyExceptions,
         policyExceptions,

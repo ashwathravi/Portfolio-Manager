@@ -90,6 +90,8 @@ export function moodBreakdown(
     // aggregation O(n) even on very long journals.
     const buckets = new Map<Mood, { count: number; total: number; wins: number }>();
     for (const t of filtered) {
+        // Only trades with a recorded mood count.
+        if (!t.rationale) continue;
         const b = buckets.get(t.rationale.mood) ?? { count: 0, total: 0, wins: 0 };
         b.count += 1;
         b.total += t.realizedPnlUsd;

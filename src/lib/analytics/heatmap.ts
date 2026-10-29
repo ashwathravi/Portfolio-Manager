@@ -63,7 +63,7 @@ export function hourLabel(h: number): string {
  * null-checks for missing cells.
  *
  * @param entries   Journal entries (only `realizedPnlUsd` + `closedAt`
- *                  are consulted).
+ *                  are consulted; date-only ones are left out).
  * @param rangeDays Days to include, counted back from `now`. Pass
  *                  `null` for "all time".
  * @param now       Epoch millis. Omit to use `Date.now()`. Tests pass
@@ -82,7 +82,8 @@ export function buildHeatmap(
     }
     const cutoff = rangeDays == null ? -Infinity : now - rangeDays * 86_400_000;
     for (const e of entries) {
-        if (e.realizedPnlUsd == null) continue;
+        // Without a time of day there's no hour to bin by.
+        if (e.realizedPnlUsd == null || e.dateOnly) continue;
         const ts = Date.parse(e.closedAt);
         if (!Number.isFinite(ts) || ts < cutoff) continue;
         const dt = new Date(ts);

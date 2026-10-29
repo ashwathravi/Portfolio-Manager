@@ -19,6 +19,10 @@ export interface WeekBounds {
      *  the review id. Avoids the ISO-week pitfalls around year
      *  boundaries (W52/W53/W01 etc.) by just using the Monday date. */
     id: string;
+    /** `YYYY-MM-DD` of the week's Monday and Friday: the days a trade
+     *  stored with a date and no time (launch item i51) counts on. */
+    firstDay: string;
+    lastDay: string;
 }
 
 /** Tallies broken out the way the narrative wants to read them. */
@@ -37,12 +41,14 @@ export interface BestDecision {
 
 export interface ReviewStats {
     realizedPnlUsd: number;
-    /** Pct change of a nominal NAV used for the review card. Signed. */
-    navPctChange: number;
+    /** Realized P&L as a percent of net worth. Signed; null when net
+     *  worth isn't known. */
+    navPctChange: number | null;
     /** 0–100. Hygiene measure: fraction of trades with thesisId,
-     *  conviction ≥ 5, and a non-`none` setup type. */
-    ruleAdherence: number;
-    /** Count of trades that fell short of the adherence bar. */
+     *  conviction ≥ 5, and a non-`none` setup type. Only trades with a
+     *  rationale recorded on Trade are scored; null when none are. */
+    ruleAdherence: number | null;
+    /** Count of scored trades that fell short of the adherence bar. */
     exceptions: number;
     /** Count of captured Risk Policy Engine overrides in the review window. */
     policyExceptions: number;
