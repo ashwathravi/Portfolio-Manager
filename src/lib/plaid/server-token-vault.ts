@@ -427,10 +427,29 @@ function vaultItemKey(itemId: string, userId?: string | null): string {
     return scopedUserId ? `${scopedUserId}:${itemId}` : itemId;
 }
 
+/**
+ * At least 32 bytes, written as hex or base64 (`openssl rand -base64 32`).
+ * The key is hashed into the AES key, so a short or guessable phrase would
+ * let anyone holding the ciphertexts (a backup, say) guess it offline.
+ */
+export function isStrongTokenKey(secret: string): boolean {
+    if (/^(?:[0-9a-f]{2})+$/i.test(secret)) return secret.length / 2 >= 32;
+    if (!/^[A-Za-z0-9+/_-]+={0,2}$/.test(secret)) return false;
+    return Buffer.from(secret, "base64").length >= 32;
+}
+
 // Only the dedicated key encrypts Plaid tokens. Reusing another secret (such
 // as INTERNAL_API_SECRET) would tie token decryption to an unrelated rotation.
+// Production refuses a weak one (launch item i69): nothing is stored until
+// it's replaced.
 function readEncryptionSecret(): string | undefined {
-    return process.env.PLAID_TOKEN_ENCRYPTION_KEY?.trim() || undefined;
+    const secret = process.env.PLAID_TOKEN_ENCRYPTION_KEY?.trim();
+    if (!secret) return undefined;
+    if (process.env.NODE_ENV === "production" && !isStrongTokenKey(secret)) {
+        console.error("PLAID_TOKEN_ENCRYPTION_KEY is too weak: use 32 random bytes, base64 or hex (openssl rand -base64 32).");
+        return undefined;
+    }
+    return secret;
 }
 
 function readKeyVersion(): string {

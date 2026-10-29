@@ -95,14 +95,17 @@ Set these for **Production only**, never Preview: a preview runs branch code, an
 | `AUTH_SECRET` | Set. |
 | `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET` | From the Google OAuth client (redirect URI `https://atlas-wealth-lovat.vercel.app/api/auth/callback/google`). |
 | `AUTH_ALLOWED_EMAILS` | Comma-separated invite list. Required: without it production refuses sign-in. |
+| `AUTH_ADMIN_EMAILS` | Who may change Alpha Radar's tracked filers and refresh them from SEC EDGAR (shared by every user). Usually just you. Nobody when unset: the Refresh buttons don't show and those routes answer 403. |
 | `DATABASE_URL` | Supabase **transaction** pooler (port 6543) as `atlas_app.<project-ref>`, the least-privilege login (see `docs/local-database-secrets.md`). |
 | `CRON_SECRET` | A generated value (`openssl rand -hex 32`). Vercel sends it to the cron route; without it no scheduled job runs. Never print or paste it. |
 | `POLYGON_API_KEY` | The Massive Basic key the nightly price ingest uses. |
-| `PLAID_*`, `PLAID_TOKEN_ENCRYPTION_KEY` | When account linking goes live. |
+| `PLAID_*`, `PLAID_TOKEN_ENCRYPTION_KEY` | When account linking goes live. The key must be 32 random bytes, base64 or hex (`openssl rand -base64 32`); production stores no Plaid token with a weaker one. |
+| `KV_REST_API_URL`, `KV_REST_API_TOKEN` (and `KV_URL`, `REDIS_URL`, `KV_REST_API_READ_ONLY_TOKEN`) | Set by the Upstash integration. They are the shared rate limiter's store; without them each instance limits on its own. |
 | `NEXT_PUBLIC_SENTRY_DSN`, `SENTRY_ORG`, `SENTRY_PROJECT`, `SENTRY_AUTH_TOKEN` | Set by the Sentry integration (Production and Preview). Don't edit them by hand. |
 
 ```bash
 vercel env add AUTH_ALLOWED_EMAILS production
+vercel env add AUTH_ADMIN_EMAILS production
 # Generates the cron secret and pipes it straight in, so it is never shown:
 openssl rand -hex 32 | tr -d '\n' | vercel env add CRON_SECRET production
 ```

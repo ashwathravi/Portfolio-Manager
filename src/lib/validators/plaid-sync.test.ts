@@ -1,7 +1,7 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { MAX_PLAID_ACCOUNTS_PER_ITEM, plaidSyncSchema } from './plaid-sync';
+import { MAX_PLAID_ACCOUNTS_PER_ITEM, plaidLinkMetadataSchema, plaidSyncSchema } from './plaid-sync';
 
 const ITEM = 'eVBnVMp7zdTJLkRNr33Rs6zr7KNJqBFL9DrE6';
 
@@ -38,5 +38,43 @@ describe('plaidSyncSchema', () => {
         if (!over.success) assert.equal(over.error.issues[0].message, `At most ${MAX_PLAID_ACCOUNTS_PER_ITEM} accounts`);
         assert.equal(plaidSyncSchema.safeParse({ itemId: ITEM, accessToken: 'access-sandbox-x' }).success, false);
         assert.equal(plaidSyncSchema.safeParse({}).success, false);
+    });
+});
+
+describe('plaidLinkMetadataSchema', () => {
+    const metadata = {
+        institution: { name: ' Fidelity ', institution_id: 'ins_12' },
+        accounts: [{ id: 'acc-1', name: 'Brokerage', mask: '1234', type: 'investment', subtype: 'brokerage', verification_status: null }],
+        link_session_id: 'session-1',
+        status: 'connected',
+        public_token: 'public-sandbox-1',
+    };
+
+    test('keeps what Link reports, trimmed, and drops the rest', () => {
+        const parsed = plaidLinkMetadataSchema.parse(metadata);
+        assert.deepEqual(parsed, {
+            institution: { name: 'Fidelity', institution_id: 'ins_12' },
+            accounts: [{ id: 'acc-1', name: 'Brokerage', mask: '1234', type: 'investment', subtype: 'brokerage', verification_status: null }],
+            link_session_id: 'session-1',
+        });
+        assert.equal(plaidLinkMetadataSchema.safeParse({}).success, true);
+        assert.equal(plaidLinkMetadataSchema.safeParse({ institution: null }).success, true);
+    });
+
+    test('refuses fields that aren\'t strings within their lengths', () => {
+        const refused = [
+            { institution: { name: { toString: 'x' } } },
+            { institution: { name: 'x'.repeat(101) } },
+            { institution: { institution_id: 'ins 12; drop' } },
+            { accounts: [{ id: 'acc-1', name: 42 }] },
+            { accounts: [{ id: '../acc', name: 'Brokerage' }] },
+            { accounts: [{ id: 'acc-1', name: 'x'.repeat(201) }] },
+            { accounts: Array.from({ length: MAX_PLAID_ACCOUNTS_PER_ITEM + 1 }, (_, i) => ({ id: `acc-${i}`, name: 'A' })) },
+            { accounts: 'acc-1' },
+        ];
+        for (const value of refused) {
+            assert.equal(plaidLinkMetadataSchema.safeParse(value).success, false, JSON.stringify(value).slice(0, 80));
+        }
+        assert.equal(plaidLinkMetadataSchema.safeParse({ institution: { name: 'x'.repeat(100) } }).success, true);
     });
 });

@@ -1,16 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { readJsonBody } from '@/lib/api/body';
 import { apiError, internalServerError, logApiEvent } from '@/lib/api/security';
 import { requestIdFrom } from '@/lib/observability/request-id';
-import { requireSessionApiUserScope } from '@/lib/api/session-security';
+import { requireAdminApiUserScope } from '@/lib/api/session-security';
 import { getAlphaRadarRefreshService } from '@/lib/alpha-radar';
-import { alphaRadarRefreshRequestSchema } from '@/lib/validators/alpha-radar';
+import { ALPHA_RADAR_BODY_MAX_BYTES, alphaRadarRefreshRequestSchema } from '@/lib/validators/alpha-radar';
 
 export async function POST(request: NextRequest) {
-    const auth = await requireSessionApiUserScope(request);
+    const auth = await requireAdminApiUserScope(request);
     if (!auth.ok) return auth.response;
 
     try {
-        const body = await request.json().catch(() => ({}));
+        const read = await readJsonBody(request, ALPHA_RADAR_BODY_MAX_BYTES);
+        if (!read.ok && read.reason === 'too-large') {
+            return apiError('Request is too large.', 'REQUEST_TOO_LARGE', 413);
+        }
+        // No body, or not JSON: a refresh with the defaults.
+        const body = read.ok ? read.value : {};
         const parsed = alphaRadarRefreshRequestSchema.safeParse(body);
         if (!parsed.success) {
             return apiError(parsed.error.issues[0]?.message ?? 'Invalid refresh payload', 'INVALID_REFRESH_PAYLOAD', 400);
@@ -20,7 +26,7 @@ export async function POST(request: NextRequest) {
             requestId: requestIdFrom(request.headers),
             force: parsed.data.force === true,
             filingLimit: parsed.data.filingLimit,
-            userScoped: true,
+            adminOnly: true,
         });
         const service = getAlphaRadarRefreshService();
         const result = await service.refreshAll({
@@ -34,7 +40,7 @@ export async function POST(request: NextRequest) {
             status,
             totalFilers: result.totalFilers,
             errorCount: result.errors.length,
-            userScoped: true,
+            adminOnly: true,
         });
         return NextResponse.json({ data: result }, { status });
     } catch (error) {

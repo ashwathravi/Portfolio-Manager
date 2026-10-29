@@ -81,6 +81,18 @@ describe("API security helpers", () => {
         assert.equal(await rateLimitApiRequest(limitedRequest), undefined);
     });
 
+    test("limits a signed-in user's Alpha Radar refreshes to 30 a minute, one filer's included", async () => {
+        mock.timers.enable({ apis: ["Date"], now: 0 });
+        const signedIn = { userId: "11111111-1111-4111-8111-111111111111", authRequired: true };
+        for (const pathname of ["/api/alpha-radar/refresh", "/api/alpha-radar/filers/0001067983/refresh"]) {
+            const refresh = request({}, pathname);
+            for (let i = 0; i < 30; i++) {
+                assert.equal(await rateLimitApiRequest(refresh, signedIn, { skipIp: true }), undefined, pathname);
+            }
+            assert.equal((await rateLimitApiRequest(refresh, signedIn, { skipIp: true }))?.status, 429, pathname);
+        }
+    });
+
     test("can be switched off for load tests", async () => {
         process.env.API_RATE_LIMIT_DISABLED = "1";
         const limitedRequest = request({ "x-forwarded-for": "203.0.113.11" }, "/api/plaid/link-token");

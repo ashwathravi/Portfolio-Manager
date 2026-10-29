@@ -26,6 +26,9 @@ const authServerEnv: Record<string, string> = databaseAuthEnabled
         // and the fresh users some tests create (tests/e2e/helpers/users.ts).
         AUTH_ALLOWED_EMAILS: '',
         AUTH_ALLOWED_DOMAINS: 'example.test',
+        // Fixture user A manages Alpha Radar; every other user, fresh copies
+        // of A included, is refused (launch item i69).
+        AUTH_ADMIN_EMAILS: 'e2e-a@example.test',
         // Off Vercel, production Auth.js only trusts a host it is told about.
         AUTH_URL: 'http://localhost:3000',
     }

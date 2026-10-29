@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
+    isStrongTokenKey,
     getPlaidAccessTokenForUser,
     getPlaidAccessToken,
     hasPlaidAccessToken,
@@ -208,6 +209,38 @@ describe("Plaid server token vault", () => {
         assert.equal(result.mode, "postgres");
         assert.match(result.reason ?? "", /PLAID_TOKEN_ENCRYPTION_KEY/);
         assert.equal(registry.connection, undefined);
+    });
+
+    test("production refuses a key that isn't 32 random bytes, and stores nothing (i69)", async (t) => {
+        t.mock.method(console, "error", () => {});
+        setNodeEnv("production");
+        process.env.PLAID_TOKEN_STORAGE = "postgres";
+        process.env.PLAID_TOKEN_ENCRYPTION_KEY = "correct horse battery staple";
+        const registry = createTestRegistryStore();
+        setPlaidTokenRegistryStoreForTests(registry.store);
+
+        const weak = await storePlaidConnection({ userId: "11111111-1111-4111-8111-111111111111", exchange: plaidExchangeFixture() });
+        assert.equal(weak.stored, false);
+        assert.equal(registry.connection, undefined);
+
+        process.env.PLAID_TOKEN_ENCRYPTION_KEY = Buffer.alloc(32, 7).toString("base64");
+        const strong = await storePlaidConnection({ userId: "11111111-1111-4111-8111-111111111111", exchange: plaidExchangeFixture() });
+        assert.equal(strong.stored, true);
+        assert.equal(
+            await getPlaidAccessTokenForUser("item-registry", "11111111-1111-4111-8111-111111111111"),
+            plaidExchangeFixture().accessToken,
+        );
+    });
+
+    test("a strong token key is 32 bytes or more, base64 or hex", () => {
+        assert.equal(isStrongTokenKey(Buffer.alloc(32, 1).toString("base64")), true);
+        assert.equal(isStrongTokenKey(Buffer.alloc(32, 1).toString("base64url")), true);
+        assert.equal(isStrongTokenKey(Buffer.alloc(32, 1).toString("hex")), true);
+        assert.equal(isStrongTokenKey(Buffer.alloc(31, 1).toString("base64")), false);
+        assert.equal(isStrongTokenKey(Buffer.alloc(31, 1).toString("hex")), false);
+        assert.equal(isStrongTokenKey("test-only-registry-key"), false);
+        assert.equal(isStrongTokenKey("correct horse battery staple"), false);
+        assert.equal(isStrongTokenKey(""), false);
     });
 
     test("revokes durable Plaid connections and clears cached access tokens", async () => {

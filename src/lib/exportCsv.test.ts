@@ -133,4 +133,36 @@ describe('exportToCsv', () => {
         const expectedCsv = 'value,flag\n123,true\n0,false';
         assert.strictEqual(createdBlobContent[0], expectedCsv);
     });
+
+    test('regression: text a spreadsheet would run as a formula is written as text (i69)', () => {
+        // A note or account name the user typed or imported, or a bank sent.
+        const rows = [
+            { text: '=HYPERLINK("https://evil.test","Click")' },
+            { text: '+cmd' },
+            { text: '-1+1' },
+            { text: '@SUM(A1)' },
+            { text: '\t=1+1' },
+            { text: '\r=1+1' },
+            { text: 'x\r=1+1' },
+        ];
+        exportToCsv('formulas.csv', rows);
+
+        assert.strictEqual(createdBlobContent[0], [
+            'text',
+            '"\'=HYPERLINK(""https://evil.test"",""Click"")"',
+            "'+cmd",
+            "'-1+1",
+            "'@SUM(A1)",
+            "'\t=1+1",
+            '"\'\r=1+1"',
+            // A lone carriage return is a row break to a spreadsheet: quoted.
+            '"x\r=1+1"',
+        ].join('\n'));
+    });
+
+    test('numbers stay numbers, negative ones and numeric text included', () => {
+        exportToCsv('numbers.csv', [{ amount: -1250.5, text: '-12.50', exp: '+3', note: '- not a number' }]);
+
+        assert.strictEqual(createdBlobContent[0], "amount,text,exp,note\n-1250.5,-12.50,+3,'- not a number");
+    });
 });

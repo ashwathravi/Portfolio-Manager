@@ -15,6 +15,7 @@ import {
     primaryKey,
     text,
     timestamp,
+    unique,
     uniqueIndex,
     uuid,
 } from "drizzle-orm/pg-core";
@@ -148,6 +149,8 @@ export const plaidItems = pgTable("plaid_items", {
 }, (table) => ({
     userStatusIdx: index("plaid_items_user_status_idx").on(table.userId, table.status),
     userItemIdx: uniqueIndex("plaid_items_user_item_idx").on(table.userId, table.plaidItemId),
+    // What plaid_accounts' owner key refers to (launch item i69).
+    idUser: unique("plaid_items_id_user_key").on(table.id, table.userId),
     serverOnlyNoClientAccess: serverOnlyNoClientAccessPolicy(),
     appRuntimeAccess: appRuntimeAccessPolicy(),
 })).enableRLS();
@@ -157,9 +160,8 @@ export const plaidAccounts = pgTable("plaid_accounts", {
     userId: text("user_id")
         .notNull()
         .references(() => authUsers.id, { onDelete: "cascade" }),
-    plaidItemRecordId: uuid("plaid_item_record_id")
-        .notNull()
-        .references(() => plaidItems.id, { onDelete: "cascade" }),
+    // Its connection, which must be the same user's (plaid_accounts_item_owner_fk).
+    plaidItemRecordId: uuid("plaid_item_record_id").notNull(),
     plaidAccountId: text("plaid_account_id").notNull(),
     name: text("name").notNull(),
     officialName: text("official_name"),
@@ -188,6 +190,13 @@ export const plaidAccounts = pgTable("plaid_accounts", {
     userIdx: index("plaid_accounts_user_idx").on(table.userId),
     itemIdx: index("plaid_accounts_item_idx").on(table.plaidItemRecordId),
     userAccountIdx: uniqueIndex("plaid_accounts_user_account_idx").on(table.userId, table.plaidAccountId),
+    // The database, not only the code, keeps an account with its owner's
+    // connection (launch item i69).
+    itemOwner: foreignKey({
+        name: "plaid_accounts_item_owner_fk",
+        columns: [table.plaidItemRecordId, table.userId],
+        foreignColumns: [plaidItems.id, plaidItems.userId],
+    }).onDelete("cascade"),
     serverOnlyNoClientAccess: serverOnlyNoClientAccessPolicy(),
     appRuntimeAccess: appRuntimeAccessPolicy(),
 })).enableRLS();
@@ -218,6 +227,8 @@ export const portfolios = pgTable("portfolios", {
     userExternalAccountIdx: uniqueIndex("portfolios_user_source_external_account_idx")
         .on(table.userId, table.source, table.externalAccountId)
         .where(sql`${table.externalAccountId} is not null`),
+    // What order_plans' owner key refers to (launch item i69).
+    idUser: unique("portfolios_id_user_key").on(table.id, table.userId),
     serverOnlyNoClientAccess: serverOnlyNoClientAccessPolicy(),
     appRuntimeAccess: appRuntimeAccessPolicy(),
 })).enableRLS();
@@ -806,9 +817,8 @@ export const orderPlans = pgTable("order_plans", {
     userId: text("user_id")
         .notNull()
         .references(() => authUsers.id, { onDelete: "cascade" }),
-    portfolioId: uuid("portfolio_id")
-        .notNull()
-        .references(() => portfolios.id, { onDelete: "cascade" }),
+    // Its account, which must be the same user's (order_plans_portfolio_owner_fk).
+    portfolioId: uuid("portfolio_id").notNull(),
     instrumentType: text("instrument_type").notNull(),
     // The ticker, or an option's underlying.
     symbol: text("symbol").notNull(),
@@ -831,6 +841,13 @@ export const orderPlans = pgTable("order_plans", {
 }, (table) => ({
     userCreatedIdx: index("order_plans_user_created_idx").on(table.userId, table.createdAt),
     portfolioIdIdx: index("order_plans_portfolio_id_idx").on(table.portfolioId),
+    // The database, not only the code, keeps a plan with its owner's account
+    // (launch item i69).
+    portfolioOwner: foreignKey({
+        name: "order_plans_portfolio_owner_fk",
+        columns: [table.portfolioId, table.userId],
+        foreignColumns: [portfolios.id, portfolios.userId],
+    }).onDelete("cascade"),
     instrumentTypeCheck: check("order_plans_instrument_type_check", sql`${table.instrumentType} in ('equity', 'option')`),
     sideCheck: check("order_plans_side_check", sql`${table.side} in ('buy', 'sell')`),
     orderTypeCheck: check("order_plans_order_type_check", sql`${table.orderType} in ('market', 'limit', 'stop', 'stop_limit')`),

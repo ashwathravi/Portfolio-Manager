@@ -181,7 +181,9 @@ function rulesFor(route: string): { ip: RateLimitRule; user: RateLimitRule } {
         };
     }
 
-    if (route.includes("/plaid/") || route.includes("/alpha-radar/refresh")) {
+    // Alpha Radar refreshes call SEC EDGAR: all filers, or one.
+    const alphaRadarRefresh = route.startsWith("/api/alpha-radar/") && route.endsWith("/refresh");
+    if (route.includes("/plaid/") || alphaRadarRefresh) {
         return {
             ip: { limit: 20, windowSeconds: 60 },
             user: { limit: 30, windowSeconds: 60 },
