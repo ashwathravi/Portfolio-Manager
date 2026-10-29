@@ -437,6 +437,41 @@ test.describe('Today › Weekly review from your closed trades (launch item i51)
         await expect(week.getByTestId('reviews-archive-reflection')).toHaveCount(0);
     });
 
+    test('dismissing an example pattern leaves the same pattern from your trades', async ({ context, page }) => {
+        await signInAsNewUser(context, { firstSignIn: true });
+        const created = await page.request.post('/api/portfolios', { data: { name: 'Mondays' } });
+        expect(created.status()).toBe(201);
+        const portfolioId = (await created.json()).data.id;
+        // Five wins, each bought and sold on one of the last five Mondays.
+        const start = new Date(Date.now() - 2 * 86_400_000);
+        start.setUTCDate(start.getUTCDate() - ((start.getUTCDay() + 6) % 7));
+        for (let week = 0; week < 5; week++) {
+            const monday = new Date(start.getTime() - week * 7 * 86_400_000).toISOString().slice(0, 10);
+            for (const transaction of [
+                { type: 'BUY', date: monday, symbol: 'NKE', quantity: 10, price: 100 },
+                { type: 'SELL', date: monday, symbol: 'NKE', quantity: 10, price: 110 },
+            ]) {
+                expect((await page.request.post('/api/transactions', { data: { portfolioId, transaction } })).status()).toBe(201);
+            }
+        }
+        await gotoAppPage(page, '/');
+
+        // The example feed's Monday pattern, dismissed under the id the example uses.
+        const snoozeKey = userKey('pm-pattern-snoozed', (await page.locator('html').getAttribute('data-storage-scope'))!);
+        await page.evaluate((key) => {
+            window.localStorage.setItem(key, JSON.stringify({ 'best_weekday_concentration:0': '2099-01-01T00:00:00.000Z' }));
+        }, snoozeKey);
+        await reloadAppPage(page);
+
+        const feed = page.getByTestId('today-review').getByTestId('pattern-feed');
+        const monday = feed.locator('[data-testid="pattern-row"][data-detector="best_weekday_concentration"]');
+        await expect(monday).toContainText('Monday');
+        await monday.getByTestId('pattern-row-dismiss').click();
+        await expect(monday).toHaveCount(0);
+        const stored = JSON.parse(await page.evaluate((key) => window.localStorage.getItem(key) ?? '{}', snoozeKey));
+        expect(Object.keys(stored).sort()).toEqual(['best_weekday_concentration:0', 'trades:best_weekday_concentration:0']);
+    });
+
     test('without closed trades the example review stays in the example section', async ({ context, page }) => {
         await signInAsNewUser(context);
         await gotoAppPage(page, '/');

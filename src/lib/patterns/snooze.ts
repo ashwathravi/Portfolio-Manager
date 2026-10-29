@@ -2,7 +2,7 @@
  * AR-112 — Pattern snooze persistence.
  *
  * When the user dismisses a pattern row it disappears for 30 days. The
- * snooze state is a flat `{ [patternId]: expiresAtISO }` map kept in
+ * snooze state is a flat `{ [snoozeId]: expiresAtISO }` map kept in
  * localStorage under the `pm-pattern-snoozed` key, one per signed-in user
  * (src/lib/storage/user-scope.ts). SSR-safe: on the server there is no
  * storage, so reads are empty and writes do nothing.
@@ -18,7 +18,18 @@ import { browserLocalStorage, readUserValue, writeUserValue } from '@/lib/storag
 export const SNOOZE_STORAGE_KEY = 'pm-pattern-snoozed';
 const SNOOZE_MS = 30 * 86_400_000;
 
-type SnoozeMap = Record<string, string>; // patternId → expiresAt ISO
+type SnoozeMap = Record<string, string>; // snoozeId → expiresAt ISO
+
+/**
+ * The key a dismissal is kept under. Patterns from the user's closed
+ * trades (launch item i51) and from the example journal share detector
+ * ids, so each keeps its own: dismissing an example warning never hides
+ * the one about the user's real losses. Example patterns keep the plain
+ * id they had before there were real ones.
+ */
+export function snoozeId(patternId: string, source: 'trades' | 'example'): string {
+    return source === 'trades' ? `trades:${patternId}` : patternId;
+}
 
 function load(): SnoozeMap {
     try {

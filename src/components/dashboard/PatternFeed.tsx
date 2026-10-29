@@ -12,7 +12,7 @@ import {
     generatePatterns,
 } from "@/lib/patterns/generate";
 import type { Pattern } from "@/lib/patterns/types";
-import { getSnoozedIds, snoozePattern } from "@/lib/patterns/snooze";
+import { getSnoozedIds, snoozeId, snoozePattern } from "@/lib/patterns/snooze";
 import { PatternRow } from "./PatternRow";
 
 /**
@@ -60,6 +60,7 @@ export function PatternFeed({
 }: PatternFeedProps) {
     const entries = useMemo(() => given ?? getSeedJournal(), [given]);
     const sectorByTicker = given ? NO_SECTORS : SEED_SECTOR_BY_TICKER;
+    const source = given ? "trades" : "example";
     const [patterns, setPatterns] = useState<Pattern[]>([]);
     const [loading, setLoading] = useState(true);
     const [refreshKey, setRefreshKey] = useState(0);
@@ -102,15 +103,15 @@ export function PatternFeed({
     }, [snoozedAt]);
 
     const visible = useMemo(
-        () => patterns.filter((p) => !snoozedIds.has(p.id)),
-        [patterns, snoozedIds],
+        () => patterns.filter((p) => !snoozedIds.has(snoozeId(p.id, source))),
+        [patterns, snoozedIds, source],
     );
     const shown = expanded ? visible : visible.slice(0, MAX_COLLAPSED);
 
     const onDismiss = useCallback((id: string) => {
-        snoozePattern(id);
+        snoozePattern(snoozeId(id, source));
         setSnoozedAt(Date.now());
-    }, []);
+    }, [source]);
 
     const onRefresh = useCallback(() => {
         setRefreshKey((k) => k + 1);
