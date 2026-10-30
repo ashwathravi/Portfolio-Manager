@@ -32,8 +32,9 @@ Retired routes redirect (307): `/portfolios`, `/portfolios/trade-log`,
 ## Next
 
 - **Before the first invite (phase 4):** clear the dev data from production
-  (i70), small hardening items (i74), and the owner's settings: `CRON_SECRET`,
-  `AUTH_ADMIN_EMAILS`, `POLYGON_API_KEY`, and Plaid's approval (i09, i67).
+  (i70), small hardening items (i74), `POLYGON_API_KEY` for the nightly
+  prices (i08), and Plaid's approval (i09, i67). `CRON_SECRET` and
+  `AUTH_ADMIN_EMAILS` were set on 2026-10-30.
 - **Product gaps still on example data or missing:** delayed intraday quotes
   (i33), ticker search (i35), saved strategies and a real backtest engine
   (i55), server-side alerts and email (i57, i58), Alpha Radar follows and
