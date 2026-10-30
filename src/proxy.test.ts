@@ -68,7 +68,9 @@ describe("API proxy security", () => {
 
         assert.equal((await proxy(apiRequest({}, "/api/health"))).status, 200);
         assert.equal((await proxy(apiRequest({}, "/api/health/ready"))).status, 200);
+        assert.equal((await proxy(apiRequest({}, "/api/health/jobs"))).status, 200);
         assert.equal((await proxy(apiRequest({}, "/api/health/ready/extra"))).status, 503);
+        assert.equal((await proxy(apiRequest({}, "/api/health/jobs/extra"))).status, 503);
     });
 
     test("answers disabled Schwab routes with 404 before authentication", async () => {

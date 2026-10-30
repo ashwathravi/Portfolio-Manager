@@ -208,3 +208,36 @@ test.describe('Scheduled jobs without CRON_SECRET', () => {
         }
     });
 });
+
+test.describe('Scheduled job health', () => {
+    // Launch item i71: public, so the production monitor and any uptime
+    // service can read it, and coarse: each job's status and last success,
+    // never an error. No job has run in the E2E database, so every one is
+    // late; without a database it is not configured.
+    test('/api/health/jobs answers without a session and lists every scheduled job', async ({ playwright, baseURL }) => {
+        const dbMode = Boolean(process.env.CI || process.env.E2E_DATABASE_AUTH === '1');
+        const sessionless = await playwright.request.newContext({ baseURL, storageState: { cookies: [], origins: [] } });
+        try {
+            const response = await sessionless.get('/api/health/jobs', { maxRedirects: 0 });
+            expect(response.status()).toBe(503);
+            expect(response.headers()['cache-control']).toBe('no-store');
+            const body = await response.json();
+            expect(body.status).toBe('degraded');
+            if (dbMode) {
+                expect(body.database).toBe('ok');
+                expect(body.jobs.map((job: { job: string }) => job.job)).toEqual(['expired-sessions', 'ask-history', 'plaid', 'prices', 'snapshots', 'backup']);
+                for (const job of body.jobs) {
+                    expect(Object.keys(job).sort()).toEqual(['dueSince', 'job', 'lastSucceededAt', 'status']);
+                    expect(job.status).toBe('late');
+                    expect(job.lastSucceededAt).toBeNull();
+                    expect(Date.parse(job.dueSince)).toBeLessThan(Date.now());
+                }
+            } else {
+                expect(body.database).toBe('not_configured');
+                expect(body.jobs).toEqual([]);
+            }
+        } finally {
+            await sessionless.dispose();
+        }
+    });
+});

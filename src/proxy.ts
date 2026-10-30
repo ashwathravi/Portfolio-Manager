@@ -142,6 +142,7 @@ function isPublicRoute(pathname: string): boolean {
         || pathname === "/terms"
         || pathname === "/api/health"
         || pathname === "/api/health/ready"
+        || pathname === "/api/health/jobs"
         || PUBLIC_ASSET_PATHS.has(pathname);
 }
 

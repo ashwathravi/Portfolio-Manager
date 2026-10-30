@@ -1,0 +1,51 @@
+name: Production monitor
+
+# Launch item i71; the runbook is docs/monitoring.md.
+#
+# Every half hour: asks production whether it can reach its database
+# (/api/health/ready) and whether every scheduled job, the nightly backup
+# included, has succeeded on schedule (/api/health/jobs). When something
+# fails it opens one issue that mentions the repository's owner, comments
+# when what fails changes, and closes the issue once every check passes. The
+# run itself fails only when it couldn't check or couldn't keep that issue up
+# to date, so an outage notifies once, not every half hour.
+#
+# Plain Node and no install: scripts/monitor uses only Node's built-ins.
+
+on:
+  schedule:
+    - cron: '7,37 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: production-monitor
+  cancel-in-progress: false
+
+jobs:
+  check:
+    # Not on forks: they have neither production nor its issue.
+    if: github.repository == 'ashwathravi/Portfolio-Manager'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/monitor
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+
+      - name: Check production
+        env:
+          PRODUCTION_URL: ${{ vars.PRODUCTION_URL }}
+          GITHUB_TOKEN: ${{ github.token }}
+          MONITOR_MENTION: ${{ github.repository_owner }}
+        run: node scripts/monitor/run.mts
