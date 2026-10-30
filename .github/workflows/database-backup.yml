@@ -6,7 +6,11 @@ name: Database backup
 # artifact for 30 days encrypted to the backup key (this repository is
 # public, and so are its artifacts), then restores it into a scratch Postgres
 # and checks every table's rows against the dump's manifest. A run that fails
-# emails whoever last changed this schedule.
+# emails whoever last changed this schedule. Every run is recorded in the
+# job_runs table, so /api/health/jobs and the production monitor
+# (production-monitor.yml, docs/monitoring.md) notice a backup that failed
+# or stopped running. Keep the schedule equal to BACKUP_CRON in
+# src/lib/health/job-health.ts (a test checks).
 #
 # On a pull request that changes the backup, the migrations or this file,
 # the same steps run on a disposable database instead: no production, no
@@ -21,6 +25,7 @@ on:
       - '.github/workflows/database-backup.yml'
       - 'scripts/db/backup*'
       - 'scripts/db/restore.ts'
+      - 'scripts/db/record-backup-run.ts'
       - 'scripts/db/install-backup-tools.sh'
       - 'scripts/db/init-local.sql'
       - 'drizzle/**'
@@ -56,7 +61,12 @@ jobs:
           --health-retries 5
 
     steps:
+      - name: Note when the run started
+        id: started
+        run: echo "at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
       - name: Check backup settings
+        id: settings
         env:
           DATABASE_MIGRATION_URL: ${{ secrets.DATABASE_MIGRATION_URL }}
         run: |
@@ -118,6 +128,17 @@ jobs:
         env:
           RESTORE_DATABASE_URL: postgres://postgres:postgres@localhost:5432/restore_check?sslmode=disable
         run: node --import tsx scripts/db/restore.ts --from "$RUNNER_TEMP/backup"
+
+      # Succeeded only when every step above did: the backup was kept and
+      # restored exactly.
+      - name: Record the run
+        if: ${{ !cancelled() && steps.settings.outcome == 'success' }}
+        env:
+          DATABASE_MIGRATION_URL: ${{ secrets.DATABASE_MIGRATION_URL }}
+          BACKUP_STATUS: ${{ job.status == 'success' && 'succeeded' || 'failed' }}
+          BACKUP_STARTED_AT: ${{ steps.started.outputs.at }}
+          BACKUP_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: node --import tsx scripts/db/record-backup-run.ts
 
   rehearse:
     if: github.event_name == 'pull_request'
@@ -183,3 +204,12 @@ jobs:
         run: |
           PGPASSWORD=postgres "$PG_BIN_DIR/psql" -h localhost -U postgres -d source -c 'CREATE DATABASE restore_check'
           node --import tsx scripts/db/restore.ts --from "$RUNNER_TEMP/decrypted"
+
+      - name: Record the run as the backup does
+        env:
+          DATABASE_MIGRATION_URL: ${{ env.ADMIN_DATABASE_URL }}
+          BACKUP_STATUS: ${{ job.status == 'success' && 'succeeded' || 'failed' }}
+          BACKUP_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          BACKUP_STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)" node --import tsx scripts/db/record-backup-run.ts
+          PGPASSWORD=postgres "$PG_BIN_DIR/psql" -h localhost -U postgres -d source -tAc "SELECT status FROM job_runs WHERE job = 'backup'" | grep -qx succeeded

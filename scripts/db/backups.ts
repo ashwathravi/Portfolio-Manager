@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { createReadStream, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
+import type postgres from "postgres";
 import { z } from "zod";
 
 /**
@@ -251,4 +252,60 @@ export function describeBackup(manifest: Pick<BackupManifest, "tables" | "migrat
     const tables = Object.keys(manifest.tables).length;
     const rows = Object.values(manifest.tables).reduce((sum, count) => sum + count, 0);
     return `${tables} tables, ${rows.toLocaleString("en-US")} rows, ${manifest.migrations.length} migrations`;
+}
+
+// ---------------------------------------------------------------------------
+// The run log (launch item i71)
+// ---------------------------------------------------------------------------
+
+/** The job_runs.job the workflow records under; /api/health/jobs watches it. */
+export const BACKUP_JOB = "backup";
+
+export interface BackupRun {
+    status: "succeeded" | "failed";
+    startedAt: Date;
+    finishedAt: Date;
+    /** The workflow run, for whoever reads job_runs. */
+    runUrl: string | null;
+}
+
+/**
+ * The run the workflow describes in BACKUP_STATUS, BACKUP_STARTED_AT (an ISO
+ * time) and BACKUP_RUN_URL, finished now. Throws on anything else, so a typo
+ * in the workflow fails the step instead of recording a wrong run.
+ */
+export function backupRunFromEnv(env: Partial<Record<string, string>>, now: Date = new Date()): BackupRun {
+    const status = env.BACKUP_STATUS?.trim();
+    if (status !== "succeeded" && status !== "failed") {
+        throw new Error(`BACKUP_STATUS must be "succeeded" or "failed", not "${status ?? ""}".`);
+    }
+    const startedAt = z.iso.datetime().safeParse(env.BACKUP_STARTED_AT?.trim());
+    if (!startedAt.success || new Date(startedAt.data) > now) {
+        throw new Error("BACKUP_STARTED_AT must be an ISO time no later than now.");
+    }
+    const runUrl = env.BACKUP_RUN_URL?.trim() || null;
+    if (runUrl && !/^https:\/\//.test(runUrl)) throw new Error("BACKUP_RUN_URL must be an https URL.");
+    return { status, startedAt: new Date(startedAt.data), finishedAt: now, runUrl };
+}
+
+/**
+ * Records one finished backup run in job_runs. started_at and finished_at
+ * have no time zone and hold UTC, like the app's own runs, whatever the
+ * session's time zone.
+ */
+export async function recordBackupRun(sql: postgres.Sql, run: BackupRun): Promise<void> {
+    const error = run.status === "failed"
+        ? `The backup workflow failed${run.runUrl ? `: ${run.runUrl}` : "."}`
+        : null;
+    await sql`
+        INSERT INTO job_runs (job, started_at, finished_at, status, detail, error)
+        VALUES (
+            ${BACKUP_JOB},
+            (${run.startedAt.toISOString()}::timestamptz AT TIME ZONE 'UTC'),
+            (${run.finishedAt.toISOString()}::timestamptz AT TIME ZONE 'UTC'),
+            ${run.status},
+            ${JSON.stringify({ runUrl: run.runUrl })}::jsonb,
+            ${error}
+        )
+    `;
 }

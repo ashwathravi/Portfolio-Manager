@@ -34,12 +34,13 @@ Not in a backup:
 1. **Dump** (`scripts/db/backup.ts`, as the table owner through the `production` environment's `DATABASE_MIGRATION_URL`; GitHub lists each run as a deployment to `production`). One read-only, repeatable-read transaction exports its snapshot, counts every table in it, and both `pg_dump`s run on that snapshot. The counts are therefore exactly what the dumps hold, while the app keeps writing.
 2. **Encrypt** the three files to every public key in the repository variable `BACKUP_AGE_RECIPIENTS`, then upload the result as the artifact.
 3. **Restore** (`scripts/db/restore.ts`) into a scratch Postgres 17 in the same job. It rebuilds the schema with this checkout's migrations, exactly the ones the backup had applied, then loads the data in one transaction with foreign keys checked. Finally it compares every table's rows and the migrations with the manifest. The run fails on any difference; the backup from step 2 is kept either way.
+4. **Record** the run (`scripts/db/record-backup-run.ts`): one `job_runs` row in production with `job = 'backup'`, `succeeded` only when every step above did, and the run's link in `detail`. The backup's only write to production; `/api/health/jobs` reads it.
 
 The logs show totals only (tables, rows, migrations), never a table's rows: they're public.
 
-**When a run fails**, GitHub emails whoever last changed the workflow's schedule. Check that github.com › Settings › Notifications › Actions has failed workflows turned on. GitHub can also start a scheduled run late or skip it under load, and in a public repository it turns schedules off after 60 days without activity. An alert for a run that didn't happen is launch item i71.
+**When a run fails**, GitHub emails whoever last changed the workflow's schedule. Check that github.com › Settings › Notifications › Actions has failed workflows turned on. GitHub can also start a scheduled run late or skip it under load, and in a public repository it turns schedules off after 60 days without activity. The production monitor catches those: it opens an issue when no backup has succeeded by 10:00 UTC (`docs/monitoring.md`).
 
-A pull request that changes the backup scripts, the migrations or the workflow runs the same steps against the E2E fixtures, with a throwaway key: dump, encrypt, decrypt, restore and check.
+A pull request that changes the backup scripts, the migrations or the workflow runs the same steps against the E2E fixtures, with a throwaway key: dump, encrypt, decrypt, restore and check, then record the run in the fixtures.
 
 ## One-time setup: the backup key
 

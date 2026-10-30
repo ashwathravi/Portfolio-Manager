@@ -30,7 +30,10 @@ A failed migration stops the job before anything is deployed. Migrations are not
 | Route | Meaning |
 |---|---|
 | `/api/health` | The process is up. No database call. Used by the Docker `HEALTHCHECK`. |
-| `/api/health/ready` | The app can reach its database: 200, or 503 with `database: "not_configured"` or `"unavailable"`. Cached for 10 seconds. Both routes are public. |
+| `/api/health/ready` | The app can reach its database: 200, or 503 with `database: "not_configured"` or `"unavailable"`. Cached for 10 seconds. |
+| `/api/health/jobs` | Every scheduled job, the backup included, has succeeded since its last run fell due: 200, or 503 with each job `ok`, `late` or `failed` and when it last succeeded, never an error. Cached for a minute. |
+
+All three are public. The production monitor (`.github/workflows/production-monitor.yml`) reads the last two every half hour and keeps an issue open while either fails; see `docs/monitoring.md`.
 
 ## Scheduled jobs
 
@@ -52,7 +55,7 @@ select job, started_at, finished_at, status, error, detail
 from job_runs order by started_at desc limit 10;
 ```
 
-To run the jobs by hand, use **Run** next to the job in the Vercel dashboard (Settings → Cron Jobs), which sends the secret for you.
+To run the jobs by hand, use **Run** next to the job in the Vercel dashboard (Settings → Cron Jobs), which sends the secret for you. A job that hasn't succeeded by midnight UTC after its weekday run shows as late or failed in `/api/health/jobs`, and the production monitor opens an issue (`docs/monitoring.md`). Changing the schedule in `vercel.json` means changing `DAILY_JOBS_CRON` in `src/lib/health/job-health.ts` too (a test checks).
 
 The route sets `maxDuration = 300`, the most Hobby allows, which needs Fluid compute (on by default for new projects).
 

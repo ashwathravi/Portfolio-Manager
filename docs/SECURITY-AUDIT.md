@@ -139,7 +139,7 @@ gh secret delete DATABASE_URL --repo ashwathravi/Portfolio-Manager
   - **User-scoped routes:** `requireSessionApiUserScope` takes the user from the Auth.js session and nothing else: no header, no shared secret.
   - **Cron routes:** need `CRON_SECRET`, compared in constant time.
   - **The Plaid webhook:** needs Plaid's ES256 signature with a known key, issued within 5 minutes, over the exact body.
-  - **Open without a session:** only `/api/health` and `/api/health/ready`.
+  - **Open without a session:** only `/api/health`, `/api/health/ready` and `/api/health/jobs` (i71: each scheduled job's status and last success, no error text, cached for a minute).
 - **`INTERNAL_API_SECRET`:** not set in production, and it never stands for a user.
 - **CSRF:** state changes are JSON calls from the app, carried by a `SameSite=Lax` cookie, which browsers don't send on cross-site requests. Auth.js protects its own forms with a token.
 
@@ -201,7 +201,7 @@ Every ID from a URL or body is checked against the session's user, in the WHERE 
 |---|---|
 | Real Supabase values in `.env.example` | Placeholders only. The unused `NEXT_PUBLIC_SUPABASE_*` lines go with i73. |
 | Production secrets in local `.env` files | Local development uses the Docker database (`db:setup` refuses anything else). Production secrets live only in Vercel and GitHub. |
-| No authentication on API routes | Every route needs a session, the cron secret or Plaid's signature, except the two health checks. |
+| No authentication on API routes | Every route needs a session, the cron secret or Plaid's signature, except the health checks. |
 | No rate limiting | Shared limits in Upstash, per user and per IP. |
 | Raw error messages returned | A fixed message per error, with details sent to Sentry, scrubbed. |
 | A database fallback URI | Without a usable `DATABASE_URL` every query fails with `DatabaseNotConfiguredError`. |
