@@ -115,6 +115,17 @@ export default defineConfig({
             name: 'chromium',
             use: { ...devices['Desktop Chrome'] },
         },
+        // The post-deploy smoke test (tests/production, launch item i72),
+        // here against the local server so it stays true to the app. Signed
+        // out, as on the live site, so only with database sessions: the local
+        // bypass signs every request in.
+        ...(databaseAuthEnabled
+            ? [{
+                name: 'production-smoke',
+                testDir: './tests/production',
+                use: { ...devices['Desktop Chrome'], storageState: { cookies: [], origins: [] } },
+            }]
+            : []),
     ],
     webServer: [
         {

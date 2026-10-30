@@ -21,7 +21,8 @@
     "test": "find src scripts -name '*.test.ts' -print0 | xargs -0 node --import tsx --test",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
-    "test:e2e:local": "bash ./scripts/e2e/run-local.sh"
+    "test:e2e:local": "bash ./scripts/e2e/run-local.sh",
+    "test:production": "playwright test --config playwright.production.config.ts"
   },
   "dependencies": {
     "@auth/drizzle-adapter": "^1.11.3",
