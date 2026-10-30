@@ -132,6 +132,24 @@ describe('parseThirteenFInformationTable', () => {
         assert.strictEqual(result.holdings[0].shares, 10000);
     });
 
+    test('decodes each entity once and leaves invalid ones as written', () => {
+        const issuerNamed = (name: string) => parseThirteenFInformationTable(`<informationTable><infoTable>
+    <nameOfIssuer>${name}</nameOfIssuer>
+    <titleOfClass>COM</titleOfClass>
+    <cusip>037833100</cusip>
+    <value>1</value>
+    <shrsOrPrnAmt><sshPrnamt>1</sshPrnamt><sshPrnamtType>SH</sshPrnamtType></shrsOrPrnAmt>
+  </infoTable></informationTable>`, CONTEXT).holdings[0].issuerName;
+
+        assert.strictEqual(issuerNamed('AT&amp;T &quot;A&quot; O&apos;NEIL'), 'AT&T "A" O\'NEIL');
+        assert.strictEqual(issuerNamed('CAF&#201; &#xC9;'), 'CAFÉ É');
+        // An escaped ampersand is text: "&amp;#60;" is the five characters "&#60;", not "<"
+        // (which the parser refuses, failing the whole filing).
+        assert.strictEqual(issuerNamed('A &amp;lt;B&amp;gt; &amp;#60;C&amp;#x3E;'), 'A &lt;B&gt; &#60;C&#x3E;');
+        // Code points past U+10FFFF used to throw and fail the whole filing.
+        assert.strictEqual(issuerNamed('BAD &#99999999; &#x110000; &bogus; OK'), 'BAD &#99999999; &#x110000; &bogus; OK');
+    });
+
     test('allows unknown ticker mappings while preserving issuer and CUSIP search keys', () => {
         const result = parseThirteenFInformationTable(REPRESENTATIVE_XML, CONTEXT);
 

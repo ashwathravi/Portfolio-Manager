@@ -10,6 +10,7 @@ import {
     useAlphaRadarReportsQuery,
     useRefreshAlphaRadarFilerMutation,
 } from "@/lib/api/alpha-radar/queries";
+import { useViewerIdentity } from "@/components/providers/IdentityProvider";
 import { useAlphaRadarAlertEngine } from "@/lib/alerts/useAlphaRadarAlertEngine";
 import {
     buildAlphaRadarReportMemoryChunks,
@@ -172,6 +173,8 @@ export function AlphaRadarDetailPane({
         { enabled: Boolean(selectedFiler), retry: false, refetchOnWindowFocus: false },
     );
     const refresh = useRefreshAlphaRadarFilerMutation(selectedFiler?.id ?? "");
+    // Refreshing calls SEC EDGAR for data every user shares: admins only.
+    const canRefresh = useViewerIdentity()?.admin === true;
     const reports = reportsQuery.data && reportsQuery.data.length > 0
         ? reportsQuery.data
         : fallbackReportsFor(selectedFiler?.id);
@@ -311,16 +314,18 @@ export function AlphaRadarDetailPane({
                         {report?.reportPeriod ?? "Latest quarter"} · {selectedFiler.fundStyle ?? "13F manager"}
                     </p>
                 </div>
-                <button
-                    type="button"
-                    className="pm-btn pm-btn-secondary"
-                    onClick={() => refresh.mutate({ force: true })}
-                    disabled={refresh.isPending}
-                    data-testid="alpha-radar-refresh"
-                >
-                    <RefreshCw size={14} aria-hidden="true" />
-                    <span>{refresh.isPending ? "Refreshing" : "Refresh"}</span>
-                </button>
+                {canRefresh && (
+                    <button
+                        type="button"
+                        className="pm-btn pm-btn-secondary"
+                        onClick={() => refresh.mutate({ force: true })}
+                        disabled={refresh.isPending}
+                        data-testid="alpha-radar-refresh"
+                    >
+                        <RefreshCw size={14} aria-hidden="true" />
+                        <span>{refresh.isPending ? "Refreshing" : "Refresh"}</span>
+                    </button>
+                )}
                 <Link href={ALPHA_RADAR_HELP_HREF} className="pm-btn pm-btn-secondary" data-testid="alpha-radar-help-link">
                     <ExternalLink size={14} aria-hidden="true" />
                     <span>Guide</span>

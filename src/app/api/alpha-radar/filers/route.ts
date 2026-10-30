@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { readJsonBody } from '@/lib/api/body';
 import { apiError, internalServerError } from '@/lib/api/security';
-import { requireSessionApiUserScope } from '@/lib/api/session-security';
+import { requireAdminApiUserScope } from '@/lib/api/session-security';
 import { getAlphaRadarDataRepository } from '@/lib/alpha-radar';
-import { alphaRadarTrackedFilerSchema } from '@/lib/validators/alpha-radar';
+import { ALPHA_RADAR_BODY_MAX_BYTES, alphaRadarTrackedFilerSchema } from '@/lib/validators/alpha-radar';
 
 export async function GET() {
     try {
@@ -15,12 +16,16 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
-    const auth = await requireSessionApiUserScope(request);
+    const auth = await requireAdminApiUserScope(request);
     if (!auth.ok) return auth.response;
 
     try {
-        const body = await request.json();
-        const parsed = alphaRadarTrackedFilerSchema.safeParse(body);
+        const read = await readJsonBody(request, ALPHA_RADAR_BODY_MAX_BYTES);
+        if (!read.ok && read.reason === 'too-large') {
+            return apiError('Request is too large.', 'REQUEST_TOO_LARGE', 413);
+        }
+        if (!read.ok) return apiError('Invalid tracked filer payload', 'INVALID_TRACKED_FILER', 400);
+        const parsed = alphaRadarTrackedFilerSchema.safeParse(read.value);
         if (!parsed.success) {
             return apiError(parsed.error.issues[0]?.message ?? 'Invalid tracked filer payload', 'INVALID_TRACKED_FILER', 400);
         }

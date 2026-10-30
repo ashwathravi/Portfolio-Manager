@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { AlertCircle, ExternalLink, RefreshCw } from "lucide-react";
+import { useViewerIdentity } from "@/components/providers/IdentityProvider";
 import {
     useAlphaRadarFilersQuery,
     useAlphaRadarReportsQuery,
@@ -28,6 +29,8 @@ export function AlphaRadarDashboardCard() {
         },
     );
     const refresh = useRefreshAlphaRadarAllMutation();
+    // Refreshing calls SEC EDGAR for every tracked filer: admins only.
+    const canRefresh = useViewerIdentity()?.admin === true;
 
     const liveFilers = filersQuery.data ?? [];
     const liveReports = reportsQuery.data ?? [];
@@ -56,16 +59,18 @@ export function AlphaRadarDashboardCard() {
                     </p>
                 </div>
                 <div className="pm-alpha-dashboard-actions">
-                    <button
-                        type="button"
-                        className="pm-btn pm-btn-secondary"
-                        onClick={() => refresh.mutate({ force: true, filingLimit: 1 })}
-                        disabled={refresh.isPending}
-                        data-testid="alpha-radar-dashboard-refresh"
-                    >
-                        <RefreshCw size={14} aria-hidden="true" />
-                        <span>{refresh.isPending ? "Refreshing" : "Refresh"}</span>
-                    </button>
+                    {canRefresh && (
+                        <button
+                            type="button"
+                            className="pm-btn pm-btn-secondary"
+                            onClick={() => refresh.mutate({ force: true, filingLimit: 1 })}
+                            disabled={refresh.isPending}
+                            data-testid="alpha-radar-dashboard-refresh"
+                        >
+                            <RefreshCw size={14} aria-hidden="true" />
+                            <span>{refresh.isPending ? "Refreshing" : "Refresh"}</span>
+                        </button>
+                    )}
                     <Link href={RESEARCH_ALPHA_RADAR_HREF} className="pm-card-link">
                         Open <ExternalLink size={12} aria-hidden="true" />
                     </Link>

@@ -10,8 +10,14 @@ describe('resolveViewerIdentity', () => {
     test('maps the Auth.js session user', async () => {
         const getSession = async () => ({ user: { id: 'u', name: ' Ash ', email: 'a@x.com', image: '' }, expires: '' }) as Session;
         assert.deepStrictEqual(await resolveViewerIdentity({ env: configured, getSession }), {
-            id: 'u', name: 'Ash', email: 'a@x.com', image: null, mode: 'signed-in',
+            id: 'u', name: 'Ash', email: 'a@x.com', image: null, mode: 'signed-in', admin: false,
         });
+    });
+
+    test('marks an admin named in AUTH_ADMIN_EMAILS', async () => {
+        const getSession = async () => ({ user: { id: 'u', email: 'Owner@x.com' }, expires: '' }) as Session;
+        const identity = await resolveViewerIdentity({ env: { ...configured, AUTH_ADMIN_EMAILS: 'owner@x.com' }, getSession });
+        assert.strictEqual(identity?.admin, true);
     });
 
     test('no session yields null', async () => {
@@ -25,6 +31,7 @@ describe('resolveViewerIdentity', () => {
     test('local bypass is labelled as local development', async () => {
         const identity = await resolveViewerIdentity({ env: bypass, getSession: async () => { throw new Error('should not call'); } });
         assert.strictEqual(identity?.mode, 'local-dev');
+        assert.strictEqual(identity?.admin, true);
         assert.strictEqual(identity?.id, bypass.AUTH_LOCAL_DEV_USER_ID);
     });
 

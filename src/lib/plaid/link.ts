@@ -148,12 +148,13 @@ export async function exchangePlaidPublicToken({
     const selected = new Set(selectedAccountIds ?? []);
     const linkAccountsById = new Map((linkMetadata?.accounts ?? []).map((account) => [account.id, account]));
     const productsSet = new Set(products);
+    const institution = institutionFor(asRecord(accountsResponse.item), linkMetadata);
     const accounts = readArray(accountsResponse, "accounts")
         .map((account) =>
             mapPlaidAccount({
                 account: asRecord(account),
                 linkAccount: linkAccountsById.get(readOptionalString(asRecord(account), "account_id") ?? ""),
-                institution: institutionFromMetadata(linkMetadata),
+                institution,
                 products: productsSet,
             }),
         )
@@ -162,7 +163,7 @@ export async function exchangePlaidPublicToken({
     return {
         itemId,
         accessToken,
-        institution: institutionFromMetadata(linkMetadata),
+        institution,
         accounts,
         requestId,
     };
@@ -416,6 +417,20 @@ function institutionFromMetadata(metadata: PlaidLinkMetadata | undefined): Plaid
         id: metadata?.institution?.institution_id?.trim() || "unknown",
         name: metadata?.institution?.name?.trim() || "Plaid institution",
     };
+}
+
+/**
+ * The connection's institution. Link's metadata comes from the browser,
+ * which can claim any bank (launch item i69), so the institution /accounts/get
+ * names wins, and the browser's name is kept only for that institution.
+ */
+function institutionFor(item: Record<string, unknown>, metadata: PlaidLinkMetadata | undefined): PlaidInstitution {
+    const fromLink = institutionFromMetadata(metadata);
+    const id = readOptionalString(item, "institution_id")?.trim();
+    if (!id) return fromLink;
+    const name = readOptionalString(item, "institution_name")?.trim()
+        || (fromLink.id === id ? fromLink.name : "Plaid institution");
+    return { id, name };
 }
 
 function normalizeClientUserId(value: string): string {

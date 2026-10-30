@@ -149,6 +149,34 @@ describe("Plaid Link helpers", () => {
         assert.strictEqual(exchange.accessToken, "access-sandbox-server-only");
     });
 
+    test("regression: the institution is the one Plaid names, not what the browser said (i69)", async () => {
+        const exchangeWith = (item: Record<string, unknown> | undefined) => exchangePlaidPublicToken({
+            credentials,
+            publicToken: "public-sandbox-real",
+            // Link's metadata arrives from the browser, which can claim anything.
+            linkMetadata: { institution: { name: "=Spoofed Bank", institution_id: "ins_spoofed" } },
+            fetchImpl: mockPlaidFetch((url) => {
+                if (url.endsWith("/item/public_token/exchange")) {
+                    return { access_token: "access-sandbox-server-only", item_id: "item-plaid-real", request_id: "r" };
+                }
+                return { accounts: [plaidAccount({ account_id: "acc-growth", name: "Brokerage", subtype: "brokerage", current: 1 })], item };
+            }),
+        });
+
+        const named = await exchangeWith({ institution_id: "ins_109508", institution_name: "Fidelity" });
+        assert.deepStrictEqual(named.institution, { id: "ins_109508", name: "Fidelity" });
+        assert.deepStrictEqual(named.accounts[0].institution, { id: "ins_109508", name: "Fidelity" });
+
+        // Plaid names the institution but not its name: the browser's name
+        // doesn't go with another institution's ID.
+        const unnamed = await exchangeWith({ institution_id: "ins_109508" });
+        assert.deepStrictEqual(unnamed.institution, { id: "ins_109508", name: "Plaid institution" });
+
+        // Only without Plaid's answer does Link's metadata name it.
+        const missing = await exchangeWith(undefined);
+        assert.deepStrictEqual(missing.institution, { id: "ins_spoofed", name: "=Spoofed Bank" });
+    });
+
     test("sanitizes exchange output before returning it to the client", async () => {
         const exchange = await exchangePlaidPublicToken({
             credentials,

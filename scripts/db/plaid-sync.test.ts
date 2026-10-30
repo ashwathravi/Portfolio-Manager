@@ -354,6 +354,16 @@ describe('Plaid sync into portfolios', { skip: !DATABASE_URL && 'SCRIPTS_TEST_DA
         assert.equal(plaid.requests.length, 0);
     });
 
+    test('the table refuses an account filed under another user\'s connection, whatever the code checks (i69)', async () => {
+        await linkedUser('u-fk-owner', 'item-fk-owner', []);
+        await sql`INSERT INTO auth_users (id, email) VALUES ('u-fk-intruder', 'u-fk-intruder@example.test')`;
+        const [item] = await sql<{ id: string }[]>`SELECT id FROM plaid_items WHERE plaid_item_id = 'item-fk-owner'`;
+        await assert.rejects(sql`
+            INSERT INTO plaid_accounts (user_id, plaid_item_record_id, plaid_account_id, name, mask, type, subtype, capabilities, verification_status)
+            VALUES ('u-fk-intruder', ${item.id}, 'acc-fk', 'Brokerage', '1234', 'investment', 'brokerage', '["holdings"]', 'automatically_verified')`,
+        /plaid_accounts_item_owner_fk/);
+    });
+
     test('regression: a new linked account keeps names unique and the account limit, as manual ones do', async () => {
         await linkedUser('u-names', 'item-names', [['acc_n1', 'Individual', 'investment']]);
         await selectPlaidAccounts('u-names', 'item-names', ['acc_n1'], database);

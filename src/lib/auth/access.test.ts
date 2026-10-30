@@ -5,6 +5,7 @@ import {
     authRuntimeMode,
     getLocalDevUserId,
     hasAccessAllowlist,
+    isAdmin,
     isGoogleProfileAllowed,
     isSessionEmailAllowed,
 } from "./access";
@@ -202,5 +203,40 @@ describe("isSessionEmailAllowed", () => {
     test("follows the open or invite-only rule when no list is set", () => {
         assert.equal(isSessionEmailAllowed("anyone@example.com", { requireAllowlist: false }), true);
         assert.equal(isSessionEmailAllowed("anyone@example.com", { requireAllowlist: true }), false);
+    });
+});
+
+describe("isAdmin", () => {
+    const configured = {
+        NODE_ENV: "production",
+        AUTH_SECRET: "secret",
+        AUTH_GOOGLE_ID: "client-id",
+        AUTH_GOOGLE_SECRET: "client-secret",
+        AUTH_ALLOWED_EMAILS: "owner@example.com,friend@example.com",
+        AUTH_ADMIN_EMAILS: " Owner@Example.com ",
+    };
+
+    test("is only the emails AUTH_ADMIN_EMAILS names, in any case", () => {
+        assert.equal(isAdmin("owner@example.com", configured), true);
+        assert.equal(isAdmin(" OWNER@example.com ", configured), true);
+        assert.equal(isAdmin("friend@example.com", configured), false);
+        assert.equal(isAdmin("owner@example.com.evil.test", configured), false);
+    });
+
+    test("is nobody when no admin is named", () => {
+        assert.equal(isAdmin("owner@example.com", { ...configured, AUTH_ADMIN_EMAILS: undefined }), false);
+        assert.equal(isAdmin("owner@example.com", { ...configured, AUTH_ADMIN_EMAILS: " , " }), false);
+    });
+
+    test("needs an email", () => {
+        assert.equal(isAdmin(undefined, configured), false);
+        assert.equal(isAdmin("", { ...configured, AUTH_ADMIN_EMAILS: "," }), false);
+        assert.equal(isAdmin(42, configured), false);
+    });
+
+    test("is the local developer in the local bypass, and nobody when sign-in is misconfigured", () => {
+        const localBypass = { NODE_ENV: "development", AUTH_LOCAL_DEV_BYPASS: "1", AUTH_LOCAL_DEV_USER_ID: "local-user" };
+        assert.equal(isAdmin(null, localBypass), true);
+        assert.equal(isAdmin("owner@example.com", { ...configured, AUTH_ALLOWED_EMAILS: "" }), false);
     });
 });
