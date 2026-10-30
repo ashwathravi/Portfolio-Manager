@@ -177,7 +177,9 @@ export interface JobHealthCheckOptions {
 /**
  * The check behind /api/health/jobs. Reports are cached and concurrent
  * callers share one load. A failed load reports the database as unavailable,
- * never the error.
+ * never the error, and so does every check while a load that outlived its
+ * timeout is still outstanding: it may hold a pooled connection, and a
+ * public endpoint mustn't fill the pool during an outage.
  */
 export function createJobHealthCheck({
     isConfigured,
@@ -190,6 +192,18 @@ export function createJobHealthCheck({
 }: JobHealthCheckOptions): () => Promise<JobHealthReport> {
     let cached: { report: JobHealthReport; expiresAt: number } | null = null;
     let inFlight: Promise<JobHealthReport> | null = null;
+    let outstandingLoad: Promise<unknown> | null = null;
+
+    async function loadOnce(): Promise<readonly JobRunSummary[] | null> {
+        if (outstandingLoad) return null;
+        const attempt = load(schedules.map((schedule) => schedule.job));
+        outstandingLoad = attempt;
+        attempt.then(settle, settle);
+        function settle() {
+            if (outstandingLoad === attempt) outstandingLoad = null;
+        }
+        return withTimeout(attempt, timeoutMs);
+    }
 
     async function check(): Promise<JobHealthReport> {
         const checkedAt = new Date(now());
@@ -201,7 +215,7 @@ export function createJobHealthCheck({
         });
         if (!isConfigured()) return degraded("not_configured");
 
-        const summaries = await withTimeout(load(schedules.map((schedule) => schedule.job)), timeoutMs);
+        const summaries = await loadOnce();
         if (!summaries) return degraded("unavailable");
 
         const byJob = new Map(summaries.map((summary) => [summary.job, summary]));

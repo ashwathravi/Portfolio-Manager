@@ -238,7 +238,7 @@ export async function syncIssue(problems: readonly Problem[], github: GitHub, co
         return { action: "opened", number: created.number };
     }
 
-    const comments = await github.request<Comment[]>("GET", `/repos/${repo}/issues/${issue.number}/comments?per_page=100`);
+    const comments = await listComments(github, repo, issue.number);
     const latest = [...comments].reverse()
         .filter((comment) => comment.user?.login === MONITOR_LOGIN)
         .map((comment) => readState(comment.body))
@@ -280,6 +280,17 @@ async function findMonitorIssue(github: GitHub, repo: string): Promise<Issue | u
         if (issue || open.length < 100) return issue;
     }
     return undefined;
+}
+
+/** Every comment on the issue, oldest first: the API has no newest-first order. */
+async function listComments(github: GitHub, repo: string, number: number): Promise<Comment[]> {
+    const comments: Comment[] = [];
+    for (let page = 1; page <= 50; page += 1) {
+        const batch = await github.request<Comment[]>("GET", `/repos/${repo}/issues/${number}/comments?per_page=100&page=${page}`);
+        comments.push(...batch);
+        if (batch.length < 100) break;
+    }
+    return comments;
 }
 
 function issueTitle(problems: readonly Problem[]): string {

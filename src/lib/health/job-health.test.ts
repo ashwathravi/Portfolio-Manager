@@ -202,6 +202,32 @@ describe("createJobHealthCheck", () => {
         assert.equal((await check()).database, "unavailable");
     });
 
+    test("a load that outlived its timeout blocks the next one until it settles", async () => {
+        let clock = now();
+        let loads = 0;
+        let release: (summaries: JobRunSummary[]) => void = () => {};
+        const check = createJobHealthCheck({
+            isConfigured: () => true,
+            load: () => {
+                loads += 1;
+                return loads === 1 ? new Promise((resolve) => { release = resolve; }) : Promise.resolve([succeeded("prices")]);
+            },
+            timeoutMs: 5,
+            now: () => clock,
+        });
+
+        assert.equal((await check()).database, "unavailable");
+        clock += 10_000;
+        assert.equal((await check()).database, "unavailable");
+        assert.equal(loads, 1);
+
+        release([]);
+        await new Promise((resolve) => setImmediate(resolve));
+        clock += 10_000;
+        assert.equal((await check()).database, "ok");
+        assert.equal(loads, 2);
+    });
+
     test("reuses a report for a minute and an outage for ten seconds, sharing one load", async () => {
         let clock = now();
         let loads = 0;

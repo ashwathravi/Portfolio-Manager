@@ -153,7 +153,10 @@ function fakeGitHub(issues: FakeIssue[] = []) {
             }
             const comments = /^\/repos\/o\/r\/issues\/(\d+)\/comments/.exec(path);
             const issue = issues.find((candidate) => candidate.number === Number(comments?.[1] ?? /issues\/(\d+)$/.exec(path)?.[1]));
-            if (method === 'GET' && comments && issue) return reply(issue.comments);
+            if (method === 'GET' && comments && issue) {
+                const page = Number(/&page=(\d+)$/.exec(path)?.[1] ?? 1);
+                return reply(issue.comments.slice((page - 1) * 100, page * 100));
+            }
             if (method === 'POST' && comments && issue) {
                 issue.comments.push({ body: (body as { body: string }).body, user: BOT });
                 return reply({});
@@ -266,6 +269,19 @@ describe('syncIssue', () => {
         assert.deepEqual(await syncIssue([late], github, context), { action: 'updated', number: 40 });
     });
 
+    test('reads its latest state past the first page of comments', async () => {
+        const { github, issues, calls } = fakeGitHub();
+        await syncIssue([down], github, context);
+        issues[0].comments.push(
+            { body: '<!-- production-monitor: job:prices:late -->', user: BOT },
+            ...Array.from({ length: 149 }, () => ({ body: 'Any news?', user: { login: 'someone' } })),
+            { body: '<!-- production-monitor: site -->', user: BOT },
+        );
+
+        assert.deepEqual(await syncIssue([down], github, context), { action: 'unchanged', number: 40 });
+        assert.deepEqual(calls.filter((call) => call.path.includes('/comments?')).slice(-2).map((call) => call.path.split('&page=')[1]), ['1', '2']);
+    });
+
     test('finds its issue past the first page of open issues and pull requests', async () => {
         const others: FakeIssue[] = Array.from({ length: 150 }, (_, index) => ({
             number: 100 + index, title: 'Bump', body: null, state: 'open', user: { login: 'dependabot[bot]' }, pull_request: {}, comments: [],
@@ -273,7 +289,7 @@ describe('syncIssue', () => {
         const { github, calls } = fakeGitHub([...others, { number: 7, title: 'Down', body: '<!-- production-monitor: site -->', state: 'open', user: BOT, comments: [] }]);
 
         assert.deepEqual(await syncIssue([down], github, context), { action: 'unchanged', number: 7 });
-        assert.deepEqual(calls.filter((call) => call.path.includes('&page=')).map((call) => call.path.split('&page=')[1]), ['1', '2']);
+        assert.deepEqual(calls.filter((call) => call.path.includes('/issues?state=open')).map((call) => call.path.split('&page=')[1]), ['1', '2']);
     });
 
     test('without someone to mention, the issue still says what fails', async () => {
