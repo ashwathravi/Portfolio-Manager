@@ -14,6 +14,8 @@ Every half hour, `.github/workflows/production-monitor.yml` runs `scripts/monito
 
 The monitor waits 30 seconds and asks again, up to three times, before counting no answer, an error or an unreachable database. A late or failed job is a settled answer and isn't retried.
 
+Each production deploy is also checked once, straight away, by the post-deploy smoke test in the deploy job (`docs/deployment.md` › Post-deploy smoke test). A failure there turns the deploy job red rather than opening an issue.
+
 ## How an alert reaches you
 
 When a check fails, the monitor opens **one issue**, created by `github-actions`, and mentions the repository's owner, so GitHub emails you:

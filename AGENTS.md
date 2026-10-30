@@ -2,14 +2,15 @@
 
 ## Overview
 
-Atlas Wealth uses two layers of automated testing:
+Atlas Wealth uses three layers of automated testing:
 
 | Layer | Tool | Directory | Command |
 |-------|------|-----------|---------|
 | **Unit tests** | Node.js built-in test runner + `tsx` | `src/**/*.test.ts`, `scripts/**/*.test.ts` | `npm test` |
 | **E2E tests** | Playwright (Chromium) | `tests/e2e/*.spec.ts` | `npm run test:e2e` |
+| **Post-deploy smoke** | Playwright (Chromium) | `tests/production/*.spec.ts` | `PRODUCTION_URL=… npm run test:production` |
 
-Both layers run in CI via `.github/workflows/docker-build.yml`. Unit tests run in the `lint-and-test` job; E2E tests run in a separate `e2e-tests` job that depends on the unit tests passing first.
+All three run in CI via `.github/workflows/docker-build.yml`. Unit tests run in the `lint-and-test` job; E2E tests run in a separate `e2e-tests` job that depends on the unit tests passing first. The post-deploy smoke suite runs in `deploy-production` against the live site after every production deploy, and in `e2e-tests` against the local production build (Playwright project `production-smoke`).
 
 ---
 
@@ -50,6 +51,8 @@ Playwright starts three web servers: the main one on port 3000; a "database down
 With database sessions (CI and `test:e2e:local`) the main server is a **production build**, as Vercel serves it: `next build` into `.next/e2e-production`, then `next start`, with the fixture users as the invite list. That adds a few minutes before the first test; `E2E_DEV_SERVER=1` runs `next dev` instead while debugging. Without a database (`npm run test:e2e`) every server is `next dev`, because the local auth bypass is refused in production, and so are the two outage servers.
 
 The Playwright config (`playwright.config.ts`) starts its own servers (on 3000, 3100 and 3200) and never reuses a running one: if any of those ports is busy, the run fails. Stop your dev server first.
+
+With database sessions the E2E run also includes the project `production-smoke`: the post-deploy smoke suite in `tests/production`, signed out, against the local production build. Its specs must work on the live site too: read-only, signed out, nothing that assumes fixture data, and anything that would reach a real service (starting a Google sign-in makes the server ask Google for its endpoints) skipped against localhost. `docs/deployment.md` › Post-deploy smoke test says what it covers.
 
 With database sessions fixture user A (`e2e-a@example.test`) is the only Alpha Radar admin (`AUTH_ADMIN_EMAILS`); fresh and new users aren't, so a test of what admins alone see signs in as one of those.
 
@@ -128,6 +131,7 @@ Every page in the application must have a corresponding E2E spec. The current ma
 | Journal in the account | `journal-sync.spec.ts` | With a database (launch item i38): an added entry follows the user to another browser, a browser's earlier journal (edited and deleted examples included) moves to the account once and leaves the browser, one account's journal doesn't reach another, a page's older write that lands late is ignored, and so is a save that lands after a deletion, the API refuses mismatched ids, unknown types and fields, writes without an order, oversized imports and signed-out callers |
 | Watchlist in the account | `watchlist-sync.spec.ts` | With a database (launch item i38): an added ticker follows the user to another browser and to Today, a browser's earlier list (edited and removed examples included) moves to the account once and leaves the browser, one account's list doesn't reach another, a page's older write that lands late doesn't undo its newer one (nor a removal that landed first), changes wait until the list has loaded, why and notes stop at what the account keeps, the API refuses duplicate tickers, mismatched ids, unknown fields, writes without an order, oversized imports and signed-out callers. Specs that change the watchlist, journal or theses sign in with `signInAsFreshUser` and wait for the page to load them (`researchLoaded` in `tests/e2e/helpers/research.ts`) |
 | Browser data per user | `browser-data-isolation.spec.ts` | `<html data-storage-scope>` is the signed-in user, another account on the same browser doesn't see your Ask history, data saved under an old shared key (pattern snoozes) goes to the first account that opens a page, even one that never shows it, a browser's Ask transcript from before answers came from the user's data goes once the account keeps the conversation, signing out removes an Ask transcript. Specs that read or clear storage use `userKey()` from `tests/e2e/helpers/storage.ts` |
+| After a production deploy | `tests/production/post-deploy.spec.ts` | Launch item i72; runs against the live site after every deploy (`playwright.production.config.ts`, after waiting until `/api/health` reports the deployed commit as `release`) and in E2E against the local production build. Signed out and read-only: the site reaches its database, `/api/health/jobs` reads every scheduled job (on time or not), a signed-out visit goes to sign in with the button on, Continue with Google goes to Google with a real client ID, this site's callback, the code flow and PKCE (live site only; the request is answered by the test, so Google is never loaded), the sign-in page, privacy policy and terms answer with their security headers and load without console errors, CSP violations or failed requests, the sign-in page fits a phone, the API refuses signed-out callers and the cron route refuses a call without its secret |
 | Cross-cutting | `smoke.spec.ts` | Fonts loaded and self-hosted (Latin files preloaded from `/_next/static/media`, Plex Mono and the Greek subset available, nothing fetched from Google), hydration clean in another timezone and with the browser on the next UTC day, no horizontal overflow at 390px, market-data routes answer 503 `MARKET_DATA_NOT_CONFIGURED` without a provider key, quotes answer from the price store (the fixture SPY close; 404 `QUOTE_UNAVAILABLE` for an unpriced symbol), valuation lists unpriced holdings, `/api/cron/daily` reaches the route without a session and refuses with 503 `CRON_NOT_CONFIGURED` without `CRON_SECRET`, `/api/health/jobs` answers without a session with each scheduled job and nothing else (all late in the E2E database, which has no runs; not configured without one; launch item i71) |
 
 ### Adding E2E tests for a new page
@@ -226,7 +230,7 @@ The GitHub Actions workflow (`.github/workflows/docker-build.yml`) runs these jo
 2. **`lint-and-test`** — Audits production dependencies (`npm audit --omit=dev --audit-level=high`), lints (`npm run lint`), runs unit tests (`npm test`), and builds Next.js (`npm run build`).
 3. **`e2e-tests`** — Installs Playwright browsers, prepares a Postgres service with `scripts/e2e/prepare-database.ts`, runs the tests of the scripts that need a database against it, builds and starts the app in production mode connected as a member of `app_runtime`, and runs all E2E tests. Only runs after `lint-and-test` passes. Uploads the Playwright HTML report as a build artifact.
 4. **`publish-image`** — On `master` only, after the three checks pass: pushes the image to GHCR.
-5. **`deploy-production`** — On `master` only, after the three checks pass: applies migrations, has Vercel build and deploy the commit (Sensitive variables such as the Sentry DSN only exist in Vercel's own builds), and checks `/api/health/ready`. See `docs/deployment.md`, including the rule that migrations must work with the code already running.
+5. **`deploy-production`** — On `master` only, after the three checks pass: applies migrations, has Vercel build and deploy the commit (Sensitive variables such as the Sentry DSN only exist in Vercel's own builds), checks `/api/health/ready`, then runs the post-deploy smoke test (`npm run test:production`) once the site serves the commit. See `docs/deployment.md`, including the rule that migrations must work with the code already running.
 
 `.github/workflows/database-backup.yml` backs up production every night: an encrypted dump kept as an artifact for 30 days, restored into a scratch database in the same run and checked table by table; on a pull request that changes the backup or the migrations it rehearses on the E2E fixtures instead. See `docs/backups.md`.
 
@@ -254,6 +258,7 @@ npm run test:e2e
 
 - Unit tests: `<module>.test.ts` next to the source file (e.g. `charts.ts` → `charts.test.ts`).
 - E2E tests: `tests/e2e/<feature>.spec.ts` (e.g. `portfolios.spec.ts`).
+- Post-deploy smoke tests: `tests/production/<name>.spec.ts`. They run against production, so they stay signed out and read-only.
 - Do not put unit tests in the `tests/` directory — that is reserved for E2E specs.
 - Do not put E2E specs in the `src/` directory.
 
