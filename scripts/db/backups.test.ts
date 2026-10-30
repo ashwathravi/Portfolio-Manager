@@ -5,6 +5,7 @@ import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+    backupRunFromEnv,
     compareRestore,
     connectionEnv,
     describeBackup,
@@ -188,5 +189,33 @@ describe('the manifest', () => {
         } finally {
             rmSync(dir, { recursive: true, force: true });
         }
+    });
+});
+
+describe('backupRunFromEnv (launch item i71)', () => {
+    const now = new Date('2026-10-29T07:00:00Z');
+    const env = {
+        BACKUP_STATUS: 'succeeded',
+        BACKUP_STARTED_AT: '2026-10-29T06:52:10Z',
+        BACKUP_RUN_URL: 'https://github.com/ashwathravi/Portfolio-Manager/actions/runs/1',
+    };
+
+    test('reads the run the workflow describes, finished now', () => {
+        assert.deepEqual(backupRunFromEnv(env, now), {
+            status: 'succeeded',
+            startedAt: new Date('2026-10-29T06:52:10Z'),
+            finishedAt: now,
+            runUrl: env.BACKUP_RUN_URL,
+        });
+        assert.equal(backupRunFromEnv({ ...env, BACKUP_STATUS: 'failed', BACKUP_RUN_URL: '' }, now).runUrl, null);
+    });
+
+    test('refuses a status, time or link the workflow could only have mistyped', () => {
+        assert.throws(() => backupRunFromEnv({ ...env, BACKUP_STATUS: 'success' }, now), /BACKUP_STATUS/);
+        assert.throws(() => backupRunFromEnv({ ...env, BACKUP_STATUS: undefined }, now), /BACKUP_STATUS/);
+        assert.throws(() => backupRunFromEnv({ ...env, BACKUP_STARTED_AT: '' }, now), /BACKUP_STARTED_AT/);
+        assert.throws(() => backupRunFromEnv({ ...env, BACKUP_STARTED_AT: 'yesterday' }, now), /BACKUP_STARTED_AT/);
+        assert.throws(() => backupRunFromEnv({ ...env, BACKUP_STARTED_AT: '2026-10-29T07:00:01Z' }, now), /BACKUP_STARTED_AT/);
+        assert.throws(() => backupRunFromEnv({ ...env, BACKUP_RUN_URL: 'javascript:alert(1)' }, now), /BACKUP_RUN_URL/);
     });
 });
