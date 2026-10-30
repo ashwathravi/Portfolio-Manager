@@ -1,16 +1,38 @@
 # Architecture
 
-- Next.js App Router application with a shared shell in `src/app/layout.tsx`: fixed sidebar, top bar, theme provider, and global toaster.
-- Mixed rendering model:
-  - Server-rendered pages read from Postgres through Drizzle (`src/app/page.tsx`, `src/app/portfolios/holdings/page.tsx`).
-  - Many other feature pages are client components backed by in-file mock arrays and local React state.
-- Persistence layer is small and relational:
-  - `portfolios`
-  - `holdings`
-  - `transactions`
-  - Alpha Radar 13F research tables for tracked filers, SEC filings, parsed holdings, quarterly changes, reports, and refresh runs
-  - Relations are portfolio -> holdings and portfolio -> transactions.
-- Database access is centralized in `src/db/index.ts` using `postgres` + `drizzle-orm`. If `DATABASE_URL` is missing, the app does not fail build, but database-backed features degrade at runtime.
+How the app, its data and its jobs fit together. The reasons behind the big choices are in `docs/decisions.md`; running it in production is in `docs/deployment.md`.
+
+## Runtime
+
+- One Next.js 16 App Router application on Vercel (Node.js runtime, Fluid compute), with Postgres on Supabase, Upstash Redis for shared rate limits and Sentry for errors (`src/instrumentation.ts`, `src/instrumentation-client.ts`). The same build runs as a standalone Docker image (`Dockerfile`).
+- `src/proxy.ts` sees every request first:
+  - it gives the response a Content-Security-Policy with a fresh script nonce (`src/lib/security/content-security-policy.ts`);
+  - it sends a signed-out page request to `/login?callbackUrl=…` and answers a signed-out API call 401;
+  - it rate-limits API calls per IP and per user (`src/lib/api/rate-limit.ts`).
+
+  The sign-in page, the privacy policy, the terms and the health routes are public. Cron routes and the Plaid webhook take no session and check their own secret or signature.
+- Pages are server components that read the signed-in user's data through Drizzle (Today, Holdings, Accounts, Activity, Performance, Trade), with client components for interaction. Writes and the per-user stores (settings, watchlist, journal, theses, Ask) go through API routes under `src/app/api`, which take the user from the session (`requireSessionApiUserScope`, `src/lib/api/session-security.ts`) and nothing else.
+- Sign-in is Auth.js with Google, the Drizzle adapter and database sessions (`src/auth.ts`). The invite list and the Alpha Radar admins come from `AUTH_ALLOWED_EMAILS`, `AUTH_ALLOWED_DOMAINS` and `AUTH_ADMIN_EMAILS` (`src/lib/auth/access.ts`). Local development signs in as a fixed user without Google (`AUTH_LOCAL_DEV_BYPASS`), which production refuses.
+
+## Data model
+
+`src/db/schema.ts`; migrations in `drizzle/`, applied by `scripts/migrate.ts` as the table owner. The app connects as a member of `app_runtime` (migration 0010). Every row a user owns carries their `user_id`, and foreign keys keep a child row with its parent's owner (migration 0025).
+
+| Area | Tables |
+|---|---|
+| Sign-in | `auth_users`, `auth_accounts`, `auth_sessions`, `auth_verification_tokens`, `auth_authenticators` |
+| Portfolios | `portfolios` (one per account: manual, CSV or a linked account), `holdings` (one row per symbol in each portfolio), `transactions` (with fees, currency and source) |
+| Linked accounts | `plaid_items` (the access token, encrypted with `PLAID_TOKEN_ENCRYPTION_KEY`), `plaid_accounts` (each account, whether it is synced, and the portfolio it syncs into) |
+| The user's own | `user_settings` (one versioned JSON row: preferences and the risk policy), `watchlist_items`, `journal_entries`, `theses` with `thesis_catalysts` and `thesis_evidence`, `order_plans`, `ask_messages` |
+| Market data | `securities` (the securities master: what is tracked, reference data, sector), `price_bars` (daily closes) |
+| History | `portfolio_snapshots`, `portfolio_snapshot_positions` (nightly valuations) |
+| Jobs | `job_runs` (one row per run of each scheduled job, the backup included) |
+| Alpha Radar | `alpha_radar_tracked_filers`, `alpha_radar_sec_filings`, `alpha_radar_filing_holdings`, `alpha_radar_holding_changes`, `alpha_radar_reports`, `alpha_radar_semantic_chunks` |
+
+Database access goes through `src/db/index.ts` (`postgres` + `drizzle-orm`), which requires TLS for every host but localhost unless the URL says `sslmode=disable`. Without a usable `DATABASE_URL` (missing, or Vercel's `[SENSITIVE]` placeholder) the client connects to nothing: every query rejects with `DatabaseNotConfiguredError` (`src/db/unconfigured-client.ts`), and pages show their empty states. A database that is configured but unreachable shows an outage notice instead, and `/api/health/ready` answers 503.
+
+## Market data and history
+
 - Market data goes through one service, `getMarketDataService()` (`src/lib/services/market-data-service.ts`), for server pages (`loadQuotes`) and the `/api/market-data` routes alike:
   - quotes come from the Postgres price store (`StoredQuoteProvider`, `src/lib/markets/stored-quote-provider.ts`): the latest two stored closes per symbol, which the nightly ingest writes from Massive's grouped daily bars. Request paths never call Massive for prices. A symbol with no stored close is left out (a single quote is 404 `QUOTE_UNAVAILABLE`) and starts being tracked for the next ingest, while the store has fewer than 2,000 securities (`REQUESTED_TRACKING_LIMIT`). With only one stored close a quote's `change` and `changePercent` are null, and `isTodaysQuote` (`src/lib/markets/quote-session.ts`) decides whether a change is today's move. Without `DATABASE_URL`, quotes reject with `MarketDataNotConfiguredError`.
   - history, fundamentals and search go to `PolygonMassiveAdapter` on the free Massive Basic plan; without `POLYGON_API_KEY` those reject with `MarketDataNotConfiguredError` (routes answer 503). The ingest also needs the key.
@@ -21,12 +43,23 @@
   - returns from that history (`src/lib/performance/holdings-returns.ts`, loaded by `return-history.ts` for Performance › Returns): each step from one snapshot date to the next prices what was held at the first close with stored, split-adjusted closes at both ends, over the accounts' total value (cash earns nothing), and the steps chain into a time-weighted return. A step only prices what was already held, so money moving in or out, including transfers between the user's own accounts, is never a gain or a loss and needs no list of flows. All accounts together combine, by value, the accounts with a snapshot at each step's start. Benchmarks are the SPY, QQQ, IWM and DIA closes on the same dates, offered only when every date has one. Both sides are price returns: dividends aren't included.
   - an in-memory cache in front (`src/lib/cache`); pages keep their stored prices whenever quotes are unavailable.
   - a quote's change counts as today's move only for today's Eastern session (`isTodaysQuote`); earlier closes price positions without a "today" change.
-- Schwab integration is server-side:
-  - OAuth callback route exchanges auth code for tokens
-  - order route validates an app-level order payload and maps it to Schwab's order format
-  - tokens are not persisted yet.
-- Client-only durable state is limited to the settings store in Zustand with `persist`; only appearance, notifications, and tags are written to local storage.
-- Initial database content is loaded from mock data via `scripts/seed.ts`.
+
+## Linked accounts
+
+Plaid Link runs in the browser; the server exchanges the public token and stores the access token encrypted in `plaid_items` (`src/lib/plaid`). The user picks which accounts to sync, and each one syncs into its own portfolio: holdings are replaced, transactions upserted by Plaid's id. Syncs run on demand (Settings › Sync now), nightly (the `plaid` job) and when Plaid's webhook (`/api/plaid/webhook`, ES256-signed) reports new data. A connection that needs the user to sign in again reconnects through Link's update mode. Production has no Plaid settings yet: linking real accounts waits for Plaid's approval (launch items i09, i67).
+
+## Scheduled jobs and operations
+
+- Vercel Cron calls `GET /api/cron/daily` once a weekday (`vercel.json`), with `CRON_SECRET` as its bearer token. The route runs `expired-sessions`, `ask-history`, `plaid`, `prices` and `snapshots` in order (`src/lib/jobs/daily-jobs.ts`), one run at a time, and records each in `job_runs` (`src/lib/jobs/runner.ts`).
+- Health: `/api/health` (the process, and the commit it runs), `/api/health/ready` (the database) and `/api/health/jobs` (each scheduled job, the backup included, on time or not; `src/lib/health/job-health.ts`). The production monitor reads the last two every half hour (`docs/monitoring.md`); every deploy ends with a smoke test of the live site (`docs/deployment.md`).
+- The nightly backup is a GitHub workflow, not a job here (`docs/backups.md`); it records its run in `job_runs`.
+
+## Integrations kept off
+
+- Schwab's OAuth and order routes (`src/app/api/schwab`, `src/lib/api/schwab`) exist but answer 404 unless `SCHWAB_INTEGRATION_ENABLED=1`, which production never sets. Their tokens aren't stored. Atlas places no orders (`docs/decisions.md`).
+
+## Alpha Radar
+
 - Alpha Radar v1 stays inside the Next.js application:
   - SEC EDGAR ingestion and 13F parsing live under `src/lib/sec`.
   - Diff, memo, refresh orchestration, repositories, and seed filers live under `src/lib/alpha-radar`.
