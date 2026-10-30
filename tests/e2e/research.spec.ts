@@ -375,6 +375,55 @@ test.describe('Research watchlist', () => {
         await expect(pane.getByLabel('Target entry ($)')).toHaveValue('70');
     });
 
+    test('regression: an item opened while the list loads shows what was saved, and leaving a field keeps it', async ({ page }) => {
+        // Found running E2E locally: SHOP opened on its example row before
+        // the saved list arrived kept the example's text, and leaving a
+        // field then saved that text over the user's.
+        test.skip(!databaseAuthEnabled, 'Without a database the list is read from this browser before anything can be opened.');
+        const list = page.locator('.pm-research-list');
+        const pane = page.locator('.pm-research-pane');
+        const notes = pane.getByRole('textbox', { name: 'Notes' });
+        const target = pane.getByLabel('Target entry ($)');
+        await list.getByRole('button', { name: /SHOP/ }).click();
+        await target.fill('70');
+        const saved = watchlistSaved(page, 'Check margins first');
+        await notes.fill('Check margins first');
+        await notes.blur();
+        await saved;
+
+        // Hold the next read of the list until SHOP is open on its example row.
+        let releaseList = () => {};
+        const listHeld = new Promise<void>((resolve) => { releaseList = resolve; });
+        await page.route('**/api/research/watchlist', async (route) => {
+            await listHeld;
+            await route.continue();
+        });
+        await reloadAppPage(page);
+        await list.getByRole('button', { name: /SHOP/ }).click();
+        await expect(notes).toHaveValue('Add on a market-wide pullback');
+        const loaded = researchLoaded(page, 'watchlist');
+        releaseList();
+        await loaded;
+        await page.unroute('**/api/research/watchlist');
+        await expect(notes).toHaveValue('Check margins first');
+        await expect(target).toHaveValue('70');
+
+        // Leaving the notes unchanged saves nothing, so the next save keeps them.
+        await notes.focus();
+        await notes.blur();
+        const why = pane.getByLabel('Why it is on the list');
+        const savedWhy = watchlistSaved(page, 'Waiting for the margin turn');
+        await why.fill('Waiting for the margin turn');
+        await why.blur();
+        await savedWhy;
+        const reloaded = researchLoaded(page, 'watchlist');
+        await reloadAppPage(page);
+        await reloaded;
+        await list.getByRole('button', { name: /SHOP/ }).click();
+        await expect(notes).toHaveValue('Check margins first');
+        await expect(why).toHaveValue('Waiting for the margin turn');
+    });
+
     test("regression: why and notes stop at what the account keeps", async ({ page }) => {
         // The Codex finding on PR #147: longer text could be typed, then was
         // cut short when saved.
