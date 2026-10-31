@@ -94,11 +94,13 @@ AUTH_URL="http://localhost:3000"     # off Vercel, Auth.js trusts no other host
 AUTH_ALLOWED_EMAILS="you@example.com"
 ```
 
-Then run:
+With the database running (`npm run db:up`, then `npm run db:setup` once), start only the app's container:
 
 ```bash
-docker compose --profile app up -d --build
+docker compose --profile app up -d --build --no-deps web
 ```
+
+`--no-deps` leaves the shared Postgres container alone; without it Compose may restart it, which interrupts anything else using it, such as an E2E run from another checkout. Docker reports the container healthy once `/api/health` answers.
 
 ## Documentation
 
