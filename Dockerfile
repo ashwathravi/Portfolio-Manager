@@ -31,7 +31,10 @@ COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 USER nextjs
 EXPOSE 3000
 
+# Exits as soon as it has the status: an http.get that never reads the
+# response keeps the process alive until Docker's timeout, so every probe
+# failed (scripts/dockerfile-healthcheck.test.ts).
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD node -e "require('http').get('http://localhost:3000/api/health', (r) => {if (r.statusCode !== 200) throw new Error(r.statusCode)})"
+  CMD node -e "fetch('http://localhost:3000/api/health', { signal: AbortSignal.timeout(2500) }).then((r) => process.exit(r.status === 200 ? 0 : 1), () => process.exit(1))"
 
 CMD ["node", "server.js"]

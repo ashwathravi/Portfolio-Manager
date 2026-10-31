@@ -103,9 +103,12 @@ Set these for **Production only**, never Preview: a preview runs branch code, an
 | `DATABASE_URL` | Supabase **transaction** pooler (port 6543) as `atlas_app.<project-ref>`, the least-privilege login (see `docs/local-database-secrets.md`). |
 | `CRON_SECRET` | A generated value (`openssl rand -hex 32`). Vercel sends it to the cron route; without it no scheduled job runs. Never print or paste it. |
 | `POLYGON_API_KEY` | The Massive Basic key the nightly price ingest uses. |
+| `SEC_EDGAR_USER_AGENT` | Set. Who Alpha Radar's SEC EDGAR requests say they're from, with a contact (SEC fair-access rules). |
 | `PLAID_*`, `PLAID_TOKEN_ENCRYPTION_KEY` | When account linking goes live. The key must be 32 random bytes, base64 or hex (`openssl rand -base64 32`); production stores no Plaid token with a weaker one. |
 | `KV_REST_API_URL`, `KV_REST_API_TOKEN` (and `KV_URL`, `REDIS_URL`, `KV_REST_API_READ_ONLY_TOKEN`) | Set by the Upstash integration. They are the shared rate limiter's store; without them each instance limits on its own. |
-| `NEXT_PUBLIC_SENTRY_DSN`, `SENTRY_ORG`, `SENTRY_PROJECT`, `SENTRY_AUTH_TOKEN` | Set by the Sentry integration (Production and Preview). Don't edit them by hand. |
+| `NEXT_PUBLIC_SENTRY_DSN`, `SENTRY_ORG`, `SENTRY_PROJECT`, `SENTRY_AUTH_TOKEN` (and `SENTRY_PUBLIC_KEY`, `SENTRY_VERCEL_LOG_DRAIN_URL`, `SENTRY_OTLP_TRACES_URL`, which the app doesn't read) | Set by the Sentry integration (Production and Preview). Don't edit them by hand. |
+
+`AUTH_URL` stays unset on Vercel: Auth.js uses the request's host there. Every variable is described in `.env.example`.
 
 ```bash
 vercel env add AUTH_ALLOWED_EMAILS production
