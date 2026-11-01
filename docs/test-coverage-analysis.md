@@ -1,151 +1,45 @@
 # Test Coverage Analysis
 
-## Current State
+_Last reviewed 2026-10-30, after launch item i72._ How the rules for writing tests work, and what each spec covers, is in `AGENTS.md`; this page is the overall picture and the gaps that are left.
 
-The codebase has **3 test files** across **~85 source files**, covering a very narrow slice of the application.
+## Current state
 
-| File | What it tests |
-|---|---|
-| `src/lib/charts.test.ts` | `calculateSparklinePoints` (5 cases) |
-| `src/lib/validators/settings.test.ts` | `tagSchema` only (7 cases) |
-| `tests/e2e/smoke.spec.ts` | Homepage title + sidebar visible |
-
-There is no `test` script in `package.json`, no coverage reporter configured, and the CI pipeline (`docker-build.yml`) does not run any tests — only lint and build.
-
----
-
-## Gaps by Priority
-
-### 1. Untested validators — `profileSchema` and `passwordChangeSchema`
-
-**File:** `src/lib/validators/settings.ts`
-
-`tagSchema` has good unit coverage, but the other two schemas exported from the same file are completely untested:
-
-- `profileSchema` — validates `fullName` (min 2 / max 100), `email` (must be valid), and `phone` (min 10 / max 20).
-- `passwordChangeSchema` — enforces uppercase, lowercase, digit, and special-character requirements on `newPassword`, and cross-field equality with `confirmPassword` via a Zod `.refine()`.
-
-The cross-field password match is the highest-value gap: it is a custom `refine` that is easy to break silently during a schema refactor.
-
-**Suggested tests:**
-- Valid profile object passes.
-- Invalid email format fails with the right message.
-- `fullName` below min / above max fails.
-- Valid password that matches `confirmPassword` passes.
-- Password without uppercase / digit / special character each produce distinct error messages.
-- Mismatched `confirmPassword` attaches the error to the `confirmPassword` path (not the root).
-
----
-
-### 2. `settingsStore` — Zustand store with no test coverage
-
-**File:** `src/lib/stores/settingsStore.ts`
-
-This store drives the entire Settings page. It has 13 distinct actions (profile update, notification toggles, 2FA toggle, theme changes, tag CRUD, account sync/reconnect/remove, full reset). None are tested.
-
-The riskiest actions are:
-
-- **`addTag`** — calls `crypto.randomUUID()` and splices the result into state. A test would catch ID uniqueness or mutability regressions.
-- **`deleteTag` / `updateTag`** — filter/map over tags by ID. Edge cases (non-existent ID, empty list) are silently no-ops today.
-- **`reconnectAccount`** — clears `errorMessage` and sets `status: 'reconciled'`. The type cast (`as const`) here is a smell worth exercising.
-- **`resetSettings`** — replaces all state slices atomically. A test confirms each slice is restored to the expected default.
-
-**Suggested tests (using Zustand's `getState()` / `setState()` directly — no React needed):**
-- `updateProfile` merges partial updates without clobbering other fields.
-- `toggleTwoFactor` flips boolean on each call.
-- `addTag` appends a tag with a unique `id`.
-- `deleteTag` with a known ID removes it; with an unknown ID leaves the list unchanged.
-- `updateTag` with a known ID updates only specified fields; other fields are preserved.
-- `syncAccount` updates `lastSynced` for the given ID.
-- `reconnectAccount` sets `status` to `'reconciled'` and removes `errorMessage`.
-- `resetSettings` restores every slice to its default value.
-
----
-
-### 3. `charts.ts` — uncovered branches in `calculateSparklinePoints`
-
-**File:** `src/lib/charts.ts`
-
-The existing 5 tests are a good start but miss two code branches:
-
-- **`drawHeight <= 0` path (line 34–40)** — reached when `padding * 2 >= height`. No test exercises this. It produces centred points and is clearly a defensive path worth regression-pinning.
-- **Negative values in the data array** — the function uses a min/max loop, so negatives should work, but this is not verified. A dataset like `[-50, 0, 50]` would confirm the normalisation arithmetic.
-- **Default parameter values** — calling `calculateSparklinePoints([10, 20])` with no `width`/`height` arguments exercises the defaults (`80`, `30`). Currently all tests pass explicit values.
-
----
-
-### 4. UI components with embedded logic
-
-Several components contain branching logic that can be tested with a lightweight renderer (e.g. Vitest + `@testing-library/react`):
-
-#### `PerformanceBadge` (`src/components/data-display/PerformanceBadge.tsx`)
-- When `value > 0`: renders `ArrowUp`, applies success colour classes, formats correctly.
-- When `value < 0`: renders `ArrowDown`, applies danger colour classes, shows `Math.abs(value)`.
-- When `value === 0`: renders `Minus` (implicit via `showArrow` default), applies muted class.
-- When `showArrow = false`: no arrow icon rendered regardless of sign.
-- `format = "decimal"` omits the `%` suffix.
-
-#### `StatCard` (`src/components/data-display/StatCard.tsx`)
-- When both `label` and `title` are passed, `label` takes precedence.
-- When `change` is positive and `trend` is not set, `calculatedTrend` is `"up"`.
-- When `change` is exactly `0`, trend is `"neutral"` and the `Minus` icon is shown.
-- When `loading` is truthy, a skeleton/loading state is rendered (if implemented).
-
-#### `OrderEntryForm` (`src/components/execution/OrderEntryForm.tsx`)
-- The price `<Input>` is hidden when `orderType === 'market'` and visible otherwise.
-- Submitting with `orderType === 'market'` calls the handler without a price field.
-- The ticker input transforms characters to uppercase on change.
-
----
-
-### 5. E2E coverage — only the homepage is tested
-
-**File:** `tests/e2e/smoke.spec.ts`
-
-The single Playwright test only checks the homepage title and sidebar visibility. The entire application — six top-level routes, all interactive forms, and navigation — has no E2E coverage.
-
-**Highest-value additions:**
-
-| Route | Key interaction to cover |
-|---|---|
-| `/portfolios` | Portfolio cards render; clicking a card navigates to holdings |
-| `/portfolios/holdings` | Holdings table renders rows with ticker, price, return data |
-| `/portfolios/trade-log` | Transaction list renders with correct types (buy, sell, dividend) |
-| `/execution` | Order form renders; selecting Market hides the price field; form submits |
-| `/research` | Thesis cards render; navigating to a thesis detail page works |
-| `/analytics` | Performance metrics table and chart render without error |
-| `/settings` | Profile form pre-fills from the store; tag CRUD round-trip |
-| Sidebar navigation | Each nav link changes the URL and renders the correct page heading |
-
----
-
-### 6. No test infrastructure in CI
-
-The `.github/workflows/docker-build.yml` `lint-test` job runs `npm run lint` and `npm run build` but never executes any test suite. Adding a `test` script to `package.json` and invoking it in CI would surface regressions automatically.
-
-A minimal addition to `package.json`:
-```json
-"test": "node --test src/**/*.test.ts",
-"test:e2e": "playwright test"
-```
-
-And to the CI job:
-```yaml
-- run: npm test
-- run: npm run test:e2e
-```
-
----
-
-## Summary Table
-
-| Area | Risk | Effort |
+| Layer | Size | Runs |
 |---|---|---|
-| `profileSchema` + `passwordChangeSchema` | High — password rules broken silently | Low |
-| `settingsStore` actions | High — 13 untested state mutations | Medium |
-| `charts.ts` edge cases | Low — 2 uncovered branches | Low |
-| `PerformanceBadge` rendering logic | Medium — financial display correctness | Low |
-| `StatCard` trend calculation | Medium — trend-direction logic | Low |
-| `OrderEntryForm` conditional fields | Medium — form behaviour | Low |
-| E2E: navigation + key user flows | High — zero coverage on 6 routes | High |
-| CI test execution | Critical — tests never run automatically | Low |
+| Unit (`node:test` + `tsx`) | 215 files, 2,232 tests in `src/` and `scripts/`, plus the database tests in `scripts/db` that need `SCRIPTS_TEST_DATABASE_URL` | `lint-and-test` on every pull request; the database tests in `e2e-tests` |
+| E2E (Playwright, Chromium) | 29 specs, 453 tests; 463 with database sessions, which add the `production-smoke` project | `e2e-tests` on every pull request: a production build on a fresh Postgres, connected as a member of `app_runtime`, plus two outage servers |
+| Post-deploy smoke | 10 checks in `tests/production` | `deploy-production`, against the live site after every deploy |
+
+Every route has an E2E spec (`AGENTS.md` › E2E Test Coverage Map). The unit tests cover most of the domain logic in `src/lib`:
+
+- validators;
+- the risk policy;
+- returns and attribution;
+- portfolio import and splits;
+- the price ingest and the securities master;
+- the Plaid sync;
+- Alpha Radar and SEC parsing;
+- sign-in rules, rate limits, the proxy and the Content-Security-Policy;
+- the job runner and job health;
+- the API routes' input checks.
+
+The database tests run the parts that depend on real Postgres behaviour against a real database:
+
+- the local database setup and migration 0019;
+- the Plaid sync;
+- deleting and exporting an account;
+- order plans;
+- the backup and its restore;
+- job health across time zones.
+
+Tests never call a real service. Massive, SEC EDGAR, Plaid and Google are faked: in unit tests through injected clients, in E2E by stubbing the app's own routes, and with no provider keys at all.
+
+## Gaps
+
+1. **No coverage measurement.** Nothing reports which lines the tests miss, so "every change has a test" is enforced only in review. Node's `--experimental-test-coverage` (or `c8`) on `npm test` would show it, and a CI summary would keep it visible without a threshold that blocks merges.
+2. **No component tests.** React components are tested only through E2E. Logic inside components (formatting, conditional rendering, form state) gets a full browser run each time, and a regression shows up as an E2E failure that is slower to pin down. Moving that logic into `src/lib` functions, as most of the app already does, keeps it unit-testable without adding a component test framework.
+3. **Real provider responses aren't tested.** Tests use recorded or hand-written shapes. If Massive, SEC EDGAR or Plaid changes a response, production finds out first: the nightly job fails, `job_runs` records the error, and the production monitor opens an issue. A small scheduled contract check against each provider's sandbox or free tier would catch it before users see stale data.
+4. **Signed-in production isn't smoke-tested.** The post-deploy suite runs signed out (`docs/deployment.md` › Post-deploy smoke test). Pages behind sign-in are covered by E2E only, so a production-only failure there (a missing grant, a variable set only in Vercel) shows up as Sentry errors rather than a failed deploy. Closing it needs a standing production account whose session token is a CI secret.
+5. **No automated accessibility scan.** `dashboard-a11y.spec.ts` and the specs' role-based locators check structure on purpose, but nothing scans pages for contrast, labels or focus order. An axe pass on each main page in E2E would cover what WCAG 2.1 AA asks for (`docs/CLAUDE.md` › Accessibility).
+6. **No visual regression tests.** Layout is checked with assertions (no horizontal overflow at 390px, one heading, gutters), not screenshots. A design change that breaks a layout without breaking an assertion goes unnoticed.
+7. **Strategies run on example data.** Their tests cover the builder's behaviour, not a backtest engine, because there isn't one yet (launch item i55).

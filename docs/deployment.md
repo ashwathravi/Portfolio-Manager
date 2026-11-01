@@ -10,7 +10,8 @@ Production runs on Vercel (project `atlas-wealth`, https://atlas-wealth-lovat.ve
    - **`deploy-production`** (GitHub environment `production`):
      1. applies database migrations with `scripts/migrate.ts`, as the table owner;
      2. uploads the commit with `vercel deploy --prod`; Vercel builds it with the Production environment variables and deploys it (CI passes the commit as `SENTRY_RELEASE`);
-     3. polls `/api/health/ready` until the app reports it can reach its database.
+     3. polls `/api/health/ready` until the app reports it can reach its database;
+     4. runs the post-deploy smoke test against the live site (below).
 
 Vercel runs the build, not CI: Sensitive variables (the Sentry DSN and its source-map upload token among them) only exist inside Vercel's own builds and functions. `vercel pull` hands them over as `[SENSITIVE]` placeholders, so a build on the CI runner would ship without error monitoring.
 
@@ -29,7 +30,7 @@ A failed migration stops the job before anything is deployed. Migrations are not
 
 | Route | Meaning |
 |---|---|
-| `/api/health` | The process is up. No database call. Used by the Docker `HEALTHCHECK`. |
+| `/api/health` | The process is up, and `release` is the commit it was built from (`SENTRY_RELEASE`, or null). No database call. Used by the Docker `HEALTHCHECK`. |
 | `/api/health/ready` | The app can reach its database: 200, or 503 with `database: "not_configured"` or `"unavailable"`. Cached for 10 seconds. |
 | `/api/health/jobs` | Every scheduled job, the backup included, has succeeded since its last run fell due: 200, or 503 with each job `ok`, `late` or `failed` and when it last succeeded, never an error. Cached for a minute. |
 
@@ -102,9 +103,12 @@ Set these for **Production only**, never Preview: a preview runs branch code, an
 | `DATABASE_URL` | Supabase **transaction** pooler (port 6543) as `atlas_app.<project-ref>`, the least-privilege login (see `docs/local-database-secrets.md`). |
 | `CRON_SECRET` | A generated value (`openssl rand -hex 32`). Vercel sends it to the cron route; without it no scheduled job runs. Never print or paste it. |
 | `POLYGON_API_KEY` | The Massive Basic key the nightly price ingest uses. |
+| `SEC_EDGAR_USER_AGENT` | Set. Who Alpha Radar's SEC EDGAR requests say they're from, with a contact (SEC fair-access rules). |
 | `PLAID_*`, `PLAID_TOKEN_ENCRYPTION_KEY` | When account linking goes live. The key must be 32 random bytes, base64 or hex (`openssl rand -base64 32`); production stores no Plaid token with a weaker one. |
 | `KV_REST_API_URL`, `KV_REST_API_TOKEN` (and `KV_URL`, `REDIS_URL`, `KV_REST_API_READ_ONLY_TOKEN`) | Set by the Upstash integration. They are the shared rate limiter's store; without them each instance limits on its own. |
-| `NEXT_PUBLIC_SENTRY_DSN`, `SENTRY_ORG`, `SENTRY_PROJECT`, `SENTRY_AUTH_TOKEN` | Set by the Sentry integration (Production and Preview). Don't edit them by hand. |
+| `NEXT_PUBLIC_SENTRY_DSN`, `SENTRY_ORG`, `SENTRY_PROJECT`, `SENTRY_AUTH_TOKEN` (and `SENTRY_PUBLIC_KEY`, `SENTRY_VERCEL_LOG_DRAIN_URL`, `SENTRY_OTLP_TRACES_URL`, which the app doesn't read) | Set by the Sentry integration (Production and Preview). Don't edit them by hand. |
+
+`AUTH_URL` stays unset on Vercel: Auth.js uses the request's host there. Every variable is described in `.env.example`.
 
 ```bash
 vercel env add AUTH_ALLOWED_EMAILS production
@@ -113,6 +117,29 @@ vercel env add AUTH_ADMIN_EMAILS production
 openssl rand -hex 32 | tr -d '\n' | vercel env add CRON_SECRET production
 ```
 
+## Post-deploy smoke test
+
+After every production deploy (launch item i72), `deploy-production` waits until `/api/health` reports the commit it just deployed, up to three minutes, then runs a short Playwright suite against `PRODUCTION_URL`: `tests/production/post-deploy.spec.ts`, with `playwright.production.config.ts`. It checks, signed out:
+
+- the site can reach its database, and `/api/health/jobs` reads every scheduled job (whether they ran on time is the production monitor's alert, not the deploy's);
+- a signed-out visit to an app page goes to sign in, and the sign-in button is on;
+- **Continue with Google** sends the browser to Google with a real client ID and this site's callback. The test answers that request itself, so Google's page never loads;
+- the sign-in page, the privacy policy and the terms answer 200 with their security headers (a nonce-based Content-Security-Policy, HSTS, `X-Frame-Options`), and load without console errors, policy violations or failed requests to the site;
+- the sign-in page fits a phone;
+- the API refuses signed-out callers, and `/api/cron/daily` refuses a call without the cron secret.
+
+It is read-only: it never signs in, writes nothing and runs no job. A signed-in check would need a standing production account and its session token as a CI secret, so the pages behind sign-in are covered by E2E only.
+
+Each run retries a failed test twice, so a network blip doesn't fail a deploy. A failure turns the job red, after the deploy is already live, and uploads the report as the `production-smoke-report` artifact. If the site is broken, roll back (below). The same suite runs in CI's E2E job against the local production build (project `production-smoke`), without the Google check, since E2E calls no real service.
+
+To check production by hand, read-only like the job:
+
+```bash
+PRODUCTION_URL=https://atlas-wealth-lovat.vercel.app npm run test:production
+```
+
+Add `EXPECTED_RELEASE=<commit>` to wait for a commit first.
+
 ## Backups
 
 `.github/workflows/database-backup.yml` dumps production every night, keeps the dump encrypted as a GitHub Actions artifact for 30 days, and restores it into a scratch database in the same run to check every table. The setup, the restore drill and the steps for recovering production are in `docs/backups.md`.
@@ -120,3 +147,5 @@ openssl rand -hex 32 | tr -d '\n' | vercel env add CRON_SECRET production
 ## Rolling back
 
 Promote the previous deployment in the Vercel dashboard (Deployments → ⋯ → Promote) or run `vercel rollback`. This rolls back code only; a migration that already ran stays applied, which the add-first rule above makes safe.
+
+After a rollback, Vercel stops giving new production deploys the domain until a deployment is promoted again. The next deploy job then fails its smoke test, because production still serves the old commit. Once the fix is deployed, promote that deployment (Deployments → ⋯ → Promote, or `vercel promote <deployment URL>`) to undo the rollback.

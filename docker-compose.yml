@@ -32,8 +32,9 @@ services:
       retries: 30
 
   # The production image. Needs real auth and database settings in
-  # .env.docker (see .env.example), so it only starts with
-  # `docker compose --profile app up --build`.
+  # .env.docker (README.md › Running the production image), so it only
+  # starts with `docker compose --profile app up -d --build --no-deps web`.
+  # --no-deps leaves the shared db container running.
   web:
     profiles: ["app"]
     build:

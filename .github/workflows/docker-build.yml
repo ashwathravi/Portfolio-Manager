@@ -217,13 +217,16 @@ jobs:
           cache-from: type=gha
 
   deploy-production:
-    # Migrate, then deploy to Vercel, only after every check has passed on
-    # master. Migrations must stay compatible with the code already running
-    # (add first, remove in a later release): there is a gap between them.
+    # Migrate, deploy to Vercel, then smoke-test the live site, only after
+    # every check has passed on master. Migrations must stay compatible with
+    # the code already running (add first, remove in a later release): there
+    # is a gap between them. The smoke test is a step here, not a job of its
+    # own: a job would queue for the concurrency group separately, and a
+    # newer entry in that queue cancels an older one, deploy or test.
     if: github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     needs: [build, lint-and-test, e2e-tests]
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     environment:
       name: production
       url: ${{ vars.PRODUCTION_URL }}
@@ -299,3 +302,29 @@ jobs:
           done
           echo "::error::$PRODUCTION_URL/api/health/ready did not report ready. The deploy is live, but the app cannot reach its database."
           exit 1
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      # Launch item i72: once the site serves this commit, a short signed-out
+      # Playwright suite (tests/production) checks it. Read-only: it never
+      # signs in, writes nothing and runs no job.
+      - name: Smoke-test production
+        id: smoke
+        env:
+          CI: true
+          PRODUCTION_URL: ${{ vars.PRODUCTION_URL }}
+          EXPECTED_RELEASE: ${{ github.sha }}
+        run: |
+          npm run test:production || {
+            echo "::error::The deploy is live but failed its smoke test. See the production-smoke-report artifact, and docs/deployment.md › Rolling back."
+            exit 1
+          }
+
+      - name: Upload the smoke test report
+        if: ${{ failure() && steps.smoke.outcome == 'failure' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: production-smoke-report
+          path: playwright-report-production/
+          retention-days: 14
