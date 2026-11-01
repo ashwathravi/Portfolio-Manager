@@ -122,6 +122,9 @@ test.describe('After a production deploy', () => {
             expect(headers['strict-transport-security']).toMatch(/max-age=\d+/);
             expect(headers['x-frame-options']).toBe('DENY');
             expect(headers['x-content-type-options']).toBe('nosniff');
+            // Kept out of search results during the beta (launch item i74).
+            expect(headers['x-robots-tag']).toBe('noindex, nofollow');
+            await expect(page.locator('meta[name="robots"]')).toHaveAttribute('content', 'noindex, nofollow');
 
             await expect(page.getByRole('heading', { level: 1 })).toHaveText(heading);
             // Hydrated (src/components/layout/AppFrame.tsx), so a hydration
@@ -133,6 +136,19 @@ test.describe('After a production deploy', () => {
             expect(problems).toEqual([]);
         });
     }
+
+    test('robots.txt lets crawlers in to read the noindex', async ({ request }) => {
+        // Not the sign-in page: a disallowed page is never fetched, so its
+        // noindex would never be seen.
+        const response = await request.get('/robots.txt', { maxRedirects: 0 });
+        expect(response.status()).toBe(200);
+        expect(response.headers()['content-type']).toContain('text/plain');
+        expect(response.headers()['x-robots-tag']).toBe('noindex, nofollow');
+        const lines = (await response.text()).split('\n').map((line) => line.trim().toLowerCase());
+        expect(lines).toContain('user-agent: *');
+        expect(lines).toContain('allow: /');
+        expect(lines.filter((line) => line.startsWith('disallow:'))).toEqual([]);
+    });
 
     test('the sign-in page fits a phone', async ({ page }) => {
         await page.setViewportSize({ width: 390, height: 844 });

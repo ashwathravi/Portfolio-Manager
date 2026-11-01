@@ -149,6 +149,15 @@ describe("API proxy security", () => {
         }
     });
 
+    test("regression: serves robots.txt to signed-out crawlers, not the sign-in page", async () => {
+        configureAuth();
+
+        const response = await proxy(pageRequest("/robots.txt"));
+
+        assert.equal(response.status, 200);
+        assert.equal(response.headers.get("location"), null);
+    });
+
     test("keeps only exact public asset paths open", async () => {
         setNodeEnv("production");
 
