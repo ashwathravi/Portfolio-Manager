@@ -8,7 +8,9 @@ const patterns = readFileSync('.dockerignore', 'utf8')
     .filter((line) => line && !line.startsWith('#'));
 
 test('.dockerignore - keeps secrets out of the image', () => {
-    for (const pattern of ['.env', '.env.*', '.runtime']) {
+    // Unlike .gitignore, a pattern without a slash matches only at the root of
+    // the build context, so private keys need **/ to be caught in any folder.
+    for (const pattern of ['.env', '.env.*', '.runtime', '**/*.pem']) {
         assert.ok(patterns.includes(pattern), `${pattern} is not ignored`);
     }
     // Only the example files come back in.

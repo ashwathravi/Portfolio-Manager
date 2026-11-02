@@ -241,3 +241,17 @@ test.describe('Scheduled job health', () => {
         }
     });
 });
+
+test.describe('Search engines during the beta', () => {
+    // Launch item i74: every response asks to stay out of search results.
+    // Signed in here; tests/production/post-deploy.spec.ts checks the
+    // signed-out pages and robots.txt, on the live site too.
+    test('a signed-in page and an API answer carry noindex', async ({ page }) => {
+        const response = await page.goto('/');
+        expect(response?.headers()['x-robots-tag']).toBe('noindex, nofollow');
+        await expect(page.locator('meta[name="robots"]')).toHaveAttribute('content', 'noindex, nofollow');
+
+        const api = await page.request.get('/api/health');
+        expect(api.headers()['x-robots-tag']).toBe('noindex, nofollow');
+    });
+});

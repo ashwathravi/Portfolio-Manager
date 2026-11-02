@@ -125,6 +125,7 @@ After every production deploy (launch item i72), `deploy-production` waits until
 - a signed-out visit to an app page goes to sign in, and the sign-in button is on;
 - **Continue with Google** sends the browser to Google with a real client ID and this site's callback. The test answers that request itself, so Google's page never loads;
 - the sign-in page, the privacy policy and the terms answer 200 with their security headers (a nonce-based Content-Security-Policy, HSTS, `X-Frame-Options`), and load without console errors, policy violations or failed requests to the site;
+- those pages ask search engines to leave them out of their results (`noindex, nofollow` as a header and a meta tag, launch item i74), and `robots.txt` lets crawlers in to read that;
 - the sign-in page fits a phone;
 - the API refuses signed-out callers, and `/api/cron/daily` refuses a call without the cron secret.
 
