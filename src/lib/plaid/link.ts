@@ -43,9 +43,9 @@ export function plaidBaseUrl(environment: PlaidEnvironment): string {
     return `https://${environment}.plaid.com`;
 }
 
+/** PLAID_ENV: production when it says so, Sandbox otherwise ("development" included: Plaid retired it). */
 export function resolvePlaidEnvironment(value: string | undefined): PlaidEnvironment {
-    if (value === "production" || value === "development") return value;
-    return "sandbox";
+    return value?.trim() === "production" ? "production" : "sandbox";
 }
 
 export async function createPlaidLinkToken({

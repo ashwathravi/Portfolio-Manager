@@ -104,7 +104,8 @@ Set these for **Production only**, never Preview: a preview runs branch code, an
 | `CRON_SECRET` | A generated value (`openssl rand -hex 32`). Vercel sends it to the cron route; without it no scheduled job runs. Never print or paste it. |
 | `POLYGON_API_KEY` | The Massive Basic key the nightly price ingest uses. |
 | `SEC_EDGAR_USER_AGENT` | Set. Who Alpha Radar's SEC EDGAR requests say they're from, with a contact (SEC fair-access rules). |
-| `PLAID_*`, `PLAID_TOKEN_ENCRYPTION_KEY` | When account linking goes live. The key must be 32 random bytes, base64 or hex (`openssl rand -base64 32`); production stores no Plaid token with a weaker one. |
+| `PLAID_*`, `PLAID_TOKEN_ENCRYPTION_KEY` | When account linking goes live. The key must be 32 random bytes, base64 or hex (`openssl rand -base64 32`); production stores no Plaid token with a weaker one. `PLAID_ENV` is `sandbox` or `production`. |
+| `PLAID_REDIRECT_URI` | With account linking: `https://<production domain>/settings`, added first to the Plaid Dashboard's allowed redirect URIs (Developers › API). Banks that sign in through OAuth send the user back there when Link can't open them in a pop-up, on phones especially, and Settings finishes the connection (launch item i47). Link refuses to open while it isn't on the Dashboard's list, and the app refuses one that isn't Settings on https. |
 | `KV_REST_API_URL`, `KV_REST_API_TOKEN` (and `KV_URL`, `REDIS_URL`, `KV_REST_API_READ_ONLY_TOKEN`) | Set by the Upstash integration. They are the shared rate limiter's store; without them each instance limits on its own. |
 | `NEXT_PUBLIC_SENTRY_DSN`, `SENTRY_ORG`, `SENTRY_PROJECT`, `SENTRY_AUTH_TOKEN` (and `SENTRY_PUBLIC_KEY`, `SENTRY_VERCEL_LOG_DRAIN_URL`, `SENTRY_OTLP_TRACES_URL`, which the app doesn't read) | Set by the Sentry integration (Production and Preview). Don't edit them by hand. |
 

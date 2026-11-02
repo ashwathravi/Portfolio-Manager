@@ -4,6 +4,7 @@ import { apiError, internalServerError, logApiEvent } from "@/lib/api/security";
 import { requestIdFrom } from "@/lib/observability/request-id";
 import { requireSessionApiUserScope } from "@/lib/api/session-security";
 import { createPlaidLinkToken, resolvePlaidEnvironment } from "@/lib/plaid/link";
+import { plaidRedirectUri } from "@/lib/plaid/oauth";
 import { getPlaidAccessTokenForUser } from "@/lib/plaid/server-token-vault";
 import { plaidIdSchema } from "@/lib/validators/plaid-sync";
 
@@ -45,7 +46,8 @@ export async function POST(request: Request) {
             clientName: readOptionalEnv("PLAID_CLIENT_NAME") ?? "Atlas Wealth",
             products: readListEnv("PLAID_PRODUCTS", ["investments", "transactions"]),
             countryCodes: readListEnv("PLAID_COUNTRY_CODES", ["US"]),
-            redirectUri: readOptionalEnv("PLAID_REDIRECT_URI"),
+            // Where an OAuth bank sends the user back (launch item i47).
+            redirectUri: plaidRedirectUri(process.env.PLAID_REDIRECT_URI, environment),
             webhook: readOptionalEnv("PLAID_WEBHOOK_URL"),
             accessToken,
         });

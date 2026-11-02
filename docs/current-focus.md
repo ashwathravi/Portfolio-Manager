@@ -32,10 +32,11 @@ Retired routes redirect (307): `/portfolios`, `/portfolios/trade-log`,
 ## Next
 
 - **Before the first invite (phase 4):** clear the dev data from production
-  (i70), turn off Supabase's Data API (i74, `docs/SECURITY-AUDIT.md`),
-  `POLYGON_API_KEY` for the nightly prices (i08), and Plaid's approval (i09,
-  i67). Every page already asks search engines to stay away during the beta. `CRON_SECRET` and
-  `AUTH_ADMIN_EMAILS` were set on 2026-10-30.
+  (i70), `POLYGON_API_KEY` for the nightly prices (i08), and Plaid's
+  approval (i09, i67), then `PLAID_REDIRECT_URI` for banks that sign in
+  through OAuth (i47, `docs/deployment.md`). Every page already asks search
+  engines to stay away during the beta, and Supabase's Data API is off.
+  `CRON_SECRET` and `AUTH_ADMIN_EMAILS` were set on 2026-10-30.
 - **Product gaps still on example data or missing:** delayed intraday quotes
   (i33), ticker search (i35), saved strategies and a real backtest engine
   (i55), server-side alerts and email (i57, i58), Alpha Radar follows and
