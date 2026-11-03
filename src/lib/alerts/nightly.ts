@@ -225,13 +225,14 @@ async function loadNotified(rules: readonly PlannedRule[], session: string | nul
 }
 
 /**
- * The rules among `ruleIds` still there and still on, locked until the
- * transaction ends: one deleted or paused since the job read the rules
- * raises nothing, and can't be deleted while its alerts are written.
+ * The rules among `ruleIds` still there and still on, with when each was
+ * last saved, locked until the transaction ends: one deleted, paused or
+ * edited since the job read the rules raises nothing, and none can change
+ * while its alerts are written.
  */
 export function buildLockLiveRulesQuery(ruleIds: string[], database: Pick<Database, "select"> = db) {
     return database
-        .select({ id: alertRules.id })
+        .select({ id: alertRules.id, updatedAt: alertRules.updatedAt })
         .from(alertRules)
         .where(and(inArray(alertRules.id, ruleIds), eq(alertRules.enabled, true)))
         .for("update");
@@ -239,17 +240,26 @@ export function buildLockLiveRulesQuery(ruleIds: string[], database: Pick<Databa
 
 /**
  * Records the firings once each, and updates their rules; returns how many
- * were new. Firings of a rule deleted or paused since the rules were read
- * are dropped, so one user's deletion can't fail everyone's batch on the
- * rule foreign key.
+ * were new. `evaluated` is when each rule had last been saved as the job
+ * read it: firings of a rule deleted, paused or edited since are dropped,
+ * so one user's deletion can't fail everyone's batch on the rule foreign
+ * key, and an edit (a threshold raised past the close) isn't answered with
+ * the old rule's alert, nor paused by it.
  */
-export async function recordFirings(firings: readonly AlertFiring[], now: Date, database: Database = db): Promise<number> {
+export async function recordFirings(
+    firings: readonly AlertFiring[],
+    evaluated: ReadonlyMap<string, Date>,
+    now: Date,
+    database: Database = db,
+): Promise<number> {
     let recorded = 0;
     for (let start = 0; start < firings.length; start += WRITE_CHUNK) {
         const planned = firings.slice(start, start + WRITE_CHUNK);
         recorded += await database.transaction(async (tx) => {
-            const live = new Set((await buildLockLiveRulesQuery(uniq(planned.map((f) => f.ruleId)), tx)).map((row) => row.id));
-            const chunk = planned.filter((f) => live.has(f.ruleId));
+            const unchanged = new Set((await buildLockLiveRulesQuery(uniq(planned.map((f) => f.ruleId)), tx))
+                .filter((row) => row.updatedAt.getTime() === evaluated.get(row.id)?.getTime())
+                .map((row) => row.id));
+            const chunk = planned.filter((f) => unchanged.has(f.ruleId));
             if (chunk.length === 0) return 0;
             const inserted = await tx
                 .insert(alertNotifications)
@@ -352,7 +362,8 @@ export async function evaluateAlertRules({
         notified,
         runDate: now.toISOString().slice(0, 10),
     });
-    const fired = firings.length > 0 ? await recordFirings(firings, now, database) : 0;
+    const evaluated = new Map(rows.map((row) => [row.id, row.updatedAt]));
+    const fired = firings.length > 0 ? await recordFirings(firings, evaluated, now, database) : 0;
     return {
         session,
         rules: rules.length,

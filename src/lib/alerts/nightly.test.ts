@@ -105,17 +105,19 @@ describe("recordFirings", () => {
         comparator: "gte", threshold: 200, observedValue: 210, message: "m", href: null,
     });
 
-    test("the rules still there and on are locked before writing, so a rule deleted mid-run is dropped", () => {
+    test("the rules still there and on are locked, with when each was last saved, before writing", () => {
         const { sql, params } = buildLockLiveRulesQuery(["r-1", "r-2"]).toSQL();
-        assert.match(sql, /from "alert_rules" where \("alert_rules"\."id" in \(\$1, \$2\) and "alert_rules"\."enabled" = \$3\) for update$/);
+        assert.match(sql, /^select "id", "updated_at" from "alert_rules" where \("alert_rules"\."id" in \(\$1, \$2\) and "alert_rules"\."enabled" = \$3\) for update$/);
         assert.deepEqual(params, ["r-1", "r-2", true]);
     });
 
-    test("writes only the firings of live rules, and nothing when none is left", async () => {
+    test("writes only the firings of rules unchanged since they were read, and nothing when none is left", async () => {
+        const SAVED = new Date("2026-11-01T12:00:00.000Z");
+        const EDITED = new Date("2026-11-02T22:34:00.000Z");
         let inserted: Array<{ ruleId: string }> = [];
         let updated = 0;
-        const tx = (live: string[]) => ({
-            select: () => ({ from: () => ({ where: () => ({ for: async () => live.map((id) => ({ id })) }) }) }),
+        const tx = (live: Array<{ id: string; updatedAt: Date }>) => ({
+            select: () => ({ from: () => ({ where: () => ({ for: async () => live }) }) }),
             insert: () => ({
                 values: (rows: Array<{ ruleId: string }>) => {
                     inserted = rows;
@@ -124,15 +126,18 @@ describe("recordFirings", () => {
             }),
             update: () => ({ set: () => ({ where: async () => { updated += 1; } }) }),
         });
-        const databaseWith = (live: string[]) =>
+        const databaseWith = (live: Array<{ id: string; updatedAt: Date }>) =>
             ({ transaction: async (run: (t: ReturnType<typeof tx>) => Promise<unknown>) => run(tx(live)) }) as unknown as typeof db;
+        const evaluated = new Map([["r-live", SAVED], ["r-deleted", SAVED], ["r-edited", SAVED]]);
 
-        assert.equal(await recordFirings([firing("r-live"), firing("r-deleted")], NOW, databaseWith(["r-live"])), 1);
+        // r-deleted is gone (or paused); r-edited was saved again after the job read it.
+        const live = [{ id: "r-live", updatedAt: new Date(SAVED) }, { id: "r-edited", updatedAt: EDITED }];
+        assert.equal(await recordFirings([firing("r-live"), firing("r-deleted"), firing("r-edited")], evaluated, NOW, databaseWith(live)), 1);
         assert.deepEqual(inserted.map((row) => row.ruleId), ["r-live"]);
         assert.equal(updated, 1);
 
         inserted = [];
-        assert.equal(await recordFirings([firing("r-deleted")], NOW, databaseWith([])), 0);
+        assert.equal(await recordFirings([firing("r-deleted"), firing("r-edited")], evaluated, NOW, databaseWith(live.slice(1))), 0);
         assert.deepEqual(inserted, []);
         assert.equal(updated, 1);
     });

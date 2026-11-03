@@ -188,20 +188,28 @@ describe('alerts kept with the account', { skip: !DATABASE_URL && 'SCRIPTS_TEST_
         assert.deepEqual((await notifications('u-2')).map((n) => n.message), ['Your accounts were worth $1,500.00 at the Nov 2 close, at or above $1,000.00.']);
     });
 
-    test('regression: a rule deleted or paused after the job read the rules raises nothing, and doesn\'t fail the others', async () => {
-        // The Codex finding on PR #185: the rule foreign key failed the whole batch.
-        const kept = await createAlertRule('u-1', rule(), { database });
-        const deleted = await createAlertRule('u-2', rule(), { database });
-        const paused = await createAlertRule('u-2', rule({ name: 'Paused since' }), { database });
+    test('regression: a rule deleted, paused or edited after the job read the rules raises nothing, and doesn\'t fail the others', async () => {
+        // The Codex findings on PR #185: the rule foreign key failed the whole batch,
+        // and an edited rule got the old rule's alert (and a once-rule was paused by it).
+        const READ = new Date('2026-11-02T22:31:00.000Z');
+        const kept = await createAlertRule('u-1', rule(), { database, now: READ });
+        const deleted = await createAlertRule('u-2', rule(), { database, now: READ });
+        const paused = await createAlertRule('u-2', rule({ name: 'Paused since' }), { database, now: READ });
+        const edited = await createAlertRule('u-2', rule({ name: 'Edited since', rearm: 'once' }), { database, now: READ });
+        const evaluated = new Map([kept, deleted, paused, edited].map((r) => [r.id, READ]));
         await deleteAlertRule('u-2', deleted.id, database);
-        await updateAlertRule('u-2', paused.id, rule({ name: 'Paused since', enabled: false }), { database });
+        await updateAlertRule('u-2', paused.id, rule({ name: 'Paused since', enabled: false }), { database, now: EVENING });
+        await updateAlertRule('u-2', edited.id, rule({ name: 'Edited since', rearm: 'once', threshold: 300 }), { database, now: EVENING });
         const firing = (ruleId: string, userId: string) => ({
             ruleId, userId, occurrence: `session:${SESSION}`, ruleName: 'AAPL above $200', metric: 'price' as const, symbol: 'AAPL',
             comparator: 'gte' as const, threshold: 200, observedValue: 210, message: 'AAPL closed at $210.00.', href: null,
         });
-        assert.equal(await recordFirings([firing(deleted.id, 'u-2'), firing(paused.id, 'u-2'), firing(kept.id, 'u-1')], EVENING, database), 1);
+        const raised = [firing(deleted.id, 'u-2'), firing(paused.id, 'u-2'), firing(edited.id, 'u-2'), firing(kept.id, 'u-1')];
+        assert.equal(await recordFirings(raised, evaluated, EVENING, database), 1);
         assert.deepEqual((await notifications('u-1')).map((n) => n.occurrence), [`session:${SESSION}`]);
         assert.deepEqual([...await notifications('u-2')], []);
+        // The edited once-rule wasn't paused by the old rule's alert.
+        assert.equal((await listAlertRules('u-2', database)).find((r) => r.id === edited.id)?.enabled, true);
     });
 
     test('the user\'s notification settings turn a kind of alert off', async () => {
