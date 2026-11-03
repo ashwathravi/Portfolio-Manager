@@ -138,7 +138,7 @@ Zustand stores own client-side settings and app preferences:
 
 - Settings state in `src/lib/stores/settingsStore.ts`.
 - UI state in `src/lib/stores/uiStore.ts`.
-- Alerts state in `src/lib/stores/alertsStore.ts`.
+- Alert rules and the alerts they raise in `alert_rules` and `alert_notifications`, evaluated by the nightly `alerts` job (`src/lib/alerts/nightly.ts`, launch item i57).
 
 LocalStorage may store:
 

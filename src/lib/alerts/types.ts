@@ -1,7 +1,8 @@
 /**
  * Domain types for threshold-based alerts. Alert rules are user-defined
- * conditions on price or portfolio state; triggers are the events emitted
- * when a rule fires.
+ * conditions on a close, the user's accounts or Alpha Radar changes;
+ * triggers are the notifications raised when a rule fires. Both are kept
+ * with the account (launch item i57).
  */
 
 export type MarketAlertMetric =
@@ -95,18 +96,4 @@ export interface AlertTrigger {
     href?: string;
     /** Source metadata for richer notification rendering and tests. */
     alphaRadar?: AlphaRadarAlertContext;
-}
-
-export interface MarketSnapshot {
-    /**
-     * Current prices by symbol (uppercased). changePercent is today's move,
-     * or null when the latest price is an earlier session's close.
-     */
-    quotes: Record<string, { price: number; changePercent: number | null }>;
-    /** Total portfolio market value in base currency. */
-    portfolioValue: number;
-    /** Portfolio day change as a fraction (0.012 = +1.2%). */
-    portfolioDayChangePct: number;
-    /** Timestamp the snapshot was captured. */
-    observedAt: string;
 }

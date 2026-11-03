@@ -116,6 +116,11 @@ async function setSessionCookie(context: BrowserContext, sessionToken: string) {
     }]);
 }
 
+/** The E2E database, as the app's login connects to it, for a spec that sets up rows itself. */
+export function e2eDatabase() {
+    return database();
+}
+
 /**
  * What the database still holds for a user (launch item i65): their user
  * row, sessions, accounts and settings. All zero once the account is deleted.

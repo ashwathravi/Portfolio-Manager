@@ -93,6 +93,9 @@ export interface AccountExport {
     theses: Record<string, unknown>[];
     /** The Ask conversation: each question and its answer, oldest first. */
     askHistory: Record<string, unknown>[];
+    /** Alert rules, oldest first, and the alerts they raised, newest first (launch item i57). */
+    alertRules: Record<string, unknown>[];
+    alerts: Record<string, unknown>[];
 }
 
 /** One row per holding, across the user's accounts. */

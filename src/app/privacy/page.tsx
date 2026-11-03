@@ -6,7 +6,7 @@ export const metadata: Metadata = {
     description: "What Atlas Wealth collects, why, who it is shared with, and how to have it deleted.",
 };
 
-const LAST_UPDATED = "November 2, 2026";
+const LAST_UPDATED = "November 3, 2026";
 const PLAID_PRIVACY_URL = "https://plaid.com/legal/#end-user-privacy-policy";
 
 export default function PrivacyPage({ searchParams }: { searchParams: LegalSearchParams }) {
@@ -50,8 +50,9 @@ export default function PrivacyPage({ searchParams }: { searchParams: LegalSearc
                         CSV or enter by hand, orders you draft on Trade (with the reasons and risk-policy
                         overrides you record for them), your watchlist (tickers, why they&rsquo;re on it, target
                         prices and notes), your decision journal, your research theses (with their catalysts and
-                        evidence links), the questions you ask Ask and its answers (the last 25 of each), and the
-                        SEC filers you add to Alpha Radar. During the beta,
+                        evidence links), the questions you ask Ask and its answers (the last 25 of each), the
+                        alert rules you set and the alerts they raise, and the SEC filers you add to Alpha
+                        Radar. During the beta,
                         Alpha Radar&rsquo;s list of filers and any notes on them are shared by every account,
                         so don&rsquo;t put anything private there.
                     </li>
@@ -71,8 +72,7 @@ export default function PrivacyPage({ searchParams }: { searchParams: LegalSearc
                     </li>
                 </ul>
                 <p>
-                    Some things are stored only in your browser, not on our servers: price alerts and their
-                    notes, and weekly reviews.
+                    Some things are stored only in your browser, not on our servers: weekly reviews.
                     Each account that signs in on this browser gets its own copy, and clearing this
                     site&rsquo;s data removes them. Someone with access to this browser profile could still
                     read them. To show prices, the ticker symbols in your watchlist and theses are sent to
@@ -140,7 +140,8 @@ export default function PrivacyPage({ searchParams }: { searchParams: LegalSearc
                     We keep your data while your account is open. Download a copy of it at any time in
                     Settings (one JSON file, or your transactions and holdings as CSV). Delete your account in
                     Settings and we remove, straight away, your account, portfolios, holdings, transactions,
-                    drafted orders, value history, watchlist, journal, theses, Ask questions and settings from
+                    drafted orders, value history, watchlist, journal, theses, alert rules and alerts, Ask
+                    questions and settings from
                     our database, end our access to your linked institutions at Plaid and erase our encrypted
                     access to them, and clear what this browser kept for you. You can also email{" "}
                     <ContactLink /> to have it done within 30 days. We keep nothing afterwards unless the law
@@ -151,6 +152,12 @@ export default function PrivacyPage({ searchParams }: { searchParams: LegalSearc
                     reasoning are erased straight away. A short record stays (the ticker and its dates, and
                     for a journal entry or thesis its type, outcome or status, and conviction) so your other
                     devices know it was removed; it goes when your account does.
+                </p>
+                <p>
+                    Your alert rules are checked each weekday evening, on our servers, against that day&rsquo;s
+                    closing prices, your accounts and Alpha Radar changes. Clearing your alerts or deleting a
+                    rule (which deletes the alerts it raised) removes them straight away; alerts are otherwise
+                    deleted once they&rsquo;re 180 days old.
                 </p>
                 <p>
                     When you clear your Ask conversation it disappears straight away. Its questions and answers

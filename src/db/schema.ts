@@ -915,6 +915,80 @@ export const askMessages = pgTable("ask_messages", {
     appRuntimeAccess: appRuntimeAccessPolicy(),
 })).enableRLS();
 
+// ---------------------------------------------------------------------------
+// Alerts (launch item i57)
+// ---------------------------------------------------------------------------
+
+/**
+ * The user's alert rules, evaluated by the nightly "alerts" job after the
+ * day's closes are stored (src/lib/alerts/nightly.ts).
+ */
+export const alertRules = pgTable("alert_rules", {
+    id: uuid("id").default(sql`gen_random_uuid()`).primaryKey(),
+    userId: text("user_id")
+        .notNull()
+        .references(() => authUsers.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    metric: text("metric").notNull(),
+    // The ticker of a price or daily-change rule; null for every other metric.
+    symbol: text("symbol"),
+    comparator: text("comparator").notNull(),
+    // Dollars, a fraction (0.05 = 5%), or an Alpha Radar score out of 100.
+    threshold: doublePrecision("threshold").notNull(),
+    rearm: text("rearm").notNull(),
+    enabled: boolean("enabled").notNull().default(true),
+    note: text("note"),
+    lastTriggeredAt: timestamp("last_triggered_at"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => ({
+    userCreatedIdx: index("alert_rules_user_created_idx").on(table.userId, table.createdAt),
+    // Lets a notification's foreign key name the rule and its owner together.
+    idUser: unique("alert_rules_id_user_key").on(table.id, table.userId),
+    metricCheck: check("alert_rules_metric_check", sql`${table.metric} in ('price', 'price_change_pct', 'portfolio_value', 'portfolio_day_change_pct', 'alpha_radar_new_position', 'alpha_radar_exit', 'alpha_radar_large_add', 'alpha_radar_large_trim', 'alpha_radar_user_overlap')`),
+    symbolCheck: check("alert_rules_symbol_check", sql`(${table.metric} in ('price', 'price_change_pct')) = (${table.symbol} is not null)`),
+    comparatorCheck: check("alert_rules_comparator_check", sql`${table.comparator} in ('gte', 'lte', 'gt', 'lt', 'eq')`),
+    rearmCheck: check("alert_rules_rearm_check", sql`${table.rearm} in ('once', 'always', 'daily')`),
+    serverOnlyNoClientAccess: serverOnlyNoClientAccessPolicy(),
+    appRuntimeAccess: appRuntimeAccessPolicy(),
+})).enableRLS();
+
+/**
+ * What the user's rules found: the in-app notification feed. `occurrence`
+ * names what fired a rule (a session's date, or an Alpha Radar change), so
+ * a job that runs twice records it once.
+ */
+export const alertNotifications = pgTable("alert_notifications", {
+    id: uuid("id").default(sql`gen_random_uuid()`).primaryKey(),
+    userId: text("user_id")
+        .notNull()
+        .references(() => authUsers.id, { onDelete: "cascade" }),
+    // Its rule, which must be the same user's (alert_notifications_rule_owner_fk).
+    ruleId: uuid("rule_id").notNull(),
+    occurrence: text("occurrence").notNull(),
+    // The rule as it was when it fired, so an edit doesn't rewrite the past.
+    ruleName: text("rule_name").notNull(),
+    metric: text("metric").notNull(),
+    symbol: text("symbol"),
+    comparator: text("comparator").notNull(),
+    threshold: doublePrecision("threshold").notNull(),
+    observedValue: doublePrecision("observed_value").notNull(),
+    message: text("message").notNull(),
+    href: text("href"),
+    triggeredAt: timestamp("triggered_at").defaultNow().notNull(),
+    readAt: timestamp("read_at"),
+}, (table) => ({
+    userTriggeredIdx: index("alert_notifications_user_triggered_idx").on(table.userId, table.triggeredAt),
+    ruleOccurrence: uniqueIndex("alert_notifications_rule_occurrence_idx").on(table.ruleId, table.occurrence),
+    ruleOwner: foreignKey({
+        name: "alert_notifications_rule_owner_fk",
+        columns: [table.ruleId, table.userId],
+        foreignColumns: [alertRules.id, alertRules.userId],
+    }).onDelete("cascade"),
+    serverOnlyNoClientAccess: serverOnlyNoClientAccessPolicy(),
+    appRuntimeAccess: appRuntimeAccessPolicy(),
+})).enableRLS();
+
 export const portfoliosRelations = relations(portfolios, ({ one, many }) => ({
     user: one(authUsers, {
         fields: [portfolios.userId],

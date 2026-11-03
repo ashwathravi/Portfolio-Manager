@@ -67,6 +67,12 @@ describe('account deletion and export', { skip: !DATABASE_URL && 'SCRIPTS_TEST_D
         await sql`INSERT INTO ask_messages (user_id, id, role, content, cleared, created_at) VALUES (${user}, 'q-0', 'user', 'An earlier question', true, '2026-10-22 09:00')`;
         await sql`INSERT INTO ask_messages (user_id, id, role, content, created_at) VALUES (${user}, 'q-1', 'user', 'Where did P&L come from?', '2026-10-23 09:00')`;
         await sql`INSERT INTO ask_messages (user_id, id, role, content, citations, created_at) VALUES (${user}, 'a-1', 'assistant', 'Mostly AAPL.', '[{"label":"Closed trades"}]', '2026-10-23 09:00:01')`;
+        const [rule] = await sql<{ id: string }[]>`
+            INSERT INTO alert_rules (user_id, name, metric, symbol, comparator, threshold, rearm, note, created_at)
+            VALUES (${user}, 'AAPL above $95', 'price', 'AAPL', 'gte', 95, 'daily', 'trim', '2026-10-20 12:00') RETURNING id`;
+        await sql`
+            INSERT INTO alert_notifications (user_id, rule_id, occurrence, rule_name, metric, symbol, comparator, threshold, observed_value, message, href, triggered_at)
+            VALUES (${user}, ${rule.id}, 'session:2026-10-23', 'AAPL above $95', 'price', 'AAPL', 'gte', 95, 100, 'AAPL closed at $100.00 on Oct 23, at or above $95.00.', '/portfolios/detail/AAPL', '2026-10-23 22:31')`;
         const [item] = await sql<{ id: string }[]>`
             INSERT INTO plaid_items (user_id, plaid_item_id, institution_id, institution_name, access_token_ciphertext, access_token_iv, access_token_auth_tag)
             VALUES (${user}, ${`item-${user}`}, 'ins_1', 'Fidelity', 'secret-cipher', 'i', 't') RETURNING id`;
@@ -93,6 +99,8 @@ describe('account deletion and export', { skip: !DATABASE_URL && 'SCRIPTS_TEST_D
                 (SELECT count(*) FROM thesis_catalysts WHERE user_id = ${user})::int AS catalysts,
                 (SELECT count(*) FROM thesis_evidence WHERE user_id = ${user})::int AS evidence,
                 (SELECT count(*) FROM ask_messages WHERE user_id = ${user})::int AS ask_messages,
+                (SELECT count(*) FROM alert_rules WHERE user_id = ${user})::int AS alert_rules,
+                (SELECT count(*) FROM alert_notifications WHERE user_id = ${user})::int AS alert_notifications,
                 (SELECT count(*) FROM plaid_items WHERE user_id = ${user})::int AS plaid_items,
                 (SELECT count(*) FROM plaid_accounts WHERE user_id = ${user})::int AS plaid_accounts`;
         return { ...counts };
@@ -144,8 +152,16 @@ describe('account deletion and export', { skip: !DATABASE_URL && 'SCRIPTS_TEST_D
             ['a-1', 'assistant', 'Mostly AAPL.', [{ label: 'Closed trades' }]],
         ]);
 
+        // Alert rules and what they raised (launch item i57).
+        assert.deepEqual(data.alertRules.map((r) => [r.name, r.metric, r.symbol, r.comparator, r.threshold, r.rearm, r.enabled, r.note, r.createdAt]), [
+            ['AAPL above $95', 'price', 'AAPL', 'gte', 95, 'daily', true, 'trim', '2026-10-20T12:00:00.000Z'],
+        ]);
+        assert.deepEqual(data.alerts.map((a) => [a.ruleName, a.observedValue, a.message, a.triggeredAt, a.readAt]), [
+            ['AAPL above $95', 100, 'AAPL closed at $100.00 on Oct 23, at or above $95.00.', '2026-10-23T22:31:00.000Z', null],
+        ]);
+
         const text = JSON.stringify(data);
-        for (const leak of ['userId', 'writeSession', 'writeSeq', 'dismissed', 'cleared', 'An earlier question', 'secret-cipher', 'item-u-export', 'acc-u-export', 'u-other']) {
+        for (const leak of ['userId', 'writeSession', 'writeSeq', 'dismissed', 'cleared', 'occurrence', 'An earlier question', 'secret-cipher', 'item-u-export', 'acc-u-export', 'u-other']) {
             assert.ok(!text.includes(leak), leak);
         }
     });

@@ -190,6 +190,13 @@
       "when": 1793687375033,
       "tag": "0026_intraday_quotes",
       "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1793742917493,
+      "tag": "0027_alerts",
+      "breakpoints": true
     }
   ]
 }

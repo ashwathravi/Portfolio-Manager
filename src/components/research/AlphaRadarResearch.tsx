@@ -11,7 +11,6 @@ import {
     useRefreshAlphaRadarFilerMutation,
 } from "@/lib/api/alpha-radar/queries";
 import { useViewerIdentity } from "@/components/providers/IdentityProvider";
-import { useAlphaRadarAlertEngine } from "@/lib/alerts/useAlphaRadarAlertEngine";
 import {
     buildAlphaRadarReportMemoryChunks,
     searchAlphaRadarSemanticChunks,
@@ -182,11 +181,6 @@ export function AlphaRadarDetailPane({
     const changes = changesQuery.data && changesQuery.data.length > 0
         ? changesQuery.data
         : fallbackChangesFor(selectedFiler?.id);
-    useAlphaRadarAlertEngine({
-        changes,
-        reports,
-        filers: data.filers,
-    });
     const materialChanges = changes.filter((change) => change.changeType !== "unchanged");
     const overlapCount = changes.filter((change) => change.userRelevance.reasons.length > 0).length;
     const usesFallback = data.isFallback || !reportsQuery.data?.length || !changesQuery.data?.length;

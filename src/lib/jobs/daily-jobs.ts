@@ -6,9 +6,11 @@
  * leaves the price job its 240 s, so tonight's prices and snapshots include
  * what they hold. Snapshots come after the prices they are valued at (they
  * use only stored closes, so they run, and stay quick, even when the price
- * job stopped early).
+ * job stopped early). Alerts go last, on the closes and holdings the jobs
+ * before them stored (launch item i57).
  */
 
+import { evaluateAlertRules } from "@/lib/alerts/nightly";
 import { pruneAskHistory } from "@/lib/ask/server/history";
 import { ingestDailyPrices } from "@/lib/markets/price-ingest";
 import { syncAllPlaidItems } from "@/lib/plaid/sync";
@@ -23,4 +25,5 @@ export const DAILY_JOBS: readonly ScheduledJob[] = [
     { name: "plaid", run: () => syncAllPlaidItems() },
     { name: "prices", run: () => ingestDailyPrices() },
     { name: "snapshots", run: () => recordValuationSnapshots() },
+    { name: "alerts", run: async () => ({ ...(await evaluateAlertRules()) }) },
 ];

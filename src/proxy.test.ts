@@ -317,6 +317,13 @@ describe("API proxy security", () => {
             ["/api/research/theses", "GET"],
             ["/api/research/theses/import", "POST"],
             ["/api/research/theses/seed-nvda", "PUT"],
+            ["/api/alerts/rules", "GET"],
+            ["/api/alerts/rules", "POST"],
+            ["/api/alerts/rules/00000000-0000-4000-8000-000000000401", "PUT"],
+            ["/api/alerts/rules/00000000-0000-4000-8000-000000000401", "DELETE"],
+            ["/api/alerts/notifications", "GET"],
+            ["/api/alerts/notifications", "PATCH"],
+            ["/api/alerts/notifications", "DELETE"],
             ["/api/alpha-radar/refresh", "POST"],
             ["/api/alpha-radar/filers", "POST"],
             ["/api/alpha-radar/filers/00000000-0000-4000-8000-000000000001", "PATCH"],
@@ -392,6 +399,11 @@ describe("API proxy security", () => {
             ["/api/research/theses/import", "PUT"],
             ["/api/research/theses/seed-nvda", "DELETE"],
             ["/api/research/theses/seed-nvda/catalysts", "PUT"],
+            ["/api/alerts/rules", "DELETE"],
+            ["/api/alerts/rules/00000000-0000-4000-8000-000000000401", "POST"],
+            ["/api/alerts/rules/00000000-0000-4000-8000-000000000401/notifications", "PUT"],
+            ["/api/alerts/notifications", "POST"],
+            ["/api/alerts/notifications/00000000-0000-4000-8000-000000000402", "PATCH"],
         ] as const) {
             const response = await handleVerifiedRequest(apiRequest({}, pathname, null, [], method));
             assert.equal(response.status, 401, `${method} ${pathname} was delegated`);

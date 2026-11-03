@@ -7,10 +7,12 @@
  * secret (Plaid tokens, and Plaid's own IDs for connections and accounts).
  */
 
-import { and, asc, eq, inArray, isNull, ne } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, ne } from "drizzle-orm";
 
 import { db } from "@/db";
 import {
+    alertNotifications,
+    alertRules,
     askMessages,
     authUsers,
     holdings,
@@ -101,6 +103,9 @@ export async function buildAccountExport(userId: string, database: Database = db
         ]);
         const asked = await tx.select().from(askMessages)
             .where(and(eq(askMessages.userId, userId), eq(askMessages.cleared, false))).orderBy(asc(askMessages.createdAt), asc(askMessages.id));
+        const rules = await tx.select().from(alertRules).where(eq(alertRules.userId, userId)).orderBy(asc(alertRules.createdAt), asc(alertRules.id));
+        const raised = await tx.select().from(alertNotifications)
+            .where(eq(alertNotifications.userId, userId)).orderBy(desc(alertNotifications.triggeredAt), asc(alertNotifications.id));
 
         return {
             format: ACCOUNT_EXPORT_FORMAT,
@@ -166,6 +171,9 @@ export async function buildAccountExport(userId: string, database: Database = db
                 evidence: evidence.filter((e) => e.thesisId === thesis.id).map((e) => plain({ ...e, thesisId: undefined })),
             })),
             askHistory: asked.map(plain),
+            alertRules: rules.map(plain),
+            // `occurrence` is how the nightly job records an alert once: internal.
+            alerts: raised.map((alert) => plain({ ...alert, occurrence: undefined })),
         };
     }, { isolationLevel: "repeatable read", accessMode: "read only" });
 }

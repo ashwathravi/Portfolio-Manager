@@ -95,7 +95,7 @@ Contract ownership:
 | `portfolio-diff-agent` | `compute-quarterly-diff` | `src/lib/alpha-radar` | `computeQuarterlyHoldingChanges` |
 | `semantic-search-agent` | `semantic-search` | `src/lib/alpha-radar/memory` | No v1 adapter; start with disabled/keyword fallback before pgvector |
 | `thesis-agent` | `generate-thesis-draft` | `src/lib/alpha-radar/thesis` | `generateAlphaRadarMemo` |
-| `notifier-agent` | `notify-material-change` | `src/lib/alerts` | `evaluateAlphaRadarAlerts` |
+| `notifier-agent` | `notify-material-change` | `src/lib/alerts` | `planAlertFirings`, run by the nightly `alerts` job (`src/lib/alerts/nightly.ts`) |
 | `ui-query-service` | `read-ui-index` | `src/lib/api/alpha-radar` | `src/lib/api/alpha-radar/queries.ts` |
 
 Shared job semantics:

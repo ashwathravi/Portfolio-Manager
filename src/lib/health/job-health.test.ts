@@ -168,7 +168,7 @@ describe("createJobHealthCheck", () => {
         assert.equal(report.status, "degraded");
         assert.equal(report.database, "ok");
         const statuses = Object.fromEntries(report.jobs.map((job) => [job.job, job.status]));
-        assert.deepEqual(statuses, { "expired-sessions": "late", "ask-history": "late", plaid: "failed", prices: "ok", snapshots: "late", backup: "late" });
+        assert.deepEqual(statuses, { "expired-sessions": "late", "ask-history": "late", plaid: "failed", prices: "ok", snapshots: "late", alerts: "late", backup: "late" });
     });
 
     test("not_configured without loading when no database is set", async () => {

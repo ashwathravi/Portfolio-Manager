@@ -41,7 +41,7 @@ export const BACKUP_CRON = "41 6 * * *";
 /** The job name the backup workflow records its runs under. */
 export const BACKUP_JOB = "backup";
 /** The names in src/lib/jobs/daily-jobs.ts, in order (a test keeps them equal). */
-export const DAILY_JOB_NAMES = ["expired-sessions", "ask-history", "plaid", "prices", "snapshots"] as const;
+export const DAILY_JOB_NAMES = ["expired-sessions", "ask-history", "plaid", "prices", "snapshots", "alerts"] as const;
 
 export const JOB_SCHEDULES: readonly JobSchedule[] = [
     // The run takes at most five minutes (the route's maxDuration).
