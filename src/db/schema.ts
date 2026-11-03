@@ -21,6 +21,9 @@ import {
 } from "drizzle-orm/pg-core";
 import { sql, relations } from "drizzle-orm";
 
+import type { AdherenceRule } from "@/lib/adherence/rules";
+import type { StrategyBacktest, StrategyDefinition } from "@/lib/strategies/strategy";
+
 const serverOnlyNoClientAccessPolicy = () => pgPolicy("server_only_no_client_access", {
     as: "restrictive",
     for: "all",
@@ -902,6 +905,30 @@ export const orderPlans = pgTable("order_plans", {
     timeInForceCheck: check("order_plans_time_in_force_check", sql`${table.timeInForce} in ('day', 'gtc', 'ioc', 'fok')`),
     statusCheck: check("order_plans_status_check", sql`${table.status} in ('pending_approval', 'ready', 'placed', 'cancelled')`),
     quantityCheck: check("order_plans_quantity_check", sql`${table.quantity} > 0`),
+    serverOnlyNoClientAccess: serverOnlyNoClientAccessPolicy(),
+    appRuntimeAccess: appRuntimeAccessPolicy(),
+})).enableRLS();
+
+// ---------------------------------------------------------------------------
+// Strategies (launch item i55)
+// ---------------------------------------------------------------------------
+
+// A strategy the user built: its definition (rules, tickers, guardrails),
+// its discipline rules and its last backtest, with the definition that ran.
+export const strategies = pgTable("strategies", {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: text("user_id")
+        .notNull()
+        .references(() => authUsers.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    description: text("description").notNull().default(""),
+    definition: jsonb("definition").$type<StrategyDefinition>().notNull(),
+    adherenceRules: jsonb("adherence_rules").$type<AdherenceRule[]>().notNull().default([]),
+    backtest: jsonb("backtest").$type<StrategyBacktest>(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => ({
+    userCreatedIdx: index("strategies_user_created_idx").on(table.userId, table.createdAt),
     serverOnlyNoClientAccess: serverOnlyNoClientAccessPolicy(),
     appRuntimeAccess: appRuntimeAccessPolicy(),
 })).enableRLS();

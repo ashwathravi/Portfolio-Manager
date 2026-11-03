@@ -1,4 +1,6 @@
 import { test, expect } from '@playwright/test';
+import { gotoAppPage, reloadAppPage } from './helpers/app';
+import { databaseAuthEnabled, signInAsFreshUser } from './helpers/users';
 
 /**
  * Phase 6 Strategy Builder tests (AR-80/81/82) + AR-111 coverage.
@@ -30,16 +32,21 @@ test.describe('Strategies page — Phase 6 builder shell', () => {
         await expect(page.getByTestId('sample-data-notice')).toBeVisible();
     });
 
-    test('regression: Duplicate creates and selects a copy (was a dead button)', async ({ page }) => {
-        const cards = page.locator('.pm-strategy-card');
-        await expect(cards).toHaveCount(3);
+    test('regression: Duplicate creates and selects a copy (was a dead button)', async ({ context, page }) => {
+        // With a database the copy is saved to the account: a user of its own.
+        await signInAsFreshUser(context);
+        await gotoAppPage(page, '/strategies');
+        await expect(page.getByTestId('strategies-empty')).toBeVisible();
         await page.getByRole('button', { name: 'Duplicate' }).click();
-        await expect(cards).toHaveCount(4);
-        await expect(cards.nth(3)).toHaveAttribute('aria-pressed', 'true');
-        await expect(cards.nth(3)).toContainText('Momentum + Value (copy)');
+        const mine = page.getByTestId('my-strategies').locator('.pm-strategy-card');
+        await expect(mine).toHaveCount(1);
+        await expect(mine.first()).toHaveAttribute('aria-pressed', 'true');
+        await expect(mine.first()).toContainText('Momentum + Trend (copy)');
+        await expect(mine.first()).toContainText('Not backtested');
+        await expect(page.getByTestId('example-strategies').locator('.pm-strategy-card')).toHaveCount(3);
     });
 
-    test('regression: there is no inert "Run backtest" button', async ({ page }) => {
+    test('an example has no Run backtest button: only a saved strategy runs one', async ({ page }) => {
         await expect(page.getByRole('button', { name: 'Run backtest' })).toHaveCount(0);
     });
 
@@ -49,12 +56,13 @@ test.describe('Strategies page — Phase 6 builder shell', () => {
         await expect(page.getByTestId('backtest-stale')).toBeVisible();
     });
 
-    test('renders three seed strategy cards in the top row', async ({ page }) => {
+    test('renders three example strategy cards, labelled Sample', async ({ page }) => {
         const cards = page.locator('.pm-strategy-card');
         await expect(cards).toHaveCount(3);
         // Scoped to the switcher: the selected name is also in the breadcrumb.
-        const row = page.locator('.pm-strategy-row');
-        await expect(row.getByText('Momentum + Value')).toBeVisible();
+        const row = page.getByTestId('example-strategies');
+        await expect(page.getByRole('region', { name: 'Example strategies' }).getByTestId('sample-data-notice')).toBeVisible();
+        await expect(row.getByText('Momentum + Trend')).toBeVisible();
         await expect(row.getByText('Mean Reversion')).toBeVisible();
         await expect(row.getByText('Sector Rotation')).toBeVisible();
     });
@@ -114,7 +122,7 @@ test.describe('Strategies page — StrategyCard adherence pill (AR-111)', () => 
         page,
     }) => {
         const pills = page.getByTestId('strategy-card-adherence');
-        // At least the seeded Momentum + Value strategy has journal
+        // At least the seeded Momentum + Trend strategy has journal
         // coverage — we expect ≥1 pill, and each pill carries a tier.
         await expect(pills.first()).toBeVisible();
         const count = await pills.count();
@@ -152,7 +160,7 @@ test.describe('Strategies page — Adherence rules editor (AR-111)', () => {
         await page.goto('/strategies');
     });
 
-    test('renders the adherence editor with seed rules for Momentum + Value', async ({
+    test('renders the adherence editor with seed rules for Momentum + Trend', async ({
         page,
     }) => {
         const panel = page.getByTestId('adherence-rules-panel');
@@ -161,7 +169,7 @@ test.describe('Strategies page — Adherence rules editor (AR-111)', () => {
             panel.getByRole('heading', { name: 'Discipline rules' }),
         ).toBeVisible();
 
-        // Momentum + Value seed has 5 rules.
+        // Momentum + Trend seed has 5 rules.
         const rows = panel.locator('.pm-adherence-row');
         await expect(rows).toHaveCount(5);
     });
@@ -196,7 +204,7 @@ test.describe('Strategies page — Adherence rules editor (AR-111)', () => {
         const before = await rows.count();
 
         await panel.getByTestId('adherence-rules-add').click();
-        // max_sector_pct is NOT in the Momentum + Value seed, so picking
+        // max_sector_pct is NOT in the Momentum + Trend seed, so picking
         // it guarantees the list grows by exactly one and the row is
         // addressable by the new data-rule-type.
         await panel
@@ -243,7 +251,7 @@ test.describe('Strategies page — Adherence rules editor (AR-111)', () => {
         // avoids a race on the click-then-read cycle.
         await page.locator('.pm-strategy-card').nth(1).click();
 
-        // Mean Reversion has 4 rules, Momentum + Value has 5 — the
+        // Mean Reversion has 4 rules, Momentum + Trend has 5 — the
         // counts should differ.
         const rowsAfter = await panel.locator('.pm-adherence-row').count();
         expect(rowsAfter).not.toBe(rowsBefore);
@@ -331,5 +339,159 @@ test.describe('Strategies page — backtest chart legibility', () => {
         await expect(label).toBeVisible();
         const px = await label.evaluate((el) => el.getBoundingClientRect().height);
         expect(px).toBeGreaterThanOrEqual(9);
+    });
+});
+
+/**
+ * Launch item i55: strategies saved to the account and backtested over the
+ * price store. The fixtures store daily bars for SPY and the sector ETFs
+ * from June 2026, plus three later sessions (to Oct 1).
+ */
+test.describe('Strategies saved to the account (i55)', () => {
+    test.skip(!databaseAuthEnabled, 'strategies are saved with a database');
+
+    test.beforeEach(async ({ context, page }) => {
+        await signInAsFreshUser(context);
+        await gotoAppPage(page, '/strategies');
+    });
+
+    const mine = (page: import('@playwright/test').Page) => page.getByTestId('my-strategies').locator('.pm-strategy-card');
+    const saved = (page: import('@playwright/test').Page) => expect(page.getByTestId('strategy-save-state')).toHaveText('Saved');
+
+    async function newStrategy(page: import('@playwright/test').Page) {
+        await page.getByRole('button', { name: 'New strategy' }).click();
+        await expect(mine(page)).toHaveCount(1);
+        await expect(mine(page).first()).toHaveAttribute('aria-pressed', 'true');
+    }
+
+    test('a new strategy is saved as it is edited and survives a reload', async ({ page }) => {
+        await expect(page.getByTestId('strategies-empty')).toBeVisible();
+        await newStrategy(page);
+        await expect(mine(page).first()).toContainText('New strategy');
+        await expect(mine(page).first()).toContainText('Not backtested');
+
+        await page.getByLabel('Strategy name').fill('Tech trend');
+        const add = page.getByLabel('Add ticker to strategy');
+        await add.fill('xlk');
+        await add.press('Enter');
+        await expect(page.getByTestId('strategy-tickers')).toContainText('XLK');
+        await saved(page);
+
+        await reloadAppPage(page);
+        await expect(mine(page)).toHaveCount(1);
+        await mine(page).first().click();
+        await expect(mine(page).first()).toContainText('Tech trend');
+        await expect(page.getByTestId('strategy-tickers')).toContainText('SPY');
+        await expect(page.getByTestId('strategy-tickers')).toContainText('XLK');
+    });
+
+    test('a backtest runs over stored prices, against SPY, and stays with the strategy', async ({ page }) => {
+        await newStrategy(page);
+        await page.getByRole('button', { name: '+ Sector ETFs' }).click();
+        await expect(page.getByTestId('strategy-tickers')).toContainText('XLY');
+        await saved(page);
+
+        await page.getByRole('button', { name: 'Run backtest' }).click();
+        // Close > SMA(50) needs 50 sessions: the window starts in August and ends at the last stored session.
+        await expect(page.getByTestId('backtest-window')).toHaveText(/^Aug 2026 – Oct 2026$/);
+        await expect(page.getByTestId('backtest-verdict')).toHaveText('Unproven');
+        await expect(page.getByTestId('backtest-reason')).toHaveText('Under six months of history: too short to judge.');
+        await expect(page.getByTestId('backtest-benchmark')).toContainText('SPY over the same window');
+        await expect(page.getByTestId('backtest-assumptions')).toContainText('none of this is investment advice');
+        await expect(page.getByRole('list', { name: 'Backtest stats' })).toContainText('Return');
+        await expect(mine(page).first().getByTestId('strategy-card-return')).not.toHaveText('Not backtested');
+
+        await reloadAppPage(page);
+        await mine(page).first().click();
+        await expect(page.getByTestId('backtest-window')).toHaveText(/^Aug 2026 – Oct 2026$/);
+        await expect(page.getByTestId('backtest-stale')).toHaveCount(0);
+
+        // Changing a rule marks the result as out of date.
+        await page.getByLabel('Value').first().fill('SMA(20)');
+        await expect(page.getByTestId('backtest-stale')).toBeVisible();
+    });
+
+    test('a rule Atlas can\'t compute is marked, and the backtest says which', async ({ page }) => {
+        await newStrategy(page);
+        const value = page.getByLabel('Value').first();
+        await value.fill('P/E');
+        await expect(value).toHaveAttribute('aria-invalid', 'true');
+        await page.getByRole('button', { name: 'Run backtest' }).click();
+        await expect(page.getByTestId('backtest-error')).toHaveText('Rule 1: "P/E" isn\'t a number or an indicator.');
+        await expect(page.getByTestId('backtest-empty')).toBeVisible();
+    });
+
+    test('a ticker without stored prices is named and left out of the run', async ({ page }) => {
+        await newStrategy(page);
+        const add = page.getByLabel('Add ticker to strategy');
+        await add.fill('ZZZZ');
+        await add.press('Enter');
+        await expect(page.getByTestId('strategy-tickers')).toContainText('ZZZZ');
+        await page.getByRole('button', { name: 'Run backtest' }).click();
+        await expect(page.getByTestId('backtest-missing')).toContainText('Left out, without stored prices yet: ZZZZ.');
+    });
+
+    test('a copy of an example is saved to the account and can be backtested', async ({ page }) => {
+        await page.getByTestId('example-strategies').locator('.pm-strategy-card').filter({ hasText: 'Sector Rotation' }).click();
+        await page.getByRole('button', { name: 'Duplicate' }).click();
+        await expect(mine(page).first()).toContainText('Sector Rotation (copy)');
+        await expect(page.getByRole('button', { name: 'Run backtest' })).toBeVisible();
+        await reloadAppPage(page);
+        await expect(mine(page)).toHaveCount(1);
+        await expect(mine(page).first()).toContainText('Sector Rotation (copy)');
+    });
+
+    test('Delete asks first, then removes the strategy', async ({ page }) => {
+        await newStrategy(page);
+        await page.getByRole('button', { name: 'Delete', exact: true }).click();
+        const confirm = page.getByRole('alertdialog', { name: 'Delete strategy' });
+        await expect(confirm).toContainText('Delete “New strategy” and its backtest?');
+        await confirm.getByRole('button', { name: 'Cancel' }).click();
+        await expect(mine(page)).toHaveCount(1);
+
+        await page.getByRole('button', { name: 'Delete', exact: true }).click();
+        await confirm.getByRole('button', { name: 'Delete' }).click();
+        await expect(page.getByTestId('strategies-empty')).toBeVisible();
+        await reloadAppPage(page);
+        await expect(page.getByTestId('strategies-empty')).toBeVisible();
+    });
+
+    test('the strategy API changes only your own strategies', async ({ context, page, playwright }) => {
+        const strategy = {
+            name: 'API strategy',
+            definition: {
+                rules: [{ id: 'r1', field: 'Close', op: '>', value: 'SMA(10)' }],
+                conjunctions: [],
+                symbols: ['XLK'],
+                guardrails: { maxPositionPct: 0.5, stopLossPct: 0.1, rebalanceDays: 7 },
+            },
+        };
+        const invalid = await page.request.post('/api/strategies', { data: { ...strategy, userId: 'someone' } });
+        expect(invalid.status()).toBe(400);
+        expect((await invalid.json()).code).toBe('INVALID_STRATEGY');
+
+        const created = await page.request.post('/api/strategies', { data: strategy });
+        expect(created.status()).toBe(201);
+        const { id } = (await created.json()).data;
+        const ran = await page.request.post(`/api/strategies/${id}/backtest`);
+        expect(ran.status()).toBe(200);
+        expect((await ran.json()).data.backtest).toMatchObject({ verdict: 'Unproven', symbolsWithoutHistory: [] });
+
+        // Another user can't see, change, run or delete it.
+        await signInAsFreshUser(context);
+        expect((await page.request.put(`/api/strategies/${id}`, { data: strategy })).status()).toBe(404);
+        expect((await page.request.post(`/api/strategies/${id}/backtest`)).status()).toBe(404);
+        const other = await page.request.delete(`/api/strategies/${id}`);
+        expect(other.status()).toBe(404);
+        expect((await other.json()).code).toBe('STRATEGY_NOT_FOUND');
+
+        const anonymous = await playwright.request.newContext({
+            baseURL: 'http://localhost:3000',
+            storageState: { cookies: [], origins: [] },
+        });
+        expect((await anonymous.post('/api/strategies', { data: strategy })).status()).toBe(401);
+        expect((await anonymous.post(`/api/strategies/${id}/backtest`)).status()).toBe(401);
+        expect((await anonymous.delete(`/api/strategies/${id}`)).status()).toBe(401);
+        await anonymous.dispose();
     });
 });

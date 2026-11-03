@@ -180,6 +180,9 @@ function isSessionBackedApiRoute(pathname: string, method: string): boolean {
     if (pathname === "/api/settings" && method === "PUT") return true;
     if (pathname === "/api/ask" && (method === "GET" || method === "POST" || method === "DELETE")) return true;
     if (pathname === "/api/market-data/search" && method === "GET") return true;
+    if (pathname === "/api/strategies" && method === "POST") return true;
+    if (/^\/api\/strategies\/[^/]+$/.test(pathname) && (method === "PUT" || method === "DELETE")) return true;
+    if (/^\/api\/strategies\/[^/]+\/backtest$/.test(pathname) && method === "POST") return true;
     if (pathname === "/api/research/watchlist" && method === "GET") return true;
     if (pathname === "/api/research/watchlist/import" && method === "POST") return true;
     if (/^\/api\/research\/watchlist\/(?!import$)[^/]+$/.test(pathname) && method === "PUT") return true;
