@@ -91,6 +91,20 @@ describe('ticker search', { skip: !DATABASE_URL && 'SCRIPTS_TEST_DATABASE_URL is
         assert.deepEqual(await search('vanguard'), [['VOO', 'Vanguard S&P 500 ETF', null, true]]);
     });
 
+    test('regression: a held company is found by its directory name, even outside the directory\'s best matches', async () => {
+        // A CSV import without a description names the holding by its ticker.
+        await sql`INSERT INTO auth_users (id, name, email) VALUES ('user-c', 'user-c', 'user-c@example.test')`;
+        const [p] = await sql<{ id: string }[]>`INSERT INTO portfolios (user_id, name) VALUES ('user-c', 'Brokerage') RETURNING id`;
+        await sql`INSERT INTO holdings (portfolio_id, symbol, name, quantity, avg_cost) VALUES (${p.id}, 'HOLO', 'HOLO', 1, 1)`;
+
+        // The directory's best two for "micro" are MSFT and MU; HOLO, held, ties with them and goes first.
+        const matches = await searchTickers('micro', { userId: 'user-c', limit: 2, database });
+        assert.deepEqual(matches, [
+            { symbol: 'HOLO', name: 'MicroCloud Hologram Inc.', exchange: 'Nasdaq', held: true },
+            { symbol: 'MSFT', name: 'MICROSOFT CORP', exchange: 'Nasdaq', held: false },
+        ]);
+    });
+
     test('never shows another user\'s holdings, or what they brought into the price store', async () => {
         assert.deepEqual(await search('vanguard', 'user-b'), []);
         assert.deepEqual(await search('zed'), []);

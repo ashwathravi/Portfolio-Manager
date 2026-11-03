@@ -24,7 +24,7 @@ import { SecEdgarClient, type SecExchangeTicker } from "@/lib/sec/edgar-client";
 import type { TickerMatch } from "@/types/market-data";
 
 import { BENCHMARK_SYMBOLS } from "./price-ingest";
-import { searchTextAsTicker } from "./ticker-search";
+import { matchRank, parseTickerQuery, type TickerQuery } from "./ticker-search";
 
 type Database = typeof db;
 
@@ -41,7 +41,6 @@ export const MAX_TICKER_MATCHES = 8;
 /** Fewer usable tickers than this in SEC's file means a bad copy: the directory is kept. */
 export const MIN_DIRECTORY_SIZE = 5_000;
 const WRITE_CHUNK = 1_000;
-const MAX_QUERY_LENGTH = 80;
 
 /** Market identifier codes (Massive's primary_exchange) as people know them. */
 const EXCHANGE_NAMES: Readonly<Record<string, string>> = {
@@ -91,33 +90,6 @@ export function directoryEntries(tickers: readonly SecExchangeTicker[]): Directo
 // ---------------------------------------------------------------------------
 // Search
 // ---------------------------------------------------------------------------
-
-export interface TickerQuery {
-    /** Lowercased, for matching names. */
-    text: string;
-    /** As a ticker (BRK B, brk-b and BRK/B are BRK.B), or null when it can't be one. */
-    symbol: string | null;
-}
-
-export function parseTickerQuery(raw: string): TickerQuery | null {
-    const text = raw.trim().replace(/\s+/g, " ").slice(0, MAX_QUERY_LENGTH).toLowerCase();
-    return text ? { text, symbol: searchTextAsTicker(text) } : null;
-}
-
-/**
- * How well an entry matches, best first: 0 the ticker itself, 1 a ticker
- * starting with it, 2 a name starting with it, 3 a name with a word
- * starting with it, 4 a name containing it; null for no match. The
- * directory query ranks the same way.
- */
-export function matchRank(entry: Pick<TickerMatch, "symbol" | "name">, query: TickerQuery): number | null {
-    if (query.symbol && entry.symbol === query.symbol) return 0;
-    if (query.symbol && entry.symbol.startsWith(query.symbol)) return 1;
-    const name = entry.name.toLowerCase();
-    if (name.startsWith(query.text)) return 2;
-    if (name.includes(` ${query.text}`)) return 3;
-    return name.includes(query.text) ? 4 : null;
-}
 
 const isListed = (exchange: string | null) => exchange !== null && exchange !== "OTC";
 
@@ -195,12 +167,24 @@ export function buildDirectorySearchQuery(query: TickerQuery, limit: number, dat
         .limit(limit);
 }
 
-/** The symbols the user holds in any of their accounts, with the names stored on the holdings. */
+/**
+ * The symbols the user holds in any of their accounts, each with its
+ * directory row when it has one. The directory's name is the one a company
+ * search matches: a holding imported without a description is named by its
+ * ticker, and the directory's own best matches may not reach it.
+ */
 export function buildHeldSymbolsQuery(userId: string, database: Pick<Database, "selectDistinct"> = db) {
     return database
-        .selectDistinct({ symbol: holdings.symbol, name: holdings.name })
+        .selectDistinct({
+            symbol: holdings.symbol,
+            name: holdings.name,
+            directoryName: symbolDirectory.name,
+            exchange: symbolDirectory.exchange,
+            position: symbolDirectory.position,
+        })
         .from(holdings)
         .innerJoin(portfolios, eq(portfolios.id, holdings.portfolioId))
+        .leftJoin(symbolDirectory, eq(symbolDirectory.symbol, sql`upper(${holdings.symbol})`))
         .where(eq(portfolios.userId, userId));
 }
 
@@ -225,7 +209,13 @@ export async function searchTickers(
     ]);
     return rankTickerMatches([
         ...directory.map((row) => ({ ...row, held: false })),
-        ...held.map((row) => ({ symbol: row.symbol.toUpperCase(), name: row.name || row.symbol, exchange: null, held: true })),
+        ...held.map((row) => ({
+            symbol: row.symbol.toUpperCase(),
+            name: row.directoryName ?? (row.name || row.symbol),
+            exchange: row.exchange,
+            held: true,
+            position: row.position ?? undefined,
+        })),
         ...benchmarks.map((row) => ({ symbol: row.symbol, name: row.name ?? row.symbol, exchange: exchangeName(row.exchange), held: false })),
     ], query, limit);
 }

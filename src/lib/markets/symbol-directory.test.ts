@@ -15,12 +15,11 @@ import {
     directoryName,
     directoryTicker,
     exchangeName,
-    matchRank,
     MIN_DIRECTORY_SIZE,
-    parseTickerQuery,
     rankTickerMatches,
     refreshSymbolDirectory,
 } from "./symbol-directory";
+import { parseTickerQuery } from "./ticker-search";
 
 const sec = (ticker: string, name: string, exchange: string | null = "Nasdaq", cik = "0000320193"): SecExchangeTicker =>
     ({ ticker, name, exchange, cik });
@@ -71,24 +70,6 @@ describe("directory entries from SEC's ticker file", () => {
 });
 
 describe("ranking matches", () => {
-    test("a query is read as text and, when it can be one, as a ticker", () => {
-        assert.deepEqual(parseTickerQuery("  Apple   Inc "), { text: "apple inc", symbol: null });
-        assert.deepEqual(parseTickerQuery("brk b"), { text: "brk b", symbol: "BRK.B" });
-        assert.deepEqual(parseTickerQuery("BRK-B"), { text: "brk-b", symbol: "BRK.B" });
-        assert.deepEqual(parseTickerQuery("nvda"), { text: "nvda", symbol: "NVDA" });
-        assert.equal(parseTickerQuery("   "), null);
-    });
-
-    test("the ticker itself, then tickers starting with it, then names by how they start", () => {
-        const q = query("app");
-        assert.equal(matchRank(match("APP", "AppLovin Corp"), q), 0);
-        assert.equal(matchRank(match("APPF", "AppFolio Inc"), q), 1);
-        assert.equal(matchRank(match("AAPL", "Apple Inc."), q), 2);
-        assert.equal(matchRank(match("XYZ", "Big Apple Corp"), q), 3);
-        assert.equal(matchRank(match("SNAP", "Snapple Holdings"), q), 4);
-        assert.equal(matchRank(match("MSFT", "Microsoft Corp"), q), null);
-    });
-
     test("orders by rank, then the user's holdings, then listed before OTC, then larger companies, then shorter tickers", () => {
         const ranked = rankTickerMatches([
             { ...match("APPLY", "Apply Co", { exchange: "OTC" }), position: 1 },
@@ -154,7 +135,7 @@ describe("ticker search queries", () => {
 
     test("holdings are the user's own; the price store gives only the benchmark ETFs", () => {
         const held = buildHeldSymbolsQuery("user-a", database).toSQL();
-        assert.match(held.sql, /select distinct [\s\S]* inner join "portfolios" on "portfolios"\."id" = "holdings"\."portfolio_id" where "portfolios"\."user_id" = \$1/);
+        assert.match(held.sql, /select distinct [\s\S]* inner join "portfolios" on "portfolios"\."id" = "holdings"\."portfolio_id" left join "symbol_directory" on "symbol_directory"\."symbol" = upper\("holdings"\."symbol"\) where "portfolios"\."user_id" = \$1/);
         assert.deepEqual(held.params, ["user-a"]);
         const benchmarks = buildBenchmarkSymbolsQuery(database).toSQL();
         assert.match(benchmarks.sql, /"securities"\."symbol" in \(/);

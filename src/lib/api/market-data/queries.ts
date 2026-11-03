@@ -1,6 +1,8 @@
+import { useMemo } from 'react';
 import { keepPreviousData, useQuery, type UseQueryOptions } from '@tanstack/react-query';
 import type { HistoricalBar } from './index';
 import { useDebouncedValue } from '@/lib/hooks/useDebouncedValue';
+import { matchesStillTyped } from '@/lib/markets/ticker-search';
 import type { Quote, TickerMatch } from '@/types/market-data';
 
 export type Timeframe = '1D' | '1H' | '1M';
@@ -130,12 +132,15 @@ function isTickerMatch(value: unknown): value is TickerMatch {
 
 /**
  * Matches for what's typed, once typing pauses. While the next search is
- * on its way the last matches stay up, so the list doesn't flicker; a
- * search that fails shows none (a ticker can always be typed in full).
+ * on its way, the last matches that still fit what's typed stay up, so the
+ * list doesn't flicker and never offers a match for something no longer
+ * typed; a search that fails shows none (a ticker can always be typed in
+ * full).
  */
 export function useTickerSearch(query: string, { enabled = true }: { enabled?: boolean } = {}) {
-    const debounced = useDebouncedValue(normalizeTickerSearch(query), TICKER_SEARCH_DEBOUNCE_MS);
-    const active = enabled && debounced.length > 0 && normalizeTickerSearch(query).length > 0;
+    const typed = normalizeTickerSearch(query);
+    const debounced = useDebouncedValue(typed, TICKER_SEARCH_DEBOUNCE_MS);
+    const active = enabled && debounced.length > 0 && typed.length > 0;
     const result = useQuery<TickerMatch[], Error>({
         queryKey: tickerSearchQueryKey(debounced),
         queryFn: ({ signal }) => fetchTickerMatches(debounced, signal),
@@ -144,9 +149,9 @@ export function useTickerSearch(query: string, { enabled = true }: { enabled?: b
         retry: false,
         placeholderData: keepPreviousData,
     });
-    return {
-        matches: (active && !result.isError ? result.data : undefined) ?? NO_MATCHES,
-        /** The matches are for what's typed now, not an earlier search. */
-        current: debounced === normalizeTickerSearch(query) && !result.isPlaceholderData && !result.isFetching,
-    };
+    const found = (active && !result.isError ? result.data : undefined) ?? NO_MATCHES;
+    /** The matches are for what's typed now, not an earlier search. */
+    const current = debounced === typed && !result.isPlaceholderData && !result.isFetching;
+    const matches = useMemo(() => (current ? found : matchesStillTyped(found, typed)), [current, found, typed]);
+    return { matches, current };
 }

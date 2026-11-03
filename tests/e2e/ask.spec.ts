@@ -93,6 +93,29 @@ test.describe('Ask Ledger — ⌘K command palette', () => {
         await expect(page).toHaveURL(/\/portfolios\/detail\/BRK\.B$/);
     });
 
+    test('regression: Enter opens what is typed, not a match left from the last search (i35)', async ({ page }) => {
+        test.skip(!databaseAuthEnabled, 'ticker search reads the symbol directory in the database');
+        // Hold the second search back, as a slow network would.
+        let release = () => {};
+        const held = new Promise<void>((resolve) => { release = resolve; });
+        await page.route(/\/api\/market-data\/search\?query=msft/, async (route) => {
+            await held;
+            await route.continue().catch(() => {});
+        });
+
+        await page.keyboard.press(`${modifier()}+KeyK`);
+        const input = page.getByLabel('Search or jump to').last();
+        await input.fill('apple');
+        await expect(page.getByTestId('command-item').filter({ hasText: 'AAPL —' })).toBeVisible();
+
+        await input.fill('msft');
+        await expect(page.getByTestId('command-item').filter({ hasText: 'Open MSFT' })).toBeVisible();
+        await expect(page.getByTestId('command-item').filter({ hasText: 'AAPL —' })).toHaveCount(0);
+        await page.keyboard.press('Enter');
+        await expect(page).toHaveURL(/\/portfolios\/detail\/MSFT$/);
+        release();
+    });
+
     test('a question is handed to Ask Ledger and answered', async ({ page }) => {
         await page.keyboard.press(`${modifier()}+KeyK`);
         await page.getByLabel('Search or jump to').last().fill('Am I overexposed to AI?');

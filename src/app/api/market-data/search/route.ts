@@ -21,6 +21,11 @@ import { marketSearchQuerySchema } from '@/lib/validators/market-data';
 import type { TickerMatch } from '@/types/market-data';
 
 export async function GET(request: NextRequest) {
+  // The proxy hands this route to its session check, which also limits it
+  // per user: once per search, whichever source answers.
+  const auth = await requireSessionApiUserScope(request);
+  if (!auth.ok) return auth.response;
+
   const query = request.nextUrl.searchParams.get('query');
 
   if (!query) {
@@ -33,8 +38,6 @@ export async function GET(request: NextRequest) {
   }
 
   if (usableDatabaseUrl(process.env.DATABASE_URL)) {
-    const auth = await requireSessionApiUserScope(request);
-    if (!auth.ok) return auth.response;
     try {
       const data = await searchTickers(parsedQuery.data, { userId: auth.context.userId });
       return NextResponse.json({ data }, { headers: { 'Cache-Control': 'no-store' } });
