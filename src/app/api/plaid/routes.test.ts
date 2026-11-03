@@ -33,6 +33,7 @@ describe("Plaid API routes", () => {
         delete process.env.PLAID_CLIENT_ID;
         delete process.env.PLAID_SECRET;
         delete process.env.PLAID_ENV;
+        delete process.env.PLAID_REDIRECT_URI;
         delete process.env.PLAID_TOKEN_ENCRYPTION_KEY;
         delete process.env.PLAID_TOKEN_KEY_VERSION;
         delete process.env.PLAID_TOKEN_STORAGE;
@@ -107,6 +108,29 @@ describe("Plaid API routes", () => {
         assert.equal(body.linkToken, "link-route-token");
         assert.equal((calls[0].user as { client_user_id: string }).client_user_id, USER_ID);
         assert.ok(!JSON.stringify(body).includes("sandbox-secret"));
+    });
+
+    test("gives Link the redirect URI for OAuth banks, and refuses one that can't work before calling Plaid", async (t) => {
+        // Launch item i47: the bank sends the user back to Settings.
+        t.mock.method(console, "info", () => {});
+        const logged = t.mock.method(console, "error", () => {});
+        configurePlaidEnv();
+        const calls: Array<Record<string, unknown>> = [];
+        globalThis.fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+            calls.push(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
+            return Response.json({ link_token: "link-route-token", expiration: "2026-11-01T04:00:00Z", request_id: "r" });
+        }) as typeof fetch;
+
+        process.env.PLAID_REDIRECT_URI = "https://atlas.test/settings";
+        assert.equal((await createLinkToken(authorizedRequest("/api/plaid/link-token"))).status, 200);
+        assert.equal(calls[0].redirect_uri, "https://atlas.test/settings");
+
+        process.env.PLAID_REDIRECT_URI = "https://atlas.test/oauth-return";
+        const refused = await createLinkToken(authorizedRequest("/api/plaid/link-token"));
+        assert.equal(refused.status, 500);
+        assert.equal((await refused.json()).code, "PLAID_LINK_TOKEN_FAILED");
+        assert.equal(calls.length, 1);
+        assert.match(String(logged.mock.calls[0].arguments[1]), /PLAID_REDIRECT_URI must end in \/settings/);
     });
 
     test("does not leak provider error details to Plaid clients", async (t) => {

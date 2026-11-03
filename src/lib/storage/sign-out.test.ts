@@ -27,6 +27,18 @@ describe("clearBrowserDataOnSignOut", () => {
         assert.equal(storage.getItem(userStorageKey("pm-ask-v1", "user-b")), "b's questions");
     });
 
+    test("removes a Plaid Link session waiting on a bank's sign-in (i47)", () => {
+        // Its link token opens Link for the account signing out.
+        const storage = new FakeStorage();
+        storage.setItem(userStorageKey("pm-plaid-link-pending", "user-a"), JSON.stringify({ token: { linkToken: "link-sandbox-a" } }));
+        storage.setItem(userStorageKey("pm-plaid-link-pending", "user-b"), JSON.stringify({ token: { linkToken: "link-sandbox-b" } }));
+
+        clearBrowserDataOnSignOut(storage, "user-a");
+
+        assert.equal(storage.getItem(userStorageKey("pm-plaid-link-pending", "user-a")), null);
+        assert.notEqual(storage.getItem(userStorageKey("pm-plaid-link-pending", "user-b")), null);
+    });
+
     test("keeps data this browser holds the only copy of", () => {
         const storage = new FakeStorage();
         for (const base of ["atlas:research:theses", "atlas:research:journal", "atlas:research:watchlist", "atlas-alerts", "pm-weekly-reviews-v1"]) {
@@ -36,7 +48,7 @@ describe("clearBrowserDataOnSignOut", () => {
         clearBrowserDataOnSignOut(storage, "user-a");
 
         assert.equal(storage.store.size, 5);
-        assert.deepEqual([...CLEARED_ON_SIGN_OUT], ["pm-ask-v1"]);
+        assert.deepEqual([...CLEARED_ON_SIGN_OUT], ["pm-ask-v1", "pm-plaid-link-pending"]);
     });
 
     test("removes the settings copy, saved or not; the server's comes back at the next sign-in", () => {

@@ -99,7 +99,7 @@ gh secret delete DATABASE_URL --repo ashwathravi/Portfolio-Manager
 - **The fix:** in the integration's settings, connect the store to Production only.
 
 **Optional hardening:**
-- Turn off Supabase's Data API (i74): in the dashboard, Integrations › Data API, turn **Enable Data API** off. Nothing uses it: the app reaches Postgres through Drizzle, and the project's logs for 28–31 October show no API requests. It's mostly closed already: row-level security is on every table, `anon` and `authenticated` have no table grants, and the advisors report nothing. The one thing it still serves is `public.codex_keepalive_ping()`, a function no migration in this repo created, which any role may call; it reads no table and returns the time. If a job outside this repo calls it to keep the project awake, turning the API off stops that job, so check first.
+- Supabase's Data API is off (i74, turned off on 1 November 2026, Integrations › Data API). Nothing used it: the app reaches Postgres through Drizzle, and the project's logs showed no API requests. It was mostly closed already: row-level security is on every table, `anon` and `authenticated` have no table grants, and the advisors report nothing. The one thing it served, `public.codex_keepalive_ping()` (a function no migration in this repo created), had no callers; the weekly keep-alive job outside this repo queries through Supabase's management API instead, which the switch doesn't affect.
 - Require actions pinned to full commit SHAs in GitHub's Actions settings; every workflow already pins them.
 
 ## Accepted, with reasons

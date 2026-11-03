@@ -46,12 +46,14 @@ describe("buildContentSecurityPolicy", () => {
     test("allows the Plaid API host of the configured environment only", () => {
         for (const [plaidEnv, host] of [
             ["sandbox", "https://sandbox.plaid.com"],
-            ["development", "https://development.plaid.com"],
             ["production", "https://production.plaid.com"],
-            // Unset or unknown means sandbox, as resolvePlaidEnvironment decides.
+            [" production ", "https://production.plaid.com"],
+            // Unset or unknown means sandbox, as resolvePlaidEnvironment decides;
+            // Plaid retired its Development environment (launch item i47).
             [undefined, "https://sandbox.plaid.com"],
             ["", "https://sandbox.plaid.com"],
             ["staging", "https://sandbox.plaid.com"],
+            ["development", "https://sandbox.plaid.com"],
         ] as const) {
             assert.deepEqual(
                 sourcesFor(production({ plaidEnv }), "connect-src"),
