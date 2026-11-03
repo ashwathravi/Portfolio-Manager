@@ -11,11 +11,11 @@ function stubProvider(): MarketDataProvider & { calls: Record<string, number> } 
         calls,
         async getQuote(symbol: string): Promise<Quote> {
             calls.getQuote++;
-            return { symbol, price: 42, change: 0, changePercent: 0, timestamp: '2026-04-19T00:00:00Z', isRealtime: true };
+            return { symbol, price: 42, change: 0, changePercent: 0, timestamp: '2026-04-19T00:00:00Z', kind: 'close', isRealtime: true };
         },
         async getBatchQuotes(symbols: string[]): Promise<Quote[]> {
             calls.getBatchQuotes++;
-            return symbols.map((s) => ({ symbol: s, price: 1, change: 0, changePercent: 0, timestamp: '2026-04-19T00:00:00Z', isRealtime: true }));
+            return symbols.map((s) => ({ symbol: s, price: 1, change: 0, changePercent: 0, timestamp: '2026-04-19T00:00:00Z', kind: 'close', isRealtime: true }));
         },
         async getHistoricalPrices(): Promise<OHLC[]> {
             calls.getHistoricalPrices++;
@@ -90,7 +90,7 @@ describe('MarketDataService', () => {
             provider.getBatchQuotes = async (symbols) => {
                 asked.push(symbols);
                 return symbols.filter((s) => s !== 'FXAIX').map((s) => ({
-                    symbol: s.toLowerCase(), price: 10, change: 1, changePercent: 11.1, timestamp: '2026-07-02T20:00:00.000Z', isRealtime: false,
+                    symbol: s.toLowerCase(), price: 10, change: 1, changePercent: 11.1, timestamp: '2026-07-02T20:00:00.000Z', kind: 'close', isRealtime: false,
                 }));
             };
 

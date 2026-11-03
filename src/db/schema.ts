@@ -542,6 +542,34 @@ export const priceBars = pgTable("price_bars", {
     appRuntimeAccess: appRuntimeAccessPolicy(),
 })).enableRLS();
 
+// Delayed intraday quotes (launch item i33): the newest quote per tracked
+// symbol, shared by every instance, so a symbol costs one provider call a
+// minute however many people look at it. Claiming a symbol to fetch stamps
+// claimed_at, which is also the shared call budget: a claim is one call.
+// Rows quoted before today's session are never served.
+export const intradayQuotes = pgTable("intraday_quotes", {
+    symbol: text("symbol")
+        .primaryKey()
+        .references(() => securities.symbol, { onDelete: "cascade", onUpdate: "cascade" }),
+    // Null until the first fetch comes back, and when the provider had no
+    // quote for the symbol.
+    price: doublePrecision("price"),
+    previousClose: doublePrecision("previous_close"),
+    // The provider's time for the price (its last trade).
+    quotedAt: timestamp("quoted_at"),
+    // When an instance last took the symbol to fetch it.
+    claimedAt: timestamp("claimed_at").notNull(),
+    // When that fetch came back, quote or not; null while the first is in
+    // flight, or when it failed.
+    fetchedAt: timestamp("fetched_at"),
+    // Which provider supplied the quote, e.g. "finnhub".
+    source: text("source").notNull(),
+}, (table) => ({
+    claimedAtIdx: index("intraday_quotes_claimed_at_idx").on(table.claimedAt),
+    serverOnlyNoClientAccess: serverOnlyNoClientAccessPolicy(),
+    appRuntimeAccess: appRuntimeAccessPolicy(),
+})).enableRLS();
+
 // ---------------------------------------------------------------------------
 // Scheduled jobs — one row per run of a cron job (launch item i48)
 // ---------------------------------------------------------------------------

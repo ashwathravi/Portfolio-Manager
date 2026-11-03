@@ -7,7 +7,7 @@ export const metadata: Metadata = {
     description: "The terms for using Atlas Wealth, including why nothing in it is investment advice.",
 };
 
-const LAST_UPDATED = "October 27, 2026";
+const LAST_UPDATED = "November 2, 2026";
 const PLAID_PRIVACY_URL = "https://plaid.com/legal/#end-user-privacy-policy";
 
 export default function TermsPage({ searchParams }: { searchParams: LegalSearchParams }) {
@@ -81,8 +81,11 @@ export default function TermsPage({ searchParams }: { searchParams: LegalSearchP
                     <li>
                         <strong>Prices</strong> come from{" "}
                         <a href="https://massive.com" target="_blank" rel="noreferrer">Massive</a> (formerly
-                        Polygon.io). They are the latest closing prices we&rsquo;ve stored, not live quotes, so
-                        a price can be a day or more old, or missing.
+                        Polygon.io) and{" "}
+                        <a href="https://finnhub.io" target="_blank" rel="noreferrer">Finnhub</a>. They are never
+                        live quotes: each is either the latest closing price we&rsquo;ve stored or, during the
+                        trading day, a quote delayed by a minute or more, and says which it is and when it&rsquo;s
+                        from. A price can be a day or more old, or missing.
                     </li>
                     <li>
                         <strong>Filings</strong> come from{" "}

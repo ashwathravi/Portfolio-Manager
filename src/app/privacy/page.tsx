@@ -6,7 +6,7 @@ export const metadata: Metadata = {
     description: "What Atlas Wealth collects, why, who it is shared with, and how to have it deleted.",
 };
 
-const LAST_UPDATED = "October 26, 2026";
+const LAST_UPDATED = "November 2, 2026";
 const PLAID_PRIVACY_URL = "https://plaid.com/legal/#end-user-privacy-policy";
 
 export default function PrivacyPage({ searchParams }: { searchParams: LegalSearchParams }) {
@@ -123,9 +123,9 @@ export default function PrivacyPage({ searchParams }: { searchParams: LegalSearc
                         Sentry sees your IP address the way any website you connect to does.
                     </li>
                     <li>
-                        <strong>Market data providers and SEC EDGAR</strong> supply prices and filings. We
-                        send them ticker symbols, filer IDs and the words you type into ticker search, never
-                        your name, email or account details.
+                        <strong>Market data providers (Massive and Finnhub) and SEC EDGAR</strong> supply prices
+                        and filings. We send them ticker symbols, filer IDs and the words you type into ticker
+                        search, never your name, email or account details.
                     </li>
                 </ul>
                 <p>

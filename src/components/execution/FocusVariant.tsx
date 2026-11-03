@@ -441,7 +441,7 @@ function OrderForm({ accounts, prices, onSubmit }: OrderFormProps) {
     const priceNote = !tickerUpper
         ? undefined
         : priceLookupPending
-            ? "Looking up the last close…"
+            ? "Looking up the price…"
             : describeTicketPrice(tickerPrice, todayEt);
 
     const handleInstrumentChange = (next: OrderInstrumentType) => {

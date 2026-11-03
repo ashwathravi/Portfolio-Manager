@@ -189,7 +189,7 @@ export function PreferencesSettings() {
                     <div className="space-y-2 max-w-sm">
                         <Label htmlFor="marketDataRefreshSeconds">Market data refresh (seconds)</Label>
                         <p className="text-xs text-muted-foreground">
-                            How often to refetch live quotes. Lower values hit provider rate limits faster.
+                            How often to check for newer prices. Quotes are delayed a minute or more, so checking more often doesn&apos;t make them newer.
                         </p>
                         <Input
                             id="marketDataRefreshSeconds"

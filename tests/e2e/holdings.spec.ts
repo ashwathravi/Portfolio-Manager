@@ -108,7 +108,7 @@ test.describe('Holdings today P&L', () => {
         await page.route('**/api/market-data/historical**', (route) => route.fulfill({ status: 200, json: { data: [] } }));
     });
     const aaplQuote = (timestamp: string) => ({
-        data: [{ symbol: 'AAPL', price: 190, change: 2, changePercent: 1.06, timestamp, isRealtime: false }],
+        data: [{ symbol: 'AAPL', price: 190, change: 2, changePercent: 1.06, timestamp, kind: 'close', isRealtime: false }],
     });
     const todayPnL = (page: Page) =>
         page.locator('.pm-summary-cell').filter({ hasText: 'Today P&L' }).locator('.pm-summary-value');
@@ -136,7 +136,7 @@ test.describe('Holdings today P&L', () => {
 
     test('with holdings: a first close with nothing to compare against has no move', async ({ page }) => {
         await page.route('**/api/market-data/quotes**', (route) => route.fulfill({ status: 200, json: {
-            data: [{ symbol: 'AAPL', price: 190, change: null, changePercent: null, timestamp: new Date().toISOString(), isRealtime: false }],
+            data: [{ symbol: 'AAPL', price: 190, change: null, changePercent: null, timestamp: new Date().toISOString(), kind: 'close', isRealtime: false }],
         } }));
         await gotoAppPage(page, '/portfolios/holdings');
         test.skip(!(await hasHoldings(page)), 'no holdings in this database');
@@ -159,7 +159,7 @@ test.describe('Holdings › By symbol', () => {
         await page.route('**/api/market-data/historical**', (route) => route.fulfill({ status: 200, json: { data: [] } }));
         // One quote for AAPL in every account.
         await page.route('**/api/market-data/quotes**', (route) => route.fulfill({ status: 200, json: {
-            data: [{ symbol: 'AAPL', price: 190, change: 2, changePercent: 1.06, timestamp: new Date().toISOString(), isRealtime: false }],
+            data: [{ symbol: 'AAPL', price: 190, change: 2, changePercent: 1.06, timestamp: new Date().toISOString(), kind: 'delayed', isRealtime: false }],
         } }));
     });
 
@@ -225,6 +225,38 @@ test.describe('Holdings › By symbol', () => {
         await expect(rowsFor(page, 'AAPL')).toHaveCount(1);
         await expect(rowChoice(page)).toHaveCount(0);
         await expect(rowsFor(page, 'AAPL').locator('.pm-account-pill')).toHaveText('Main Portfolio');
+    });
+});
+
+test.describe('Holdings prices', () => {
+    // Launch item i33: one line under the summary says what the prices are.
+    test.beforeEach(async ({ page }) => {
+        await page.route('**/api/market-data/historical**', (route) => route.fulfill({ status: 200, json: { data: [] } }));
+    });
+    const aapl = (overrides: Record<string, unknown>) => ({
+        data: [{ symbol: 'AAPL', price: 190, change: 2, changePercent: 1.06, timestamp: new Date().toISOString(), kind: 'delayed', isRealtime: false, ...overrides }],
+    });
+
+    test('with holdings: a delayed quote is labelled delayed with its time, and is today\'s move', async ({ page }) => {
+        const quotedAt = new Date();
+        await page.route('**/api/market-data/quotes**', (route) => route.fulfill({ status: 200, json: aapl({ timestamp: quotedAt.toISOString() }) }));
+        await gotoAppPage(page, '/portfolios/holdings');
+        test.skip(!(await hasHoldings(page)), 'no holdings in this database');
+        const clock = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit' }).format(quotedAt);
+        await expect(page.getByTestId('holdings-price-note')).toHaveText(new RegExp(`^Delayed quotes, as of (\\w{3} \\d{1,2} )?${clock} ET$`));
+        await expect(page.getByTestId('holdings-table').locator('tbody tr').filter({ hasText: 'AAPL' }).getByTestId('holding-today')).toHaveText('+1.06%');
+    });
+
+    test('with holdings: a close is labelled with its session; without any quote, the stored prices say so', async ({ page }) => {
+        await page.route('**/api/market-data/quotes**', (route) => route.fulfill({ status: 200, json: aapl({ kind: 'close', timestamp: '2026-10-30T20:00:00.000Z' }) }));
+        await gotoAppPage(page, '/portfolios/holdings');
+        test.skip(!(await hasHoldings(page)), 'no holdings in this database');
+        await expect(page.getByTestId('holdings-price-note')).toHaveText(/^Closing prices from Oct 30(, 2026)?$/);
+
+        await page.unroute('**/api/market-data/quotes**');
+        await page.route('**/api/market-data/quotes**', (route) => route.fulfill({ status: 200, json: { data: [] } }));
+        await gotoAppPage(page, '/portfolios/holdings');
+        await expect(page.getByTestId('holdings-price-note')).toHaveText('Prices stored with your holdings');
     });
 });
 

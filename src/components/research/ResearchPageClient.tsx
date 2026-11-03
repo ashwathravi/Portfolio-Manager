@@ -6,10 +6,13 @@ import { usePageHeader } from "@/components/layout/PageHeaderContext";
 import { Plus, Search, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useQuotesQuery } from "@/lib/api/market-data/queries";
+import { useEasternDate } from "@/lib/hooks/useEasternDate";
+import { describeQuote } from "@/lib/markets/quote-label";
 import { useThesisStore } from "@/lib/research/useThesisStore";
 import { useJournalStore } from "@/lib/research/useJournalStore";
 import type { Thesis, ThesisDraft } from "@/lib/research/thesis";
 import type { JournalEntry } from "@/lib/research/journal";
+import type { Quote } from "@/types/market-data";
 import { useWatchlist } from "@/lib/research/useWatchlist";
 import { distanceToEntryPct, type WatchItem } from "@/lib/research/watchlist";
 import { SampleTag } from "@/components/data-display/SampleTag";
@@ -90,7 +93,7 @@ export function ResearchPageClient() {
         [theses],
     );
 
-    // Live watchlist quotes — same behavior the old WatchlistSection had.
+    // Watchlist quotes (delayed or closes) — same behavior the old WatchlistSection had.
     const watchSymbols = useMemo(
         () => watchlist.items.map((w) => w.ticker),
         [watchlist.items],
@@ -353,7 +356,7 @@ export function ResearchPageClient() {
                             <WatchlistDetailPane
                                 key={selectedWatchItem.id}
                                 item={selectedWatchItem}
-                                livePrice={liveWatchPrice(watchQuotes, selectedWatchItem.ticker)}
+                                livePrice={watchQuote(watchQuotes, selectedWatchItem.ticker)?.price ?? null}
                                 thesis={thesisForTicker(selectedWatchItem.ticker)}
                                 onUpdate={(patch) => watchlist.update(selectedWatchItem.id, patch)}
                                 onRemove={() => handleRemoveWatch(selectedWatchItem)}
@@ -445,11 +448,12 @@ function ThesesColumn({
     );
 }
 
-type QuoteMap = Record<string, { price: number }> | undefined;
+type QuoteMap = Record<string, Pick<Quote, "price" | "kind" | "timestamp">> | undefined;
 
-function liveWatchPrice(quotes: QuoteMap, ticker: string): number | null {
-    const live = quotes?.[ticker.toUpperCase()];
-    return live && Number.isFinite(live.price) && live.price > 0 ? live.price : null;
+/** A ticker's quote with a usable price, delayed or a close. */
+function watchQuote(quotes: QuoteMap, ticker: string) {
+    const quote = quotes?.[ticker.toUpperCase()];
+    return quote && Number.isFinite(quote.price) && quote.price > 0 ? quote : undefined;
 }
 
 function WatchlistColumn({
@@ -468,6 +472,7 @@ function WatchlistColumn({
 }) {
     const [draft, setDraft] = useState("");
     const [error, setError] = useState<string | null>(null);
+    const todayEt = useEasternDate();
     return (
         <>
             <form
@@ -506,7 +511,8 @@ function WatchlistColumn({
                 <div className="pm-research-empty-hint">No watchlist matches.</div>
             ) : (
                 list.map((w) => {
-                    const price = liveWatchPrice(quotes, w.ticker);
+                    const quote = watchQuote(quotes, w.ticker);
+                    const price = quote?.price ?? null;
                     const distance = distanceToEntryPct(price, w.targetEntry);
                     return (
                         <button
@@ -523,8 +529,14 @@ function WatchlistColumn({
                                 </span>
                                 {w.sample ? (
                                     <SampleTag />
-                                ) : price != null ? (
-                                    <span className="pm-live-dot" aria-label="Live quote" title="Live quote, refreshes every 60s" />
+                                ) : quote ? (
+                                    // Lit for a delayed quote from today, muted for a close.
+                                    <span
+                                        className={`pm-live-dot${quote.kind === "delayed" ? "" : " is-closed"}`}
+                                        role="img"
+                                        aria-label={describeQuote(quote, todayEt)}
+                                        title={describeQuote(quote, todayEt)}
+                                    />
                                 ) : null}
                             </span>
                             {w.reason && <span className="pm-watch-list-reason">{w.reason}</span>}

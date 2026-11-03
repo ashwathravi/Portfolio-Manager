@@ -7,7 +7,9 @@
  * (launch item i30). The underlying provider is swappable via constructor
  * injection. By default quotes are read from the Postgres price store that
  * the nightly ingest fills (StoredQuoteProvider), so serving a page never
- * spends the free plan's five Massive calls a minute; history, fundamentals
+ * spends the free plan's five Massive calls a minute; during the session a
+ * delayed Finnhub quote, shared in Postgres, takes a close's place
+ * (DelayedQuoteProvider, launch item i33); history, fundamentals
  * and search go to the PolygonMassiveAdapter. Construction never throws:
  * without a database (quotes) or POLYGON_API_KEY (the rest) requests reject
  * with MarketDataNotConfiguredError, which pages answer with stored prices
@@ -25,6 +27,7 @@ import {
 import { MarketDataNotConfiguredError } from '@/lib/providers/errors';
 import { PolygonMassiveAdapter } from '@/lib/providers/polygon-massive-adapter';
 import { getMassiveQuota } from '@/lib/providers/massive-quota';
+import { DelayedQuoteProvider } from '@/lib/markets/delayed-quote-provider';
 import { StoredQuoteProvider } from '@/lib/markets/stored-quote-provider';
 import type {
   Fundamentals,
@@ -56,10 +59,13 @@ export class MarketDataService {
     this.provider =
       provider ??
       new CachedMarketDataProvider(
-        // Quotes come from the price store; Massive serves history,
-        // fundamentals and search, within the budget it shares with the
-        // nightly ingest.
-        new StoredQuoteProvider(new PolygonMassiveAdapter(undefined, undefined, { quota: getMassiveQuota() })),
+        // Quotes are the price store's closes, with delayed Finnhub quotes
+        // in their place during the session (launch item i33); Massive
+        // serves history, fundamentals and search, within the budget it
+        // shares with the nightly ingest.
+        new DelayedQuoteProvider(
+          new StoredQuoteProvider(new PolygonMassiveAdapter(undefined, undefined, { quota: getMassiveQuota() })),
+        ),
         new InMemoryCache({ sweepIntervalMs: 60_000 }),
       );
     this.valuationEngine = new PortfolioValuationEngine(this.provider);

@@ -391,6 +391,33 @@ test.describe('Research watchlist', () => {
         await expect(pane.getByLabel('Why it is on the list')).toHaveValue(/AI platform/);
     });
 
+    test('a watched ticker\'s price says whether it is a delayed quote or a close (i33)', async ({ page }) => {
+        const quotedAt = new Date();
+        let kind = 'delayed';
+        await page.route('**/api/market-data/quotes**', (route) => route.fulfill({ status: 200, json: { data: [
+            { symbol: 'AMD', price: 160, change: 1, changePercent: 0.63, timestamp: kind === 'delayed' ? quotedAt.toISOString() : '2026-10-30T20:00:00.000Z', kind, isRealtime: false },
+        ] } }));
+        const add = page.getByLabel('Add ticker to watchlist');
+        await expect(async () => {
+            await add.fill('amd');
+            await expect(add).toHaveValue('AMD', { timeout: 1_000 });
+        }).toPass({ timeout: 10_000 });
+        const saved = watchlistSaved(page, '"AMD"');
+        await page.getByRole('button', { name: 'Add', exact: true }).click();
+        await saved;
+        const card = page.locator('.pm-research-list').getByRole('button', { name: /AMD/ });
+        const clock = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit' }).format(quotedAt);
+        await expect(card.locator('.pm-live-dot')).toHaveAttribute('aria-label', new RegExp(`^Delayed quote, (\\w{3} \\d{1,2} )?${clock} ET$`));
+        await expect(card.locator('.pm-live-dot')).not.toHaveClass(/is-closed/);
+        await expect(card.getByLabel(/live/i)).toHaveCount(0);
+
+        kind = 'close';
+        await reloadAppPage(page);
+        const reloaded = page.locator('.pm-research-list').getByRole('button', { name: /AMD/ });
+        await expect(reloaded.locator('.pm-live-dot')).toHaveAttribute('aria-label', /^Last close, Oct 30(, 2026)?$/);
+        await expect(reloaded.locator('.pm-live-dot')).toHaveClass(/is-closed/);
+    });
+
     test('add a ticker, and it is still there after a reload', async ({ page }) => {
         const add = page.getByLabel('Add ticker to watchlist');
         await expect(async () => {
