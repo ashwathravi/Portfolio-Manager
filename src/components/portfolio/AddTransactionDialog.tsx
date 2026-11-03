@@ -4,6 +4,7 @@ import { useEffect, useId, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Plus } from "lucide-react";
 import { toast } from "sonner";
+import { TickerSearchInput } from "@/components/command/TickerSearchInput";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
     SYMBOL_TYPES,
@@ -155,17 +156,18 @@ export function AddTransactionDialog({ accounts }: { accounts: readonly Transact
                                     <input id={`${ids}-date`} type="date" className="pm-exec-input" value={date} required onChange={(e) => setDate(e.target.value)} />
                                 </label>
                                 {needsSymbol && (
-                                    <label className="pm-exec-field" htmlFor={`${ids}-symbol`}>
-                                        <span className="pm-exec-field-label">Symbol</span>
-                                        <input
+                                    // A div, not a label around the field: the suggestions would join its name.
+                                    <div className="pm-exec-field">
+                                        <label className="pm-exec-field-label" htmlFor={`${ids}-symbol`}>Symbol</label>
+                                        <TickerSearchInput
                                             id={`${ids}-symbol`}
-                                            className="pm-exec-input"
                                             value={symbol}
-                                            maxLength={10}
-                                            placeholder="AAPL"
-                                            onChange={(e) => setSymbol(e.target.value.toUpperCase())}
+                                            placeholder="AAPL or Apple"
+                                            listAlign="end"
+                                            onChange={(value) => setSymbol(value.toUpperCase())}
+                                            onPick={(match) => setSymbol(match.symbol)}
                                         />
-                                    </label>
+                                    </div>
                                 )}
                             </div>
                             {trade ? (

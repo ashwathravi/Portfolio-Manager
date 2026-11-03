@@ -570,6 +570,26 @@ export const intradayQuotes = pgTable("intraday_quotes", {
     appRuntimeAccess: appRuntimeAccessPolicy(),
 })).enableRLS();
 
+// Ticker search (launch item i35): every listed US company's ticker and
+// name, from SEC EDGAR's ticker file, replaced by the nightly job. Separate
+// from securities, which holds only what Atlas tracks and prices.
+export const symbolDirectory = pgTable("symbol_directory", {
+    // As the rest of the app writes it: BRK.B, where SEC writes BRK-B.
+    symbol: text("symbol").primaryKey(),
+    name: text("name").notNull(),
+    // SEC's listing venue: "Nasdaq", "NYSE", "CBOE", "OTC"; null when it
+    // has none yet (a company about to list).
+    exchange: text("exchange"),
+    cik: text("cik").notNull(),
+    // The row's place in SEC's file, which lists the largest companies
+    // first: matches that tie on everything else come in this order.
+    position: integer("position").notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, () => ({
+    serverOnlyNoClientAccess: serverOnlyNoClientAccessPolicy(),
+    appRuntimeAccess: appRuntimeAccessPolicy(),
+})).enableRLS();
+
 // ---------------------------------------------------------------------------
 // Scheduled jobs — one row per run of a cron job (launch item i48)
 // ---------------------------------------------------------------------------
