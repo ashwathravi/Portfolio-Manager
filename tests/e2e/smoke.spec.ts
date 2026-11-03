@@ -170,6 +170,8 @@ test.describe('Market data without a provider key', () => {
             const { data } = await batch.json();
             expect(data.map((quote: { symbol: string }) => quote.symbol)).toEqual(['SPY']);
             expect(data[0].price).toBe(515.1);
+            // A stored close says so; E2E has no Finnhub key, so nothing is delayed (launch item i33).
+            expect([data[0].kind, data[0].isRealtime]).toEqual(['close', false]);
             expect(single.status()).toBe(404);
             expect(await single.json()).toEqual({ error: 'No price for AAPL yet.', code: 'QUOTE_UNAVAILABLE' });
         } else {
@@ -239,5 +241,19 @@ test.describe('Scheduled job health', () => {
         } finally {
             await sessionless.dispose();
         }
+    });
+});
+
+test.describe('Search engines during the beta', () => {
+    // Launch item i74: every response asks to stay out of search results.
+    // Signed in here; tests/production/post-deploy.spec.ts checks the
+    // signed-out pages and robots.txt, on the live site too.
+    test('a signed-in page and an API answer carry noindex', async ({ page }) => {
+        const response = await page.goto('/');
+        expect(response?.headers()['x-robots-tag']).toBe('noindex, nofollow');
+        await expect(page.locator('meta[name="robots"]')).toHaveAttribute('content', 'noindex, nofollow');
+
+        const api = await page.request.get('/api/health');
+        expect(api.headers()['x-robots-tag']).toBe('noindex, nofollow');
     });
 });

@@ -13,6 +13,7 @@ import {
     marketStateLabel,
     nextTradingDay,
     previousTradingDay,
+    sessionSoFar,
 } from "./market-hours";
 
 /**
@@ -340,5 +341,27 @@ describe("easternDateTime", () => {
         assert.throws(() => easternDateTime("2026-07-02", 24 * 60), RangeError);
         assert.throws(() => easternDateTime("2026-07-02", 90.5), RangeError);
         assert.throws(() => easternDateTime("2026-02-30", 600), RangeError);
+    });
+});
+
+describe("sessionSoFar", () => {
+    test("is null before the open, then today's session from 9:30 AM ET through the evening", () => {
+        assert.strictEqual(sessionSoFar(new Date("2026-11-02T14:29:00Z")), null); // 9:29 AM EST
+        const open = sessionSoFar(new Date("2026-11-02T14:30:00Z"));
+        assert.deepStrictEqual(
+            open && { date: open.date, openAt: open.openAt.toISOString(), closeAt: open.closeAt.toISOString() },
+            { date: "2026-11-02", openAt: "2026-11-02T14:30:00.000Z", closeAt: "2026-11-02T21:00:00.000Z" },
+        );
+        // After the bell it is still today's session, until midnight ET.
+        assert.strictEqual(sessionSoFar(new Date("2026-11-03T04:59:00Z"))?.date, "2026-11-02");
+    });
+
+    test("ends at 1:00 PM ET on an early close", () => {
+        assert.strictEqual(sessionSoFar(new Date("2026-11-27T16:00:00Z"))?.closeAt.toISOString(), "2026-11-27T18:00:00.000Z");
+    });
+
+    test("is null on weekends and holidays", () => {
+        assert.strictEqual(sessionSoFar(new Date("2026-10-31T16:00:00Z")), null); // Saturday
+        assert.strictEqual(sessionSoFar(new Date("2026-11-26T16:00:00Z")), null); // Thanksgiving
     });
 });

@@ -8,9 +8,9 @@
  * uses {@link selectTrackedBars} to cut the market-wide daily file down to the
  * tracked set before writing.
  *
- * Quotes are not stored here: they live a minute and belong in the shared
- * cache. Closing prices from this store are what valuations and "last close"
- * labels read.
+ * Intraday quotes are kept apart, in `intraday_quotes` (intraday-quotes.ts):
+ * they live a minute. Closing prices from this store are what valuations and
+ * "close" labels read.
  */
 
 import { and, asc, count, desc, eq, exists, gte, inArray, isNotNull, isNull, lt, lte, max, notInArray, or, sql } from "drizzle-orm";

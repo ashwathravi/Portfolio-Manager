@@ -183,6 +183,13 @@
       "when": 1793305048070,
       "tag": "0025_owner_consistent_foreign_keys",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1793687375033,
+      "tag": "0026_intraday_quotes",
+      "breakpoints": true
     }
   ]
 }

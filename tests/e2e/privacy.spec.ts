@@ -79,6 +79,9 @@ test.describe('Privacy policy', () => {
     }
     await expect(sharing.getByText(/Reports never include your name, email, cookies/)).toBeVisible();
     await expect(sharing.getByText(/Sentry sees your IP address/)).toBeVisible();
+    // Both price providers are named (launch item i33), and get ticker symbols only.
+    await expect(sharing.getByText('Market data providers (Massive and Finnhub) and SEC EDGAR')).toBeVisible();
+    await expect(sharing).toContainText('We send them ticker symbols, filer IDs and the words you type into ticker search, never your name, email or account details.');
   });
 
   test('links to the Plaid end user policy and a contact address', async ({ page }) => {

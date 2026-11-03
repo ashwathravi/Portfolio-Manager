@@ -70,6 +70,7 @@ export function quoteFromCloses(symbol: string, closes: readonly LatestClose[]):
     change,
     changePercent: change !== null ? (change / previousClose) * 100 : null,
     timestamp: sessionCloseTime(latest.date),
+    kind: 'close',
     isRealtime: false,
   };
 }

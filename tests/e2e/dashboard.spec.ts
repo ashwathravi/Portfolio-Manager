@@ -504,7 +504,7 @@ test.describe('Today watchlist', () => {
 
     test('successful route-shaped quotes render price and change; missing symbols keep dashes', async ({ page }) => {
         await page.route('**/api/market-data/quotes**', (route) => route.fulfill({ status: 200, json: { data: [
-            { symbol: 'COIN', price: 123.45, change: -2.5, changePercent: -1.98, timestamp: new Date().toISOString(), isRealtime: false },
+            { symbol: 'COIN', price: 123.45, change: -2.5, changePercent: -1.98, timestamp: new Date().toISOString(), kind: 'close', isRealtime: false },
         ] } }));
         await gotoAppPage(page, '/');
         const card = page.getByTestId('today-watchlist');
@@ -519,7 +519,7 @@ test.describe('Today watchlist', () => {
     test('regression: an earlier session\'s close shows its price but not its move', async ({ page }) => {
         const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
         await page.route('**/api/market-data/quotes**', (route) => route.fulfill({ status: 200, json: { data: [
-            { symbol: 'COIN', price: 123.45, change: -2.5, changePercent: -1.98, timestamp: threeDaysAgo, isRealtime: false },
+            { symbol: 'COIN', price: 123.45, change: -2.5, changePercent: -1.98, timestamp: threeDaysAgo, kind: 'close', isRealtime: false },
         ] } }));
         await gotoAppPage(page, '/');
         const coin = page.getByTestId('today-watchlist').locator('li').filter({ has: page.getByRole('link', { name: /COIN/ }) });
@@ -543,7 +543,7 @@ test.describe('Today › Top holdings', () => {
     });
 
     const aapl = (overrides: Record<string, unknown>) => ({
-        data: [{ symbol: 'AAPL', price: 190, change: 2, changePercent: 1.06, timestamp: new Date().toISOString(), isRealtime: false, ...overrides }],
+        data: [{ symbol: 'AAPL', price: 190, change: 2, changePercent: 1.06, timestamp: new Date().toISOString(), kind: 'close', isRealtime: false, ...overrides }],
     });
     const aaplToday = (page: import('@playwright/test').Page) =>
         page.getByRole('region', { name: 'Top holdings' }).locator('tbody tr').filter({ hasText: 'AAPL' }).getByTestId('top-holding-today');
@@ -571,10 +571,46 @@ test.describe('Today › Top holdings', () => {
 
 test.describe('Today › Net worth hero', () => {
     const HELD = ['AAPL', 'MSFT', 'NVDA', 'GOOGL', 'TSLA', 'AMZN'];
-    const quote = (symbol: string) => ({ symbol, price: 100, change: 1, changePercent: 1, timestamp: new Date().toISOString(), isRealtime: false });
+    const quote = (symbol: string) => ({ symbol, price: 100, change: 1, changePercent: 1, timestamp: new Date().toISOString(), kind: 'close', isRealtime: false });
 
     test.beforeEach(async ({ page }) => {
         await page.route('**/api/market-data/historical**', (route) => route.fulfill({ status: 200, json: { data: [] } }));
+    });
+
+    // Launch item i33: Atlas has no real-time feed, so the line under the
+    // hero says what the prices are and never calls them live.
+    const etClock = (at: Date) => new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit' }).format(at);
+
+    test('with holdings: delayed quotes are labelled with the oldest one\'s time, and move today\'s change', async ({ page }) => {
+        const quotedAt = new Date();
+        const older = new Date(quotedAt.getTime() - 60_000);
+        await page.route('**/api/market-data/quotes**', (route) => route.fulfill({ status: 200, json: { data: HELD.map((symbol, i) => ({
+            ...quote(symbol), kind: 'delayed', timestamp: (i === 1 ? older : quotedAt).toISOString(),
+        })) } }));
+        await gotoAppPage(page, '/');
+        test.skip(!(await hasHoldings(page)), 'no holdings in this database');
+        const freshness = page.getByTestId('price-freshness');
+        await expect(freshness).toContainText(new RegExp(`Delayed quotes, as of (\\w{3} \\d{1,2} )?${etClock(older)} ET`));
+        await expect(freshness).not.toContainText(/live/i);
+        await expect(page.getByTestId('today-change')).toHaveText(/today$/);
+    });
+
+    test('with holdings: closes are labelled with their session, and a mix says how many are delayed', async ({ page }) => {
+        const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
+        await page.route('**/api/market-data/quotes**', (route) => route.fulfill({ status: 200, json: { data: HELD.map((symbol) => ({
+            ...quote(symbol), timestamp: threeDaysAgo,
+        })) } }));
+        await gotoAppPage(page, '/');
+        test.skip(!(await hasHoldings(page)), 'no holdings in this database');
+        await expect(page.getByTestId('price-freshness')).toContainText(/Closing prices from [A-Z][a-z]{2} \d{1,2}/);
+        await expect(page.getByTestId('today-change')).toHaveText('Prices as of the last close');
+
+        await page.unroute('**/api/market-data/quotes**');
+        await page.route('**/api/market-data/quotes**', (route) => route.fulfill({ status: 200, json: { data: HELD.map((symbol, i) => ({
+            ...quote(symbol), ...(i === 0 ? { kind: 'delayed' } : { timestamp: threeDaysAgo }),
+        })) } }));
+        await gotoAppPage(page, '/');
+        await expect(page.getByTestId('price-freshness')).toContainText(`Delayed quotes for 1 of ${HELD.length}, last closes for the rest`);
     });
 
     test('with holdings: every position moved today, so the headline is the portfolio\'s move', async ({ page }) => {

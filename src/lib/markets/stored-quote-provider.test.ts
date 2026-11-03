@@ -44,6 +44,7 @@ describe("quoteFromCloses", () => {
             change: 2,
             changePercent: 0.8,
             timestamp: "2026-10-16T20:00:00.000Z",
+            kind: "close",
             isRealtime: false,
         });
     });

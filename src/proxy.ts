@@ -140,6 +140,7 @@ function isPublicRoute(pathname: string): boolean {
     return pathname === "/login"
         || pathname === "/privacy"
         || pathname === "/terms"
+        || pathname === "/robots.txt"
         || pathname === "/api/health"
         || pathname === "/api/health/ready"
         || pathname === "/api/health/jobs"

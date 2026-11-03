@@ -3,6 +3,8 @@
  *
  * - The Ask transcript: questions about your money shouldn't stay on a
  *   shared device.
+ * - A Plaid Link session waiting on a bank's sign-in (launch item i47): its
+ *   link token opens Link for this account.
  * - Settings: profile, balances and risk and tax details. Sign-out first
  *   tries to save what the server hasn't got (briefly: a stalled request
  *   never blocks it), then removes the copy either way; the server's
@@ -17,13 +19,14 @@
  */
 
 import { ASK_STORAGE_KEY } from "@/lib/ask/storage";
+import { PENDING_PLAID_LINK_KEY } from "@/lib/plaid/oauth";
 import { flushAccountWrites } from "@/lib/research/accountWrites";
 import { flushSettings, haltSettingsSync, removeBrowserCopy } from "@/lib/settings/sync";
 
 import { FORMERLY_SHARED_KEYS, adoptFormerlySharedData } from "./shared-keys";
 import { browserLocalStorage, currentStorageScope, removeUserValue } from "./user-scope";
 
-export const CLEARED_ON_SIGN_OUT = [ASK_STORAGE_KEY] as const;
+export const CLEARED_ON_SIGN_OUT = [ASK_STORAGE_KEY, PENDING_PLAID_LINK_KEY] as const;
 
 export function clearBrowserDataOnSignOut(
     storage: Pick<Storage, "getItem" | "setItem" | "removeItem"> | null = browserLocalStorage(),

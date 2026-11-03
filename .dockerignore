@@ -15,3 +15,5 @@ coverage
 !.env.example
 !.env*.example
 .runtime
+# Keys and certificates anywhere; a bare *.pem would match only the root.
+**/*.pem

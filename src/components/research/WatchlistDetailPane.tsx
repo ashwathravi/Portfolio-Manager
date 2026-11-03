@@ -8,7 +8,7 @@ import type { Thesis } from "@/lib/research/thesis";
 import { WATCH_ITEM_LIMITS } from "@/lib/validators/watchlist";
 
 /**
- * Research › Watchlist detail. Shows why a ticker is on the list, the live
+ * Research › Watchlist detail. Shows why a ticker is on the list, the last
  * price against the entry the user wants, and the next steps (thesis, draft
  * order, position). Reason, target entry, and notes edit in place and save
  * when the field loses focus; a field left unchanged follows the saved value.
@@ -61,7 +61,7 @@ export function WatchlistDetailPane({
                     />
                 </div>
                 {livePrice == null && (
-                    <p className="pm-watch-detail-note">No live quote right now, so there is no distance to your entry.</p>
+                    <p className="pm-watch-detail-note">No price for it yet, so there is no distance to your entry.</p>
                 )}
             </section>
 

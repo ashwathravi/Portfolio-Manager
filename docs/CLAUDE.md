@@ -145,7 +145,7 @@ Use the tokens rather than raw hex values, so light and dark themes stay consist
 ### Data
 
 - Every figure is the user's own data or carries a **Sample** tag (`SampleTag`, `SampleDataNotice`), hideable in Settings › Data. Never invent a number to fill a card: no made-up prices, deltas, sparklines or commissions.
-- Prices are stored daily closes from the nightly ingest, not live quotes; say so where it matters.
+- Prices are stored daily closes from the nightly ingest or, during the session, delayed Finnhub quotes, never live; every `Quote` has a `kind`, and pages say which with `describeQuote` / `describeQuotes` (`src/lib/markets/quote-label.ts`).
 - Nothing in the app is investment advice, and Atlas never places trades or moves money.
 
 ## Performance Targets

@@ -99,7 +99,7 @@ gh secret delete DATABASE_URL --repo ashwathravi/Portfolio-Manager
 - **The fix:** in the integration's settings, connect the store to Production only.
 
 **Optional hardening:**
-- Turn off Supabase's Data API (i74). It's already closed: row-level security is on every table, `anon` and `authenticated` have no grants, and the advisors report nothing.
+- Supabase's Data API is off (i74, turned off on 1 November 2026, Integrations › Data API). Nothing used it: the app reaches Postgres through Drizzle, and the project's logs showed no API requests. It was mostly closed already: row-level security is on every table, `anon` and `authenticated` have no table grants, and the advisors report nothing. The one thing it served, `public.codex_keepalive_ping()` (a function no migration in this repo created), had no callers; the weekly keep-alive job outside this repo queries through Supabase's management API instead, which the switch doesn't affect.
 - Require actions pinned to full commit SHAs in GitHub's Actions settings; every workflow already pins them.
 
 ## Accepted, with reasons
@@ -209,7 +209,7 @@ Every ID from a URL or body is checked against the session's user, in the WHERE 
 | A file-based Plaid token vault | Encrypted in Postgres in production. |
 | CSP with `'unsafe-inline'` and `'unsafe-eval'` | A nonce with `'strict-dynamic'`. |
 | No CORS configuration | Same-origin only. No CORS headers are sent, which is right for a single-domain app. |
-| `.dockerignore` missing `.env*` | `.env*` and `.runtime` are excluded. `*.pem` goes with i74. |
+| `.dockerignore` missing `.env*` | `.env*`, `.runtime` and `*.pem` in any folder are excluded (`scripts/dockerignore.test.ts`). |
 
 ## Repeating this review
 

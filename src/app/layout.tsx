@@ -16,12 +16,14 @@ import { RequestTimeProvider } from "@/components/providers/RequestTimeProvider"
 import { SettingsSync } from "@/components/providers/SettingsSync";
 import { isDatabaseConfigured } from "@/db/connection-options";
 import { resolveViewerIdentity } from "@/lib/auth/viewer";
+import { ROBOTS_DIRECTIVES } from "@/lib/security/search-engines";
 import { serverSettingsFor } from "@/lib/settings/server";
 import { storageScopeFor } from "@/lib/storage/user-scope";
 
 export const metadata: Metadata = {
   title: "Atlas Wealth | Personal Investment Operating System",
   description: "Comprehensive wealth management platform",
+  robots: ROBOTS_DIRECTIVES,
 };
 
 /**
