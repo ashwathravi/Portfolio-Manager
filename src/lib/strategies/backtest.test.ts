@@ -120,6 +120,15 @@ describe('runBacktest', () => {
         assert.equal(run(definition(), { AAA: flat([90, 90]) }).backtest.benchmark, null);
     });
 
+    test('regression: no SPY comparison when its stored closes stop more than a week before the window does', () => {
+        const dates = sessions(20);
+        const aaa = bars(dates.map(() => [90, 90, 90] as [number, number, number]), dates);
+        const spyStopsEarly = bars([[400, 400, 400], [410, 410, 410], [420, 420, 420]], dates.slice(0, 3));
+        assert.equal(run(definition(), { AAA: aaa }, spyStopsEarly).backtest.benchmark, null);
+        const spyWholeWindow = bars(dates.map((_, i) => [400 + i, 400 + i, 400 + i] as [number, number, number]), dates);
+        assert.deepEqual(run(definition(), { AAA: aaa }, spyWholeWindow).backtest.benchmark, { symbol: 'SPY', totalReturnPct: 4.75 });
+    });
+
     test('tickers without history are named and left out', () => {
         const { backtest } = run(definition({ symbols: ['AAA', 'NOPE'] }), { AAA: flat([90, 90, 90]) });
         assert.deepEqual(backtest.symbolsWithoutHistory, ['NOPE']);

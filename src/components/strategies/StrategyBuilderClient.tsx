@@ -115,6 +115,8 @@ export function StrategyBuilderClient({ data, requestedId }: { data: StrategiesP
                 setSaveError(null);
                 return true;
             } catch (err) {
+                // Keep the draft for the next save (Run backtest tries again first), unless a newer edit replaced it.
+                if (!pending.current.has(id)) pending.current.set(id, strategy);
                 setSaveState((prev) => ({ ...prev, [id]: "error" }));
                 setSaveError(err instanceof Error ? err.message : "Couldn't save the strategy.");
                 return false;

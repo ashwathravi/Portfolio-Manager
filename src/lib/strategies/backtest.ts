@@ -350,12 +350,17 @@ function summarize(equity: readonly number[], returns: readonly number[], trades
     };
 }
 
-/** SPY from its last close on or before the first session (within a week) to its last on or before the last. */
+/**
+ * SPY from its last close on or before the first session to its last on or
+ * before the last, each within a week of it; otherwise none, rather than a
+ * return over some other window.
+ */
 function benchmarkReturn(bars: readonly BacktestBar[] | undefined, from: string, to: string): StrategyBacktest['benchmark'] {
     const sorted = [...(bars ?? [])].sort((a, b) => a.date.localeCompare(b.date));
     const start = sorted.filter((b) => b.date <= from).at(-1);
     const end = sorted.filter((b) => b.date <= to).at(-1);
-    if (!start || !end || start.close <= 0 || Date.parse(from) - Date.parse(start.date) > 7 * DAY_MS) return null;
+    const near = (date: string, target: string) => Date.parse(target) - Date.parse(date) <= 7 * DAY_MS;
+    if (!start || !end || start.close <= 0 || !near(start.date, from) || !near(end.date, to)) return null;
     return { symbol: BENCHMARK_SYMBOL, totalReturnPct: round((end.close / start.close - 1) * 100, 2) };
 }
 

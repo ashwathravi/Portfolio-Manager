@@ -411,6 +411,27 @@ test.describe('Strategies saved to the account (i55)', () => {
         await expect(page.getByTestId('backtest-stale')).toBeVisible();
     });
 
+    test('regression: after a save fails, Run backtest saves the edits first rather than running the old rules', async ({ page }) => {
+        await newStrategy(page);
+        let failures = 1;
+        await page.route(/\/api\/strategies\/[^/]+$/, async (route) => {
+            if (route.request().method() === 'PUT' && failures-- > 0) {
+                return route.fulfill({ status: 500, json: { error: 'Unable to save the strategy.', code: 'STRATEGY_UPDATE_FAILED' } });
+            }
+            return route.continue();
+        });
+        await page.getByRole('button', { name: '+ Sector ETFs' }).click();
+        await expect(page.getByTestId('strategy-save-state')).toHaveText('Not saved');
+        await expect(page.getByTestId('strategy-error')).toHaveText('Unable to save the strategy.');
+
+        await page.getByRole('button', { name: 'Run backtest' }).click();
+        await expect(page.getByTestId('backtest-window')).toHaveText(/^Aug 2026 – Oct 2026$/);
+        // The run is on the tickers on screen, so it isn't out of date.
+        await expect(page.getByTestId('backtest-stale')).toHaveCount(0);
+        await expect(page.getByTestId('strategy-save-state')).toHaveText('Saved');
+        await expect(page.getByTestId('strategy-error')).toHaveCount(0);
+    });
+
     test('a rule Atlas can\'t compute is marked, and the backtest says which', async ({ page }) => {
         await newStrategy(page);
         const value = page.getByLabel('Value').first();
