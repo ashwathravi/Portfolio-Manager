@@ -31,7 +31,7 @@ import { HoldingsSummaryStrip } from "./HoldingsSummaryStrip";
 import { OptionsRiskLedgerCard } from "./OptionsRiskLedgerCard";
 import { isTodaysQuote } from "@/lib/markets/quote-session";
 import { useEasternDate } from "@/lib/hooks/useEasternDate";
-import { combineBySymbol, type HoldingsRowView } from "@/lib/holdings/combine";
+import { combineBySymbol, hasSymbolInSeveralAccounts, type HoldingsRowView } from "@/lib/holdings/combine";
 
 /**
  * Phase 4 (AR-74) Holdings page wrapper.
@@ -54,6 +54,8 @@ export interface HoldingsSeed {
     /** Null when there is no price for it yet (no quote, nothing stored). */
     currentPrice: number | null;
     marketValue: number;
+    /** The account's ID; names can repeat. */
+    accountId: string;
     account: string;
     /** Approx days since the position was opened, for the "Avg holding period" cell. */
     holdingDays?: number;
@@ -149,16 +151,7 @@ export function HoldingsPageClient({
     const { rows, totalMV } = enriched;
 
     // The choice of rows only matters when some symbol is in more than one account.
-    const hasSharedSymbols = useMemo(() => {
-        const accountsBySymbol = new Map<string, Set<string>>();
-        for (const r of rows) {
-            const symbol = r.symbol.toUpperCase();
-            const accounts = accountsBySymbol.get(symbol) ?? new Set<string>();
-            accounts.add(r.account);
-            accountsBySymbol.set(symbol, accounts);
-        }
-        return [...accountsBySymbol.values()].some((accounts) => accounts.size > 1);
-    }, [rows]);
+    const hasSharedSymbols = useMemo(() => hasSymbolInSeveralAccounts(rows), [rows]);
     const bySymbol = hasSharedSymbols && rowView === "symbol";
 
     const changeRowView = (next: HoldingsRowView) => {

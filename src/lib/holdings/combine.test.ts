@@ -1,8 +1,9 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
-import { combineBySymbol, parseHoldingsRowView, type AccountPosition } from "./combine";
+import { combineBySymbol, hasSymbolInSeveralAccounts, parseHoldingsRowView, type AccountPosition } from "./combine";
 
+/** A position; its account's ID is its name unless given. */
 function position(
     overrides: Partial<AccountPosition> & Pick<AccountPosition, "id" | "symbol" | "account" | "quantity">,
     avgCost: number,
@@ -11,6 +12,7 @@ function position(
     const costBasis = overrides.quantity * avgCost;
     return {
         name: `${overrides.symbol} Inc.`,
+        accountId: overrides.account,
         last,
         costBasis,
         marketValue: last === null ? costBasis : overrides.quantity * last,
@@ -27,6 +29,33 @@ describe("holdings / parseHoldingsRowView", () => {
         for (const value of [undefined, "", "account", "SYMBOL", ["symbol"], 1]) {
             assert.equal(parseHoldingsRowView(value), "account");
         }
+    });
+});
+
+describe("holdings / hasSymbolInSeveralAccounts", () => {
+    it("is true once a symbol is in a second account, in any letter case", () => {
+        assert.equal(hasSymbolInSeveralAccounts([
+            { symbol: "AAPL", accountId: "p1" },
+            { symbol: "MSFT", accountId: "p2" },
+        ]), false);
+        assert.equal(hasSymbolInSeveralAccounts([
+            { symbol: "aapl", accountId: "p1" },
+            { symbol: "MSFT", accountId: "p1" },
+            { symbol: "AAPL", accountId: "p2" },
+        ]), true);
+    });
+
+    it("regression: counts two accounts with the same name as two", () => {
+        // Accounts made before names had to differ can still share one.
+        const sameName = [
+            position({ id: "h1", symbol: "AAPL", accountId: "p1", account: "Brokerage", quantity: 1 }, 1),
+            position({ id: "h2", symbol: "AAPL", accountId: "p2", account: "Brokerage", quantity: 1 }, 1),
+        ];
+        assert.equal(hasSymbolInSeveralAccounts(sameName), true);
+    });
+
+    it("is false without positions", () => {
+        assert.equal(hasSymbolInSeveralAccounts([]), false);
     });
 });
 
@@ -75,6 +104,15 @@ describe("holdings / combineBySymbol", () => {
             position({ id: "h3", symbol: "AAPL", account: "Roth", quantity: 1 }, 1),
         ]);
         assert.deepEqual(row.accounts, ["Main", "Roth"]);
+    });
+
+    it("regression: two accounts with the same name are two accounts", () => {
+        const [row] = combineBySymbol([
+            position({ id: "h1", symbol: "AAPL", accountId: "p1", account: "Brokerage", quantity: 1 }, 1),
+            position({ id: "h2", symbol: "AAPL", accountId: "p2", account: "Brokerage", quantity: 2 }, 1),
+        ]);
+        assert.equal(row.quantity, 3);
+        assert.deepEqual(row.accounts, ["Brokerage", "Brokerage"]);
     });
 
     it("adds up allocation and today's P&L, and keeps the symbol's move today", () => {

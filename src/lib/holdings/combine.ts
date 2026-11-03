@@ -19,6 +19,9 @@ export function parseHoldingsRowView(value: unknown): HoldingsRowView {
 export interface AccountPosition {
     id: string;
     symbol: string;
+    /** Identifies the account: two accounts can share a name. */
+    accountId: string;
+    /** The account's name, for display. */
     account: string;
     quantity: number;
     /** What the shares cost: quantity × average cost. */
@@ -50,8 +53,20 @@ export interface SymbolPosition {
     todayPct: number | null;
     todayChangeAbs: number;
     allocationPct: number;
-    /** The accounts holding it, each once, in the order first seen. */
+    /** The names of the accounts holding it, one per account, in the order first seen. */
     accounts: string[];
+}
+
+/** True when some symbol (in any letter case) is held in more than one account. */
+export function hasSymbolInSeveralAccounts(positions: readonly Pick<AccountPosition, "symbol" | "accountId">[]): boolean {
+    const accountBySymbol = new Map<string, string>();
+    for (const position of positions) {
+        const key = position.symbol.toUpperCase();
+        const account = accountBySymbol.get(key);
+        if (account === undefined) accountBySymbol.set(key, position.accountId);
+        else if (account !== position.accountId) return true;
+    }
+    return false;
 }
 
 export type CombinedPosition<T extends AccountPosition> = Omit<T, keyof SymbolPosition> & SymbolPosition;
@@ -102,8 +117,14 @@ function combineGroup<T extends AccountPosition>(key: string, group: readonly T[
         todayPct: group.find((p) => p.todayPct !== null)?.todayPct ?? null,
         todayChangeAbs: sum(group, (p) => p.todayChangeAbs),
         allocationPct: sum(group, (p) => p.allocationPct),
-        accounts: [...new Set(group.map((p) => p.account))],
+        accounts: accountNames(group),
     };
+}
+
+function accountNames(group: readonly AccountPosition[]): string[] {
+    const names = new Map<string, string>();
+    for (const p of group) if (!names.has(p.accountId)) names.set(p.accountId, p.account);
+    return [...names.values()];
 }
 
 function sum<T>(rows: readonly T[], value: (row: T) => number): number {

@@ -35,6 +35,7 @@ async function HoldingsContent({ rowView }: { rowView: HoldingsRowView }) {
         currentPrice: number | null;
         marketValue: number | null;
         createdAt: Date;
+        portfolioId: string;
         portfolioName: string;
     }> = [];
     let accounts: ImportAccountOption[] = [];
@@ -103,6 +104,7 @@ async function HoldingsContent({ rowView }: { rowView: HoldingsRowView }) {
             avgCost: avg,
             currentPrice: last,
             marketValue,
+            accountId: h.portfolioId,
             account: h.portfolioName,
             holdingDays,
         };
