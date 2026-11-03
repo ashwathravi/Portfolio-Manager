@@ -233,7 +233,7 @@
 .pm-side[data-side="BUY"] { color: var(--pm-fg); }
 .pm-side[data-side="SELL"] { color: var(--pm-fg-muted); }
 .pm-side[data-side="DIVIDEND"], .pm-side[data-side="DEPOSIT"] { color: var(--pm-pos); }
-.pm-side[data-side="WITHDRAWAL"] { color: var(--pm-fg-muted); }
+.pm-side[data-side="WITHDRAWAL"], .pm-side[data-side="TRANSFER"] { color: var(--pm-fg-muted); }
 
 /* --- Inline callout (one alert colour: warn) ------------------------------ */
 .pm-callout {

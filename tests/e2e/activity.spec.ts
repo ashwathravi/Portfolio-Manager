@@ -109,6 +109,43 @@ test.describe('Portfolio › Activity — recording transactions', () => {
         await expect(activityRow(page, 'Monthly saving')).toContainText('$2,000');
     });
 
+    test('money moved between two accounts is a transfer, not money in or out (launch item i80)', async ({ page }) => {
+        const addCash = async (type: 'DEPOSIT' | 'WITHDRAWAL', account: string, date: string, amount: string, note: string) => {
+            await page.getByRole('button', { name: 'Add transaction' }).click();
+            const dialog = page.getByRole('dialog');
+            await dialog.getByLabel('Type').selectOption(type);
+            await dialog.getByLabel('Account').selectOption({ label: account });
+            await dialog.getByLabel('Date').fill(date);
+            await dialog.getByLabel('Amount ($)').fill(amount);
+            await dialog.getByLabel('Note (optional)').fill(note);
+            await dialog.getByRole('button', { name: `Add ${type.toLowerCase()}` }).click();
+            await expect(dialog).toBeHidden();
+            await expect(activityRow(page, note)).toHaveCount(1);
+        };
+        await addCash('WITHDRAWAL', 'Main Portfolio', '2026-03-02', '2,500', 'Moving to growth');
+        await addCash('DEPOSIT', 'Growth Portfolio', '2026-03-04', '2,500', 'Arrived from main');
+        await addCash('DEPOSIT', 'Main Portfolio', '2026-03-05', '1,000', 'Paycheck');
+
+        await expect(activityRow(page, 'Moving to growth')).toContainText('TRANSFER');
+        await expect(activityRow(page, 'Moving to growth')).toContainText('Main Portfolio to Growth Portfolio');
+        await expect(activityRow(page, 'Arrived from main')).toContainText('TRANSFER');
+        await expect(activityRow(page, 'Arrived from main')).toContainText('Growth Portfolio from Main Portfolio');
+        await expect(activityRow(page, 'Paycheck')).toContainText('DEPOSIT');
+        // Across all accounts only the paycheck came in.
+        const net = page.getByTestId('activity-net-deposits');
+        await expect(net).toHaveText('+$1,000');
+        // For Main Portfolio alone, the transfer went out of it.
+        await page.getByRole('combobox', { name: 'Account' }).selectOption('Main Portfolio');
+        await expect(net).toHaveText('−$1,500');
+
+        // Today lists it once, as a transfer.
+        await gotoAppPage(page, '/');
+        const recent = page.getByRole('region', { name: 'Recent activity' });
+        await expect(recent.getByText('Main Portfolio to Growth Portfolio', { exact: false })).toHaveCount(1);
+        await expect(recent.getByText('Transfer', { exact: true })).toHaveCount(1);
+        await expect(recent.getByText('Withdrawal', { exact: true })).toHaveCount(0);
+    });
+
     test('a broker CSV imports once: importing it again adds nothing', async ({ page }) => {
         const importOnce = async () => {
             await page.getByRole('button', { name: 'Import CSV' }).click();

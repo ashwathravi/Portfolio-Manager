@@ -11,10 +11,10 @@ import {
 } from './activity';
 
 const rows: TransactionRowInput[] = [
-    { id: 't1', symbol: 'aapl', type: 'BUY', quantity: '10', price: '170.5', timestamp: '2026-02-05T15:00:00Z', portfolioName: 'Brokerage' },
-    { id: 't2', symbol: 'TSLA', type: 'sell', quantity: '4', price: '210', timestamp: new Date('2026-02-06T15:00:00Z'), portfolioName: 'Roth IRA', notes: 'trim' },
-    { id: 't3', symbol: null, type: 'deposit', quantity: null, price: null, amount: 5000, timestamp: '2026-02-01T12:00:00Z', portfolioName: 'Brokerage' },
-    { id: 't4', symbol: 'MSFT', type: 'dividend', quantity: null, price: null, amount: -12.5, timestamp: '2026-01-15T12:00:00Z', portfolioName: 'Brokerage' },
+    { id: 't1', symbol: 'aapl', type: 'BUY', quantity: '10', price: '170.5', timestamp: '2026-02-05T15:00:00Z', portfolioId: 'p-Brokerage', portfolioName: 'Brokerage' },
+    { id: 't2', symbol: 'TSLA', type: 'sell', quantity: '4', price: '210', timestamp: new Date('2026-02-06T15:00:00Z'), portfolioId: 'p-Roth IRA', portfolioName: 'Roth IRA', notes: 'trim' },
+    { id: 't3', symbol: null, type: 'deposit', quantity: null, price: null, amount: 5000, timestamp: '2026-02-01T12:00:00Z', portfolioId: 'p-Brokerage', portfolioName: 'Brokerage' },
+    { id: 't4', symbol: 'MSFT', type: 'dividend', quantity: null, price: null, amount: -12.5, timestamp: '2026-01-15T12:00:00Z', portfolioId: 'p-Brokerage', portfolioName: 'Brokerage' },
 ];
 
 describe('portfolio activity', () => {
@@ -57,18 +57,71 @@ describe('portfolio activity', () => {
             sellCount: 1,
             bought: [{ currency: 'USD', amount: 1705 }],
             sold: [{ currency: 'USD', amount: 840 }],
+            netDeposits: [{ currency: 'USD', amount: 5000 }],
             accounts: 2,
         });
     });
 
     test('summarizeActivity on no rows is all zeros', () => {
-        assert.deepStrictEqual(summarizeActivity([]), { count: 0, buyCount: 0, sellCount: 0, bought: [], sold: [], accounts: 0 });
+        assert.deepStrictEqual(summarizeActivity([]), { count: 0, buyCount: 0, sellCount: 0, bought: [], sold: [], netDeposits: [], accounts: 0 });
+    });
+
+    describe('transfers between accounts (launch item i80)', () => {
+        const flow = (id: string, type: string, account: string, amount: number, day: string, currency = 'USD'): TransactionRowInput => ({
+            id, symbol: null, type, quantity: null, price: null, amount, timestamp: `2026-03-${day}T12:00:00Z`,
+            portfolioId: `p-${account}`, portfolioName: account, currency,
+        });
+        const moved = [
+            flow('out', 'withdrawal', 'Brokerage', 2500, '02'),
+            flow('in', 'deposit', 'Roth IRA', 2500, '04'),
+            flow('paycheck', 'deposit', 'Brokerage', 1000, '05'),
+            flow('rent', 'withdrawal', 'Roth IRA', 300, '06'),
+        ];
+
+        test('toActivityRows marks both sides of a move between two accounts', () => {
+            const out = toActivityRows(moved);
+            const byId = new Map(out.map((r) => [r.id, r]));
+            assert.deepStrictEqual(byId.get('out')?.transfer, { direction: 'out', otherId: 'in', otherAccountId: 'p-Roth IRA', otherAccount: 'Roth IRA' });
+            assert.deepStrictEqual(byId.get('in')?.transfer, { direction: 'in', otherId: 'out', otherAccountId: 'p-Brokerage', otherAccount: 'Brokerage' });
+            assert.strictEqual(byId.get('paycheck')?.transfer, null);
+            assert.strictEqual(byId.get('rent')?.transfer, null);
+            // Still a withdrawal and a deposit: that's what each account saw.
+            assert.strictEqual(byId.get('out')?.side, 'WITHDRAWAL');
+            assert.strictEqual(byId.get('out')?.accountId, 'p-Brokerage');
+        });
+
+        test('across all accounts a transfer is no money in or out', () => {
+            const s = summarizeActivity(toActivityRows(moved));
+            assert.deepStrictEqual(s.netDeposits, [{ currency: 'USD', amount: 700 }]);
+        });
+
+        test("in one account's rows a transfer is money in or out of it", () => {
+            const rows = toActivityRows(moved);
+            const brokerage = summarizeActivity(filterActivity(rows, { account: 'Brokerage' }));
+            assert.deepStrictEqual(brokerage.netDeposits, [{ currency: 'USD', amount: -1500 }]);
+            const roth = summarizeActivity(filterActivity(rows, { account: 'Roth IRA' }));
+            assert.deepStrictEqual(roth.netDeposits, [{ currency: 'USD', amount: 2200 }]);
+        });
+
+        test('only transfers leave nothing deposited', () => {
+            const s = summarizeActivity(toActivityRows(moved.slice(0, 2)));
+            assert.deepStrictEqual(s.netDeposits, []);
+        });
+
+        test('net deposits are totalled per currency', () => {
+            const s = summarizeActivity(toActivityRows([
+                flow('a', 'deposit', 'Brokerage', 100, '02'),
+                flow('b', 'deposit', 'TFSA', 400, '02', 'CAD'),
+                flow('c', 'withdrawal', 'TFSA', 150, '03', 'CAD'),
+            ]));
+            assert.deepStrictEqual(s.netDeposits, [{ currency: 'USD', amount: 100 }, { currency: 'CAD', amount: 250 }]);
+        });
     });
 
     test('regression: amounts in different currencies are totalled apart, USD first', () => {
         // The Codex finding on PR #154: a CAD 100 buy and a USD 100 buy read as $200 bought.
         const trade = (id: string, type: string, currency: string, price: string): TransactionRowInput => ({
-            id, symbol: 'SHOP', type, quantity: '1', price, timestamp: '2026-02-05T15:00:00Z', portfolioName: 'Brokerage', currency,
+            id, symbol: 'SHOP', type, quantity: '1', price, timestamp: '2026-02-05T15:00:00Z', portfolioId: 'p-Brokerage', portfolioName: 'Brokerage', currency,
         });
         const s = summarizeActivity(toActivityRows([
             trade('a', 'BUY', 'USD', '100'),
@@ -83,7 +136,7 @@ describe('portfolio activity', () => {
 
     test('regression: activityChurn keeps turnover in the trades\' own currency', () => {
         const trade = (id: string, type: string, currency: string, day: string): TransactionRowInput => ({
-            id, symbol: 'SHOP', type, quantity: '1', price: '100', timestamp: `2026-02-${day}T15:00:00Z`, portfolioName: 'Brokerage', currency,
+            id, symbol: 'SHOP', type, quantity: '1', price: '100', timestamp: `2026-02-${day}T15:00:00Z`, portfolioId: 'p-Brokerage', portfolioName: 'Brokerage', currency,
         });
         const churn = activityChurn(toActivityRows([
             trade('a', 'BUY', 'CAD', '02'), trade('b', 'SELL', 'CAD', '03'), trade('c', 'BUY', 'CAD', '04'),
@@ -99,7 +152,7 @@ describe('portfolio activity', () => {
     });
 
     test('activityChurn measures every currency over the same window, ending at the latest trade', () => {
-        const old = { id: 'o1', symbol: 'SHOP', type: 'BUY', quantity: '1', price: '100', portfolioName: 'B', currency: 'CAD' };
+        const old = { id: 'o1', symbol: 'SHOP', type: 'BUY', quantity: '1', price: '100', portfolioId: 'p-B', portfolioName: 'B', currency: 'CAD' };
         const churn = activityChurn(toActivityRows([
             { ...old, id: 'o1', timestamp: '2025-01-02T15:00:00Z' },
             { ...old, id: 'o2', type: 'SELL', timestamp: '2025-01-03T15:00:00Z' },
