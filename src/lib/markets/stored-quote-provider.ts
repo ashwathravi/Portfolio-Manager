@@ -9,7 +9,9 @@
  * tracked, so the next ingest prices it, while the store is under its
  * limit of tracked securities (REQUESTED_TRACKING_LIMIT).
  *
- * History, fundamentals and search still go to the reference provider.
+ * History and fundamentals still go to the reference provider. So does
+ * search, but only without a database: with one, the search route reads the
+ * symbol directory instead (symbol-directory.ts, launch item i35).
  */
 
 import { usableDatabaseUrl } from '@/db/connection-options';

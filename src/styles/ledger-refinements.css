@@ -594,6 +594,44 @@
 .pm-cmd-empty { padding: 16px; font-size: 13px; color: var(--pm-fg-muted); }
 @media (max-width: 600px) { .pm-cmd-hint { display: none; } }
 
+/* --- Ticker search (launch item i35): suggestions under a ticker field ------ */
+.pm-ticker-search { position: relative; min-width: 0; }
+.pm-ticker-search > .pm-exec-input { width: 100%; }
+.pm-ticker-search-list {
+  position: absolute;
+  z-index: 60;
+  top: calc(100% + 4px);
+  left: 0;
+  width: max(100%, 280px);
+  max-width: min(420px, calc(100vw - 32px));
+  max-height: 280px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  background: var(--pm-card);
+  color: var(--pm-fg);
+  border: 1px solid var(--pm-border);
+  border-radius: 10px;
+  box-shadow: var(--pm-shadow-lg, 0 12px 32px rgba(0, 0, 0, 0.18));
+}
+.pm-ticker-search-list[data-align="end"] { left: auto; right: 0; }
+.pm-ticker-search-option {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 8px;
+  padding: 7px 8px;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.pm-ticker-search-option.is-active { background: var(--pm-neutral-100); }
+.pm-ticker-search-symbol { font-weight: 600; font-variant-numeric: tabular-nums; }
+.pm-ticker-search-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--pm-fg-muted); }
+.pm-ticker-search-hint { font-size: 11.5px; color: var(--pm-fg-subtle); white-space: nowrap; }
+.pm-watch-add .pm-ticker-search { flex: 1; }
+
 .pm-ask-example {
   margin: 12px auto 4px;
   max-width: 520px;

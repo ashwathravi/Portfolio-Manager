@@ -91,6 +91,33 @@ test.describe('Portfolio › Activity — recording transactions', () => {
         await expect(activityRow(page, 'Starter position')).toContainText('CRM');
     });
 
+    test('the symbol can be found by company name (i35)', async ({ page }) => {
+        await page.getByRole('button', { name: 'Add transaction' }).click();
+        const dialog = page.getByRole('dialog');
+        const symbol = dialog.getByLabel('Symbol');
+        await symbol.fill('micro');
+        // The user holds MSFT: the match says so.
+        const option = dialog.getByRole('option', { name: /MSFT\s*MICROSOFT CORP\s*In your accounts/ });
+        await option.click();
+        await expect(symbol).toHaveValue('MSFT');
+        await expect(dialog.getByRole('listbox', { name: 'Matching tickers' })).toBeHidden();
+
+        // Escape closes the suggestions, not the dialog.
+        await symbol.fill('apple');
+        await expect(dialog.getByRole('option', { name: /AAPL/ })).toBeVisible();
+        await symbol.press('Escape');
+        await expect(dialog.getByRole('listbox', { name: 'Matching tickers' })).toBeHidden();
+        await expect(dialog).toBeVisible();
+        await symbol.fill('MSFT');
+
+        await dialog.getByLabel('Quantity').fill('2');
+        await dialog.getByLabel('Price ($)').fill('400');
+        await dialog.getByLabel('Note (optional)').fill('Picked from search');
+        await dialog.getByRole('button', { name: 'Add buy' }).click();
+        await expect(dialog).toBeHidden();
+        await expect(activityRow(page, 'Picked from search')).toContainText('MSFT');
+    });
+
     test('a deposit takes an amount, and a buy without a price is explained', async ({ page }) => {
         await page.getByRole('button', { name: 'Add transaction' }).click();
         const dialog = page.getByRole('dialog');
