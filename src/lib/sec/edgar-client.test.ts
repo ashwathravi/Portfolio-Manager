@@ -306,4 +306,38 @@ describe('SecEdgarClient', () => {
 
         assert.deepStrictEqual(filings, []);
     });
+    test('reads SEC\'s exchange ticker file, skipping rows that aren\'t a CIK, name and ticker', async () => {
+        const urls: string[] = [];
+        const client = clientFor(async (url) => {
+            urls.push(url);
+            return jsonResponse({
+                fields: ['cik', 'name', 'ticker', 'exchange'],
+                data: [
+                    [320193, 'Apple Inc.', 'AAPL', 'Nasdaq'],
+                    [1067983, 'BERKSHIRE HATHAWAY INC', 'brk-b', 'NYSE'],
+                    [2156068, 'InoBat B.V.', 'INBT', null],
+                    ['320193', 'String CIK', 'BAD', 'Nasdaq'],
+                    [1, '', 'NONAME', 'Nasdaq'],
+                    [2, 'No ticker', '', 'OTC'],
+                    'not a row',
+                ],
+            });
+        });
+
+        const tickers = await client.fetchExchangeTickers();
+
+        assert.deepStrictEqual(urls, ['https://www.sec.gov/files/company_tickers_exchange.json']);
+        assert.deepStrictEqual(tickers, [
+            { cik: '0000320193', name: 'Apple Inc.', ticker: 'AAPL', exchange: 'Nasdaq' },
+            { cik: '0001067983', name: 'BERKSHIRE HATHAWAY INC', ticker: 'BRK-B', exchange: 'NYSE' },
+            { cik: '0002156068', name: 'InoBat B.V.', ticker: 'INBT', exchange: null },
+        ]);
+    });
+
+    test('refuses an exchange ticker file whose columns changed', async () => {
+        const client = clientFor(async () => jsonResponse({ fields: ['cik', 'ticker', 'name', 'exchange'], data: [] }));
+
+        await assert.rejects(client.fetchExchangeTickers(), (error: unknown) =>
+            error instanceof SecEdgarError && error.code === 'malformed_response');
+    });
 });

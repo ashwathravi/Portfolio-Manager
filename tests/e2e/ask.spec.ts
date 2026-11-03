@@ -77,8 +77,20 @@ test.describe('Ask Ledger — ⌘K command palette', () => {
     test('a ticker opens its position detail', async ({ page }) => {
         await page.keyboard.press(`${modifier()}+KeyK`);
         await page.getByLabel('Search or jump to').last().fill('nvda');
-        await page.getByTestId('command-item').filter({ hasText: 'Open NVDA' }).click();
+        // With a database, ticker search finds the user's own NVDA by name (launch item i35).
+        const item = page.getByTestId('command-item').filter({ hasText: databaseAuthEnabled ? /NVDA — NVIDIA Corp.*In your accounts/ : 'Open NVDA' });
+        await item.click();
         await expect(page).toHaveURL(/\/portfolios\/detail\/NVDA$/);
+    });
+
+    test('a company name finds its ticker (i35)', async ({ page }) => {
+        test.skip(!databaseAuthEnabled, 'ticker search reads the symbol directory in the database');
+        await page.keyboard.press(`${modifier()}+KeyK`);
+        await page.getByLabel('Search or jump to').last().fill('berkshire');
+        const item = page.getByTestId('command-item').filter({ hasText: 'BRK.B — BERKSHIRE HATHAWAY INC' });
+        await expect(item).toContainText('NYSE');
+        await item.click();
+        await expect(page).toHaveURL(/\/portfolios\/detail\/BRK\.B$/);
     });
 
     test('a question is handed to Ask Ledger and answered', async ({ page }) => {
