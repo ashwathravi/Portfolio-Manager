@@ -6,7 +6,7 @@ import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import postgres from 'postgres';
 
 import * as schema from '../../src/db/schema';
-import { ALERTS_JOB, evaluateAlertRules } from '../../src/lib/alerts/nightly';
+import { ALERTS_JOB, evaluateAlertRules, recordFirings } from '../../src/lib/alerts/nightly';
 import { clearAlertNotifications, loadAlertFeed, markAlertNotificationsRead } from '../../src/lib/alerts/server/notifications';
 import { AlertRuleLimitError, createAlertRule, deleteAlertRule, listAlertRules, updateAlertRule } from '../../src/lib/alerts/server/rules';
 import { ALERT_RULES_PER_USER, alertRuleInputSchema } from '../../src/lib/validators/alerts';
@@ -186,6 +186,22 @@ describe('alerts kept with the account', { skip: !DATABASE_URL && 'SCRIPTS_TEST_
         assert.equal(detail.splitCheck, undefined);
         assert.deepEqual((await notifications('u-1')).map((n) => n.rule_name), ['NVDA above $1']);
         assert.deepEqual((await notifications('u-2')).map((n) => n.message), ['Your accounts were worth $1,500.00 at the Nov 2 close, at or above $1,000.00.']);
+    });
+
+    test('regression: a rule deleted or paused after the job read the rules raises nothing, and doesn\'t fail the others', async () => {
+        // The Codex finding on PR #185: the rule foreign key failed the whole batch.
+        const kept = await createAlertRule('u-1', rule(), { database });
+        const deleted = await createAlertRule('u-2', rule(), { database });
+        const paused = await createAlertRule('u-2', rule({ name: 'Paused since' }), { database });
+        await deleteAlertRule('u-2', deleted.id, database);
+        await updateAlertRule('u-2', paused.id, rule({ name: 'Paused since', enabled: false }), { database });
+        const firing = (ruleId: string, userId: string) => ({
+            ruleId, userId, occurrence: `session:${SESSION}`, ruleName: 'AAPL above $200', metric: 'price' as const, symbol: 'AAPL',
+            comparator: 'gte' as const, threshold: 200, observedValue: 210, message: 'AAPL closed at $210.00.', href: null,
+        });
+        assert.equal(await recordFirings([firing(deleted.id, 'u-2'), firing(paused.id, 'u-2'), firing(kept.id, 'u-1')], EVENING, database), 1);
+        assert.deepEqual((await notifications('u-1')).map((n) => n.occurrence), [`session:${SESSION}`]);
+        assert.deepEqual([...await notifications('u-2')], []);
     });
 
     test('the user\'s notification settings turn a kind of alert off', async () => {

@@ -10,12 +10,15 @@ import {
     buildChangesSinceQuery,
     buildEnabledRulesQuery,
     buildLastSuccessfulRunQuery,
+    buildLockLiveRulesQuery,
     buildNotifiedQuery,
     buildPruneAlertsQuery,
     evaluateAlertRules,
+    loadAccounts,
     NOTIFICATION_RETENTION_DAYS,
+    recordFirings,
 } from "./nightly";
-import type { PlannedRule, UserAccounts } from "./nightly-plan";
+import type { AlertFiring, PlannedRule, UserAccounts } from "./nightly-plan";
 
 const NOW = new Date("2026-11-02T22:35:00.000Z");
 
@@ -67,6 +70,71 @@ describe("alerts job queries (launch item i57)", () => {
         assert.deepEqual(buildNotifiedQuery([rule("r-1", "price")], "2026-11-02")!.toSQL().params, ["r-1", "session:2026-11-02"]);
         assert.equal(buildNotifiedQuery([rule("r-1", "price")], null), null);
         assert.equal(buildNotifiedQuery([], "2026-11-02"), null);
+    });
+});
+
+describe("loadAccounts", () => {
+    test("reads cash and positions in one repeatable-read snapshot, so a sync is seen whole or not at all", async () => {
+        const configs: unknown[] = [];
+        const updatedAt = new Date("2026-11-02T15:00:00.000Z");
+        const tx = {
+            select: (fields: Record<string, unknown>) => ({
+                from: () => ("cash" in fields
+                    ? { where: () => ({ groupBy: async () => [{ userId: "u-1", cash: 250 }, { userId: "u-2", cash: 0 }] }) }
+                    : { innerJoin: () => ({ where: async () => [{ userId: "u-1", symbol: "aapl", quantity: "10", avgCost: "150", updatedAt }] }) }),
+            }),
+        };
+        const database = {
+            transaction: async (run: (t: typeof tx) => Promise<unknown>, config: unknown) => { configs.push(config); return run(tx); },
+        } as unknown as typeof db;
+
+        const accounts = await loadAccounts(["u-1", "u-2"], database);
+        assert.deepEqual(configs, [{ isolationLevel: "repeatable read", accessMode: "read only" }]);
+        assert.deepEqual(Object.fromEntries(accounts), {
+            "u-1": { cash: 250, positions: [{ symbol: "AAPL", quantity: 10, avgCost: 150, updatedAt }] },
+            "u-2": { cash: 0, positions: [] },
+        });
+        assert.equal((await loadAccounts([], database)).size, 0);
+        assert.equal(configs.length, 1, "nothing to read for no users");
+    });
+});
+
+describe("recordFirings", () => {
+    const firing = (ruleId: string): AlertFiring => ({
+        ruleId, userId: "u-1", occurrence: "session:2026-11-02", ruleName: ruleId, metric: "price", symbol: "AAPL",
+        comparator: "gte", threshold: 200, observedValue: 210, message: "m", href: null,
+    });
+
+    test("the rules still there and on are locked before writing, so a rule deleted mid-run is dropped", () => {
+        const { sql, params } = buildLockLiveRulesQuery(["r-1", "r-2"]).toSQL();
+        assert.match(sql, /from "alert_rules" where \("alert_rules"\."id" in \(\$1, \$2\) and "alert_rules"\."enabled" = \$3\) for update$/);
+        assert.deepEqual(params, ["r-1", "r-2", true]);
+    });
+
+    test("writes only the firings of live rules, and nothing when none is left", async () => {
+        let inserted: Array<{ ruleId: string }> = [];
+        let updated = 0;
+        const tx = (live: string[]) => ({
+            select: () => ({ from: () => ({ where: () => ({ for: async () => live.map((id) => ({ id })) }) }) }),
+            insert: () => ({
+                values: (rows: Array<{ ruleId: string }>) => {
+                    inserted = rows;
+                    return { onConflictDoNothing: () => ({ returning: async () => rows.map((row) => ({ ruleId: row.ruleId })) }) };
+                },
+            }),
+            update: () => ({ set: () => ({ where: async () => { updated += 1; } }) }),
+        });
+        const databaseWith = (live: string[]) =>
+            ({ transaction: async (run: (t: ReturnType<typeof tx>) => Promise<unknown>) => run(tx(live)) }) as unknown as typeof db;
+
+        assert.equal(await recordFirings([firing("r-live"), firing("r-deleted")], NOW, databaseWith(["r-live"])), 1);
+        assert.deepEqual(inserted.map((row) => row.ruleId), ["r-live"]);
+        assert.equal(updated, 1);
+
+        inserted = [];
+        assert.equal(await recordFirings([firing("r-deleted")], NOW, databaseWith([])), 0);
+        assert.deepEqual(inserted, []);
+        assert.equal(updated, 1);
     });
 });
 

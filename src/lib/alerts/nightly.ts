@@ -93,7 +93,7 @@ export function buildLastSuccessfulRunQuery(database: Database = db) {
         .limit(1);
 }
 
-export function buildAccountCashQuery(userIds: string[], database: Database = db) {
+export function buildAccountCashQuery(userIds: string[], database: Pick<Database, "select"> = db) {
     return database
         .select({ userId: portfolios.userId, cash: sql<number>`coalesce(sum(${portfolios.cashBalance}), 0)`.mapWith(Number) })
         .from(portfolios)
@@ -101,7 +101,7 @@ export function buildAccountCashQuery(userIds: string[], database: Database = db
         .groupBy(portfolios.userId);
 }
 
-export function buildAccountPositionsQuery(userIds: string[], database: Database = db) {
+export function buildAccountPositionsQuery(userIds: string[], database: Pick<Database, "select"> = db) {
     return database
         .select({ userId: portfolios.userId, symbol: holdings.symbol, quantity: holdings.quantity, avgCost: holdings.avgCost, updatedAt: holdings.updatedAt })
         .from(holdings)
@@ -109,11 +109,19 @@ export function buildAccountPositionsQuery(userIds: string[], database: Database
         .where(inArray(portfolios.userId, userIds));
 }
 
-/** Each user's cash and positions across their accounts; users without an account are left out. */
-async function loadAccounts(userIds: string[], database: Database): Promise<Map<string, UserAccounts>> {
+/**
+ * Each user's cash and positions across their accounts; users without an
+ * account are left out. Read in one repeatable-read snapshot, so a sync that
+ * replaces an account's holdings and cash together (src/lib/plaid/sync.ts)
+ * is seen whole or not at all.
+ */
+export async function loadAccounts(userIds: string[], database: Database = db): Promise<Map<string, UserAccounts>> {
     const accounts = new Map<string, { cash: number; positions: UserAccounts["positions"][number][] }>();
     if (userIds.length === 0) return accounts;
-    const [cash, positions] = await Promise.all([buildAccountCashQuery(userIds, database), buildAccountPositionsQuery(userIds, database)]);
+    const [cash, positions] = await database.transaction(async (tx) => [
+        await buildAccountCashQuery(userIds, tx),
+        await buildAccountPositionsQuery(userIds, tx),
+    ] as const, { isolationLevel: "repeatable read", accessMode: "read only" });
     for (const row of cash) accounts.set(row.userId, { cash: row.cash, positions: [] });
     for (const row of positions) {
         accounts.get(row.userId)?.positions.push({
@@ -216,12 +224,33 @@ async function loadNotified(rules: readonly PlannedRule[], session: string | nul
     return notified;
 }
 
-/** Records the firings once each, and updates their rules; returns how many were new. */
-async function recordFirings(firings: readonly AlertFiring[], now: Date, database: Database): Promise<number> {
+/**
+ * The rules among `ruleIds` still there and still on, locked until the
+ * transaction ends: one deleted or paused since the job read the rules
+ * raises nothing, and can't be deleted while its alerts are written.
+ */
+export function buildLockLiveRulesQuery(ruleIds: string[], database: Pick<Database, "select"> = db) {
+    return database
+        .select({ id: alertRules.id })
+        .from(alertRules)
+        .where(and(inArray(alertRules.id, ruleIds), eq(alertRules.enabled, true)))
+        .for("update");
+}
+
+/**
+ * Records the firings once each, and updates their rules; returns how many
+ * were new. Firings of a rule deleted or paused since the rules were read
+ * are dropped, so one user's deletion can't fail everyone's batch on the
+ * rule foreign key.
+ */
+export async function recordFirings(firings: readonly AlertFiring[], now: Date, database: Database = db): Promise<number> {
     let recorded = 0;
     for (let start = 0; start < firings.length; start += WRITE_CHUNK) {
-        const chunk = firings.slice(start, start + WRITE_CHUNK);
+        const planned = firings.slice(start, start + WRITE_CHUNK);
         recorded += await database.transaction(async (tx) => {
+            const live = new Set((await buildLockLiveRulesQuery(uniq(planned.map((f) => f.ruleId)), tx)).map((row) => row.id));
+            const chunk = planned.filter((f) => live.has(f.ruleId));
+            if (chunk.length === 0) return 0;
             const inserted = await tx
                 .insert(alertNotifications)
                 .values(chunk.map((f) => ({ ...f, triggeredAt: now })))
