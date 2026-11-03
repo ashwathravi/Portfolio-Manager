@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useEasternDate } from '@/lib/hooks/useEasternDate';
+import { describeQuote } from '@/lib/markets/quote-label';
 import { isTodaysQuote } from '@/lib/markets/quote-session';
 import type { Quote } from '@/types/market-data';
 import { useThesisStore } from '@/lib/research/useThesisStore';
@@ -32,7 +33,7 @@ export interface HoldingDetail {
 }
 
 /** The latest quote, with the session it is from. */
-export type SymbolQuote = Pick<Quote, 'price' | 'change' | 'changePercent' | 'timestamp' | 'isRealtime'>;
+export type SymbolQuote = Pick<Quote, 'price' | 'change' | 'changePercent' | 'timestamp' | 'kind' | 'isRealtime'>;
 
 /**
  * Position detail (/portfolios/detail/[symbol]).
@@ -74,6 +75,11 @@ export function HoldingDetailView({
                                 </span>
                             )}
                         </p>
+                        {price !== null && (
+                            <p className="pm-metric-note" data-testid="position-price-note">
+                                {quote ? describeQuote(quote, todayEt) : 'Price stored with your holding'}
+                            </p>
+                        )}
                     </div>
                     <div className="pm-empty-actions">
                         <button

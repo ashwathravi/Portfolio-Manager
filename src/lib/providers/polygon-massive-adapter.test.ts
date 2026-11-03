@@ -123,8 +123,8 @@ describe('PolygonMassiveAdapter', () => {
 
       assert.deepEqual([...calls].sort(), [groupedUrl('2026-07-01'), groupedUrl('2026-07-02')]);
       assert.deepEqual(quotes, [
-        { symbol: 'AAPL', price: 101.5, change: 1.5, changePercent: 1.5, timestamp: '2026-07-02T20:00:00.000Z', isRealtime: false },
-        { symbol: 'MSFT', price: 200, change: -50, changePercent: -20, timestamp: '2026-07-02T20:00:00.000Z', isRealtime: false },
+        { symbol: 'AAPL', price: 101.5, change: 1.5, changePercent: 1.5, timestamp: '2026-07-02T20:00:00.000Z', kind: 'close', isRealtime: false },
+        { symbol: 'MSFT', price: 200, change: -50, changePercent: -20, timestamp: '2026-07-02T20:00:00.000Z', kind: 'close', isRealtime: false },
       ]);
     });
 

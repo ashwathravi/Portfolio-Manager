@@ -96,7 +96,7 @@ describe('fetchQuotes', () => {
     });
 
     test('indexes the actual route envelope by normalized symbol without losing quote metadata', async () => {
-        const quote = { symbol: ' aapl ', price: 100, change: -1, changePercent: -1, timestamp: '2026-10-03T18:11:00.000Z', isRealtime: false };
+        const quote = { symbol: ' aapl ', price: 100, change: -1, changePercent: -1, timestamp: '2026-10-03T18:11:00.000Z', kind: 'close', isRealtime: false };
         mockFetch({ ok: true, json: { data: [quote] } });
         assert.deepStrictEqual(await fetchQuotes(['AAPL', 'MSFT']), { AAPL: { ...quote, symbol: 'AAPL' } });
     });
@@ -114,7 +114,7 @@ describe('fetchQuotes', () => {
     });
 
     test('drops malformed and zero-priced entries and keeps the valid quotes in the batch', async () => {
-        const msft = { symbol: 'MSFT', price: 500, change: 2, changePercent: 0.4, timestamp: '2026-10-03T18:11:00.000Z', isRealtime: false };
+        const msft = { symbol: 'MSFT', price: 500, change: 2, changePercent: 0.4, timestamp: '2026-10-03T18:11:00.000Z', kind: 'close', isRealtime: false };
         mockFetch({
             ok: true,
             json: { data: [null, { symbol: 'AAPL' }, { ...msft, symbol: 'SPY', price: Number.NaN }, { ...msft, symbol: 'QQQ', price: 0 }, msft] },
@@ -123,12 +123,22 @@ describe('fetchQuotes', () => {
     });
 
     test('keeps a quote whose change is unknown, but not one with half a change', async () => {
-        const first = { symbol: 'NEWCO', price: 25, change: null, changePercent: null, timestamp: '2026-10-16T20:00:00.000Z', isRealtime: false };
+        const first = { symbol: 'NEWCO', price: 25, change: null, changePercent: null, timestamp: '2026-10-16T20:00:00.000Z', kind: 'close', isRealtime: false };
         mockFetch({
             ok: true,
             json: { data: [first, { ...first, symbol: 'HALF', change: 1 }, { ...first, symbol: 'TEXT', change: '1', changePercent: '1' }] },
         });
         assert.deepStrictEqual(await fetchQuotes(['NEWCO', 'HALF', 'TEXT']), { NEWCO: first });
+    });
+
+    test('keeps closes and delayed quotes, and drops a price that doesn\'t say which it is (i33)', async () => {
+        const close = { symbol: 'AAPL', price: 100, change: 1, changePercent: 1, timestamp: '2026-10-30T20:00:00.000Z', kind: 'close', isRealtime: false };
+        const delayed = { ...close, symbol: 'MSFT', kind: 'delayed', timestamp: '2026-11-02T15:42:00.000Z' };
+        mockFetch({
+            ok: true,
+            json: { data: [close, delayed, { ...close, symbol: 'NOKIND', kind: undefined }, { ...close, symbol: 'LIVE', kind: 'live' }] },
+        });
+        assert.deepStrictEqual(await fetchQuotes(['AAPL', 'MSFT', 'NOKIND', 'LIVE']), { AAPL: close, MSFT: delayed });
     });
 
 });
