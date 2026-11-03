@@ -62,6 +62,12 @@ describe('alerts kept with the account', { skip: !DATABASE_URL && 'SCRIPTS_TEST_
         }
     }
 
+    /** The latest price run's split check of held positions, as price-ingest.ts records it. */
+    async function splitsChecked(through: string, unadjusted: { symbol: string; executionDate: string }[] = []) {
+        await sql`INSERT INTO job_runs (job, started_at, finished_at, status, detail) VALUES ('prices', ${`${through}T22:31:00Z`}, ${`${through}T22:33:00Z`}, 'succeeded',
+            ${JSON.stringify({ holdingSplits: { from: '2026-10-01', to: through, ...(unadjusted.length > 0 ? { unadjusted } : {}) } })}::jsonb)`;
+    }
+
     async function notifications(user: string) {
         return sql<{ rule_name: string; occurrence: string; observed_value: number; message: string }[]>`
             SELECT rule_name, occurrence, observed_value, message FROM alert_notifications WHERE user_id = ${user} ORDER BY rule_name, occurrence`;
@@ -109,6 +115,7 @@ describe('alerts kept with the account', { skip: !DATABASE_URL && 'SCRIPTS_TEST_
         await closes('MSFT', [['2026-10-30', 400]]);
         const [portfolio] = await sql<{ id: string }[]>`INSERT INTO portfolios (user_id, name, cash_balance) VALUES ('u-1', 'Brokerage', 1000) RETURNING id`;
         await sql`INSERT INTO holdings (portfolio_id, symbol, name, quantity, avg_cost) VALUES (${portfolio.id}, 'AAPL', 'Apple', 10, 150)`;
+        await splitsChecked(SESSION);
 
         await createAlertRule('u-1', rule(), { database });
         await createAlertRule('u-1', rule({ name: 'AAPL up 5%', metric: 'price_change_pct', threshold: 0.05, rearm: 'once' }), { database });
@@ -117,7 +124,7 @@ describe('alerts kept with the account', { skip: !DATABASE_URL && 'SCRIPTS_TEST_
         await createAlertRule('u-1', rule({ name: 'Paused', threshold: 1, enabled: false }), { database });
         await createAlertRule('u-2', rule({ name: 'Not yet', threshold: 300 }), { database });
 
-        assert.deepEqual(await evaluateAlertRules({ database, now: EVENING }), { session: SESSION, rules: 5, fired: 3, pruned: 0 });
+        assert.deepEqual(await evaluateAlertRules({ database, now: EVENING }), { session: SESSION, rules: 5, fired: 3, pruned: 0, accountsWaiting: 0 });
         assert.deepEqual((await notifications('u-1')).map((n) => [n.rule_name, n.occurrence, n.message]), [
             ['AAPL above $200', 'session:2026-11-02', 'AAPL closed at $210.00 on Nov 2, at or above $200.00.'],
             ['AAPL up 5%', 'session:2026-11-02', 'AAPL moved +5.00% on Nov 2, at or above +5.00%.'],
@@ -148,6 +155,37 @@ describe('alerts kept with the account', { skip: !DATABASE_URL && 'SCRIPTS_TEST_
         assert.deepEqual((await loadAlertFeed('u-1', database)).notifications.map((n) => [n.ruleId, n.message]), [
             [created.id, 'AAPL closed at $212.00 on Nov 4, at or above $200.00.'],
         ]);
+    });
+
+    test('regression: accounts rules wait for split adjustments, so old share counts at post-split prices raise nothing', async () => {
+        // The Codex finding on PR #185: NVDA split 10-for-1 on Nov 2; its stored closes are post-split.
+        await closes('NVDA', [['2026-10-30', 14], [SESSION, 15]]);
+        const holdIn = async (user: string, quantity: number, updatedAt: string) => {
+            const [p] = await sql<{ id: string }[]>`INSERT INTO portfolios (user_id, name, cash_balance) VALUES (${user}, 'Brokerage', 0) RETURNING id`;
+            await sql`INSERT INTO holdings (portfolio_id, symbol, name, quantity, avg_cost, updated_at) VALUES (${p.id}, 'NVDA', 'NVIDIA', ${quantity}, 10, ${updatedAt})`;
+        };
+        await holdIn('u-1', 10, '2026-10-30 15:00'); // still 10 pre-split shares: worth $1,500, not $150
+        await holdIn('u-2', 100, '2026-11-03 15:00'); // re-imported after the split
+        // u-1's would fire falsely on 10 × $15; u-2's fires truly on 100 × $15.
+        await createAlertRule('u-1', rule({ name: 'Under $500', metric: 'portfolio_value', comparator: 'lt', threshold: 500 }), { database });
+        await createAlertRule('u-2', rule({ name: 'Over $1,000', metric: 'portfolio_value', comparator: 'gte', threshold: 1000 }), { database });
+        await createAlertRule('u-1', rule({ name: 'NVDA above $1', symbol: 'NVDA', threshold: 1 }), { database });
+
+        // The price run hasn't checked held positions through Nov 2: every accounts rule waits; prices don't.
+        await splitsChecked('2026-10-30');
+        assert.deepEqual(await evaluateAlertRules({ database, now: EVENING }), {
+            session: SESSION, rules: 3, fired: 1, pruned: 0, accountsWaiting: 2,
+            splitCheck: 'held positions haven\'t been checked against splits through the latest close',
+        });
+        assert.deepEqual((await notifications('u-1')).map((n) => n.rule_name), ['NVDA above $1']);
+
+        // Checked, with u-1's position from before the split it couldn't apply: u-1 waits, u-2 is valued.
+        await splitsChecked(SESSION, [{ symbol: 'NVDA', executionDate: SESSION }]);
+        const detail = await evaluateAlertRules({ database, now: new Date(EVENING.getTime() + 60_000) });
+        assert.equal(detail.accountsWaiting, 1);
+        assert.equal(detail.splitCheck, undefined);
+        assert.deepEqual((await notifications('u-1')).map((n) => n.rule_name), ['NVDA above $1']);
+        assert.deepEqual((await notifications('u-2')).map((n) => n.message), ['Your accounts were worth $1,500.00 at the Nov 2 close, at or above $1,000.00.']);
     });
 
     test('the user\'s notification settings turn a kind of alert off', async () => {

@@ -10,6 +10,12 @@
  * job again, or on a market holiday when the newest session is unchanged,
  * adds nothing. A rule set to fire once is paused when it does.
  * Notifications older than NOTIFICATION_RETENTION_DAYS are deleted.
+ *
+ * Stored closes are split-adjusted, so an accounts rule waits, as the
+ * valuation snapshots do, until the latest price run has checked held
+ * positions against splits through the session, and a user still holding
+ * a position from before a split that couldn't be applied is left out:
+ * old share counts at post-split prices would raise a false alert.
  */
 
 import { and, desc, eq, gt, inArray, lt, ne, or, sql } from "drizzle-orm";
@@ -28,6 +34,7 @@ import {
     watchlistItems,
 } from "@/db/schema";
 import { buildRecentClosesQuery, getLatestBarDate } from "@/lib/markets/price-store";
+import { awaitsSplit, buildLatestHoldingSplitsQuery, splitReadiness, type SplitReadiness } from "@/lib/portfolio/valuation-snapshots";
 import { storedAlertPreferences } from "@/lib/settings/alert-preferences";
 import type { SettingsDocument } from "@/lib/settings/document";
 
@@ -55,44 +62,83 @@ export interface AlertsJobDetail {
     rules: number;
     fired: number;
     pruned: number;
+    /** Users whose accounts rules waited for split adjustments. */
+    accountsWaiting: number;
+    /** Why every accounts rule waited, when the split check hasn't caught up. */
+    splitCheck?: string;
 }
 
 function uniq<T>(values: Iterable<T>): T[] {
     return [...new Set(values)];
 }
 
+export function buildPruneAlertsQuery(now: Date, database: Database = db) {
+    return database
+        .delete(alertNotifications)
+        .where(lt(alertNotifications.triggeredAt, new Date(now.getTime() - NOTIFICATION_RETENTION_DAYS * 24 * 60 * 60 * 1000)))
+        .returning({ id: alertNotifications.id });
+}
+
+export function buildEnabledRulesQuery(database: Database = db) {
+    return database.select().from(alertRules).where(eq(alertRules.enabled, true));
+}
+
 /** When the job last succeeded: Alpha Radar changes stored before then were already seen. */
-export async function lastSuccessfulRun(database: Database = db): Promise<Date | null> {
-    const [row] = await database
+export function buildLastSuccessfulRunQuery(database: Database = db) {
+    return database
         .select({ startedAt: jobRuns.startedAt })
         .from(jobRuns)
         .where(and(eq(jobRuns.job, ALERTS_JOB), eq(jobRuns.status, "succeeded")))
         .orderBy(desc(jobRuns.startedAt))
         .limit(1);
-    return row?.startedAt ?? null;
+}
+
+export function buildAccountCashQuery(userIds: string[], database: Database = db) {
+    return database
+        .select({ userId: portfolios.userId, cash: sql<number>`coalesce(sum(${portfolios.cashBalance}), 0)`.mapWith(Number) })
+        .from(portfolios)
+        .where(inArray(portfolios.userId, userIds))
+        .groupBy(portfolios.userId);
+}
+
+export function buildAccountPositionsQuery(userIds: string[], database: Database = db) {
+    return database
+        .select({ userId: portfolios.userId, symbol: holdings.symbol, quantity: holdings.quantity, avgCost: holdings.avgCost, updatedAt: holdings.updatedAt })
+        .from(holdings)
+        .innerJoin(portfolios, eq(portfolios.id, holdings.portfolioId))
+        .where(inArray(portfolios.userId, userIds));
 }
 
 /** Each user's cash and positions across their accounts; users without an account are left out. */
 async function loadAccounts(userIds: string[], database: Database): Promise<Map<string, UserAccounts>> {
-    const accounts = new Map<string, { cash: number; positions: { symbol: string; quantity: number; avgCost: number }[] }>();
+    const accounts = new Map<string, { cash: number; positions: UserAccounts["positions"][number][] }>();
     if (userIds.length === 0) return accounts;
-    const [cash, positions] = await Promise.all([
-        database
-            .select({ userId: portfolios.userId, cash: sql<number>`coalesce(sum(${portfolios.cashBalance}), 0)`.mapWith(Number) })
-            .from(portfolios)
-            .where(inArray(portfolios.userId, userIds))
-            .groupBy(portfolios.userId),
-        database
-            .select({ userId: portfolios.userId, symbol: holdings.symbol, quantity: holdings.quantity, avgCost: holdings.avgCost })
-            .from(holdings)
-            .innerJoin(portfolios, eq(portfolios.id, holdings.portfolioId))
-            .where(inArray(portfolios.userId, userIds)),
-    ]);
+    const [cash, positions] = await Promise.all([buildAccountCashQuery(userIds, database), buildAccountPositionsQuery(userIds, database)]);
     for (const row of cash) accounts.set(row.userId, { cash: row.cash, positions: [] });
     for (const row of positions) {
-        accounts.get(row.userId)?.positions.push({ symbol: row.symbol.toUpperCase(), quantity: Number(row.quantity), avgCost: Number(row.avgCost) });
+        accounts.get(row.userId)?.positions.push({
+            symbol: row.symbol.toUpperCase(),
+            quantity: Number(row.quantity),
+            avgCost: Number(row.avgCost),
+            updatedAt: row.updatedAt,
+        });
     }
     return accounts;
+}
+
+/**
+ * The users whose accounts can be valued at the session's split-adjusted
+ * closes, and how many wait: everyone while the split check hasn't caught
+ * up, else those still holding a position from before a split that
+ * couldn't be applied.
+ */
+export function accountsOnSessionScale(
+    accounts: ReadonlyMap<string, UserAccounts>,
+    readiness: SplitReadiness,
+): { ready: Map<string, UserAccounts>; waiting: number } {
+    if (!readiness.ready) return { ready: new Map(), waiting: accounts.size };
+    const ready = new Map([...accounts].filter(([, user]) => !user.positions.some((p) => awaitsSplit(p, readiness.unadjusted))));
+    return { ready, waiting: accounts.size - ready.size };
 }
 
 /** The tickers each user holds, watches or has an open thesis on. */
@@ -117,8 +163,9 @@ async function loadOverlap(userIds: string[], accounts: ReadonlyMap<string, User
     return overlap;
 }
 
-async function loadChanges(after: Date, database: Database): Promise<AlertableChange[]> {
-    const rows = await database
+/** Alpha Radar changes stored after `after`, with their filer's name. */
+export function buildChangesSinceQuery(after: Date, database: Database = db) {
+    return database
         .select({
             trackedFilerId: alphaRadarHoldingChanges.trackedFilerId,
             filerName: alphaRadarTrackedFilers.name,
@@ -135,15 +182,14 @@ async function loadChanges(after: Date, database: Database): Promise<AlertableCh
         .from(alphaRadarHoldingChanges)
         .innerJoin(alphaRadarTrackedFilers, eq(alphaRadarTrackedFilers.id, alphaRadarHoldingChanges.trackedFilerId))
         .where(gt(alphaRadarHoldingChanges.createdAt, after));
-    return rows;
 }
 
 /**
- * The occurrences each rule already raised: this session's for market
- * rules, every change for Alpha Radar ones.
+ * The occurrences each rule already raised (cleared ones included): this
+ * session's for market rules, every change for Alpha Radar ones. Null with
+ * nothing to look up.
  */
-async function loadNotified(rules: readonly PlannedRule[], session: string | null, database: Database) {
-    const notified = new Map<string, Set<string>>();
+export function buildNotifiedQuery(rules: readonly PlannedRule[], session: string | null, database: Database = db) {
     const market = rules.filter((rule) => !isAlphaRadarAlertMetric(rule.metric)).map((rule) => rule.id);
     const alpha = rules.filter((rule) => isAlphaRadarAlertMetric(rule.metric)).map((rule) => rule.id);
     const conditions = [
@@ -152,12 +198,17 @@ async function loadNotified(rules: readonly PlannedRule[], session: string | nul
             : undefined,
         alpha.length > 0 ? inArray(alertNotifications.ruleId, alpha) : undefined,
     ].filter((condition) => condition !== undefined);
-    if (conditions.length === 0) return notified;
-    const rows = await database
+    if (conditions.length === 0) return null;
+    return database
         .select({ ruleId: alertNotifications.ruleId, occurrence: alertNotifications.occurrence })
         .from(alertNotifications)
         .where(or(...conditions));
-    for (const row of rows) {
+}
+
+async function loadNotified(rules: readonly PlannedRule[], session: string | null, database: Database) {
+    const notified = new Map<string, Set<string>>();
+    const query = buildNotifiedQuery(rules, session, database);
+    for (const row of query ? await query : []) {
         const seen = notified.get(row.ruleId) ?? new Set<string>();
         seen.add(row.occurrence);
         notified.set(row.ruleId, seen);
@@ -196,13 +247,10 @@ export async function evaluateAlertRules({
     now = new Date(),
     database = db,
 }: { now?: Date; database?: Database } = {}): Promise<AlertsJobDetail> {
-    const pruned = await database
-        .delete(alertNotifications)
-        .where(lt(alertNotifications.triggeredAt, new Date(now.getTime() - NOTIFICATION_RETENTION_DAYS * 24 * 60 * 60 * 1000)))
-        .returning({ id: alertNotifications.id });
+    const pruned = await buildPruneAlertsQuery(now, database);
 
-    const rows = await database.select().from(alertRules).where(eq(alertRules.enabled, true));
-    if (rows.length === 0) return { session: null, rules: 0, fired: 0, pruned: pruned.length };
+    const rows = await buildEnabledRulesQuery(database);
+    if (rows.length === 0) return { session: null, rules: 0, fired: 0, pruned: pruned.length, accountsWaiting: 0 };
 
     const rules: PlannedRule[] = rows.map((row) => ({
         id: row.id,
@@ -221,19 +269,25 @@ export async function evaluateAlertRules({
     const alphaRules = rules.filter((rule) => isAlphaRadarAlertMetric(rule.metric));
     const alphaUsers = uniq(alphaRules.map((rule) => rule.userId));
 
-    const [session, settingsRows, accounts, since] = await Promise.all([
+    const [session, settingsRows, accounts, lastRun, holdingSplits] = await Promise.all([
         getLatestBarDate(database),
         database.select().from(userSettings).where(inArray(userSettings.userId, userIds)),
         loadAccounts(uniq([...portfolioUsers, ...alphaUsers]), database),
-        alphaRules.length > 0 ? lastSuccessfulRun(database) : Promise.resolve(null),
+        alphaRules.length > 0 ? buildLastSuccessfulRunQuery(database) : Promise.resolve([]),
+        portfolioUsers.length > 0 ? buildLatestHoldingSplitsQuery(database) : Promise.resolve([]),
     ]);
+    const since = lastRun[0]?.startedAt ?? null;
+    const readiness = session
+        ? splitReadiness(holdingSplits[0]?.holdingSplits, session)
+        : { ready: false as const, reason: "no closes stored yet" };
+    const valued = accountsOnSessionScale(new Map([...accounts].filter(([userId]) => portfolioUsers.includes(userId))), readiness);
 
     const stored = new Map(settingsRows.map((row) => [row.userId, { version: row.version, settings: row.settings as SettingsDocument["settings"] }]));
     const preferences = new Map<string, AlertPreferences>(userIds.map((userId) => [userId, storedAlertPreferences(stored.get(userId) ?? null)]));
 
     const symbols = uniq([
         ...rules.flatMap((rule) => (rule.symbol ? [rule.symbol] : [])),
-        ...portfolioUsers.flatMap((userId) => accounts.get(userId)?.positions.map((p) => p.symbol) ?? []),
+        ...[...valued.ready.values()].flatMap((user) => user.positions.map((p) => p.symbol)),
     ]);
     const closes = new Map<string, StoredClose[]>();
     if (session && symbols.length > 0) {
@@ -250,7 +304,7 @@ export async function evaluateAlertRules({
             const from = since && since > rule.createdAt ? since : rule.createdAt;
             return from < min ? from : min;
         }, now);
-        changes = await loadChanges(earliest, database);
+        changes = await buildChangesSinceQuery(earliest, database);
     }
     const [overlap, notified] = await Promise.all([
         changes.length > 0 ? loadOverlap(alphaUsers, accounts, database) : Promise.resolve(new Map<string, UserOverlap>()),
@@ -261,7 +315,7 @@ export async function evaluateAlertRules({
         rules,
         session,
         closes,
-        accounts: new Map([...accounts].filter(([userId]) => portfolioUsers.includes(userId))),
+        accounts: valued.ready,
         overlap,
         changes,
         preferences,
@@ -270,5 +324,12 @@ export async function evaluateAlertRules({
         runDate: now.toISOString().slice(0, 10),
     });
     const fired = firings.length > 0 ? await recordFirings(firings, now, database) : 0;
-    return { session, rules: rules.length, fired, pruned: pruned.length };
+    return {
+        session,
+        rules: rules.length,
+        fired,
+        pruned: pruned.length,
+        accountsWaiting: valued.waiting,
+        ...(!readiness.ready && portfolioUsers.length > 0 ? { splitCheck: readiness.reason } : {}),
+    };
 }

@@ -55,7 +55,8 @@ export interface StoredClose {
 
 export interface UserAccounts {
     cash: number;
-    positions: readonly { symbol: string; quantity: number; avgCost: number }[];
+    /** `updatedAt`: when the holding last changed (split readiness compares it with split dates). */
+    positions: readonly { symbol: string; quantity: number; avgCost: number; updatedAt?: Date }[];
 }
 
 export interface UserOverlap {

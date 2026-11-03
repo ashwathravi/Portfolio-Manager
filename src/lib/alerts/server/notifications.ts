@@ -54,22 +54,23 @@ export function buildAlertFeedQuery(userId: string, limit: number = ALERT_FEED_L
         .limit(limit);
 }
 
+export function buildUnreadCountQuery(userId: string, database: Database = db) {
+    return database
+        .select({ value: count() })
+        .from(alertNotifications)
+        .where(and(eq(alertNotifications.userId, userId), eq(alertNotifications.cleared, false), isNull(alertNotifications.readAt)));
+}
+
 export async function loadAlertFeed(userId: string, database: Database = db): Promise<AlertFeed> {
     const [rows, [{ value: unread }]] = await Promise.all([
         buildAlertFeedQuery(userId, ALERT_FEED_LIMIT, database),
-        database.select({ value: count() }).from(alertNotifications)
-            .where(and(eq(alertNotifications.userId, userId), eq(alertNotifications.cleared, false), isNull(alertNotifications.readAt))),
+        buildUnreadCountQuery(userId, database),
     ]);
     return { notifications: rows.map(toTrigger), unread };
 }
 
-/** Marks the user's notifications read: the ones named, or all of them. Others' IDs are ignored. */
-export async function markAlertNotificationsRead(
-    userId: string,
-    which: { ids: readonly string[] } | { all: true },
-    { now = new Date(), database = db }: { now?: Date; database?: Database } = {},
-): Promise<void> {
-    await database
+export function buildMarkReadQuery(userId: string, which: { ids: readonly string[] } | { all: true }, now: Date, database: Database = db) {
+    return database
         .update(alertNotifications)
         .set({ readAt: now })
         .where(and(
@@ -79,17 +80,30 @@ export async function markAlertNotificationsRead(
         ));
 }
 
+/** Marks the user's notifications read: the ones named, or all of them. Others' IDs are ignored. */
+export async function markAlertNotificationsRead(
+    userId: string,
+    which: { ids: readonly string[] } | { all: true },
+    { now = new Date(), database = db }: { now?: Date; database?: Database } = {},
+): Promise<void> {
+    await buildMarkReadQuery(userId, which, now, database);
+}
+
 /**
  * Clears the user's feed; their rules stay. Each notification keeps only
  * which rule fired for what, so the nightly job doesn't raise it again (on
  * a market holiday the newest session is the one already evaluated).
  */
+export function buildClearAlertsQuery(userId: string, now: Date, database: Database = db) {
+    return database
+        .update(alertNotifications)
+        .set({ cleared: true, message: "", href: null, readAt: sql`coalesce(${alertNotifications.readAt}, ${now.toISOString()}::timestamp)` })
+        .where(and(eq(alertNotifications.userId, userId), eq(alertNotifications.cleared, false)));
+}
+
 export async function clearAlertNotifications(
     userId: string,
     { now = new Date(), database = db }: { now?: Date; database?: Database } = {},
 ): Promise<void> {
-    await database
-        .update(alertNotifications)
-        .set({ cleared: true, message: "", href: null, readAt: sql`coalesce(${alertNotifications.readAt}, ${now.toISOString()}::timestamp)` })
-        .where(and(eq(alertNotifications.userId, userId), eq(alertNotifications.cleared, false)));
+    await buildClearAlertsQuery(userId, now, database);
 }

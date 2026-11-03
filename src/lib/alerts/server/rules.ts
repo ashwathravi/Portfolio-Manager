@@ -89,6 +89,21 @@ export async function createAlertRule(
     return toAlertRule(row);
 }
 
+export function buildUpdateAlertRuleQuery(userId: string, id: string, input: AlertRuleInput, now: Date, database: Database = db) {
+    return database
+        .update(alertRules)
+        .set({ ...input, updatedAt: now })
+        .where(and(eq(alertRules.id, id), eq(alertRules.userId, userId)))
+        .returning();
+}
+
+export function buildDeleteAlertRuleQuery(userId: string, id: string, database: Database = db) {
+    return database
+        .delete(alertRules)
+        .where(and(eq(alertRules.id, id), eq(alertRules.userId, userId)))
+        .returning({ id: alertRules.id });
+}
+
 /** Replaces the user's rule; null when they have no rule with that ID. */
 export async function updateAlertRule(
     userId: string,
@@ -96,11 +111,7 @@ export async function updateAlertRule(
     input: AlertRuleInput,
     { now = new Date(), database = db }: { now?: Date; database?: Database } = {},
 ): Promise<AlertRule | null> {
-    const [row] = await database
-        .update(alertRules)
-        .set({ ...input, updatedAt: now })
-        .where(and(eq(alertRules.id, id), eq(alertRules.userId, userId)))
-        .returning();
+    const [row] = await buildUpdateAlertRuleQuery(userId, id, input, now, database);
     if (!row) return null;
     await trackRuleSymbol(input, database);
     return toAlertRule(row);
@@ -108,9 +119,6 @@ export async function updateAlertRule(
 
 /** Deletes the user's rule and what it raised; false when they have no rule with that ID. */
 export async function deleteAlertRule(userId: string, id: string, database: Database = db): Promise<boolean> {
-    const deleted = await database
-        .delete(alertRules)
-        .where(and(eq(alertRules.id, id), eq(alertRules.userId, userId)))
-        .returning({ id: alertRules.id });
+    const deleted = await buildDeleteAlertRuleQuery(userId, id, database);
     return deleted.length > 0;
 }
