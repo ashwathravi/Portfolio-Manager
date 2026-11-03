@@ -26,6 +26,7 @@ function rule(overrides: Partial<PlannedRule> = {}): PlannedRule {
         threshold: 200,
         rearm: 'daily',
         createdAt: RULE_MADE,
+        lastTriggeredAt: null,
         ...overrides,
     };
 }
@@ -44,6 +45,7 @@ function plan(overrides: Partial<AlertPlanInput>) {
         changes: [],
         preferences: new Map(),
         alphaRadarSince: null,
+        notified: new Map(),
         runDate: '2026-11-02',
         ...overrides,
     });
@@ -66,6 +68,12 @@ describe('planAlertFirings: closes (launch item i57)', () => {
             message: 'AAPL closed at $210.00 on Nov 2, at or above $200.00.',
             href: '/portfolios/detail/AAPL',
         });
+    });
+
+    test('a session the rule already raised (a rerun, or a market holiday) raises nothing more', () => {
+        const notified = new Map([['r-1', new Set(['session:2026-11-02'])]]);
+        assert.deepEqual(plan({ rules: [rule()], notified }), []);
+        assert.equal(plan({ rules: [rule()], notified: new Map([['r-1', new Set(['session:2026-10-30'])]]) }).length, 1);
     });
 
     test('nothing fires when the condition doesn\'t hold', () => {
@@ -142,6 +150,8 @@ describe('planAlertFirings: Alpha Radar', () => {
         trackedFilerId: 'f-1',
         filerName: 'Berkshire Hathaway',
         reportPeriod: '2026-Q3',
+        currentFilingId: 'filing-q3',
+        priorFilingId: 'filing-q2',
         cusip: '171232101',
         ticker: 'CB',
         issuerName: 'Chubb',
@@ -157,7 +167,7 @@ describe('planAlertFirings: Alpha Radar', () => {
     test('a change stored after the rule was made fires, with its filer and score', () => {
         const [firing] = plan({ rules: [radar()], changes: [change()] });
         assert.equal(firing.message, 'Berkshire Hathaway opened a new position in Chubb (CB) in 2026-Q3. Materiality 82/100.');
-        assert.equal(firing.occurrence, 'change:f-1:2026-Q3:171232101:new');
+        assert.equal(firing.occurrence, 'change:f-1:2026-Q3:filing-q3:171232101:new');
         assert.equal(firing.href, '/research?tab=alpha-radar');
         assert.equal(firing.observedValue, 82);
     });
@@ -176,11 +186,11 @@ describe('planAlertFirings: Alpha Radar', () => {
             change({ cusip: 'X3', changeType: 'decreased', ticker: 'BAC', issuerName: 'Bank of America' }),
         ];
         const fired = (metric: PlannedRule['metric'], threshold = 50) => plan({ rules: [radar({ metric, threshold })], changes }).map((f) => f.occurrence);
-        assert.deepEqual(fired('alpha_radar_new_position'), ['change:f-1:2026-Q3:171232101:new']);
-        assert.deepEqual(fired('alpha_radar_exit'), ['change:f-1:2026-Q3:X1:exited']);
+        assert.deepEqual(fired('alpha_radar_new_position'), ['change:f-1:2026-Q3:filing-q3:171232101:new']);
+        assert.deepEqual(fired('alpha_radar_exit'), ['change:f-1:2026-Q3:filing-q3:X1:exited']);
         assert.deepEqual(fired('alpha_radar_large_add'), []);
-        assert.deepEqual(fired('alpha_radar_large_add', 40), ['change:f-1:2026-Q3:X2:increased']);
-        assert.deepEqual(fired('alpha_radar_large_trim'), ['change:f-1:2026-Q3:X3:decreased']);
+        assert.deepEqual(fired('alpha_radar_large_add', 40), ['change:f-1:2026-Q3:filing-q3:X2:increased']);
+        assert.deepEqual(fired('alpha_radar_large_trim'), ['change:f-1:2026-Q3:filing-q3:X3:decreased']);
     });
 
     test('overlap is the user\'s own: tickers they hold, watch or have an open thesis on', () => {
@@ -197,14 +207,32 @@ describe('planAlertFirings: Alpha Radar', () => {
         assert.deepEqual(plan({ rules: [overlapRule], changes, overlap: new Map([['u-2', overlap.get('u-1')!]]) }), []);
     });
 
-    test('"daily" raises the most material change once a day, "once" the most material change', () => {
+    test('"daily" raises the most material new change once a day, "once" the most material change', () => {
         const changes = [change({ materialityScore: 60 }), change({ cusip: 'X9', ticker: 'V', issuerName: 'Visa', materialityScore: 90 })];
         const [daily, ...noMore] = plan({ rules: [radar({ rearm: 'daily' })], changes });
         assert.equal(noMore.length, 0);
-        assert.equal(daily.occurrence, 'day:2026-11-02');
+        assert.equal(daily.occurrence, 'change:f-1:2026-Q3:filing-q3:X9:new');
         assert.match(daily.message, /Visa/);
+        // Already raised: the next most material one.
+        const notified = new Map([['r-1', new Set(['change:f-1:2026-Q3:filing-q3:X9:new'])]]);
+        assert.deepEqual(plan({ rules: [radar({ rearm: 'daily' })], changes, notified }).map((f) => f.occurrence), ['change:f-1:2026-Q3:filing-q3:171232101:new']);
+        // A rerun the evening it fired raises nothing more.
+        assert.deepEqual(plan({ rules: [radar({ rearm: 'daily', lastTriggeredAt: new Date('2026-11-02T22:31:00Z') })], changes }), []);
+        assert.equal(plan({ rules: [radar({ rearm: 'daily', lastTriggeredAt: new Date('2026-11-01T22:31:00Z') })], changes }).length, 1);
         const once = plan({ rules: [radar({ rearm: 'once' })], changes });
-        assert.deepEqual(once.map((f) => f.occurrence), ['change:f-1:2026-Q3:X9:new']);
+        assert.deepEqual(once.map((f) => f.occurrence), ['change:f-1:2026-Q3:filing-q3:X9:new']);
+    });
+
+    test('a change already raised isn\'t raised again when a refresh stores it anew; a later filing for the period is a new change', () => {
+        const notified = new Map([['r-1', new Set(['change:f-1:2026-Q3:filing-q3:171232101:new'])]]);
+        assert.deepEqual(plan({ rules: [radar()], changes: [change()], notified }), []);
+        // Another rule hasn't raised it.
+        assert.equal(plan({ rules: [radar({ id: 'r-2' })], changes: [change()], notified }).length, 1);
+        const amended = plan({ rules: [radar()], changes: [change({ currentFilingId: 'filing-q3-amended' })], notified });
+        assert.deepEqual(amended.map((f) => f.occurrence), ['change:f-1:2026-Q3:filing-q3-amended:171232101:new']);
+        // An exit has no current filing: the prior one names it.
+        const exited = plan({ rules: [radar({ metric: 'alpha_radar_exit' })], changes: [change({ changeType: 'exited', currentFilingId: null })] });
+        assert.deepEqual(exited.map((f) => f.occurrence), ['change:f-1:2026-Q3:filing-q2:171232101:exited']);
     });
 
     test('"always" raises one per change, up to the cap', () => {
@@ -219,7 +247,7 @@ describe('planAlertFirings: Alpha Radar', () => {
             changes,
             overlap: new Map([['u-1', { holdings: new Set(['AAPL']), watchlist: new Set<string>(), theses: new Set<string>() }]]),
             preferences: new Map([['u-1', { ...DEFAULT_ALERT_PREFERENCES, alphaRadar: { ...DEFAULT_ALERT_PREFERENCES.alphaRadar, ...alphaRadar } }]]),
-        }).map((f) => f.occurrence.split(':')[3]);
+        }).map((f) => f.occurrence.split(':')[4]);
         assert.deepEqual(withDelivery({}), ['171232101', 'X2']);
         assert.deepEqual(withDelivery({ inApp: false }), []);
         assert.deepEqual(withDelivery({ overlapOnly: true }), ['X2']);
@@ -238,7 +266,7 @@ describe('planAlertFirings: notification settings', () => {
             rule({ id: 'r-3', metric: 'alpha_radar_exit', symbol: null, threshold: 0, rearm: 'always' }),
         ];
         const changes: AlertableChange[] = [{
-            trackedFilerId: 'f-1', filerName: 'Fund', reportPeriod: '2026-Q3', cusip: 'C', ticker: null, issuerName: 'Issuer',
+            trackedFilerId: 'f-1', filerName: 'Fund', reportPeriod: '2026-Q3', currentFilingId: null, priorFilingId: 'f-q2', cusip: 'C', ticker: null, issuerName: 'Issuer',
             changeType: 'exited', materialityScore: 10, createdAt: new Date('2026-11-02T00:00:00Z'),
         }];
         const fired = (preferences: Partial<AlertPreferences>) => plan({

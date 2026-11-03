@@ -3,9 +3,11 @@
  * found, newest first. Every query is scoped to one user's ID, which the API
  * routes take from the session. The nightly job writes the rows
  * (src/lib/alerts/nightly.ts); the user reads, marks read and clears them.
+ * A cleared row stays, its text erased, as the record that its rule fired
+ * for that occurrence, so the job never raises it again.
  */
 
-import { and, count, desc, eq, inArray, isNull } from "drizzle-orm";
+import { and, count, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 
 import { db } from "@/db";
 import { alertNotifications } from "@/db/schema";
@@ -47,7 +49,7 @@ export function buildAlertFeedQuery(userId: string, limit: number = ALERT_FEED_L
     return database
         .select()
         .from(alertNotifications)
-        .where(eq(alertNotifications.userId, userId))
+        .where(and(eq(alertNotifications.userId, userId), eq(alertNotifications.cleared, false)))
         .orderBy(desc(alertNotifications.triggeredAt), desc(alertNotifications.id))
         .limit(limit);
 }
@@ -56,7 +58,7 @@ export async function loadAlertFeed(userId: string, database: Database = db): Pr
     const [rows, [{ value: unread }]] = await Promise.all([
         buildAlertFeedQuery(userId, ALERT_FEED_LIMIT, database),
         database.select({ value: count() }).from(alertNotifications)
-            .where(and(eq(alertNotifications.userId, userId), isNull(alertNotifications.readAt))),
+            .where(and(eq(alertNotifications.userId, userId), eq(alertNotifications.cleared, false), isNull(alertNotifications.readAt))),
     ]);
     return { notifications: rows.map(toTrigger), unread };
 }
@@ -77,7 +79,17 @@ export async function markAlertNotificationsRead(
         ));
 }
 
-/** Deletes every notification the user has; their rules stay. */
-export async function clearAlertNotifications(userId: string, database: Database = db): Promise<void> {
-    await database.delete(alertNotifications).where(eq(alertNotifications.userId, userId));
+/**
+ * Clears the user's feed; their rules stay. Each notification keeps only
+ * which rule fired for what, so the nightly job doesn't raise it again (on
+ * a market holiday the newest session is the one already evaluated).
+ */
+export async function clearAlertNotifications(
+    userId: string,
+    { now = new Date(), database = db }: { now?: Date; database?: Database } = {},
+): Promise<void> {
+    await database
+        .update(alertNotifications)
+        .set({ cleared: true, message: "", href: null, readAt: sql`coalesce(${alertNotifications.readAt}, ${now.toISOString()}::timestamp)` })
+        .where(and(eq(alertNotifications.userId, userId), eq(alertNotifications.cleared, false)));
 }

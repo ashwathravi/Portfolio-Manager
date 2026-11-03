@@ -134,6 +134,22 @@ describe('alerts kept with the account', { skip: !DATABASE_URL && 'SCRIPTS_TEST_
         assert.equal((await notifications('u-1')).length, 3);
     });
 
+    test('regression: a cleared alert isn\'t raised again by a rerun or a market holiday; the next session raises it', async () => {
+        // The Codex finding on PR #185: clearing deleted the only record of what fired.
+        await closes('AAPL', [['2026-10-30', 200], [SESSION, 210]]);
+        const created = await createAlertRule('u-1', rule(), { database });
+        assert.equal((await evaluateAlertRules({ database, now: EVENING })).fired, 1);
+        await clearAlertNotifications('u-1', { database });
+        // A holiday: the cron runs, the newest session is still Nov 2.
+        assert.equal((await evaluateAlertRules({ database, now: new Date('2026-11-03T22:35:00.000Z') })).fired, 0);
+        assert.equal((await loadAlertFeed('u-1', database)).notifications.length, 0);
+        await closes('AAPL', [['2026-11-04', 212]]);
+        assert.equal((await evaluateAlertRules({ database, now: new Date('2026-11-04T22:35:00.000Z') })).fired, 1);
+        assert.deepEqual((await loadAlertFeed('u-1', database)).notifications.map((n) => [n.ruleId, n.message]), [
+            [created.id, 'AAPL closed at $212.00 on Nov 4, at or above $200.00.'],
+        ]);
+    });
+
     test('the user\'s notification settings turn a kind of alert off', async () => {
         await closes('AAPL', [['2026-10-30', 200], [SESSION, 210]]);
         await createAlertRule('u-1', rule(), { database });
@@ -149,6 +165,7 @@ describe('alerts kept with the account', { skip: !DATABASE_URL && 'SCRIPTS_TEST_
         const change = (cusip: string, ticker: string, createdAt: string) => sql`
             INSERT INTO alpha_radar_holding_changes (tracked_filer_id, report_period, change_type, issuer_name, cusip, ticker, materiality_score, created_at)
             VALUES (${filer.id}, '2026-Q3', 'new', ${ticker}, ${cusip}, ${ticker}, 90, ${createdAt})`;
+        const occurrences = async () => (await sql<{ occurrence: string }[]>`SELECT occurrence FROM alert_notifications WHERE user_id = 'u-1' ORDER BY occurrence`).map((r) => r.occurrence);
         await change('171232101', 'CB', '2026-11-02 15:00');
 
         await evaluateAlertRules({ database, now: EVENING });
@@ -162,7 +179,18 @@ describe('alerts kept with the account', { skip: !DATABASE_URL && 'SCRIPTS_TEST_
         await change('X2', 'CB2', '2026-11-03 15:00');
         await sql`INSERT INTO watchlist_items (user_id, id, ticker, company_name, reason, notes, added_at) VALUES ('u-1', 'w-2', 'CB2', '', '', '', '2026-10-01')`;
         await evaluateAlertRules({ database, now: new Date('2026-11-03T22:35:00.000Z') });
-        assert.equal((await notifications('u-1')).length, 2);
+        assert.deepEqual(await occurrences(), [
+            `change:${filer.id}:2026-Q3:unknown-filing:171232101:new`,
+            `change:${filer.id}:2026-Q3:unknown-filing:X2:new`,
+        ]);
+
+        // A refresh stores the period's changes anew; nothing is raised twice, even after clearing.
+        await clearAlertNotifications('u-1', { database });
+        await sql`INSERT INTO job_runs (job, started_at, finished_at, status) VALUES (${ALERTS_JOB}, '2026-11-03T22:35:00Z', '2026-11-03T22:35:00Z', 'succeeded')`;
+        await sql`DELETE FROM alpha_radar_holding_changes WHERE tracked_filer_id = ${filer.id}`;
+        await change('171232101', 'CB', '2026-11-04 15:00');
+        await change('X2', 'CB2', '2026-11-04 15:00');
+        assert.equal((await evaluateAlertRules({ database, now: new Date('2026-11-04T22:35:00.000Z') })).fired, 0);
     });
 
     test('the feed: newest first, read one or all, others\' IDs ignored, cleared; old alerts pruned', async () => {
@@ -198,8 +226,13 @@ describe('alerts kept with the account', { skip: !DATABASE_URL && 'SCRIPTS_TEST_
         assert.equal((await evaluateAlertRules({ database, now: EVENING })).pruned, 1);
         assert.deepEqual((await loadAlertFeed('u-1', database)).notifications.map((n) => n.id), [newer, older]);
 
-        await clearAlertNotifications('u-1', database);
+        await clearAlertNotifications('u-1', { database });
         assert.deepEqual((await loadAlertFeed('u-1', database)).notifications, []);
+        // Each keeps only which rule fired for what.
+        assert.deepEqual([...await sql`SELECT occurrence, message, href, read_at IS NOT NULL AS read FROM alert_notifications WHERE user_id = 'u-1' ORDER BY occurrence`], [
+            { occurrence: 'session:2026-10-30', message: '', href: null, read: true },
+            { occurrence: 'session:2026-11-02', message: '', href: null, read: true },
+        ]);
         assert.equal((await loadAlertFeed('u-2', database)).notifications.length, 1);
         assert.equal((await listAlertRules('u-1', database)).length, 1);
 

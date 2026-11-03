@@ -1,6 +1,6 @@
 'use client';
 
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 
 import type { AlertRuleInput } from '@/lib/validators/alerts';
 
@@ -34,7 +34,8 @@ export type AlertRuleBody = Omit<AlertRuleInput, 'symbol' | 'note'> & { symbol?:
 
 export class AlertsApiError extends Error {}
 
-async function request<T>(url: string, init?: RequestInit): Promise<T> {
+/** A call to /api/alerts: the response's `data`, or an AlertsApiError with the server's message. */
+export async function alertsRequest<T>(url: string, init?: RequestInit): Promise<T> {
     const response = await fetch(url, {
         credentials: 'same-origin',
         ...init,
@@ -51,54 +52,71 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 export function useAlertRules() {
     return useQuery({
         queryKey: alertQueryKeys.rules,
-        queryFn: () => request<AlertRulesData>('/api/alerts/rules'),
+        queryFn: () => alertsRequest<AlertRulesData>('/api/alerts/rules'),
         staleTime: 30_000,
     });
 }
 
-function useRulesMutation<V>(mutationFn: (variables: V) => Promise<unknown>) {
-    const queryClient = useQueryClient();
-    return useMutation({
+/**
+ * A change to the rules: the list is read again once it settles, and the
+ * feed too when the change can remove alerts (deleting a rule deletes them).
+ */
+export function rulesMutationOptions<V, T>(
+    queryClient: QueryClient,
+    mutationFn: (variables: V) => Promise<T>,
+    { feedToo = false }: { feedToo?: boolean } = {},
+) {
+    return {
         mutationFn,
-        onSettled: () => queryClient.invalidateQueries({ queryKey: alertQueryKeys.rules }),
-    });
+        onSettled: () => Promise.all([
+            queryClient.invalidateQueries({ queryKey: alertQueryKeys.rules }),
+            feedToo ? queryClient.invalidateQueries({ queryKey: alertQueryKeys.feed }) : undefined,
+        ]),
+    };
 }
 
+export const createAlertRule = (rule: AlertRuleBody) =>
+    alertsRequest<AlertRule>('/api/alerts/rules', { method: 'POST', body: JSON.stringify(rule) });
+
+export const updateAlertRule = ({ id, rule }: { id: string; rule: AlertRuleBody }) =>
+    alertsRequest<AlertRule>(`/api/alerts/rules/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(rule) });
+
+export const deleteAlertRule = (id: string) =>
+    alertsRequest<void>(`/api/alerts/rules/${encodeURIComponent(id)}`, { method: 'DELETE' });
+
 export function useCreateAlertRule() {
-    return useRulesMutation((rule: AlertRuleBody) =>
-        request<AlertRule>('/api/alerts/rules', { method: 'POST', body: JSON.stringify(rule) }));
+    return useMutation(rulesMutationOptions(useQueryClient(), createAlertRule));
 }
 
 export function useUpdateAlertRule() {
-    return useRulesMutation(({ id, rule }: { id: string; rule: AlertRuleBody }) =>
-        request<AlertRule>(`/api/alerts/rules/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(rule) }));
+    return useMutation(rulesMutationOptions(useQueryClient(), updateAlertRule));
 }
 
 export function useDeleteAlertRule() {
-    const queryClient = useQueryClient();
-    return useMutation({
-        mutationFn: (id: string) => request<void>(`/api/alerts/rules/${encodeURIComponent(id)}`, { method: 'DELETE' }),
-        onSettled: () => Promise.all([
-            queryClient.invalidateQueries({ queryKey: alertQueryKeys.rules }),
-            // A deleted rule's notifications go with it.
-            queryClient.invalidateQueries({ queryKey: alertQueryKeys.feed }),
-        ]),
-    });
+    return useMutation(rulesMutationOptions(useQueryClient(), deleteAlertRule, { feedToo: true }));
 }
 
 /** The feed is written each weekday evening; reading it on focus picks that up. */
 export function useAlertFeed() {
     return useQuery({
         queryKey: alertQueryKeys.feed,
-        queryFn: () => request<AlertFeedData>('/api/alerts/notifications'),
+        queryFn: () => alertsRequest<AlertFeedData>('/api/alerts/notifications'),
         staleTime: 60_000,
         refetchOnWindowFocus: true,
     });
 }
 
-function useFeedMutation<V>(mutationFn: (variables: V) => Promise<unknown>, apply: (feed: AlertFeedData, variables: V) => AlertFeedData) {
-    const queryClient = useQueryClient();
-    return useMutation({
+/**
+ * A change to the feed, shown at once: `apply` updates the cached feed
+ * before the request, the cache goes back if the request fails, and the
+ * feed is read again either way.
+ */
+export function feedMutationOptions<V>(
+    queryClient: QueryClient,
+    mutationFn: (variables: V) => Promise<unknown>,
+    apply: (feed: AlertFeedData, variables: V) => AlertFeedData,
+) {
+    return {
         mutationFn,
         onMutate: async (variables: V) => {
             await queryClient.cancelQueries({ queryKey: alertQueryKeys.feed });
@@ -106,29 +124,37 @@ function useFeedMutation<V>(mutationFn: (variables: V) => Promise<unknown>, appl
             if (previous) queryClient.setQueryData(alertQueryKeys.feed, apply(previous, variables));
             return { previous };
         },
-        onError: (_error, _variables, context) => {
+        onError: (_error: unknown, _variables: V, context: { previous?: AlertFeedData } | undefined) => {
             if (context?.previous) queryClient.setQueryData(alertQueryKeys.feed, context.previous);
         },
         onSettled: () => queryClient.invalidateQueries({ queryKey: alertQueryKeys.feed }),
-    });
+    };
 }
 
+export type AlertsToRead = { ids: string[] } | { all: true };
+
+/** The feed with those notifications read. */
+export function readInFeed(feed: AlertFeedData, which: AlertsToRead): AlertFeedData {
+    const read = (n: AlertTrigger) => 'all' in which || which.ids.includes(n.id);
+    const notifications = feed.notifications.map((n) => (read(n) ? { ...n, acknowledged: true } : n));
+    const newlyRead = feed.notifications.filter((n) => !n.acknowledged && read(n)).length;
+    return { ...feed, notifications, unread: 'all' in which ? 0 : Math.max(0, feed.unread - newlyRead) };
+}
+
+/** The feed once cleared. */
+export function clearedFeed(feed: AlertFeedData): AlertFeedData {
+    return { ...feed, notifications: [], unread: 0 };
+}
+
+export const markAlertsRead = (which: AlertsToRead) =>
+    alertsRequest<void>('/api/alerts/notifications', { method: 'PATCH', body: JSON.stringify(which) });
+
+export const clearAlerts = () => alertsRequest<void>('/api/alerts/notifications', { method: 'DELETE' });
+
 export function useMarkAlertsRead() {
-    return useFeedMutation(
-        (which: { ids: string[] } | { all: true }) =>
-            request<void>('/api/alerts/notifications', { method: 'PATCH', body: JSON.stringify(which) }),
-        (feed, which) => {
-            const read = (n: AlertTrigger) => 'all' in which || which.ids.includes(n.id);
-            const notifications = feed.notifications.map((n) => (read(n) ? { ...n, acknowledged: true } : n));
-            const newlyRead = feed.notifications.filter((n) => !n.acknowledged && read(n)).length;
-            return { ...feed, notifications, unread: 'all' in which ? 0 : Math.max(0, feed.unread - newlyRead) };
-        },
-    );
+    return useMutation(feedMutationOptions(useQueryClient(), markAlertsRead, readInFeed));
 }
 
 export function useClearAlerts() {
-    return useFeedMutation(
-        () => request<void>('/api/alerts/notifications', { method: 'DELETE' }),
-        (feed) => ({ ...feed, notifications: [], unread: 0 }),
-    );
+    return useMutation(feedMutationOptions(useQueryClient(), clearAlerts, clearedFeed));
 }

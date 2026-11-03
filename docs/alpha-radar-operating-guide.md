@@ -152,7 +152,7 @@ npm run test:e2e -- tests/e2e/research.spec.ts
 - SEC `429` or rate-limit response: retry later; do not run bulk refreshes from CI.
 - No live reports in UI: confirm migrations ran, seed filers exist, and the refresh route can reach EDGAR.
 - No semantic memory results: confirm `alpha_radar_semantic_chunks` has rows for the selected filer/period. If embeddings are unavailable, keyword fallback should still return report-section matches.
-- Duplicate alerts after refresh: the nightly `alerts` job records each notification once per rule and `occurrence` (`change:<filer>:<period>:<CUSIP>:<change type>`, or `day:<date>` for a rule set to fire daily), and only looks at changes stored since its last successful run.
+- Duplicate alerts after refresh: a refresh deletes and stores a period's changes again, so the nightly `alerts` job records each notification once per rule and `occurrence` (`change:<filer>:<period>:<filing>:<CUSIP>:<change type>`, the filing being the current one or, for an exit, the prior one) and skips occurrences a rule already raised, cleared ones included. A later filing for the same period is a new change.
 - Duplicate scheduled runs: compare `alpha-radar` scheduler idempotency keys for the same schedule/window before queueing downstream work.
 - Provider budget blocked: wait until `nextRetryAt` or the window reset before retrying. Do not bypass budgets in preview or production.
 - Destructive maintenance blocked: rerun the plan in dry-run mode first, then use the generated confirmation token only after reviewing selected filer/period scope.

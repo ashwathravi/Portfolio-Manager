@@ -1,5 +1,5 @@
 {
-  "id": "c60ecd3d-de69-4bc1-8067-761ef616c0a0",
+  "id": "9e5b3552-8633-444d-b803-403ab26a1031",
   "prevId": "81547fdd-916d-4574-bbbd-554d3da24461",
   "version": "7",
   "dialect": "postgresql",
@@ -93,6 +93,13 @@
           "type": "timestamp",
           "primaryKey": false,
           "notNull": false
+        },
+        "cleared": {
+          "name": "cleared",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
         }
       },
       "indexes": {

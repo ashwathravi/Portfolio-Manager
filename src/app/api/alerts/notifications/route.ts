@@ -5,7 +5,8 @@
  * GET     Response: { data: { notifications: AlertTrigger[], unread, stored } }, newest first.
  * PATCH   { ids: string[] } or { all: true } marks them read → 204. Others' IDs are ignored.
  *         400 INVALID_ALERT_READ, 413.
- * DELETE  Clears the feed; the rules stay → 204.
+ * DELETE  Clears the feed; the rules stay → 204. Each cleared alert keeps only
+ *         which rule fired for what, so it isn't raised again.
  *
  * Without a database (local runs) the feed is empty (`stored: false`).
  */

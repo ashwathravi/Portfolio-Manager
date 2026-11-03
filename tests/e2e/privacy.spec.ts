@@ -56,6 +56,7 @@ test.describe('Privacy policy', () => {
     const retention = page.getByRole('region', { name: 'Keeping and deleting your data' });
     await expect(retention).toContainText('drafted orders, value history, watchlist, journal, theses, alert rules and alerts, Ask questions and settings');
     await expect(retention).toContainText('Your alert rules are checked each weekday evening, on our servers');
+    await expect(retention).toContainText('Clearing your alerts removes them and erases their text straight away; a short record of which rule fired, for what and when stays');
     await expect(retention).toContainText('alerts are otherwise deleted once they’re 180 days old');
     await expect(retention).toContainText('When you clear your Ask conversation it disappears straight away. Its questions and answers are deleted once they’re a day old, by the next nightly cleanup');
     await expect(retention.getByText(/When you remove a watchlist ticker or delete a journal entry or thesis/)).toContainText('notes and reasoning are erased');

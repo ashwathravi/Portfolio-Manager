@@ -155,9 +155,11 @@ export default function PrivacyPage({ searchParams }: { searchParams: LegalSearc
                 </p>
                 <p>
                     Your alert rules are checked each weekday evening, on our servers, against that day&rsquo;s
-                    closing prices, your accounts and Alpha Radar changes. Clearing your alerts or deleting a
-                    rule (which deletes the alerts it raised) removes them straight away; alerts are otherwise
-                    deleted once they&rsquo;re 180 days old.
+                    closing prices, your accounts and Alpha Radar changes. Clearing your alerts removes them
+                    and erases their text straight away; a short record of which rule fired, for what and
+                    when stays so the same alert isn&rsquo;t raised again, until it&rsquo;s 180 days old.
+                    Deleting a rule deletes everything it raised, and alerts are otherwise deleted once
+                    they&rsquo;re 180 days old.
                 </p>
                 <p>
                     When you clear your Ask conversation it disappears straight away. Its questions and answers

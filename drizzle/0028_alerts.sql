@@ -12,7 +12,8 @@ CREATE TABLE "alert_notifications" (
 	"message" text NOT NULL,
 	"href" text,
 	"triggered_at" timestamp DEFAULT now() NOT NULL,
-	"read_at" timestamp
+	"read_at" timestamp,
+	"cleared" boolean DEFAULT false NOT NULL
 );
 --> statement-breakpoint
 ALTER TABLE "alert_notifications" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint

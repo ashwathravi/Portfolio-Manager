@@ -975,8 +975,11 @@ export const alertRules = pgTable("alert_rules", {
 
 /**
  * What the user's rules found: the in-app notification feed. `occurrence`
- * names what fired a rule (a session's date, or an Alpha Radar change), so
- * a job that runs twice records it once.
+ * names what fired a rule (a session's date, or an Alpha Radar change and
+ * its filing), so a job that runs twice records it once. Clearing the feed
+ * marks the rows `cleared` and erases their text rather than deleting them,
+ * so a rerun can't raise them again; rows go after 180 days or with their
+ * rule.
  */
 export const alertNotifications = pgTable("alert_notifications", {
     id: uuid("id").default(sql`gen_random_uuid()`).primaryKey(),
@@ -997,6 +1000,7 @@ export const alertNotifications = pgTable("alert_notifications", {
     href: text("href"),
     triggeredAt: timestamp("triggered_at").defaultNow().notNull(),
     readAt: timestamp("read_at"),
+    cleared: boolean("cleared").notNull().default(false),
 }, (table) => ({
     userTriggeredIdx: index("alert_notifications_user_triggered_idx").on(table.userId, table.triggeredAt),
     ruleOccurrence: uniqueIndex("alert_notifications_rule_occurrence_idx").on(table.ruleId, table.occurrence),

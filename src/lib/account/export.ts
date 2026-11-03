@@ -3,7 +3,8 @@
  * for the user, as they'd recognize it, read in one snapshot. Left out:
  * internal fields (user IDs, write order), removal markers kept only so
  * other devices learn of a deletion, Ask messages already cleared (kept
- * only so they count towards the day's question limit), and anything
+ * only so they count towards the day's question limit), alerts already
+ * cleared (kept only so they aren't raised again), and anything
  * secret (Plaid tokens, and Plaid's own IDs for connections and accounts).
  */
 
@@ -105,7 +106,8 @@ export async function buildAccountExport(userId: string, database: Database = db
             .where(and(eq(askMessages.userId, userId), eq(askMessages.cleared, false))).orderBy(asc(askMessages.createdAt), asc(askMessages.id));
         const rules = await tx.select().from(alertRules).where(eq(alertRules.userId, userId)).orderBy(asc(alertRules.createdAt), asc(alertRules.id));
         const raised = await tx.select().from(alertNotifications)
-            .where(eq(alertNotifications.userId, userId)).orderBy(desc(alertNotifications.triggeredAt), asc(alertNotifications.id));
+            .where(and(eq(alertNotifications.userId, userId), eq(alertNotifications.cleared, false)))
+            .orderBy(desc(alertNotifications.triggeredAt), asc(alertNotifications.id));
 
         return {
             format: ACCOUNT_EXPORT_FORMAT,

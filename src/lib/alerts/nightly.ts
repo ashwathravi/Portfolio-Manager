@@ -5,12 +5,14 @@
  * are in ./nightly-plan.ts; this reads what they need and writes the result.
  *
  * A notification is inserted once per rule and occurrence
- * (alert_notifications_rule_occurrence_idx), so running the job again the
- * same evening adds nothing. A rule set to fire once is paused when it
- * does. Notifications older than NOTIFICATION_RETENTION_DAYS are deleted.
+ * (alert_notifications_rule_occurrence_idx), and the plan leaves out
+ * occurrences a rule already raised, cleared ones included: running the
+ * job again, or on a market holiday when the newest session is unchanged,
+ * adds nothing. A rule set to fire once is paused when it does.
+ * Notifications older than NOTIFICATION_RETENTION_DAYS are deleted.
  */
 
-import { and, desc, eq, gt, inArray, lt, ne, sql } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, lt, ne, or, sql } from "drizzle-orm";
 
 import { db } from "@/db";
 import {
@@ -121,6 +123,8 @@ async function loadChanges(after: Date, database: Database): Promise<AlertableCh
             trackedFilerId: alphaRadarHoldingChanges.trackedFilerId,
             filerName: alphaRadarTrackedFilers.name,
             reportPeriod: alphaRadarHoldingChanges.reportPeriod,
+            currentFilingId: alphaRadarHoldingChanges.currentFilingId,
+            priorFilingId: alphaRadarHoldingChanges.priorFilingId,
             cusip: alphaRadarHoldingChanges.cusip,
             ticker: alphaRadarHoldingChanges.ticker,
             issuerName: alphaRadarHoldingChanges.issuerName,
@@ -132,6 +136,33 @@ async function loadChanges(after: Date, database: Database): Promise<AlertableCh
         .innerJoin(alphaRadarTrackedFilers, eq(alphaRadarTrackedFilers.id, alphaRadarHoldingChanges.trackedFilerId))
         .where(gt(alphaRadarHoldingChanges.createdAt, after));
     return rows;
+}
+
+/**
+ * The occurrences each rule already raised: this session's for market
+ * rules, every change for Alpha Radar ones.
+ */
+async function loadNotified(rules: readonly PlannedRule[], session: string | null, database: Database) {
+    const notified = new Map<string, Set<string>>();
+    const market = rules.filter((rule) => !isAlphaRadarAlertMetric(rule.metric)).map((rule) => rule.id);
+    const alpha = rules.filter((rule) => isAlphaRadarAlertMetric(rule.metric)).map((rule) => rule.id);
+    const conditions = [
+        session && market.length > 0
+            ? and(inArray(alertNotifications.ruleId, market), eq(alertNotifications.occurrence, `session:${session}`))
+            : undefined,
+        alpha.length > 0 ? inArray(alertNotifications.ruleId, alpha) : undefined,
+    ].filter((condition) => condition !== undefined);
+    if (conditions.length === 0) return notified;
+    const rows = await database
+        .select({ ruleId: alertNotifications.ruleId, occurrence: alertNotifications.occurrence })
+        .from(alertNotifications)
+        .where(or(...conditions));
+    for (const row of rows) {
+        const seen = notified.get(row.ruleId) ?? new Set<string>();
+        seen.add(row.occurrence);
+        notified.set(row.ruleId, seen);
+    }
+    return notified;
 }
 
 /** Records the firings once each, and updates their rules; returns how many were new. */
@@ -183,6 +214,7 @@ export async function evaluateAlertRules({
         threshold: row.threshold,
         rearm: row.rearm as PlannedRule["rearm"],
         createdAt: row.createdAt,
+        lastTriggeredAt: row.lastTriggeredAt,
     }));
     const userIds = uniq(rules.map((rule) => rule.userId));
     const portfolioUsers = uniq(rules.filter((r) => r.metric === "portfolio_value" || r.metric === "portfolio_day_change_pct").map((r) => r.userId));
@@ -220,7 +252,10 @@ export async function evaluateAlertRules({
         }, now);
         changes = await loadChanges(earliest, database);
     }
-    const overlap = changes.length > 0 ? await loadOverlap(alphaUsers, accounts, database) : new Map<string, UserOverlap>();
+    const [overlap, notified] = await Promise.all([
+        changes.length > 0 ? loadOverlap(alphaUsers, accounts, database) : Promise.resolve(new Map<string, UserOverlap>()),
+        loadNotified(rules, session, database),
+    ]);
 
     const firings = planAlertFirings({
         rules,
@@ -231,6 +266,7 @@ export async function evaluateAlertRules({
         changes,
         preferences,
         alphaRadarSince: since,
+        notified,
         runDate: now.toISOString().slice(0, 10),
     });
     const fired = firings.length > 0 ? await recordFirings(firings, now, database) : 0;

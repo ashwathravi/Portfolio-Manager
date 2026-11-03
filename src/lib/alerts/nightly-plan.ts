@@ -17,7 +17,9 @@
  * Each rule raises at most one notification an evening, except an Alpha
  * Radar rule set to "always", which raises one per change (up to
  * MAX_CHANGES_PER_RULE). A notification names what raised it
- * (`occurrence`), so a rerun records it once. The user's settings decide
+ * (`occurrence`: the session, or the change and the filing it came from),
+ * so a rerun records it once, and an Alpha Radar rule never raises the
+ * same change twice: a refresh stores a period's changes again. The user's settings decide
  * which kinds they get: Price Alerts, Portfolio Updates, and Alpha Radar
  * Signals with its in-app channel and delivery filters.
  */
@@ -43,6 +45,7 @@ export interface PlannedRule {
     threshold: number;
     rearm: "once" | "always" | "daily";
     createdAt: Date;
+    lastTriggeredAt: Date | null;
 }
 
 export interface StoredClose {
@@ -65,6 +68,9 @@ export interface AlertableChange {
     trackedFilerId: string;
     filerName: string;
     reportPeriod: string;
+    /** The filing the change was computed from (a later filing for the period is a new change). */
+    currentFilingId: string | null;
+    priorFilingId: string | null;
     cusip: string;
     ticker: string | null;
     issuerName: string;
@@ -100,6 +106,8 @@ export interface AlertPlanInput {
     preferences: ReadonlyMap<string, AlertPreferences>;
     /** When the job last succeeded: Alpha Radar changes stored before it were seen then. */
     alphaRadarSince: Date | null;
+    /** Each rule's occurrences already recorded (cleared ones included). */
+    notified: ReadonlyMap<string, ReadonlySet<string>>;
     /** The run's date (YYYY-MM-DD, UTC): an Alpha Radar rule set to "daily" raises one a day. */
     runDate: string;
 }
@@ -135,7 +143,7 @@ export function planAlertFirings(input: AlertPlanInput): AlertFiring[] {
             firings.push(...alphaRadarFirings(rule, input, preferences));
             continue;
         }
-        if (!input.session) continue;
+        if (!input.session || input.notified.get(rule.id)?.has(`session:${input.session}`)) continue;
         let accounts: AccountsObservation | null = null;
         if (rule.metric === "portfolio_value" || rule.metric === "portfolio_day_change_pct") {
             if (!accountValues.has(rule.userId)) {
@@ -236,11 +244,14 @@ function marketFiring(
 const ALPHA_RADAR_HREF = "/research?tab=alpha-radar";
 
 function alphaRadarFirings(rule: PlannedRule, input: AlertPlanInput, preferences: AlertPreferences): AlertFiring[] {
+    // A rule set to "daily" that already fired today (a rerun) waits for tomorrow.
+    if (rule.rearm === "daily" && rule.lastTriggeredAt?.toISOString().slice(0, 10) === input.runDate) return [];
     const since = input.alphaRadarSince && input.alphaRadarSince > rule.createdAt ? input.alphaRadarSince : rule.createdAt;
     const overlap = input.overlap.get(rule.userId);
+    const notified = input.notified.get(rule.id);
     const delivery = preferences.alphaRadar;
     const matching = input.changes
-        .filter((change) => change.createdAt > since)
+        .filter((change) => change.createdAt > since && !notified?.has(changeOccurrence(change)))
         .map((change) => ({ change, reasons: overlapReasons(change, overlap) }))
         .filter(({ change, reasons }) =>
             matchesMetric(rule.metric, change, reasons)
@@ -256,7 +267,7 @@ function alphaRadarFirings(rule: PlannedRule, input: AlertPlanInput, preferences
     const chosen = rule.rearm === "always" ? matching.slice(0, MAX_CHANGES_PER_RULE) : matching.slice(0, 1);
     return chosen.map(({ change, reasons }) => firing(
         rule,
-        rule.rearm === "daily" ? `day:${input.runDate}` : `change:${changeKey(change)}`,
+        changeOccurrence(change),
         change.materialityScore,
         alphaRadarMessage(change, reasons),
         ALPHA_RADAR_HREF,
@@ -264,7 +275,12 @@ function alphaRadarFirings(rule: PlannedRule, input: AlertPlanInput, preferences
 }
 
 function changeKey(change: AlertableChange): string {
-    return [change.trackedFilerId, change.reportPeriod, change.cusip, change.changeType].join(":");
+    const filing = change.currentFilingId ?? change.priorFilingId ?? "unknown-filing";
+    return [change.trackedFilerId, change.reportPeriod, filing, change.cusip, change.changeType].join(":");
+}
+
+function changeOccurrence(change: AlertableChange): string {
+    return `change:${changeKey(change)}`;
 }
 
 function overlapReasons(change: AlertableChange, overlap: UserOverlap | undefined): string[] {
