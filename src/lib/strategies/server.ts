@@ -20,11 +20,14 @@ export interface StrategiesPageData {
 
 export async function loadStrategiesPage(
     userId: string,
-    { databaseConfigured = isDatabaseConfigured() }: { databaseConfigured?: boolean } = {},
+    {
+        databaseConfigured = isDatabaseConfigured(),
+        load = loadUserStrategies,
+    }: { databaseConfigured?: boolean; load?: (userId: string) => Promise<Strategy[]> } = {},
 ): Promise<StrategiesPageData> {
     if (!databaseConfigured) return { strategies: [], persisted: false, unavailable: false };
     try {
-        return { strategies: await loadUserStrategies(userId), persisted: true, unavailable: false };
+        return { strategies: await load(userId), persisted: true, unavailable: false };
     } catch (error) {
         console.error("Strategies fetch failed — showing the outage notice.", loggableError(error));
         return { strategies: [], persisted: true, unavailable: true };
