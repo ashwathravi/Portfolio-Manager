@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import { SampleGate } from "@/components/data-display/SampleGate";
 import { useAutoRefreshQuotes } from "@/lib/hooks/useAutoRefreshQuotes";
+import { describeQuotes } from "@/lib/markets/quote-label";
 import { sectorFor, type Sector } from "@/lib/holdings/sector";
 import {
     computeBucketAllocation,
@@ -36,7 +37,7 @@ import { useEasternDate } from "@/lib/hooks/useEasternDate";
  * Phase 4 (AR-74) Holdings page wrapper.
  *
  * This component owns:
- *   - live-quote polling via `useAutoRefreshQuotes`
+ *   - quote polling via `useAutoRefreshQuotes`, labelled delayed or close
  *   - the filter + sort state
  *   - the derived summary metrics
  *
@@ -93,7 +94,7 @@ export function HoldingsPageClient({
     // The user's risk policy: their bucket choices, caps, and employer stock (launch item i54).
     const riskPolicy = useSettingsStore((s) => s.riskPolicy);
 
-    // ---- Enrich with live quote, then derive allocation + today% ----
+    // ---- Enrich with the latest quote, then derive allocation + today% ----
     const enriched = useMemo(() => {
         const employer = new Set(employerSymbols(riskPolicy));
         const withQuote = holdings.map((h) => {
@@ -270,6 +271,9 @@ export function HoldingsPageClient({
                 avgHoldingDays={summary.avgHoldingDays}
                 concentrationTop3={summary.concentrationTop3}
             />
+            <p className="pm-metric-note pm-price-note" data-testid="holdings-price-note">
+                {describeQuotes(Object.values(quotes), todayEt) ?? "Prices stored with your holdings"}
+            </p>
 
             <PolicyExposureOverview
                 bucketSummary={policySummary}

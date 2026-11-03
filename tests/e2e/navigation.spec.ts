@@ -135,6 +135,7 @@ test.describe('App footer', () => {
             await expect(footer).toHaveCount(1);
             await expect(footer).toContainText('Not investment advice. Atlas Wealth never places trades or moves money.');
             await expect(footer.getByRole('link', { name: 'Massive' })).toHaveAttribute('href', 'https://massive.com');
+            await expect(footer.getByRole('link', { name: 'Finnhub' })).toHaveAttribute('href', 'https://finnhub.io');
             await expect(footer.getByRole('link', { name: 'SEC EDGAR' })).toHaveAttribute('href', 'https://www.sec.gov/edgar');
             const legal = footer.getByRole('navigation', { name: 'Legal' });
             const callback = path === '/' ? '' : `?callbackUrl=${encodeURIComponent(path)}`;

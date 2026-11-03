@@ -40,7 +40,7 @@ export function buildTradeTicket({
     orders = [],
 }: {
     accounts: readonly StoredTicketAccount[];
-    quotes?: Readonly<Record<string, Pick<Quote, "price" | "timestamp">>>;
+    quotes?: Readonly<Record<string, Pick<Quote, "price" | "timestamp" | "kind">>>;
     orders?: Order[];
 }): TradeTicketData {
     const ticketAccounts: TicketAccount[] = [...accounts]

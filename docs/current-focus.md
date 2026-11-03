@@ -26,21 +26,22 @@ Retired routes redirect (307): `/portfolios`, `/portfolios/trade-log`,
 - Every figure is either the user's own data or carries a **Sample** tag
   (`SampleTag`, `SampleDataNotice`). `SampleGate` hides example cards when
   Settings › Data › "Show example data" is off; a new user starts with it off.
-- Prices are stored daily closes from Massive, not live quotes.
+- Prices are stored daily closes from Massive or, during the session, delayed
+  Finnhub quotes, labelled as such; never live quotes (i33).
 - Nothing is investment advice, and Atlas never places trades (`/terms`).
 
 ## Next
 
 - **Before the first invite (phase 4):** clear the dev data from production
-  (i70), `POLYGON_API_KEY` for the nightly prices (i08), and Plaid's
-  approval (i09, i67), then `PLAID_REDIRECT_URI` for banks that sign in
-  through OAuth (i47, `docs/deployment.md`). Every page already asks search
-  engines to stay away during the beta, and Supabase's Data API is off.
-  `CRON_SECRET` and `AUTH_ADMIN_EMAILS` were set on 2026-10-30.
-- **Product gaps still on example data or missing:** delayed intraday quotes
-  (i33), ticker search (i35), saved strategies and a real backtest engine
-  (i55), server-side alerts and email (i57, i58), Alpha Radar follows and
-  relevance per user (i60, i61), and options positions for the LEAPS ledger
-  (i63).
+  (i70), `POLYGON_API_KEY` for the nightly prices and `FINNHUB_API_KEY` for
+  delayed quotes (i08), and Plaid's approval (i09, i67), then
+  `PLAID_REDIRECT_URI` for banks that sign in through OAuth (i47,
+  `docs/deployment.md`). Every page already asks search engines to stay away
+  during the beta, and Supabase's Data API is off. `CRON_SECRET` and
+  `AUTH_ADMIN_EMAILS` were set on 2026-10-30.
+- **Product gaps still on example data or missing:** ticker search (i35),
+  saved strategies and a real backtest engine (i55), server-side alerts and
+  email (i57, i58), Alpha Radar follows and relevance per user (i60, i61),
+  and options positions for the LEAPS ledger (i63).
 - **Public launch (phase 5):** invite the first users (i75), upgrade plans
   (i76), then open sign-up with per-user quotas (i77).

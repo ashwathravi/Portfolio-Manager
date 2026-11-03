@@ -539,7 +539,7 @@ Without database/provider keys, many UI surfaces still render seeded or fallback
 
 Quotes and the other market-data routes need different settings:
 
-- **Quotes** (`/api/market-data/quote`, `/api/market-data/quotes`) come from the price store in Postgres, never from Massive, so they need `DATABASE_URL`, not `POLYGON_API_KEY`. Without a database they answer 503 `MARKET_DATA_NOT_CONFIGURED`. A symbol with no stored close yet is 404 `QUOTE_UNAVAILABLE` (left out of a batch); the nightly price ingest stores closes, and starts pricing a looked-up symbol from its next run.
+- **Quotes** (`/api/market-data/quote`, `/api/market-data/quotes`) come from the price store in Postgres, never from Massive, so they need `DATABASE_URL`, not `POLYGON_API_KEY`. Without a database they answer 503 `MARKET_DATA_NOT_CONFIGURED`. A symbol with no stored close yet is 404 `QUOTE_UNAVAILABLE` (left out of a batch); the nightly price ingest stores closes, and starts pricing a looked-up symbol from its next run. With `FINNHUB_API_KEY`, during the session a tracked US stock answers with a delayed Finnhub quote instead (`kind: "delayed"`); every price still showing "Close" during market hours means the key is missing, the minute's budget is spent, or Finnhub has no quote for the symbol (the server logs say which).
 - **History, fundamentals and search** (`/api/market-data/history`, `historical`, `fundamentals`, `search`) call Massive, so they need `POLYGON_API_KEY`; without it they answer 503 `MARKET_DATA_NOT_CONFIGURED`. A 429 `RATE_LIMITED` means the free plan's five calls a minute are spent.
 
 Also check network access to Massive. Pages degrade to dashes, not errors, when a quote is unavailable.

@@ -204,6 +204,25 @@ export function easternDateTime(date: string, minutes: number): Date {
     throw new RangeError(`${date} has no ${Math.floor(minutes / 60)}:${String(minutes % 60).padStart(2, "0")} in New York`);
 }
 
+export interface RegularSession {
+    /** The session's Eastern date. */
+    date: string;
+    openAt: Date;
+    closeAt: Date;
+}
+
+/**
+ * Today's regular session once it has opened: from 9:30 AM ET on a trading
+ * day, through its close and the rest of that day. Null before the open and
+ * on days NYSE doesn't trade.
+ */
+export function sessionSoFar(now: Date = new Date()): RegularSession | null {
+    const { hour, minute, date } = getEasternParts(now);
+    const day = getMarketDay(date);
+    if (day.closeMinutes === null || hour * 60 + minute < NYSE_OPEN_MINUTES) return null;
+    return { date, openAt: easternDateTime(date, NYSE_OPEN_MINUTES), closeAt: easternDateTime(date, day.closeMinutes) };
+}
+
 /** NYSE full-day closures in `year`, in date order. */
 export function marketHolidays(year: number): MarketHoliday[] {
     return [...holidaysFor(year)]
