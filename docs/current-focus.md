@@ -28,6 +28,8 @@ Retired routes redirect (307): `/portfolios`, `/portfolios/trade-log`,
   Settings › Data › "Show example data" is off; a new user starts with it off.
 - Prices are stored daily closes from Massive or, during the session, delayed
   Finnhub quotes, labelled as such; never live quotes (i33).
+- Ticker search reads a nightly copy of SEC's list of listed companies, plus
+  the benchmark ETFs and the user's own holdings; never other users' (i35).
 - Nothing is investment advice, and Atlas never places trades (`/terms`).
 
 ## Next

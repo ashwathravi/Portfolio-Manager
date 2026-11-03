@@ -433,6 +433,45 @@ test.describe('Research watchlist', () => {
         await expect(page.locator('.pm-research-list').getByRole('button', { name: /AMD/ })).toBeVisible();
     });
 
+    test('a ticker found by company name is added with its name (i35)', async ({ page }) => {
+        test.skip(!databaseAuthEnabled, 'ticker search reads the symbol directory in the database');
+        const add = page.getByLabel('Add ticker to watchlist');
+        await add.fill('coca');
+        const option = page.getByRole('option', { name: /KO\s*COCA COLA CO\s*NYSE/ });
+        await expect(option).toBeVisible();
+        await expect(add).toHaveAttribute('aria-expanded', 'true');
+        const saved = watchlistSaved(page, '"KO"');
+        await option.click();
+        await saved;
+        const card = page.locator('.pm-research-list').getByRole('button', { name: /KO/ });
+        await expect(card.locator('.pm-watch-list-company')).toHaveText('COCA COLA CO');
+        await expect(add).toHaveValue('');
+        await expect(page.getByRole('listbox', { name: 'Matching tickers' })).toBeHidden();
+    });
+
+    test('regression: Enter adds the ticker typed, not a longer match that starts the same way (i35)', async ({ page }) => {
+        test.skip(!databaseAuthEnabled, 'ticker search reads the symbol directory in the database');
+        const add = page.getByLabel('Add ticker to watchlist');
+        // APL isn't in the directory; APLE starts the same way.
+        await add.fill('apl');
+        await expect(page.getByRole('option', { name: /APLE/ })).toBeVisible();
+        await expect(page.getByRole('option', { selected: true })).toHaveCount(0);
+        const saved = watchlistSaved(page, '"APL"');
+        await add.press('Enter');
+        await saved;
+        await expect(page.locator('.pm-research-pane .pm-thesis-detail-sym')).toHaveText('APL');
+
+        // The arrows pick a match, and Enter adds it.
+        await add.fill('micro');
+        await expect(page.getByRole('option', { name: /MSFT/ })).toBeVisible();
+        await add.press('ArrowDown');
+        await expect(page.getByRole('option', { name: /MSFT/ })).toHaveAttribute('aria-selected', 'true');
+        const msft = watchlistSaved(page, '"MSFT"');
+        await add.press('Enter');
+        await msft;
+        await expect(page.locator('.pm-research-pane .pm-thesis-detail-sym')).toHaveText('MSFT');
+    });
+
     test('duplicates and malformed tickers are refused with a message', async ({ page }) => {
         const add = page.getByLabel('Add ticker to watchlist');
         const addButton = page.getByRole('button', { name: 'Add', exact: true });

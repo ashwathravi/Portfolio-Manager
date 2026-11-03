@@ -21,6 +21,22 @@ export interface SecEdgarClientOptions {
     dataBaseUrl?: string;
     archivesBaseUrl?: string;
     companyTickersUrl?: string;
+    exchangeTickersUrl?: string;
+}
+
+/** SEC's company_tickers_exchange.json: column names, then one array per ticker. */
+interface SecExchangeTickersResponse {
+    fields?: unknown;
+    data?: unknown;
+}
+
+/** One row of SEC's exchange ticker file, as published. */
+export interface SecExchangeTicker {
+    cik: string;
+    name: string;
+    ticker: string;
+    /** "Nasdaq", "NYSE", "CBOE", "OTC", ...; null when it has none. */
+    exchange: string | null;
 }
 
 interface SecCompanyTickerRow {
@@ -63,6 +79,8 @@ const DEFAULT_USER_AGENT = 'Portfolio-Manager Alpha Radar local-dev contact@exam
 const DEFAULT_DATA_BASE_URL = 'https://data.sec.gov';
 const DEFAULT_ARCHIVES_BASE_URL = 'https://www.sec.gov/Archives';
 const DEFAULT_COMPANY_TICKERS_URL = 'https://www.sec.gov/files/company_tickers.json';
+const DEFAULT_EXCHANGE_TICKERS_URL = 'https://www.sec.gov/files/company_tickers_exchange.json';
+const EXCHANGE_TICKER_FIELDS = ['cik', 'name', 'ticker', 'exchange'];
 const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
 const DEFAULT_MAX_JSON_RESPONSE_BYTES = 10 * 1024 * 1024;
 
@@ -78,6 +96,7 @@ export class SecEdgarClient {
     private readonly dataBaseUrl: string;
     private readonly archivesBaseUrl: string;
     private readonly companyTickersUrl: string;
+    private readonly exchangeTickersUrl: string;
     private lastRequestAt = 0;
     private companyCache: SecCompanyMatch[] | null = null;
 
@@ -102,6 +121,40 @@ export class SecEdgarClient {
         this.dataBaseUrl = trimTrailingSlash(options.dataBaseUrl ?? DEFAULT_DATA_BASE_URL);
         this.archivesBaseUrl = trimTrailingSlash(options.archivesBaseUrl ?? DEFAULT_ARCHIVES_BASE_URL);
         this.companyTickersUrl = options.companyTickersUrl ?? DEFAULT_COMPANY_TICKERS_URL;
+        this.exchangeTickersUrl = options.exchangeTickersUrl ?? DEFAULT_EXCHANGE_TICKERS_URL;
+    }
+
+    /**
+     * Every ticker in SEC's exchange ticker file (launch item i35's symbol
+     * directory). Rows that aren't a CIK, a name and a ticker are skipped;
+     * a file whose columns aren't the expected ones is refused.
+     */
+    async fetchExchangeTickers(): Promise<SecExchangeTicker[]> {
+        const response = await this.requestJson<SecExchangeTickersResponse>(this.exchangeTickersUrl);
+        const { fields, data } = response ?? {};
+        if (
+            !Array.isArray(fields)
+            || fields.length !== EXCHANGE_TICKER_FIELDS.length
+            || fields.some((field, index) => field !== EXCHANGE_TICKER_FIELDS[index])
+            || !Array.isArray(data)
+        ) {
+            throw new SecEdgarError('malformed_response', `SEC exchange ticker file at ${this.exchangeTickersUrl} has unexpected columns.`);
+        }
+
+        const tickers: SecExchangeTicker[] = [];
+        for (const row of data) {
+            if (!Array.isArray(row)) continue;
+            const [cik, name, ticker, exchange] = row;
+            if (typeof cik !== 'number' || !Number.isInteger(cik) || cik <= 0) continue;
+            if (typeof name !== 'string' || !name.trim() || typeof ticker !== 'string' || !ticker.trim()) continue;
+            tickers.push({
+                cik: String(cik).padStart(10, '0'),
+                name: name.trim(),
+                ticker: ticker.trim().toUpperCase(),
+                exchange: typeof exchange === 'string' && exchange.trim() ? exchange.trim() : null,
+            });
+        }
+        return tickers;
     }
 
     async resolveCik(query: string): Promise<SecCompanyMatch> {
