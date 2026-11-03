@@ -4,7 +4,7 @@
  * Quotes start as the price store's closes (StoredQuoteProvider). From the
  * opening bell until the nightly ingest has stored today's close, a tracked
  * US stock's close is replaced by a Finnhub quote from today's session,
- * kept in Postgres and at most about a minute old when fetched
+ * kept in Postgres and fetched again about every 80 seconds
  * (`intraday-quotes.ts`). Every quote says which it is (`kind`), and a
  * delayed one carries the time it was quoted, so pages label prices as
  * "delayed" or "close" and never as live.
@@ -28,6 +28,7 @@ import type { Fundamentals, MarketDataProvider, OHLC, Quote, SymbolResult } from
 
 import {
     claimIntradayQuotes,
+    FETCH_CONCURRENCY,
     FINNHUB_CALL_BUDGET,
     needsRefresh,
     readIntradayRows,
@@ -45,7 +46,6 @@ const US_STOCK_TICKER = /^[A-Z]{1,5}(?:\.[A-Z]{1,2})?$/;
 export const PREVIOUS_CLOSE_TOLERANCE = 0.02;
 /** A quote time this far ahead of the server's clock is still believed. */
 const CLOCK_SKEW_MS = 60_000;
-const FETCH_CONCURRENCY = 8;
 export const RATE_LIMIT_PAUSE_MS = 60_000;
 export const AUTH_PAUSE_MS = 10 * 60_000;
 

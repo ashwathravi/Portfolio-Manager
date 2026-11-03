@@ -13,7 +13,7 @@ import {
     type IntradaySource,
     type IntradayStore,
 } from "./delayed-quote-provider";
-import { chooseClaims, type IntradayResult, type IntradayRow } from "./intraday-quotes";
+import { chooseClaims, INTRADAY_REFRESH_MS, type IntradayResult, type IntradayRow } from "./intraday-quotes";
 import { sessionSoFar } from "./market-hours";
 import { quoteFromCloses } from "./stored-quote-provider";
 
@@ -122,7 +122,7 @@ describe("DelayedQuoteProvider", () => {
         assert.deepEqual(calls, ["AAPL"]);
     });
 
-    test("serves the shared quote for a minute, then fetches it again", async () => {
+    test("serves the shared quote until its claim leaves the budget window, then fetches it again", async () => {
         const { source, calls } = fakeSource({ AAPL: { price: 231.5, previousClose: 230, quotedAt } });
         const { store } = fakeStore(["AAPL"]);
         const time = clock();
@@ -131,11 +131,11 @@ describe("DelayedQuoteProvider", () => {
         const other = new DelayedQuoteProvider(closesProvider({ AAPL: [230, 228] }), source, store, time.now);
 
         await provider.getBatchQuotes(["AAPL"]);
-        time.advance(30_000);
+        time.advance(INTRADAY_REFRESH_MS - 1_000);
         assert.equal((await other.getBatchQuotes(["AAPL"]))[0].kind, "delayed");
         assert.deepEqual(calls, ["AAPL"]);
 
-        time.advance(30_000);
+        time.advance(1_000);
         await other.getBatchQuotes(["AAPL"]);
         assert.deepEqual(calls, ["AAPL", "AAPL"]);
     });
@@ -189,14 +189,14 @@ describe("DelayedQuoteProvider", () => {
             source,
             fakeStore(["A", "B", "C"]).store,
             time.now,
-            { limit: 2, windowMs: 61_000 },
+            { limit: 2, windowMs: INTRADAY_REFRESH_MS },
         );
 
         const first = await provider.getBatchQuotes(["A", "B", "C"]);
         assert.deepEqual(first.map((q) => [q.symbol, q.kind]), [["A", "delayed"], ["B", "delayed"], ["C", "close"]]);
         assert.deepEqual(calls, ["A", "B"]);
 
-        time.advance(61_000);
+        time.advance(INTRADAY_REFRESH_MS);
         await provider.getBatchQuotes(["A", "B", "C"]);
         assert.deepEqual(calls.slice(2), ["C", "A"]);
     });
@@ -225,19 +225,24 @@ describe("DelayedQuoteProvider", () => {
         assert.equal(quote.price, 200);
     });
 
-    test("after a 429 this instance asks again only after a minute, showing closes meanwhile", async () => {
-        const answers: Record<string, IntradayQuote | Error> = { AAPL: new FinnhubRateLimitError() };
+    test("after a 429 this instance asks for nothing for a minute, showing closes meanwhile", async () => {
+        const answers: Record<string, IntradayQuote | Error> = { AAPL: new FinnhubRateLimitError(), MSFT: { price: 510, previousClose: 500, quotedAt } };
         const { source, calls } = fakeSource(answers);
         const time = clock();
-        const provider = new DelayedQuoteProvider(closesProvider({ AAPL: [230, 228] }), source, fakeStore(["AAPL"]).store, time.now);
+        const provider = new DelayedQuoteProvider(closesProvider({ AAPL: [230, 228], MSFT: [500, 490] }), source, fakeStore(["AAPL", "MSFT"]).store, time.now);
 
         assert.equal((await provider.getBatchQuotes(["AAPL"]))[0].kind, "close");
-        answers.AAPL = { price: 231.5, previousClose: 230, quotedAt };
+        // A symbol nobody has claimed waits out the pause too.
         time.advance(RATE_LIMIT_PAUSE_MS - 1_000);
-        await provider.getBatchQuotes(["AAPL"]);
+        assert.equal((await provider.getBatchQuotes(["MSFT"]))[0].kind, "close");
         assert.deepEqual(calls, ["AAPL"]);
         time.advance(1_000);
+        assert.equal((await provider.getBatchQuotes(["MSFT"]))[0].kind, "delayed");
+        // AAPL's failed claim is retried once it leaves the budget window.
+        answers.AAPL = { price: 231.5, previousClose: 230, quotedAt };
+        time.advance(INTRADAY_REFRESH_MS - RATE_LIMIT_PAUSE_MS);
         assert.equal((await provider.getBatchQuotes(["AAPL"]))[0].kind, "delayed");
+        assert.deepEqual(calls, ["AAPL", "MSFT", "AAPL"]);
         assert.match(warnings.join("\n"), /rate limit/);
     });
 

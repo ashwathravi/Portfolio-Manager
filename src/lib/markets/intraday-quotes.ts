@@ -4,13 +4,14 @@
  * Finnhub's free plan prices one symbol per call and allows 60 calls a
  * minute for the whole app, while every server instance and every open page
  * asks for prices. So the newest quote per symbol lives in `intraday_quotes`,
- * shared by every instance: a symbol is fetched at most once a minute
+ * shared by every instance: a symbol is fetched about every 80 seconds
  * however many people look at it. An instance claims the symbols it will
- * fetch, under an advisory lock, and each claim stamps `claimed_at`; the
- * claims of the last minute are the calls of the last minute, so the lock
- * also keeps the whole app under its call budget. A symbol with no quote at
- * the provider is asked about again only every ten minutes, and once today's
- * session has closed a quote fetched after the closing prints is final.
+ * fetch, under an advisory lock, and each claim stamps `claimed_at`. A row
+ * is claimed again only once its last claim has left the budget window, so
+ * the claims in the window are the calls in it, and the lock keeps the whole
+ * app under its call budget. A symbol with no quote at the provider is asked
+ * about again only every ten minutes, and once today's session has closed a
+ * quote fetched after the closing prints is final.
  *
  * Only tracked securities get a row (a foreign key to `securities`), which
  * bounds the table the same way it bounds the price store.
@@ -21,28 +22,44 @@ import { eq, gt, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { intradayQuotes, securities } from "@/db/schema";
 
+import { FINNHUB_TIMEOUT_MS } from "@/lib/providers/finnhub-quote-client";
+
 import type { RegularSession } from "./market-hours";
 
 type Database = typeof db;
-
-/** How old a quote may get before it is fetched again. */
-export const INTRADAY_REFRESH_MS = 60_000;
-/** How long before a symbol the provider had no quote for is asked about again. */
-export const NO_QUOTE_RETRY_MS = 10 * 60_000;
-/** A quote fetched this long after the close carries the closing prints. */
-export const FINAL_AFTER_CLOSE_MS = 5 * 60_000;
 
 export interface CallBudget {
     limit: number;
     windowMs: number;
 }
 
+/** How many calls an instance has in flight at once. */
+export const FETCH_CONCURRENCY = 8;
+const FINNHUB_CALLS_PER_MINUTE = 50;
+
 /**
- * Finnhub's free plan allows 60 calls a minute; ten are left for clock
- * differences and anything else using the key, and a second of slack covers
- * instances whose clocks disagree.
+ * Finnhub's free plan allows 60 calls a minute; ten are left for anything
+ * else using the key. A claim is counted when it is made, but its calls go
+ * out over the rounds the batch takes (eight at a time, each cut off at the
+ * client's timeout), so the window is the provider's minute plus the longest
+ * batch, plus slack for instances whose clocks disagree. Then no 60 seconds
+ * at Finnhub can see more calls than the limit.
  */
-export const FINNHUB_CALL_BUDGET: CallBudget = { limit: 50, windowMs: 61_000 };
+export const FINNHUB_CALL_BUDGET: CallBudget = {
+    limit: FINNHUB_CALLS_PER_MINUTE,
+    windowMs: 60_000 + Math.ceil(FINNHUB_CALLS_PER_MINUTE / FETCH_CONCURRENCY) * FINNHUB_TIMEOUT_MS + 3_000,
+};
+
+/**
+ * How old a quote may get before it is fetched again: no sooner than its
+ * last claim leaves the budget window, so a new claim never overwrites one
+ * the window still counts (each row's claim is the call log).
+ */
+export const INTRADAY_REFRESH_MS = FINNHUB_CALL_BUDGET.windowMs;
+/** How long before a symbol the provider had no quote for is asked about again. */
+export const NO_QUOTE_RETRY_MS = 10 * 60_000;
+/** A quote fetched this long after the close carries the closing prints. */
+export const FINAL_AFTER_CLOSE_MS = 5 * 60_000;
 
 /** A tracked symbol and its stored quote; the quote fields are null when it has never been claimed. */
 export interface IntradayRow {
@@ -64,8 +81,11 @@ export interface IntradayResult {
 export function needsRefresh(row: IntradayRow, now: Date, session: Pick<RegularSession, "closeAt">): boolean {
     if (!row.claimedAt) return true;
     const claimed = row.claimedAt.getTime();
-    // Fetched after today's closing prints: nothing changes until tomorrow.
-    if (now >= session.closeAt && claimed >= session.closeAt.getTime() + FINAL_AFTER_CLOSE_MS) return false;
+    // A fetch that came back after today's closing prints: nothing changes
+    // until tomorrow. A claim alone isn't enough; its fetch may have failed.
+    if (now >= session.closeAt && row.fetchedAt && row.fetchedAt.getTime() >= session.closeAt.getTime() + FINAL_AFTER_CLOSE_MS) {
+        return false;
+    }
     const noQuote = row.fetchedAt !== null && row.price === null;
     return now.getTime() - claimed >= (noQuote ? NO_QUOTE_RETRY_MS : INTRADAY_REFRESH_MS);
 }

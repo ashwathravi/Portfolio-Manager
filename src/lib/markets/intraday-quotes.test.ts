@@ -3,11 +3,14 @@ import assert from "node:assert/strict";
 
 import { drizzle } from "drizzle-orm/postgres-js";
 
+import { FINNHUB_TIMEOUT_MS } from "@/lib/providers/finnhub-quote-client";
+
 import {
     buildClaimQuery,
     buildRecentClaimsCountQuery,
     buildSaveResultsQuery,
     chooseClaims,
+    FETCH_CONCURRENCY,
     FINAL_AFTER_CLOSE_MS,
     FINNHUB_CALL_BUDGET,
     INTRADAY_REFRESH_MS,
@@ -39,15 +42,17 @@ describe("needsRefresh", () => {
         assert.equal(needsRefresh(row("AAPL"), now, session), true);
     });
 
-    test("a quote is fetched again once it is a minute old", () => {
-        assert.equal(needsRefresh(row("AAPL", quoted("2026-11-02T15:41:01Z")), now, session), false);
-        assert.equal(needsRefresh(row("AAPL", quoted("2026-11-02T15:41:00Z")), now, session), true);
-        assert.equal(INTRADAY_REFRESH_MS, 60_000);
+    const ago = (ms: number) => new Date(now.getTime() - ms).toISOString();
+
+    test("a quote is fetched again once its claim has left the budget window", () => {
+        assert.equal(needsRefresh(row("AAPL", quoted(ago(INTRADAY_REFRESH_MS - 1_000))), now, session), false);
+        assert.equal(needsRefresh(row("AAPL", quoted(ago(INTRADAY_REFRESH_MS))), now, session), true);
+        assert.equal(INTRADAY_REFRESH_MS, FINNHUB_CALL_BUDGET.windowMs);
     });
 
-    test("a claim whose fetch never came back is retried after a minute too", () => {
-        assert.equal(needsRefresh(row("AAPL", { claimedAt: at("2026-11-02T15:41:30Z") }), now, session), false);
-        assert.equal(needsRefresh(row("AAPL", { claimedAt: at("2026-11-02T15:40:59Z") }), now, session), true);
+    test("a claim whose fetch never came back is retried after the same wait", () => {
+        assert.equal(needsRefresh(row("AAPL", { claimedAt: at(ago(30_000)) }), now, session), false);
+        assert.equal(needsRefresh(row("AAPL", { claimedAt: at(ago(INTRADAY_REFRESH_MS)) }), now, session), true);
     });
 
     test("a symbol the provider had no quote for waits ten minutes", () => {
@@ -65,6 +70,14 @@ describe("needsRefresh", () => {
         assert.equal(needsRefresh(row("AAPL", quoted("2026-11-02T21:01:00Z")), evening, session), true);
         // Yesterday's final quote is no help today.
         assert.equal(needsRefresh(row("AAPL", quoted("2026-10-30T21:10:00Z")), now, session), true);
+    });
+
+    test("regression: a post-close claim whose fetch failed doesn't make the old quote final", () => {
+        // Claimed at 4:10 PM, but the fetch timed out: the stored quote is still 3:59 PM's.
+        const evening = at("2026-11-02T21:30:00Z");
+        const failed = row("AAPL", { ...quoted("2026-11-02T20:59:00Z"), claimedAt: at("2026-11-02T21:10:00Z") });
+        assert.equal(needsRefresh(failed, evening, session), true);
+        assert.equal(needsRefresh(failed, at("2026-11-02T21:10:30Z"), session), false); // the usual wait first
     });
 });
 
@@ -88,9 +101,43 @@ describe("chooseClaims", () => {
         assert.deepEqual(chooseClaims(rows, -3, now, session), []);
     });
 
-    test("the budget stays under Finnhub's 60 calls a minute", () => {
+    test("the budget stays under Finnhub's 60 calls a minute, counting the time a batch takes to go out", () => {
         assert.ok(FINNHUB_CALL_BUDGET.limit < 60);
-        assert.ok(FINNHUB_CALL_BUDGET.windowMs > 60_000);
+        const longestBatchMs = Math.ceil(FINNHUB_CALL_BUDGET.limit / FETCH_CONCURRENCY) * FINNHUB_TIMEOUT_MS;
+        assert.ok(FINNHUB_CALL_BUDGET.windowMs > 60_000 + longestBatchMs);
+    });
+
+    test("regression: a refresh never erases a claim the window still counts", () => {
+        // The model of claimIntradayQuotes: count the rows claimed within the
+        // window, choose, stamp. Every claim is also logged, as the calls made.
+        const { limit, windowMs } = FINNHUB_CALL_BUDGET;
+        const rows = new Map<string, IntradayRow>();
+        const calls: number[] = [];
+        const claim = (symbols: string[], at: number) => {
+            const used = [...rows.values()].filter((r) => r.claimedAt && r.claimedAt.getTime() > at - windowMs).length;
+            const current = symbols.map((symbol) => rows.get(symbol) ?? row(symbol));
+            for (const symbol of chooseClaims(current, limit - used, new Date(at), session)) {
+                rows.set(symbol, { ...(rows.get(symbol) ?? row(symbol)), claimedAt: new Date(at) });
+                calls.push(at);
+            }
+        };
+        const symbols = (prefix: string) => Array.from({ length: 25 }, (_, i) => `${prefix}${i}`);
+        const start = now.getTime();
+
+        // Codex's case: 25 claimed, the same 25 a minute later, then 25 more.
+        claim(symbols("A"), start);
+        claim(symbols("A"), start + 60_000);
+        claim(symbols("B"), start + 60_100);
+        // And ten minutes of every page asking for 100 symbols every 5 seconds.
+        const all = [...symbols("A"), ...symbols("B"), ...symbols("C"), ...symbols("D")];
+        for (let t = start + 61_000; t < start + 11 * 60_000; t += 5_000) claim(all, t);
+
+        // Each claim's calls go out within the longest batch after it, so no
+        // window that long, minus that batch, holds more than the limit.
+        for (const at of calls) {
+            assert.ok(calls.filter((c) => c > at - windowMs && c <= at).length <= limit, `over budget at +${at - start}ms`);
+        }
+        assert.ok(calls.length > 300, "symbols keep being refreshed");
     });
 });
 

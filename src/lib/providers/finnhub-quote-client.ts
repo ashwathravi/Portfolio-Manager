@@ -13,7 +13,8 @@
  */
 
 export const FINNHUB_QUOTE_URL = "https://finnhub.io/api/v1/quote";
-const TIMEOUT_MS = 2_000;
+/** A call that hasn't answered by then is given up (and its claim retried later). */
+export const FINNHUB_TIMEOUT_MS = 2_000;
 
 export interface IntradayQuote {
     price: number;
@@ -56,7 +57,7 @@ export class FinnhubQuoteClient {
     constructor(
         apiKey: string = process.env.FINNHUB_API_KEY ?? "",
         private readonly fetchImpl: typeof fetch = (...args) => fetch(...args),
-        private readonly timeoutMs: number = TIMEOUT_MS,
+        private readonly timeoutMs: number = FINNHUB_TIMEOUT_MS,
     ) {
         this.apiKey = apiKey.trim();
     }

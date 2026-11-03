@@ -6,7 +6,7 @@ import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import postgres from 'postgres';
 
 import * as schema from '../../src/db/schema';
-import { claimIntradayQuotes, readIntradayRows, saveIntradayResults } from '../../src/lib/markets/intraday-quotes';
+import { claimIntradayQuotes, INTRADAY_REFRESH_MS, readIntradayRows, saveIntradayResults } from '../../src/lib/markets/intraday-quotes';
 
 // Launch item i33: delayed quotes shared in intraday_quotes, against a
 // scratch database with every migration applied. Needs a local Postgres it
@@ -101,7 +101,7 @@ describe('intraday quotes', { skip: !DATABASE_URL && 'SCRIPTS_TEST_DATABASE_URL 
 
     test('regression: a slow fetch that lands after a newer claim doesn\'t overwrite its quote', async () => {
         await claimIntradayQuotes(['AAPL'], options(50), database);
-        const next = new Date(NOW.getTime() + 61_000);
+        const next = new Date(NOW.getTime() + INTRADAY_REFRESH_MS);
         await claimIntradayQuotes(['AAPL'], options(50, next), database);
         await saveIntradayResults([{ symbol: 'AAPL', quote: quote(240) }], { claimedAt: next, fetchedAt: next, source: 'finnhub' }, database);
 
