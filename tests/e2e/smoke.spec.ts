@@ -152,7 +152,6 @@ test.describe('Market data without a provider key', () => {
         '/api/market-data/history?symbol=AAPL&range=1M',
         '/api/market-data/historical?symbol=AAPL&timeframe=1D',
         '/api/market-data/fundamentals?symbol=AAPL',
-        '/api/market-data/search?query=apple',
     ]) {
         test(`${path.split('?')[0]} answers 503 MARKET_DATA_NOT_CONFIGURED`, async ({ page }) => {
             const response = await page.request.get(path);
@@ -180,6 +179,28 @@ test.describe('Market data without a provider key', () => {
                 expect(await response.json()).toEqual(notConfigured);
             }
         }
+    });
+
+    test('ticker search answers from the symbol directory, or 503 without a database (i35)', async ({ page }) => {
+        const response = await page.request.get('/api/market-data/search?query=apple');
+        if (!dbMode) {
+            expect(response.status()).toBe(503);
+            expect(await response.json()).toEqual(notConfigured);
+            return;
+        }
+        expect(response.status()).toBe(200);
+        // User A holds AAPL; the fixtures' directory names both.
+        expect((await response.json()).data).toEqual([
+            { symbol: 'AAPL', name: 'Apple Inc.', exchange: 'Nasdaq', held: true },
+            { symbol: 'APLE', name: 'Apple Hospitality REIT, Inc.', exchange: 'NYSE', held: false },
+        ]);
+        // Another user's holding (XUSR, user B's) is never anyone else's match.
+        for (const query of ['xusr', 'cross tenant']) {
+            const other = await page.request.get(`/api/market-data/search?query=${encodeURIComponent(query)}`);
+            expect((await other.json()).data).toEqual([]);
+        }
+        const empty = await page.request.get('/api/market-data/search?query=%20');
+        expect(empty.status()).toBe(400);
     });
 
     test('portfolio valuation lists unpriced holdings instead of failing', async ({ page }) => {

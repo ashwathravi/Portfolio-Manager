@@ -308,6 +308,7 @@ describe("API proxy security", () => {
             ["/api/ask", "GET"],
             ["/api/ask", "POST"],
             ["/api/ask", "DELETE"],
+            ["/api/market-data/search", "GET"],
             ["/api/research/watchlist", "GET"],
             ["/api/research/watchlist/import", "POST"],
             ["/api/research/watchlist/w-coin", "PUT"],
@@ -404,6 +405,8 @@ describe("API proxy security", () => {
             ["/api/alerts/rules/00000000-0000-4000-8000-000000000401/notifications", "PUT"],
             ["/api/alerts/notifications", "POST"],
             ["/api/alerts/notifications/00000000-0000-4000-8000-000000000402", "PATCH"],
+            ["/api/market-data/search", "POST"],
+            ["/api/market-data/quotes", "GET"],
         ] as const) {
             const response = await handleVerifiedRequest(apiRequest({}, pathname, null, [], method));
             assert.equal(response.status, 401, `${method} ${pathname} was delegated`);
@@ -418,7 +421,7 @@ describe("API proxy security", () => {
         for (let i = 0; i < 60; i++) {
             const response = await handleVerifiedRequest(apiRequest(
                 { "x-forwarded-for": `203.0.113.${i}` },
-                "/api/market-data/search",
+                "/api/alpha-radar/memory/search",
                 USER_ID,
             ));
             assert.equal(response.status, 200);
@@ -426,7 +429,7 @@ describe("API proxy security", () => {
 
         const response = await handleVerifiedRequest(apiRequest(
             { "x-forwarded-for": "203.0.113.200" },
-            "/api/market-data/search",
+            "/api/alpha-radar/memory/search",
             USER_ID,
         ));
 
@@ -445,10 +448,22 @@ describe("API proxy security", () => {
 
         const headers = { "x-forwarded-for": "203.0.113.99", "x-api-key": "test-secret" };
         for (let i = 0; i < 30; i++) {
-            assert.equal((await handleVerifiedRequest(apiRequest(headers, "/api/market-data/search"))).status, 200);
+            assert.equal((await handleVerifiedRequest(apiRequest(headers, "/api/alpha-radar/memory/search"))).status, 200);
         }
 
-        assert.equal((await handleVerifiedRequest(apiRequest(headers, "/api/market-data/search"))).status, 429);
+        assert.equal((await handleVerifiedRequest(apiRequest(headers, "/api/alpha-radar/memory/search"))).status, 429);
+    });
+
+    test("regression: leaves a signed-in ticker search to its route, which limits it once", async () => {
+        configureAuth();
+        mock.timers.enable({ apis: ["Date"], now: 0 });
+
+        // The route's session check spends the user's 60 a minute; the proxy
+        // spending them too halved the budget for search-as-you-type.
+        for (let i = 0; i < 61; i++) {
+            const response = await handleVerifiedRequest(apiRequest({}, "/api/market-data/search", USER_ID));
+            assert.equal(response.status, 200);
+        }
     });
 
     test("rate limits Auth.js routes by client IP", async () => {
