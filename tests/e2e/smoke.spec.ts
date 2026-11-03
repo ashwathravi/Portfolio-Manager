@@ -170,6 +170,8 @@ test.describe('Market data without a provider key', () => {
             const { data } = await batch.json();
             expect(data.map((quote: { symbol: string }) => quote.symbol)).toEqual(['SPY']);
             expect(data[0].price).toBe(515.1);
+            // A stored close says so; E2E has no Finnhub key, so nothing is delayed (launch item i33).
+            expect([data[0].kind, data[0].isRealtime]).toEqual(['close', false]);
             expect(single.status()).toBe(404);
             expect(await single.json()).toEqual({ error: 'No price for AAPL yet.', code: 'QUOTE_UNAVAILABLE' });
         } else {

@@ -5,7 +5,7 @@ import { InMemoryCache } from './in-memory-cache';
 import type { MarketDataProvider, Quote, OHLC, Fundamentals, SymbolResult } from '@/types/market-data';
 
 function quote(symbol: string, price = 100): Quote {
-    return { symbol, price, change: 1, changePercent: 1, timestamp: '2026-04-19T00:00:00Z', isRealtime: true };
+    return { symbol, price, change: 1, changePercent: 1, timestamp: '2026-04-19T00:00:00Z', kind: 'close', isRealtime: true };
 }
 
 class FakeProvider implements MarketDataProvider {

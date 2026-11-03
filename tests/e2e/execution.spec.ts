@@ -164,6 +164,18 @@ test.describe('Trade ticket on the user\'s accounts', () => {
         await expect(page.locator('.pm-exec-preview')).toContainText('1 sh');
     });
 
+    test('a delayed quote is priced with the time it was quoted, never as live or as a close (i33)', async ({ page }) => {
+        const quotedAt = new Date();
+        await page.route('**/api/market-data/quotes**', (route) => route.fulfill({ status: 200, json: { data: [
+            { symbol: 'CRM', price: 251.2, change: 1.2, changePercent: 0.48, timestamp: quotedAt.toISOString(), kind: 'delayed', isRealtime: false },
+        ] } }));
+        await chooseTicker(page, 'CRM');
+        await expect(page.getByTestId('ticker-price')).toHaveText('$251.20');
+        const clock = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit' }).format(quotedAt);
+        await expect(page.getByTestId('ticker-price-note')).toHaveText(new RegExp(`^Delayed quote, (\\w{3} \\d{1,2} )?${clock} ET$`));
+        await expect(page.getByLabel('Limit price')).toHaveValue('251.2');
+    });
+
     test('a market order without any price is refused: it needs a limit to be sized', async ({ page }) => {
         await chooseTicker(page, 'ZZZZ');
         await expect(page.getByTestId('ticker-price-note')).toHaveText('No price yet');

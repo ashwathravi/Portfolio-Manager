@@ -18,7 +18,7 @@ export interface TodayHeroHolding {
 
 /**
  * Today's hero: the money. Net worth and today's change from the user's
- * own holdings (live quotes when available), with invested / cash /
+ * own holdings (delayed quotes or closes, labelled), with invested / cash /
  * positions beneath. No illustrative sparklines or hardcoded deltas —
  * the old stat row showed "+1.2% vs last month" regardless of data.
  * Without any positions it is the first-run card (FirstRunCard): the
@@ -76,6 +76,7 @@ export function TodayHero({
                 refreshMs={refreshMs}
                 lastUpdatedAt={lastUpdatedAt}
                 onRefresh={() => void refetch()}
+                quotes={quotes}
             />
         </div>
     );
@@ -104,7 +105,7 @@ export function TodayHero({
                     ) : live ? (
                         "Prices as of the last close"
                     ) : (
-                        "Today's change appears when live quotes arrive"
+                        "Today's change appears once prices arrive"
                     )}
                 </p>
             </div>

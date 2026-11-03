@@ -43,6 +43,8 @@ function isQuote(value: unknown): value is Quote {
         && ((quote.change === null && quote.changePercent === null)
             || (Number.isFinite(quote.change) && Number.isFinite(quote.changePercent)))
         && typeof quote.timestamp === 'string'
+        // Every price says whether it is a close or a delayed quote (launch item i33).
+        && (quote.kind === 'close' || quote.kind === 'delayed')
         && typeof quote.isRealtime === 'boolean';
 }
 

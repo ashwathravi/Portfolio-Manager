@@ -85,6 +85,8 @@
 .pm-metric-strip dd.is-pos { color: var(--pm-pos); }
 .pm-metric-strip dd.is-neg { color: var(--pm-neg); }
 .pm-metric-note { font-size: 12px; font-weight: 400; color: var(--pm-fg-subtle); }
+/* What a page's prices are: delayed quotes or closes (launch item i33). */
+.pm-price-note { margin: -4px 0 0; }
 
 .pm-empty-line { margin: 0; font-size: 13px; color: var(--pm-fg-muted); }
 

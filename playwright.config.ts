@@ -50,11 +50,13 @@ const noSharedRedis = {
     UPSTASH_REDIS_REST_TOKEN: '',
 };
 
-// No market-data key either, so test runs never spend the free plan's 5 calls
-// a minute and always see the not-configured state: stored prices on pages,
-// 503 from /api/market-data (tests stub those routes where they need quotes).
+// No market-data keys either, so test runs never spend the free plans' calls
+// and always see the not-configured state: stored prices on pages, 503 from
+// /api/market-data (tests stub those routes where they need quotes), and
+// closes rather than delayed Finnhub quotes during market hours.
 const noMarketData = {
     POLYGON_API_KEY: '',
+    FINNHUB_API_KEY: '',
 };
 
 // No cron secret, so /api/cron/* always refuses (503) and a test run never

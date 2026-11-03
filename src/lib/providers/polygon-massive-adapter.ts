@@ -337,6 +337,7 @@ function closingQuote(symbol: string, sessions: ClosingSessions): Quote | undefi
     change,
     changePercent: change !== null ? (change / previousClose) * 100 : null,
     timestamp: sessions.closedAt,
+    kind: 'close',
     isRealtime: false,
   };
 }

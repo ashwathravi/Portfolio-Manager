@@ -11,7 +11,8 @@ export function AppFooter({ pathname }: { pathname: string }) {
         <footer className="pm-app-footer" data-testid="app-footer">
             <p>
                 Not investment advice. Atlas Wealth never places trades or moves money. Market data from{" "}
-                <a href="https://massive.com" target="_blank" rel="noreferrer">Massive</a>, filings from{" "}
+                <a href="https://massive.com" target="_blank" rel="noreferrer">Massive</a> and{" "}
+                <a href="https://finnhub.io" target="_blank" rel="noreferrer">Finnhub</a>, filings from{" "}
                 <a href="https://www.sec.gov/edgar" target="_blank" rel="noreferrer">SEC EDGAR</a>.
             </p>
             <nav aria-label="Legal">
