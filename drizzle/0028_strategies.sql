@@ -6,6 +6,8 @@ CREATE TABLE "strategies" (
 	"definition" jsonb NOT NULL,
 	"adherence_rules" jsonb DEFAULT '[]'::jsonb NOT NULL,
 	"backtest" jsonb,
+	"write_session" text,
+	"write_seq" bigint,
 	"created_at" timestamp DEFAULT now() NOT NULL,
 	"updated_at" timestamp DEFAULT now() NOT NULL
 );

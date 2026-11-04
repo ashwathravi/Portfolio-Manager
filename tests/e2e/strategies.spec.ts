@@ -411,6 +411,16 @@ test.describe('Strategies saved to the account (i55)', () => {
         await expect(page.getByTestId('backtest-stale')).toBeVisible();
     });
 
+    test('regression: an edit made just before a reload is saved, not dropped with its timer', async ({ page }) => {
+        await newStrategy(page);
+        await page.getByLabel('Strategy name').fill('Kept on reload');
+        // No waiting for "Saved": the reload comes inside the save's delay.
+        await expect(async () => {
+            await reloadAppPage(page);
+            await expect(mine(page).first()).toContainText('Kept on reload', { timeout: 1_000 });
+        }).toPass({ timeout: 15_000 });
+    });
+
     test('regression: after a save fails, Run backtest saves the edits first rather than running the old rules', async ({ page }) => {
         await newStrategy(page);
         let failures = 1;

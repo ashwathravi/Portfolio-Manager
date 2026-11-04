@@ -96,6 +96,22 @@ describe('saved strategies', { skip: !DATABASE_URL && 'SCRIPTS_TEST_DATABASE_URL
         assert.deepEqual(await loadUserStrategies('user-a', database), []);
     });
 
+    test('regression: a page\'s older save that lands after its newer one changes nothing', async () => {
+        const created = await createStrategy('user-b', input(), database);
+        const save = (name: string, order?: { session: string; seq: number }) =>
+            updateStrategy('user-b', created.id, { ...input({}, name), order }, database);
+
+        // Sent as the page closed, seq 2 overtakes seq 1, still on its way.
+        assert.equal((await save('Newer', { session: 'page-aaaa1111', seq: 2 }))?.name, 'Newer');
+        assert.equal((await save('Older', { session: 'page-aaaa1111', seq: 1 }))?.name, 'Newer');
+        // Another page (another tab, or a reload) and a save without an order still apply.
+        assert.equal((await save('Other tab', { session: 'page-bbbb2222', seq: 1 }))?.name, 'Other tab');
+        assert.equal((await save('No order'))?.name, 'No order');
+        const [row] = await sql`SELECT name, write_session, write_seq FROM strategies WHERE id = ${created.id}`;
+        assert.deepEqual({ ...row }, { name: 'No order', write_session: null, write_seq: null });
+        await deleteStrategy('user-b', created.id, database);
+    });
+
     test(`a user keeps at most ${STRATEGY_LIMITS.perUser} strategies`, async () => {
         for (let i = 0; i < STRATEGY_LIMITS.perUser; i++) await createStrategy('user-full', input({}, `S${i}`), database);
         await assert.rejects(createStrategy('user-full', input(), database), StrategyLimitError);

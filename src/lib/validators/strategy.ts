@@ -5,6 +5,7 @@ import { STRATEGY_LIMITS, STRATEGY_OPS, type StrategyOp } from '@/lib/strategies
 
 import { safeText } from './common';
 import { tickerSchema } from './market-data';
+import { writeOrderSchema } from './research-ids';
 
 /**
  * Strategies as the builder saves them (launch item i55). A rule's text is
@@ -68,6 +69,8 @@ export const strategyInputSchema = z.object({
     definition: strategyDefinitionSchema,
     adherenceRules: z.array(adherenceRuleSchema)
         .max(STRATEGY_LIMITS.adherenceRules, `at most ${STRATEGY_LIMITS.adherenceRules} adherence rules`).default([]),
+    /** On a save: which page sent it and its count of saves, so a page's older save never replaces its newer one. */
+    order: writeOrderSchema.optional(),
 }).strict();
 
 export type StrategyInput = z.infer<typeof strategyInputSchema>;

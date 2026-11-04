@@ -925,6 +925,10 @@ export const strategies = pgTable("strategies", {
     definition: jsonb("definition").$type<StrategyDefinition>().notNull(),
     adherenceRules: jsonb("adherence_rules").$type<AdherenceRule[]>().notNull().default([]),
     backtest: jsonb("backtest").$type<StrategyBacktest>(),
+    // The page and its count of saves behind the last save: of two saves
+    // from one page, the newer wins even if it arrives first.
+    writeSession: text("write_session"),
+    writeSeq: bigint("write_seq", { mode: "number" }),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (table) => ({

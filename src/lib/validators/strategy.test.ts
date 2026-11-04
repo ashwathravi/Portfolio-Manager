@@ -53,4 +53,36 @@ describe('strategyInputSchema', () => {
         assert.equal(issue({ ...valid(), name: '<b>x</b>' }), 'name: Input contains invalid characters (< or >)');
         assert.equal(issue({ ...valid(), adherenceRules: [{ id: 'a1', type: 'no_such_rule', params: {}, severity: 'soft' }] }), 'adherenceRules.0.type: unknown adherence rule type');
     });
+
+    test('discipline rules: each parameter within its range, whole numbers where the editor asks for them', () => {
+        const withRule = (params: Record<string, unknown>, extra: Record<string, unknown> = {}) =>
+            issue({ ...valid(), adherenceRules: [{ id: 'a1', type: 'max_position_pct', params, severity: 'soft', ...extra }] });
+        for (const params of [{ pct: 0 }, { pct: 100 }, { days: 0 }, { days: 365 }, { value: 0 }, { value: 10 }, { fromHour: 0, toHour: 24 }, { sector: 'Technology' }, {}]) {
+            assert.equal(withRule(params), 'ok', JSON.stringify(params));
+        }
+        assert.match(withRule({ pct: -1 }), /^adherenceRules\.0\.params\.pct: /);
+        assert.match(withRule({ pct: 100.5 }), /^adherenceRules\.0\.params\.pct: /);
+        assert.match(withRule({ days: 2.5 }), /^adherenceRules\.0\.params\.days: /);
+        assert.match(withRule({ days: 366 }), /^adherenceRules\.0\.params\.days: /);
+        assert.match(withRule({ value: 11 }), /^adherenceRules\.0\.params\.value: /);
+        assert.match(withRule({ fromHour: -1 }), /^adherenceRules\.0\.params\.fromHour: /);
+        assert.match(withRule({ toHour: 25 }), /^adherenceRules\.0\.params\.toHour: /);
+        assert.match(withRule({ fromHour: 9.5 }), /^adherenceRules\.0\.params\.fromHour: /);
+        assert.match(withRule({ sector: 'x'.repeat(61) }), /^adherenceRules\.0\.params\.sector: /);
+        assert.equal(withRule({ sector: '<script>' }), 'adherenceRules.0.params.sector: Input contains invalid characters (< or >)');
+        assert.match(withRule({ pct: 5, limit: 3 }), /^adherenceRules\.0\.params: Unrecognized key/);
+        assert.match(withRule({}, { severity: 'block' }), /^adherenceRules\.0\.severity: /);
+        assert.match(withRule({}, { id: 'has space' }), /^adherenceRules\.0\.id: id must be letters, digits, _ or -/);
+        assert.equal(issue({
+            ...valid(),
+            adherenceRules: Array.from({ length: STRATEGY_LIMITS.adherenceRules + 1 }, (_, i) => ({ id: `a${i}`, type: 'stop_loss_required', params: {}, severity: 'soft' })),
+        }), `adherenceRules: at most ${STRATEGY_LIMITS.adherenceRules} adherence rules`);
+    });
+
+    test('a save may carry its page\'s order: a page ID and a count from 1', () => {
+        assert.equal(issue({ ...valid(), order: { session: 'page-1234', seq: 1 } }), 'ok');
+        assert.equal(issue({ ...valid(), order: { session: 'page-1234', seq: 0 } }), 'order.seq: seq must be at least 1');
+        assert.equal(issue({ ...valid(), order: { session: 'x', seq: 1 } }), 'order.session: session must be a page ID');
+        assert.match(issue({ ...valid(), order: { session: 'page-1234', seq: 1, at: 2 } }), /^order: Unrecognized key/);
+    });
 });

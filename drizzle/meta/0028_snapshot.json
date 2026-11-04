@@ -1,5 +1,5 @@
 {
-  "id": "0cc6d4c0-c915-4455-afed-078410881e8d",
+  "id": "9f4c672d-da32-4722-8cd9-9ca37e98a2c3",
   "prevId": "81547fdd-916d-4574-bbbd-554d3da24461",
   "version": "7",
   "dialect": "postgresql",
@@ -3940,6 +3940,18 @@
         "backtest": {
           "name": "backtest",
           "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "write_session": {
+          "name": "write_session",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "write_seq": {
+          "name": "write_seq",
+          "type": "bigint",
           "primaryKey": false,
           "notNull": false
         },

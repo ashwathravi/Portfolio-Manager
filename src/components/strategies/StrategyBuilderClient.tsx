@@ -1,12 +1,13 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Copy, Plus, Trash2 } from "lucide-react";
 import { usePageHeader } from "@/components/layout/PageHeaderContext";
 import { DataUnavailableNotice } from "@/components/data-display/DataUnavailableNotice";
 import { SampleDataNotice } from "@/components/data-display/SampleDataNotice";
 import { SampleEmptyState } from "@/components/data-display/SampleEmptyState";
 import { useShowSampleData } from "@/lib/hooks/useShowSampleData";
+import { newWriteSession } from "@/lib/research/accountWrites";
 import { SEED_STRATEGIES } from "@/lib/strategies/seed";
 import { resolveSelectedStrategyId } from "@/lib/strategies/routes";
 import type { StrategiesPageData } from "@/lib/strategies/server";
@@ -47,8 +48,10 @@ import { AdherenceImpactCard } from "./AdherenceImpactCard";
  * discipline rules on the left; the backtest on the right.
  *
  * Edits to a saved strategy are saved a moment after the last change, one
- * request at a time per strategy, so a slow save can't land after a newer
- * one. Run backtest saves first, then runs the engine on the server over
+ * request at a time per strategy; an edit still waiting when the page is
+ * closed or reloaded goes out then, with keepalive. Each save carries this
+ * page's ID and its count of saves, so the server never lets an older save
+ * replace a newer one that overtook it. Run backtest saves first, then runs the engine on the server over
  * the stored prices. Edits to an example stay in this tab and flag its
  * illustrative backtest as out of date; Duplicate saves a copy to the
  * account, which can then be backtested for real.
@@ -61,8 +64,8 @@ type SaveState = "saving" | "saved" | "error";
 
 const SAVE_DELAY_MS = 600;
 
-function toInput(s: Strategy) {
-    return { name: s.name, description: s.description, definition: strategyDefinition(s), adherenceRules: s.adherenceRules };
+function toInput(s: Strategy, order?: { session: string; seq: number }) {
+    return { name: s.name, description: s.description, definition: strategyDefinition(s), adherenceRules: s.adherenceRules, ...(order ? { order } : {}) };
 }
 
 async function errorMessage(res: Response, fallback: string): Promise<string> {
@@ -93,6 +96,13 @@ export function StrategyBuilderClient({ data, requestedId }: { data: StrategiesP
     const pending = useRef(new Map<string, Strategy>());
     const timers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
     const queues = useRef(new Map<string, Promise<boolean>>());
+    const writeSession = useRef<string | null>(null);
+    const writeSeq = useRef(0);
+    const nextOrder = () => {
+        writeSession.current ??= newWriteSession();
+        writeSeq.current += 1;
+        return { session: writeSession.current, seq: writeSeq.current };
+    };
 
     /** Sends the strategy's latest unsaved version, after any save already on its way. */
     const flush = useCallback((id: string): Promise<boolean> => {
@@ -108,7 +118,7 @@ export function StrategyBuilderClient({ data, requestedId }: { data: StrategiesP
                 const res = await fetch(`/api/strategies/${encodeURIComponent(id)}`, {
                     method: "PUT",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify(toInput(strategy)),
+                    body: JSON.stringify(toInput(strategy, nextOrder())),
                 });
                 if (!res.ok) throw new Error(await errorMessage(res, "Couldn't save the strategy."));
                 setSaveState((prev) => ({ ...prev, [id]: "saved" }));
@@ -124,6 +134,24 @@ export function StrategyBuilderClient({ data, requestedId }: { data: StrategiesP
         });
         queues.current.set(id, next);
         return next;
+    }, []);
+
+    // A reload or close mustn't drop an edit still waiting for its save. The
+    // draft stays waiting too: if the page is kept (back-forward cache), its
+    // save goes out again, and a repeat changes nothing.
+    useEffect(() => {
+        const sendWaiting = () => {
+            for (const [id, strategy] of pending.current) {
+                void fetch(`/api/strategies/${encodeURIComponent(id)}`, {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(toInput(strategy, nextOrder())),
+                    keepalive: true,
+                }).catch(() => {});
+            }
+        };
+        window.addEventListener("pagehide", sendWaiting);
+        return () => window.removeEventListener("pagehide", sendWaiting);
     }, []);
 
     const scheduleSave = useCallback((strategy: Strategy) => {

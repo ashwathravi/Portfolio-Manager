@@ -9,7 +9,7 @@
  * night) and the next backtest can use them.
  */
 
-import { and, asc, count, eq, gte, inArray, lte, sql } from "drizzle-orm";
+import { and, asc, count, eq, gte, inArray, lte, or, sql } from "drizzle-orm";
 
 import { db } from "@/db";
 import { priceBars, strategies } from "@/db/schema";
@@ -71,18 +71,35 @@ export async function createStrategy(userId: string, input: StrategyInput, datab
     return strategyFromRow(row);
 }
 
-/** Replaces the strategy's name, description, definition and discipline rules; its backtest stays. */
+/**
+ * Replaces the strategy's name, description, definition and discipline
+ * rules; its backtest stays. A save that carries its page's order is
+ * skipped when the same page already saved a later one (a save sent as the
+ * page closes can overtake an older one still on its way); the strategy
+ * is returned as it stands either way. Null when the user has no such
+ * strategy.
+ */
 export async function updateStrategy(userId: string, id: string, input: StrategyInput, database: Database = db): Promise<Strategy | null> {
+    const { order } = input;
+    const mine = and(eq(strategies.id, id), eq(strategies.userId, userId));
+    const newer = order
+        ? or(sql`${strategies.writeSession} is distinct from ${order.session}`, sql`${strategies.writeSeq} < ${order.seq}`)
+        : undefined;
     const [row] = await database.update(strategies).set({
         name: input.name,
         description: input.description,
         definition: input.definition,
         adherenceRules: input.adherenceRules,
+        writeSession: order?.session ?? null,
+        writeSeq: order?.seq ?? null,
         updatedAt: new Date(),
-    }).where(and(eq(strategies.id, id), eq(strategies.userId, userId))).returning();
-    if (!row) return null;
-    await trackSymbols(input.definition.symbols, database);
-    return strategyFromRow(row);
+    }).where(and(mine, newer)).returning();
+    if (row) {
+        await trackSymbols(input.definition.symbols, database);
+        return strategyFromRow(row);
+    }
+    const [current] = await database.select().from(strategies).where(mine);
+    return current ? strategyFromRow(current) : null;
 }
 
 export async function deleteStrategy(userId: string, id: string, database: Database = db): Promise<boolean> {
