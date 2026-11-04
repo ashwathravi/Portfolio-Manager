@@ -64,6 +64,11 @@ async function routeRequest(request: NextRequest, event: NextFetchEvent | undefi
         // over the body itself (src/lib/plaid/webhook.ts). Limited per IP.
         return (await rateLimitApiRequest(request)) ?? next();
     }
+    if (isUnsubscribeRoute(pathname, request.method)) {
+        // No session: a mail app's one-click unsubscribe posts here, and the
+        // route checks the link's token itself. Limited per IP.
+        return (await rateLimitApiRequest(request)) ?? next();
+    }
     if (isPublicRoute(pathname)) return next();
 
     const mode = authRuntimeMode();
@@ -140,6 +145,7 @@ function isPublicRoute(pathname: string): boolean {
     return pathname === "/login"
         || pathname === "/privacy"
         || pathname === "/terms"
+        || pathname === "/unsubscribe"
         || pathname === "/robots.txt"
         || pathname === "/api/health"
         || pathname === "/api/health/ready"
@@ -153,6 +159,10 @@ function isCronRoute(pathname: string): boolean {
 
 function isProviderWebhookRoute(pathname: string, method: string): boolean {
     return pathname === "/api/plaid/webhook" && method === "POST";
+}
+
+function isUnsubscribeRoute(pathname: string, method: string): boolean {
+    return pathname === "/api/email/unsubscribe" && method === "POST";
 }
 
 function isSchwabRoute(pathname: string): boolean {
@@ -195,6 +205,7 @@ function isSessionBackedApiRoute(pathname: string, method: string): boolean {
     if (pathname === "/api/alerts/rules" && (method === "GET" || method === "POST")) return true;
     if (/^\/api\/alerts\/rules\/[^/]+$/.test(pathname) && (method === "PUT" || method === "DELETE")) return true;
     if (pathname === "/api/alerts/notifications" && (method === "GET" || method === "PATCH" || method === "DELETE")) return true;
+    if (pathname === "/api/email/preferences" && (method === "GET" || method === "PUT")) return true;
     if (pathname === "/api/alpha-radar/refresh" && method === "POST") return true;
     if (pathname === "/api/alpha-radar/filers" && method === "POST") return true;
     if (/^\/api\/alpha-radar\/filers\/[^/]+\/refresh$/.test(pathname) && method === "POST") return true;

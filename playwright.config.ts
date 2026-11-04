@@ -59,6 +59,13 @@ const noMarketData = {
     FINNHUB_API_KEY: '',
 };
 
+// No Resend key or sender, so a test run never sends email (launch item
+// i58) and Settings always says this server doesn't send yet.
+const noEmail = {
+    RESEND_API_KEY: '',
+    EMAIL_FROM: '',
+};
+
 // No cron secret, so /api/cron/* always refuses (503) and a test run never
 // runs the scheduled jobs, whatever .env.local holds.
 const noCronSecret = {
@@ -145,6 +152,7 @@ export default defineConfig({
                 ...noSharedRedis,
                 ...noMarketData,
                 ...noCronSecret,
+                ...noEmail,
                 ...noSentry,
             },
             url: 'http://localhost:3000',
@@ -172,6 +180,7 @@ export default defineConfig({
                 ...noSharedRedis,
                 ...noMarketData,
                 ...noCronSecret,
+                ...noEmail,
                 ...noSentry,
             },
             url: 'http://localhost:3100/api/health',
@@ -205,6 +214,7 @@ export default defineConfig({
                 ...noSharedRedis,
                 ...noMarketData,
                 ...noCronSecret,
+                ...noEmail,
                 ...noSentry,
             },
             url: 'http://localhost:3200/api/health',

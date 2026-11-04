@@ -74,6 +74,7 @@ describe('account deletion and export', { skip: !DATABASE_URL && 'SCRIPTS_TEST_D
         await sql`
             INSERT INTO alert_notifications (user_id, rule_id, occurrence, rule_name, metric, symbol, comparator, threshold, observed_value, message, href, triggered_at)
             VALUES (${user}, ${rule.id}, 'session:2026-10-23', 'AAPL above $95', 'price', 'AAPL', 'gte', 95, 100, 'AAPL closed at $100.00 on Oct 23, at or above $95.00.', '/portfolios/detail/AAPL', '2026-10-23 22:31')`;
+        await sql`INSERT INTO email_preferences (user_id, alerts, weekly_review, alerts_since, unsubscribe_token, updated_at) VALUES (${user}, true, false, '2026-10-21 12:00', ${`unsubscribe-secret-${user}`}, '2026-10-21 12:00')`;
         const [item] = await sql<{ id: string }[]>`
             INSERT INTO plaid_items (user_id, plaid_item_id, institution_id, institution_name, access_token_ciphertext, access_token_iv, access_token_auth_tag)
             VALUES (${user}, ${`item-${user}`}, 'ins_1', 'Fidelity', 'secret-cipher', 'i', 't') RETURNING id`;
@@ -103,6 +104,7 @@ describe('account deletion and export', { skip: !DATABASE_URL && 'SCRIPTS_TEST_D
                 (SELECT count(*) FROM strategies WHERE user_id = ${user})::int AS strategies,
                 (SELECT count(*) FROM alert_rules WHERE user_id = ${user})::int AS alert_rules,
                 (SELECT count(*) FROM alert_notifications WHERE user_id = ${user})::int AS alert_notifications,
+                (SELECT count(*) FROM email_preferences WHERE user_id = ${user})::int AS email_preferences,
                 (SELECT count(*) FROM plaid_items WHERE user_id = ${user})::int AS plaid_items,
                 (SELECT count(*) FROM plaid_accounts WHERE user_id = ${user})::int AS plaid_accounts`;
         return { ...counts };
@@ -165,8 +167,11 @@ describe('account deletion and export', { skip: !DATABASE_URL && 'SCRIPTS_TEST_D
             ['AAPL above $95', 100, 'AAPL closed at $100.00 on Oct 23, at or above $95.00.', '2026-10-23T22:31:00.000Z', null],
         ]);
 
+        // Which emails it gets (launch item i58), without the unsubscribe token.
+        assert.deepEqual(data.emailPreferences, { alerts: true, weeklyReview: false, updatedAt: '2026-10-21T12:00:00.000Z' });
+
         const text = JSON.stringify(data);
-        for (const leak of ['userId', 'writeSession', 'writeSeq', 'dismissed', 'cleared', 'occurrence', 'An earlier question', 'secret-cipher', 'item-u-export', 'acc-u-export', 'u-other']) {
+        for (const leak of ['userId', 'writeSession', 'writeSeq', 'dismissed', 'cleared', 'occurrence', 'An earlier question', 'secret-cipher', 'item-u-export', 'acc-u-export', 'u-other', 'unsubscribe-secret', 'alertsSince']) {
             assert.ok(!text.includes(leak), leak);
         }
     });

@@ -59,10 +59,10 @@ export default function PrivacyPage({ searchParams }: { searchParams: LegalSearc
                     </li>
                     <li>
                         <strong>Your settings.</strong> Profile, display, notification and trading
-                        preferences, the account names, last four digits and balances shown in Settings, and
-                        your risk policy, including cash, employer-stock and tax-limit details. They are
-                        saved with your account so they follow you to any browser; this browser keeps a copy
-                        until you sign out. API keys you enter in Settings are never saved: they&rsquo;re held
+                        preferences, which emails you&rsquo;ve asked for, the account names, last four digits
+                        and balances shown in Settings, and your risk policy, including cash, employer-stock
+                        and tax-limit details. They are saved with your account so they follow you to any
+                        browser; this browser keeps a copy until you sign out. API keys you enter in Settings are never saved: they&rsquo;re held
                         in memory for the current session only.
                     </li>
                     <li>
@@ -87,6 +87,11 @@ export default function PrivacyPage({ searchParams }: { searchParams: LegalSearc
                 <ul>
                     <li>To run the app: show your net worth, holdings, activity and performance, and check trade ideas against your risk policy.</li>
                     <li>To keep it secure: sign-in, limiting request rates, and investigating misuse.</li>
+                    <li>
+                        To send the emails you turn on in Settings: your alerts each weekday evening, and the
+                        weekly review of the trades you closed. Both are off until you turn them on, and every
+                        one has a link to stop it in one click.
+                    </li>
                     <li>To fix problems and to contact you about your account.</li>
                 </ul>
                 <p>
@@ -124,6 +129,11 @@ export default function PrivacyPage({ searchParams }: { searchParams: LegalSearc
                         Sentry sees your IP address the way any website you connect to does.
                     </li>
                     <li>
+                        <strong>Resend</strong> sends the emails you turn on. It receives your email address
+                        and what each email says: your alerts, or your week&rsquo;s closed trades and realized
+                        profit or loss.
+                    </li>
+                    <li>
                         <strong>Market data providers (Massive and Finnhub) and SEC EDGAR</strong> supply prices
                         and filings. We send them ticker symbols, filer IDs and the words you type into ticker
                         search, never your name, email or account details.
@@ -142,7 +152,7 @@ export default function PrivacyPage({ searchParams }: { searchParams: LegalSearc
                     Settings (one JSON file, or your transactions and holdings as CSV). Delete your account in
                     Settings and we remove, straight away, your account, portfolios, holdings, transactions,
                     drafted orders, value history, watchlist, journal, theses, strategies, alert rules and
-                    alerts, Ask questions and settings from
+                    alerts, email choices, Ask questions and settings from
                     our database, end our access to your linked institutions at Plaid and erase our encrypted
                     access to them, and clear what this browser kept for you. You can also email{" "}
                     <ContactLink /> to have it done within 30 days. We keep nothing afterwards unless the law
@@ -160,7 +170,8 @@ export default function PrivacyPage({ searchParams }: { searchParams: LegalSearc
                     and erases their text straight away; a short record of which rule fired, for what and
                     when stays so the same alert isn&rsquo;t raised again, until it&rsquo;s 180 days old.
                     Deleting a rule deletes everything it raised, and alerts are otherwise deleted once
-                    they&rsquo;re 180 days old.
+                    they&rsquo;re 180 days old. If you&rsquo;ve turned on alert emails, we record when each
+                    alert was emailed so it isn&rsquo;t emailed twice.
                 </p>
                 <p>
                     When you clear your Ask conversation it disappears straight away. Its questions and answers
@@ -198,6 +209,10 @@ export default function PrivacyPage({ searchParams }: { searchParams: LegalSearc
                 <p>
                     You can ask for a copy of your data, ask us to correct it, or ask us to delete it by
                     emailing <ContactLink />. We reply within 30 days.
+                </p>
+                <p>
+                    Turn emails on or off in Settings › Notifications at any time. The unsubscribe link in
+                    each email stops that kind of email without signing in.
                 </p>
             </section>
 

@@ -564,6 +564,8 @@ test.describe('Settings page', () => {
         await expect(page.getByText('Alpha Radar Signals').first()).toBeVisible();
         await expect(page.getByTestId('alpha-radar-delivery-preferences')).toBeVisible();
         await expect(page.getByLabel('Alpha Radar delivery ticker filters')).toBeVisible();
+        // Email is its own card, kept with the account (launch item i58; email.spec.ts).
+        await expect(page.getByTestId('email-preferences')).toBeVisible();
     });
 
     test('Alpha Radar delivery preferences accept ticker filters', async ({ page }) => {

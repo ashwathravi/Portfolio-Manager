@@ -211,6 +211,13 @@
       "when": 1793751661237,
       "tag": "0029_alerts",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1793751738338,
+      "tag": "0030_email",
+      "breakpoints": true
     }
   ]
 }

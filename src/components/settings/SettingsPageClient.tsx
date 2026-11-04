@@ -19,6 +19,7 @@ import { ExampleDataCard } from "./cards/ExampleDataCard";
 import { PreferencesSettings } from "./PreferencesSettings";
 import { NotificationPreferences } from "./NotificationPreferences";
 import { AlertRulesManager } from "./AlertRulesManager";
+import { EmailPreferencesCard } from "./EmailPreferencesCard";
 import { ApiKeysSettings } from "./ApiKeysSettings";
 import { DataManagement } from "./DataManagement";
 import { TagsManager } from "./TagsManager";
@@ -82,6 +83,7 @@ export function SettingsPageClient() {
                 </Section>
                 <Section id="notifications" title="Notifications & alerts">
                     <NotificationPreferences />
+                    <EmailPreferencesCard />
                     <AlertRulesManager />
                 </Section>
                 <Section id="preferences" title="Preferences">

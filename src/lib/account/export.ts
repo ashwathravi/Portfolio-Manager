@@ -5,7 +5,8 @@
  * other devices learn of a deletion, Ask messages already cleared (kept
  * only so they count towards the day's question limit), alerts already
  * cleared (kept only so they aren't raised again), and anything
- * secret (Plaid tokens, and Plaid's own IDs for connections and accounts).
+ * secret (Plaid tokens, Plaid's own IDs for connections and accounts, and
+ * the token in email unsubscribe links).
  */
 
 import { and, asc, desc, eq, inArray, isNull, ne } from "drizzle-orm";
@@ -16,6 +17,7 @@ import {
     alertRules,
     askMessages,
     authUsers,
+    emailPreferences,
     holdings,
     journalEntries,
     orderPlans,
@@ -111,6 +113,7 @@ export async function buildAccountExport(userId: string, database: Database = db
         const raised = await tx.select().from(alertNotifications)
             .where(and(eq(alertNotifications.userId, userId), eq(alertNotifications.cleared, false)))
             .orderBy(desc(alertNotifications.triggeredAt), asc(alertNotifications.id));
+        const [emails] = await tx.select().from(emailPreferences).where(eq(emailPreferences.userId, userId)).limit(1);
 
         return {
             format: ACCOUNT_EXPORT_FORMAT,
@@ -180,6 +183,10 @@ export async function buildAccountExport(userId: string, database: Database = db
             alertRules: rules.map(plain),
             // `occurrence` is how the nightly job records an alert once: internal.
             alerts: raised.map((alert) => plain({ ...alert, occurrence: undefined })),
+            // The unsubscribe token and the job's bookkeeping are internal.
+            emailPreferences: emails
+                ? { alerts: emails.alerts, weeklyReview: emails.weeklyReview, updatedAt: emails.updatedAt.toISOString() }
+                : null,
         };
     }, { isolationLevel: "repeatable read", accessMode: "read only" });
 }

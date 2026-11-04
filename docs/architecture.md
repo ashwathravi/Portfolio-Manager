@@ -55,6 +55,7 @@ Plaid Link runs in the browser; the server exchanges the public token and stores
 
 - Vercel Cron calls `GET /api/cron/daily` once a weekday (`vercel.json`), with `CRON_SECRET` as its bearer token. The route runs `expired-sessions`, `ask-history`, `plaid`, `prices` and `snapshots` in order (`src/lib/jobs/daily-jobs.ts`), one run at a time, and records each in `job_runs` (`src/lib/jobs/runner.ts`).
 - Health: `/api/health` (the process, and the commit it runs), `/api/health/ready` (the database) and `/api/health/jobs` (each scheduled job, the backup included, on time or not; `src/lib/health/job-health.ts`). The production monitor reads the last two every half hour (`docs/monitoring.md`); every deploy ends with a smoke test of the live site (`docs/deployment.md`).
+- Email (launch item i58, `src/lib/email`): the nightly `email` job, after `alerts`, sends each user who turned them on (`email_preferences`, Settings' Email card through `/api/email/preferences`) their unread alerts and, after Friday's close, the weekly review built by `src/lib/reviews` from their trade journal, through Resend's API with one `fetch` (`resend.ts`). Each email is claimed before it's sent and given back if Resend refuses it. Unsubscribing needs no session: a mail app's one-click POST to `/api/email/unsubscribe`, or the button on `/unsubscribe`, with the random token from the link.
 - The nightly backup is a GitHub workflow, not a job here (`docs/backups.md`); it records its run in `job_runs`.
 
 ## Integrations kept off
@@ -156,7 +157,7 @@ Scheduled orchestration and delivery:
 - `src/lib/alpha-radar/scheduler.ts` implements the AR-131 scheduler boundary without adding a separate worker stack. It plans weekly, quarterly, and ad hoc Alpha Radar refreshes with deterministic schedule-window idempotency keys.
 - The default refresh pipeline queues ingestion, parser, diff, thesis, and notifier operations. Scheduling does not perform SEC calls directly; it only creates downstream job references that a future worker or cron runner can execute through the AR-125 contracts.
 - Quarterly windows respect the 13F availability lag instead of assuming quarter-end data is immediately tradable. Run history summaries collapse repeated failures into one actionable in-app status so retries do not spam duplicate alerts.
-- Delivery planning supports in-app, email, Slack, and Telegram channel preferences. The approved v2 implementation delivers in-app and leaves external channels adapter-gated until AR-133 locks provider credentials, destinations, and cost controls.
+- Delivery planning supports in-app, Slack, and Telegram channel preferences. The approved v2 implementation delivers in-app and leaves Slack and Telegram adapter-gated until AR-133 locks provider credentials, destinations, and cost controls. Alpha Radar alerts reach email with the user's other alerts (launch item i58), not through a channel of their own.
 - Settings persist `alphaRadarDelivery` preferences for scheduled updates, failure summaries, channel toggles, and ticker filters. Research renders scheduled run visibility so users can see due jobs, last run status, and delivery mode.
 
 Backtesting:

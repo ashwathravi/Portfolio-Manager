@@ -55,10 +55,14 @@ test.describe('Privacy policy', () => {
 
   test('says what stays when you remove a watchlist ticker, journal entry or thesis', async ({ page }) => {
     const retention = page.getByRole('region', { name: 'Keeping and deleting your data' });
-    await expect(retention).toContainText('drafted orders, value history, watchlist, journal, theses, strategies, alert rules and alerts, Ask questions and settings');
+    await expect(retention).toContainText('drafted orders, value history, watchlist, journal, theses, strategies, alert rules and alerts, email choices, Ask questions and settings');
     await expect(retention).toContainText('Your alert rules are checked each weekday evening, on our servers');
     await expect(retention).toContainText('Clearing your alerts removes them and erases their text straight away; a short record of which rule fired, for what and when stays');
     await expect(retention).toContainText('alerts are otherwise deleted once they’re 180 days old');
+    await expect(retention).toContainText('we record when each alert was emailed so it isn’t emailed twice');
+    // Launch item i58: emails are off until turned on, and stop from their own link.
+    await expect(page.getByRole('region', { name: 'How we use it' })).toContainText('Both are off until you turn them on, and every one has a link to stop it in one click.');
+    await expect(page.getByRole('region', { name: 'Your choices' })).toContainText('The unsubscribe link in each email stops that kind of email without signing in.');
     await expect(retention).toContainText('When you clear your Ask conversation it disappears straight away. Its questions and answers are deleted once they’re a day old, by the next nightly cleanup');
     await expect(retention.getByText(/When you remove a watchlist ticker or delete a journal entry or thesis/)).toContainText('notes and reasoning are erased');
   });
@@ -81,7 +85,7 @@ test.describe('Privacy policy', () => {
 
   test('names every service that receives data, including error reports', async ({ page }) => {
     const sharing = page.getByRole('region', { name: 'Who we share it with' });
-    for (const service of ['Plaid', 'Google', 'Vercel', 'Upstash', 'Supabase', 'Sentry']) {
+    for (const service of ['Plaid', 'Google', 'Vercel', 'Upstash', 'Supabase', 'Sentry', 'Resend']) {
       await expect(sharing.getByText(service, { exact: true })).toBeVisible();
     }
     await expect(sharing.getByText(/Reports never include your name, email, cookies/)).toBeVisible();
@@ -89,6 +93,8 @@ test.describe('Privacy policy', () => {
     // Both price providers are named (launch item i33), and get ticker symbols only.
     await expect(sharing.getByText('Market data providers (Massive and Finnhub) and SEC EDGAR')).toBeVisible();
     await expect(sharing).toContainText('We send them ticker symbols, filer IDs and the words you type into ticker search, never your name, email or account details.');
+    // Launch item i58: the emails the user turns on.
+    await expect(sharing).toContainText('Resend sends the emails you turn on. It receives your email address and what each email says');
   });
 
   test('links to the Plaid end user policy and a contact address', async ({ page }) => {
