@@ -31,6 +31,17 @@ function entry(id: string, closedAt: string, realizedPnlUsd: number): JournalEnt
     } as JournalEntry;
 }
 
+/** A week of closed trades: two in the week of Oct 26, one the week before. */
+const WEEK_TRADES: TradeJournal = {
+    entries: [
+        entry('t-1', '2026-10-27T15:00:00.000Z', 400),
+        entry('t-2', '2026-10-30T19:00:00.000Z', -100),
+        entry('t-old', '2026-10-20T15:00:00.000Z', 5_000), // the week before
+    ],
+    leftOut: ['NVDA'],
+    netWorth: 100_000,
+};
+
 describe('email kept with the account, and the nightly email job', { skip: !DATABASE_URL && 'SCRIPTS_TEST_DATABASE_URL is not set', timeout: 120_000 }, () => {
     const name = `email_test_${process.pid}`;
     let server: ReturnType<typeof postgres>;
@@ -199,6 +210,7 @@ describe('email kept with the account, and the nightly email job', { skip: !DATA
             assert.deepEqual(fake.sent.map((email) => email.to), ['u-2@example.test']);
             assert.equal(await emailedAt(failing), null);
             assert.notEqual(await emailedAt(going), null);
+            assert.equal((await sql`SELECT 1 FROM alert_notifications WHERE email_claimed_at IS NOT NULL`).length, 0, 'no claim is left behind');
 
             const retry = outbox();
             const later = new Date(MONDAY.getTime() + 86_400_000);
@@ -238,19 +250,73 @@ describe('email kept with the account, and the nightly email job', { skip: !DATA
             const waiting = await sql`SELECT 1 FROM alert_notifications WHERE emailed_at IS NULL`;
             assert.equal(waiting.length, 1);
         });
+
+        test('regression: an email whose run was cut off after claiming it goes on a later run; one a live run holds isn\'t taken', async () => {
+            await saveEmailPreferences('u-1', { alerts: true }, { database, now: new Date('2026-10-29T12:00:00Z') });
+            await saveEmailPreferences('u-2', { alerts: true }, { database, now: new Date('2026-10-29T12:00:00Z') });
+            const abandoned = await raise('u-1', '2026-11-02 22:35');
+            const inFlight = await raise('u-2', '2026-11-02 22:35');
+            // The function was stopped twenty minutes ago between claiming and sending; another run claimed a minute ago.
+            await sql`UPDATE alert_notifications SET email_claimed_at = '2026-11-02 22:15' WHERE id = ${abandoned}`;
+            await sql`UPDATE alert_notifications SET email_claimed_at = '2026-11-02 22:34' WHERE id = ${inFlight}`;
+
+            const fake = outbox();
+            assert.deepEqual((await run(MONDAY, { send: fake.send })).alerts, { sent: 1, failed: 0, deferred: 0 });
+            assert.deepEqual(fake.sent.map((email) => email.to), ['u-1@example.test']);
+            assert.equal(await emailedAt(abandoned), '2026-11-02T22:35');
+            assert.equal(await emailedAt(inFlight), null);
+        });
+
+        test('Friday evening\'s alerts still go on Monday, when Friday\'s run couldn\'t send them', async () => {
+            await saveEmailPreferences('u-1', { alerts: true }, { database, now: new Date('2026-10-29T12:00:00Z') });
+            const friday = await raise('u-1', '2026-10-30 23:20'); // Hobby can start the 22:30 run late
+            const fake = outbox();
+            assert.equal((await run(new Date('2026-11-02T22:31:00.000Z'), { send: fake.send })).alerts?.sent, 1);
+            assert.notEqual(await emailedAt(friday), null);
+        });
+
+        test('while reviews are due alerts get half the budget, and whoever was put off goes first the next evening', async () => {
+            for (const user of ['u-1', 'u-2', 'u-3']) {
+                await saveEmailPreferences(user, { alerts: true }, { database, now: new Date('2026-10-29T12:00:00Z') });
+            }
+            await raise('u-3', '2026-10-30 22:35'); // waiting since Friday
+            await raise('u-1', '2026-11-02 22:35');
+            await raise('u-2', '2026-11-02 22:35');
+            await sql`INSERT INTO auth_users (id, name, email) VALUES ('u-4', 'u-4', 'u-4@example.test')`;
+            await saveEmailPreferences('u-4', { weeklyReview: true }, { database });
+
+            const timed = () => {
+                let clock = 0;
+                const fake = outbox();
+                return {
+                    fake,
+                    deps: {
+                        send: async (email: OutgoingEmail) => { clock += 100; return fake.send(email); },
+                        clock: () => clock,
+                        pause: async (ms: number) => { clock += ms; },
+                        budgetMs: 1_000,
+                        loadJournal: async (userId: string) => (userId === 'u-4' ? WEEK_TRADES : { entries: [], leftOut: [], netWorth: 0 }),
+                    },
+                };
+            };
+
+            // Monday: alerts stop at half a second, so the review still goes.
+            const monday = timed();
+            const detail = await run(MONDAY, monday.deps);
+            assert.deepEqual(detail.alerts, { sent: 2, failed: 0, deferred: 1 });
+            assert.deepEqual(detail.weeklyReview, { week: 'wk:2026-10-26', sent: 1, noTrades: 0, failed: 0, deferred: 0 });
+            assert.deepEqual(monday.fake.sent.map((email) => email.to), ['u-3@example.test', 'u-1@example.test', 'u-4@example.test'],
+                'the alert waiting since Friday first');
+
+            // Tuesday: new alerts for u-1, but u-2 has waited longest and goes first.
+            await raise('u-1', '2026-11-03 22:35');
+            const tuesday = timed();
+            await run(new Date('2026-11-03T22:35:00.000Z'), { ...tuesday.deps, budgetMs: 100 });
+            assert.deepEqual(tuesday.fake.sent.map((email) => email.to), ['u-2@example.test']);
+        });
     });
 
     describe('weekly review emails', () => {
-        const WEEK_TRADES: TradeJournal = {
-            entries: [
-                entry('t-1', '2026-10-27T15:00:00.000Z', 400),
-                entry('t-2', '2026-10-30T19:00:00.000Z', -100),
-                entry('t-old', '2026-10-20T15:00:00.000Z', 5_000), // the week before
-            ],
-            leftOut: ['NVDA'],
-            netWorth: 100_000,
-        };
-
         test('after Friday\'s close, the week\'s review of closed trades, once; none for a week without trades', async () => {
             await saveEmailPreferences('u-1', { weeklyReview: true }, { database });
             await saveEmailPreferences('u-2', { weeklyReview: true }, { database });
@@ -296,8 +362,23 @@ describe('email kept with the account, and the nightly email job', { skip: !DATA
         test('a journal that can\'t be read fails that user\'s review, and leaves it for a later run', async () => {
             await saveEmailPreferences('u-1', { weeklyReview: true }, { database });
             await assert.rejects(run(FRIDAY, { send: outbox().send, loadJournal: async () => { throw new Error('database timeout'); } }), /First: database timeout/);
-            const [row] = await sql<{ weekly_review_week: string | null }[]>`SELECT weekly_review_week FROM email_preferences WHERE user_id = 'u-1'`;
+            const [row] = await sql<{ weekly_review_week: string | null; weekly_review_claimed_at: Date | null }[]>`SELECT weekly_review_week, weekly_review_claimed_at FROM email_preferences WHERE user_id = 'u-1'`;
             assert.equal(row.weekly_review_week, null);
+            assert.equal(row.weekly_review_claimed_at, null);
+        });
+
+        test('regression: a review whose run was cut off after claiming it goes on a later run; one a live run holds isn\'t taken', async () => {
+            await saveEmailPreferences('u-1', { weeklyReview: true }, { database });
+            await saveEmailPreferences('u-2', { weeklyReview: true }, { database });
+            await sql`UPDATE email_preferences SET weekly_review_claimed_at = '2026-10-30 22:15' WHERE user_id = 'u-1'`;
+            await sql`UPDATE email_preferences SET weekly_review_claimed_at = '2026-10-30 22:34' WHERE user_id = 'u-2'`;
+
+            const fake = outbox();
+            assert.deepEqual((await run(FRIDAY, { send: fake.send, loadJournal: async () => WEEK_TRADES })).weeklyReview,
+                { week: 'wk:2026-10-26', sent: 1, noTrades: 0, failed: 0, deferred: 0 });
+            assert.deepEqual(fake.sent.map((email) => email.to), ['u-1@example.test']);
+            const rows = await sql<{ user_id: string; weekly_review_week: string | null }[]>`SELECT user_id, weekly_review_week FROM email_preferences ORDER BY user_id`;
+            assert.deepEqual(rows.map((r) => [r.user_id, r.weekly_review_week]), [['u-1', 'wk:2026-10-26'], ['u-2', null]]);
         });
 
         test('before Friday\'s close nothing is sent for the week', async () => {

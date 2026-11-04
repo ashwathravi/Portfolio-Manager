@@ -4,23 +4,33 @@
  *
  *   - one email with the alerts raised since their last, leaving out the
  *     ones read or cleared in the app, those from before alert emails were
- *     turned on, and any over three days old;
+ *     turned on, and any over four days old (so Friday's still go on
+ *     Monday);
  *   - after Friday's close, the week's review of the trades they closed
  *     (src/lib/reviews), as Today shows it. Not sent for a week without
  *     closed trades. A run up to Tuesday's close can still send it when
  *     Friday's couldn't.
  *
- * Every email is claimed before it's sent (its alerts' emailed_at, the
- * review's week) and released if sending fails, so two runs at once never
- * send one twice and a failed one goes on a later run. Sends are spaced to
- * keep within Resend's rate limit, and stop when the job's budget is spent;
- * the rest go the next evening. Any failed send fails the run, after the
- * others have gone, so the job's health shows it.
+ * Every email is claimed before it's sent (its alerts' email_claimed_at, the
+ * user's weekly_review_claimed_at) and marked sent once Resend accepts it
+ * (emailed_at, weekly_review_week). A refused one is released at once; a
+ * claim never marked sent, because the run was cut off, lapses after
+ * {@link EMAIL_CLAIM_TTL_MS} and a later run takes it again, under the same
+ * idempotency key while it holds the same alerts. So two runs never send an
+ * email twice, and none is lost.
+ *
+ * Sends are spaced to keep within Resend's rate limit and stop when the
+ * job's budget is spent; the rest go the next evening. Users whose alerts
+ * have waited longest go first, so nobody is put off night after night,
+ * and while reviews are due the alerts may use only half the budget. Any
+ * failed send fails the run, after the others have gone, so the job's
+ * health shows it.
  */
 
 import { createHash } from "node:crypto";
 
-import { and, asc, desc, eq, gt, gte, inArray, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, inArray, isNotNull, isNull, lt, or, sql, type SQL } from "drizzle-orm";
+import type { PgColumn } from "drizzle-orm/pg-core";
 
 import { db } from "@/db";
 import { alertNotifications, authUsers, emailPreferences } from "@/db/schema";
@@ -38,14 +48,19 @@ type Database = typeof db;
 type Env = Readonly<Record<string, string | undefined>>;
 
 export const EMAIL_JOB = "email";
-/** Alerts older than this aren't emailed: they'd be news no longer. */
-export const ALERT_EMAIL_MAX_AGE_DAYS = 3;
+/** Alerts older than this aren't emailed: they'd be news no longer. Covers a weekend without runs. */
+export const ALERT_EMAIL_MAX_AGE_DAYS = 4;
 /** A week's review goes on a run from Friday's 4 PM close until this long after it (Tuesday's). */
 export const WEEKLY_REVIEW_SEND_DAYS = 4;
 /** Between sends: Resend allows two requests a second by default. */
 export const SEND_SPACING_MS = 500;
 /** No email is started after this; the nightly run's five minutes are mostly the price job's. */
 export const EMAIL_JOB_BUDGET_MS = 15_000;
+/**
+ * A claim this old that was never marked sent was cut off: the cron route
+ * stops at five minutes, and one run goes at a time.
+ */
+export const EMAIL_CLAIM_TTL_MS = 15 * 60_000;
 
 const DAY_MS = 86_400_000;
 
@@ -73,6 +88,11 @@ export interface EmailJobDeps {
 // Queries (compiled in tests)
 // ---------------------------------------------------------------------------
 
+/** Not claimed, or claimed by a run that was cut off. */
+function claimable(claimedAt: PgColumn, now: Date): SQL {
+    return or(isNull(claimedAt), lt(claimedAt, new Date(now.getTime() - EMAIL_CLAIM_TTL_MS)))!;
+}
+
 /** The alerts waiting to be emailed, each user's newest first, with where they go. */
 export function buildAlertsToEmailQuery(now: Date, database: Database = db) {
     return database
@@ -83,6 +103,7 @@ export function buildAlertsToEmailQuery(now: Date, database: Database = db) {
             metric: alertNotifications.metric,
             symbol: alertNotifications.symbol,
             href: alertNotifications.href,
+            triggeredAt: alertNotifications.triggeredAt,
             address: authUsers.email,
             token: emailPreferences.unsubscribeToken,
         })
@@ -95,73 +116,92 @@ export function buildAlertsToEmailQuery(now: Date, database: Database = db) {
             eq(alertNotifications.cleared, false),
             isNull(alertNotifications.readAt),
             isNull(alertNotifications.emailedAt),
+            claimable(alertNotifications.emailClaimedAt, now),
             gte(alertNotifications.triggeredAt, emailPreferences.alertsSince),
             gt(alertNotifications.triggeredAt, new Date(now.getTime() - ALERT_EMAIL_MAX_AGE_DAYS * DAY_MS)),
         ))
         .orderBy(asc(alertNotifications.userId), desc(alertNotifications.triggeredAt), asc(alertNotifications.id));
 }
 
-/** Claims alerts for an email: those not emailed (or cleared) since they were read. */
+/** Claims alerts for an email: those no other run has claimed, sent or seen cleared. */
 export function buildClaimAlertsQuery(ids: string[], now: Date, database: Database = db) {
     return database
         .update(alertNotifications)
-        .set({ emailedAt: now })
-        .where(and(inArray(alertNotifications.id, ids), isNull(alertNotifications.emailedAt), eq(alertNotifications.cleared, false)))
+        .set({ emailClaimedAt: now })
+        .where(and(
+            inArray(alertNotifications.id, ids),
+            isNull(alertNotifications.emailedAt),
+            eq(alertNotifications.cleared, false),
+            claimable(alertNotifications.emailClaimedAt, now),
+        ))
         .returning({ id: alertNotifications.id });
+}
+
+/** Marks this run's claimed alerts sent. */
+export function buildAlertsSentQuery(ids: string[], claimedAt: Date, database: Database = db) {
+    return database
+        .update(alertNotifications)
+        .set({ emailedAt: claimedAt, emailClaimedAt: null })
+        .where(and(inArray(alertNotifications.id, ids), eq(alertNotifications.emailClaimedAt, claimedAt)));
 }
 
 /** Gives back a claim whose email didn't go. */
 export function buildReleaseAlertsQuery(ids: string[], claimedAt: Date, database: Database = db) {
     return database
         .update(alertNotifications)
-        .set({ emailedAt: null })
-        .where(and(inArray(alertNotifications.id, ids), eq(alertNotifications.emailedAt, claimedAt)));
+        .set({ emailClaimedAt: null })
+        .where(and(inArray(alertNotifications.id, ids), eq(alertNotifications.emailClaimedAt, claimedAt)));
 }
 
-/** Who wants the review of `week` and hasn't had it. */
-export function buildWeeklyReviewRecipientsQuery(week: string, database: Database = db) {
+/** Who wants the review of `week`, hasn't had it, and isn't being sent it by another run. */
+export function buildWeeklyReviewRecipientsQuery(week: string, now: Date, database: Database = db) {
     return database
-        .select({
-            userId: emailPreferences.userId,
-            address: authUsers.email,
-            token: emailPreferences.unsubscribeToken,
-            lastWeek: emailPreferences.weeklyReviewWeek,
-        })
+        .select({ userId: emailPreferences.userId, address: authUsers.email, token: emailPreferences.unsubscribeToken })
         .from(emailPreferences)
         .innerJoin(authUsers, eq(authUsers.id, emailPreferences.userId))
         .where(and(
             eq(emailPreferences.weeklyReview, true),
             isNotNull(authUsers.email),
-            or(isNull(emailPreferences.weeklyReviewWeek), ne(emailPreferences.weeklyReviewWeek, week)),
+            sql`${emailPreferences.weeklyReviewWeek} is distinct from ${week}`,
+            claimable(emailPreferences.weeklyReviewClaimedAt, now),
         ))
         .orderBy(asc(emailPreferences.userId));
 }
 
-/** Claims the user's review of `week`, if no other run has since `lastWeek` was read. */
-export function buildClaimWeeklyReviewQuery(userId: string, week: string, lastWeek: string | null, database: Database = db) {
+/** Claims the user's review of `week`, if no other run has it or has sent it. */
+export function buildClaimWeeklyReviewQuery(userId: string, week: string, now: Date, database: Database = db) {
     return database
         .update(emailPreferences)
-        .set({ weeklyReviewWeek: week })
+        .set({ weeklyReviewClaimedAt: now })
         .where(and(
             eq(emailPreferences.userId, userId),
             eq(emailPreferences.weeklyReview, true),
-            sql`${emailPreferences.weeklyReviewWeek} is not distinct from ${lastWeek}`,
+            sql`${emailPreferences.weeklyReviewWeek} is distinct from ${week}`,
+            claimable(emailPreferences.weeklyReviewClaimedAt, now),
         ))
         .returning({ userId: emailPreferences.userId });
 }
 
-export function buildReleaseWeeklyReviewQuery(userId: string, week: string, lastWeek: string | null, database: Database = db) {
+/** Marks this run's claimed review handled: sent, or not needed for want of trades. */
+export function buildWeeklyReviewDoneQuery(userId: string, week: string, claimedAt: Date, database: Database = db) {
     return database
         .update(emailPreferences)
-        .set({ weeklyReviewWeek: lastWeek })
-        .where(and(eq(emailPreferences.userId, userId), eq(emailPreferences.weeklyReviewWeek, week)));
+        .set({ weeklyReviewWeek: week, weeklyReviewClaimedAt: null })
+        .where(and(eq(emailPreferences.userId, userId), eq(emailPreferences.weeklyReviewClaimedAt, claimedAt)));
+}
+
+export function buildReleaseWeeklyReviewQuery(userId: string, claimedAt: Date, database: Database = db) {
+    return database
+        .update(emailPreferences)
+        .set({ weeklyReviewClaimedAt: null })
+        .where(and(eq(emailPreferences.userId, userId), eq(emailPreferences.weeklyReviewClaimedAt, claimedAt)));
 }
 
 // ---------------------------------------------------------------------------
 // Sending
 // ---------------------------------------------------------------------------
 
-/** Sends spaced out and within the budget; counts what went, failed, and waits. */
+/** Sends spaced out and within the budget; counts what went and failed. */
 class Outbox {
     sent = 0;
     failed = 0;
@@ -173,8 +213,9 @@ class Outbox {
         this.startedAt = deps.clock();
     }
 
-    hasTime(): boolean {
-        return this.deps.clock() - this.startedAt < this.deps.budgetMs;
+    /** Whether there's time to start another email within `limitMs` of the job's start (its whole budget by default). */
+    hasTime(limitMs: number = this.deps.budgetMs): boolean {
+        return this.deps.clock() - this.startedAt < Math.min(limitMs, this.deps.budgetMs);
     }
 
     /** True when the email went. */
@@ -209,23 +250,37 @@ function keyFor(...parts: string[]): string {
     return createHash("sha256").update(parts.join("\n")).digest("hex");
 }
 
-async function emailAlerts(outbox: Outbox, config: EmailConfig, now: Date, database: Database): Promise<NonNullable<EmailJobDetail["alerts"]>> {
-    const rows = await buildAlertsToEmailQuery(now, database);
-    const byUser = new Map<string, typeof rows>();
-    for (const row of rows) byUser.set(row.userId, [...(byUser.get(row.userId) ?? []), row]);
+type AlertRow = Awaited<ReturnType<typeof buildAlertsToEmailQuery>>[number];
 
+/** Each user's alerts, newest first, the user whose oldest has waited longest first. */
+export function alertsByUser(rows: readonly AlertRow[]): AlertRow[][] {
+    const byUser = new Map<string, AlertRow[]>();
+    for (const row of rows) byUser.set(row.userId, [...(byUser.get(row.userId) ?? []), row]);
+    const oldest = (alerts: AlertRow[]) => Math.min(...alerts.map((alert) => alert.triggeredAt.getTime()));
+    return [...byUser.values()]
+        .map((alerts) => [...alerts].sort((a, b) => b.triggeredAt.getTime() - a.triggeredAt.getTime() || a.id.localeCompare(b.id)))
+        .sort((a, b) => oldest(a) - oldest(b) || a[0].userId.localeCompare(b[0].userId));
+}
+
+async function emailAlerts(
+    outbox: Outbox,
+    config: EmailConfig,
+    now: Date,
+    database: Database,
+    limitMs: number,
+): Promise<NonNullable<EmailJobDetail["alerts"]>> {
     const sentBefore = outbox.sent;
     const failedBefore = outbox.failed;
     let deferred = 0;
-    for (const [userId, alerts] of byUser) {
-        if (!outbox.hasTime()) {
+    for (const alerts of alertsByUser(await buildAlertsToEmailQuery(now, database))) {
+        if (!outbox.hasTime(limitMs)) {
             deferred += 1;
             continue;
         }
         const claimed = new Set((await buildClaimAlertsQuery(alerts.map((a) => a.id), now, database)).map((row) => row.id));
         const mine = alerts.filter((alert) => claimed.has(alert.id));
         if (mine.length === 0) continue;
-        const { address, token } = mine[0];
+        const { userId, address, token } = mine[0];
         const links = { siteUrl: config.siteUrl, token };
         const rendered = alertsEmail(mine.map((alert) => ({ ...alert, metric: alert.metric as AlertMetric })), links);
         const ids = mine.map((alert) => alert.id).sort();
@@ -236,23 +291,22 @@ async function emailAlerts(outbox: Outbox, config: EmailConfig, now: Date, datab
             "alerts",
             `alerts/${keyFor(userId, ...ids)}`,
         ));
-        if (!sent) await buildReleaseAlertsQuery(ids, now, database);
+        await (sent ? buildAlertsSentQuery(ids, now, database) : buildReleaseAlertsQuery(ids, now, database));
     }
     return { sent: outbox.sent - sentBefore, failed: outbox.failed - failedBefore, deferred };
 }
+
+type Recipient = Awaited<ReturnType<typeof buildWeeklyReviewRecipientsQuery>>[number];
 
 async function emailWeeklyReviews(
     outbox: Outbox,
     config: EmailConfig,
     now: Date,
+    week: ReturnType<typeof easternWeekBounds>,
+    recipients: readonly Recipient[],
     database: Database,
     loadJournal: NonNullable<EmailJobDeps["loadJournal"]>,
 ): Promise<NonNullable<EmailJobDetail["weeklyReview"]>> {
-    const week = easternWeekBounds(now);
-    const closedAt = Date.parse(week.weekEnd);
-    if (now.getTime() < closedAt || now.getTime() >= closedAt + WEEKLY_REVIEW_SEND_DAYS * DAY_MS) return { week: null };
-
-    const recipients = await buildWeeklyReviewRecipientsQuery(week.id, database);
     const sentBefore = outbox.sent;
     const failedBefore = outbox.failed;
     let noTrades = 0;
@@ -262,9 +316,10 @@ async function emailWeeklyReviews(
             deferred += 1;
             continue;
         }
-        const [claimed] = await buildClaimWeeklyReviewQuery(recipient.userId, week.id, recipient.lastWeek, database);
+        const [claimed] = await buildClaimWeeklyReviewQuery(recipient.userId, week.id, now, database);
         if (!claimed) continue;
-        const release = () => buildReleaseWeeklyReviewQuery(recipient.userId, week.id, recipient.lastWeek, database);
+        const release = () => buildReleaseWeeklyReviewQuery(recipient.userId, now, database);
+        const done = () => buildWeeklyReviewDoneQuery(recipient.userId, week.id, now, database);
 
         let journal: TradeJournal;
         try {
@@ -278,6 +333,7 @@ async function emailWeeklyReviews(
         // Today shows no review for a week without closed trades; neither does email.
         if (review.stats.tradeCount.total === 0) {
             noTrades += 1;
+            await done();
             continue;
         }
         const links = { siteUrl: config.siteUrl, token: recipient.token };
@@ -288,7 +344,7 @@ async function emailWeeklyReviews(
             "weekly_review",
             `weekly-review/${keyFor(recipient.userId, week.id)}`,
         ));
-        if (!sent) await release();
+        await (sent ? done() : release());
     }
     return { week: week.id, sent: outbox.sent - sentBefore, noTrades, failed: outbox.failed - failedBefore, deferred };
 }
@@ -314,8 +370,16 @@ export async function sendScheduledEmails({
     if (!setup.ok) return { skipped: setup.reason };
 
     const outbox = new Outbox({ send: send ?? resendSender(setup.config), pause, clock, budgetMs });
-    const alerts = await emailAlerts(outbox, setup.config, now, database);
-    const weeklyReview = await emailWeeklyReviews(outbox, setup.config, now, database, loadJournal);
+    const week = easternWeekBounds(now);
+    const closedAt = Date.parse(week.weekEnd);
+    const reviewsDue = now.getTime() >= closedAt && now.getTime() < closedAt + WEEKLY_REVIEW_SEND_DAYS * DAY_MS;
+    const recipients = reviewsDue ? await buildWeeklyReviewRecipientsQuery(week.id, now, database) : [];
+
+    // Reviews waiting get at least half the budget: alerts come every evening, a review's chance only until Tuesday.
+    const alerts = await emailAlerts(outbox, setup.config, now, database, recipients.length > 0 ? budgetMs / 2 : budgetMs);
+    const weeklyReview = reviewsDue
+        ? await emailWeeklyReviews(outbox, setup.config, now, week, recipients, database, loadJournal)
+        : { week: null };
     const detail: EmailJobDetail = { alerts, weeklyReview };
     if (outbox.failed > 0) throw new EmailJobError(detail, outbox.failed, outbox.firstError);
     return detail;

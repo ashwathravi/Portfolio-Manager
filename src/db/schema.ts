@@ -1034,6 +1034,9 @@ export const alertNotifications = pgTable("alert_notifications", {
     cleared: boolean("cleared").notNull().default(false),
     // When the nightly email job sent it (launch item i58); null until then.
     emailedAt: timestamp("emailed_at"),
+    // When a run took it to email; a claim this old that never became
+    // emailed_at was cut off, and a later run takes it again.
+    emailClaimedAt: timestamp("email_claimed_at"),
 }, (table) => ({
     userTriggeredIdx: index("alert_notifications_user_triggered_idx").on(table.userId, table.triggeredAt),
     ruleOccurrence: uniqueIndex("alert_notifications_rule_occurrence_idx").on(table.ruleId, table.occurrence),
@@ -1063,6 +1066,8 @@ export const emailPreferences = pgTable("email_preferences", {
     alertsSince: timestamp("alerts_since"),
     // The last week (wk:YYYY-MM-DD) whose review email was sent, or skipped for want of trades.
     weeklyReviewWeek: text("weekly_review_week"),
+    // When a run took this user's review to send; as email_claimed_at.
+    weeklyReviewClaimedAt: timestamp("weekly_review_claimed_at"),
     // Random, unguessable; it can only turn emails off.
     unsubscribeToken: text("unsubscribe_token").notNull().unique(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),

@@ -181,8 +181,9 @@ export async function buildAccountExport(userId: string, database: Database = db
             askHistory: asked.map(plain),
             strategies: saved.map(plain),
             alertRules: rules.map(plain),
-            // `occurrence` is how the nightly job records an alert once: internal.
-            alerts: raised.map((alert) => plain({ ...alert, occurrence: undefined })),
+            // `occurrence` is how the nightly job records an alert once, and
+            // `emailClaimedAt` how the email job takes one to send: internal.
+            alerts: raised.map((alert) => plain({ ...alert, occurrence: undefined, emailClaimedAt: undefined })),
             // The unsubscribe token and the job's bookkeeping are internal.
             emailPreferences: emails
                 ? { alerts: emails.alerts, weeklyReview: emails.weeklyReview, updatedAt: emails.updatedAt.toISOString() }

@@ -171,7 +171,7 @@ describe('account deletion and export', { skip: !DATABASE_URL && 'SCRIPTS_TEST_D
         assert.deepEqual(data.emailPreferences, { alerts: true, weeklyReview: false, updatedAt: '2026-10-21T12:00:00.000Z' });
 
         const text = JSON.stringify(data);
-        for (const leak of ['userId', 'writeSession', 'writeSeq', 'dismissed', 'cleared', 'occurrence', 'An earlier question', 'secret-cipher', 'item-u-export', 'acc-u-export', 'u-other', 'unsubscribe-secret', 'alertsSince']) {
+        for (const leak of ['userId', 'writeSession', 'writeSeq', 'dismissed', 'cleared', 'occurrence', 'An earlier question', 'secret-cipher', 'item-u-export', 'acc-u-export', 'u-other', 'unsubscribe-secret', 'alertsSince', 'emailClaimedAt']) {
             assert.ok(!text.includes(leak), leak);
         }
     });

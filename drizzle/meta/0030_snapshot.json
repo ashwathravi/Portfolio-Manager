@@ -1,5 +1,5 @@
 {
-  "id": "5af014b3-247e-44da-90f1-941660383bcb",
+  "id": "329fe069-7ddf-496a-aca2-bd1fc4a58ee6",
   "prevId": "d9f4c5ea-05f2-4565-8b90-614604d813c9",
   "version": "7",
   "dialect": "postgresql",
@@ -103,6 +103,12 @@
         },
         "emailed_at": {
           "name": "emailed_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "email_claimed_at": {
+          "name": "email_claimed_at",
           "type": "timestamp",
           "primaryKey": false,
           "notNull": false
@@ -2428,6 +2434,12 @@
         "weekly_review_week": {
           "name": "weekly_review_week",
           "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "weekly_review_claimed_at": {
+          "name": "weekly_review_claimed_at",
+          "type": "timestamp",
           "primaryKey": false,
           "notNull": false
         },

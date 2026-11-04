@@ -25,7 +25,7 @@ describe("email preference queries (launch item i58)", () => {
 
     test("turning alert emails on starts them now, unless they were already on; the review switch is left alone", () => {
         const { sql, params } = buildSaveEmailPreferencesQuery(USER, { alerts: true }, NOW, TOKEN).toSQL();
-        assert.match(sql, /^insert into "email_preferences" \("user_id", "alerts", "weekly_review", "alerts_since", "weekly_review_week", "unsubscribe_token", "updated_at"\) values \(\$1, \$2, \$3, \$4, default, \$5, \$6\) on conflict \("user_id"\) do update set "alerts" = \$7, "alerts_since" = case when "email_preferences"\."alerts" then "email_preferences"\."alerts_since" else \$8::timestamp end, "updated_at" = \$9 returning "alerts", "weekly_review"$/);
+        assert.match(sql, /^insert into "email_preferences" \("user_id", "alerts", "weekly_review", "alerts_since", "weekly_review_week", "weekly_review_claimed_at", "unsubscribe_token", "updated_at"\) values \(\$1, \$2, \$3, \$4, default, default, \$5, \$6\) on conflict \("user_id"\) do update set "alerts" = \$7, "alerts_since" = case when "email_preferences"\."alerts" then "email_preferences"\."alerts_since" else \$8::timestamp end, "updated_at" = \$9 returning "alerts", "weekly_review"$/);
         assert.deepEqual(params, [USER, true, false, NOW.toISOString(), TOKEN, NOW.toISOString(), true, NOW.toISOString(), NOW.toISOString()]);
         assert.doesNotMatch(sql.split(" do update ")[1], /unsubscribe_token|weekly_review" =/, "an existing row keeps its token and the other switch");
     });
