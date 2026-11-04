@@ -50,9 +50,10 @@ export default function PrivacyPage({ searchParams }: { searchParams: LegalSearc
                         CSV or enter by hand, orders you draft on Trade (with the reasons and risk-policy
                         overrides you record for them), your watchlist (tickers, why they&rsquo;re on it, target
                         prices and notes), your decision journal, your research theses (with their catalysts and
-                        evidence links), the questions you ask Ask and its answers (the last 25 of each), the
-                        alert rules you set and the alerts they raise, and the SEC filers you add to Alpha
-                        Radar. During the beta,
+                        evidence links), the strategies you save (their rules, tickers, guardrails and last
+                        backtest), the questions you ask Ask and its answers (the last 25 of each), the alert
+                        rules you set and the alerts they raise, and the SEC filers you add to Alpha Radar.
+                        During the beta,
                         Alpha Radar&rsquo;s list of filers and any notes on them are shared by every account,
                         so don&rsquo;t put anything private there.
                     </li>
@@ -140,8 +141,8 @@ export default function PrivacyPage({ searchParams }: { searchParams: LegalSearc
                     We keep your data while your account is open. Download a copy of it at any time in
                     Settings (one JSON file, or your transactions and holdings as CSV). Delete your account in
                     Settings and we remove, straight away, your account, portfolios, holdings, transactions,
-                    drafted orders, value history, watchlist, journal, theses, alert rules and alerts, Ask
-                    questions and settings from
+                    drafted orders, value history, watchlist, journal, theses, strategies, alert rules and
+                    alerts, Ask questions and settings from
                     our database, end our access to your linked institutions at Plaid and erase our encrypted
                     access to them, and clear what this browser kept for you. You can also email{" "}
                     <ContactLink /> to have it done within 30 days. We keep nothing afterwards unless the law

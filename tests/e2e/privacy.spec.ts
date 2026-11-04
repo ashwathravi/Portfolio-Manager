@@ -42,7 +42,8 @@ test.describe('Privacy policy', () => {
     await expect(added).toContainText('orders you draft on Trade');
     // Launch item i56.
     await expect(added).toContainText('the questions you ask Ask and its answers (the last 25 of each)');
-    // Launch item i57.
+    // Launch items i55 and i57.
+    await expect(added).toContainText('the strategies you save (their rules, tickers, guardrails and last backtest)');
     await expect(added).toContainText('the alert rules you set and the alerts they raise');
     const browserOnly = collected.getByText(/stored only in your browser/);
     await expect(browserOnly).not.toContainText('watchlist,');
@@ -54,7 +55,7 @@ test.describe('Privacy policy', () => {
 
   test('says what stays when you remove a watchlist ticker, journal entry or thesis', async ({ page }) => {
     const retention = page.getByRole('region', { name: 'Keeping and deleting your data' });
-    await expect(retention).toContainText('drafted orders, value history, watchlist, journal, theses, alert rules and alerts, Ask questions and settings');
+    await expect(retention).toContainText('drafted orders, value history, watchlist, journal, theses, strategies, alert rules and alerts, Ask questions and settings');
     await expect(retention).toContainText('Your alert rules are checked each weekday evening, on our servers');
     await expect(retention).toContainText('Clearing your alerts removes them and erases their text straight away; a short record of which rule fired, for what and when stays');
     await expect(retention).toContainText('alerts are otherwise deleted once they’re 180 days old');

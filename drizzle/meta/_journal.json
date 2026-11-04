@@ -201,8 +201,15 @@
     {
       "idx": 28,
       "version": "7",
-      "when": 1793744640956,
-      "tag": "0028_alerts",
+      "when": 1793750326316,
+      "tag": "0028_strategies",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1793751661237,
+      "tag": "0029_alerts",
       "breakpoints": true
     }
   ]

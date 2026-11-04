@@ -58,6 +58,7 @@ describe('account deletion and export', { skip: !DATABASE_URL && 'SCRIPTS_TEST_D
         await sql`INSERT INTO portfolio_snapshot_positions (portfolio_id, date, symbol, quantity, cost_basis, close, close_date, market_value) VALUES (${p.id}, '2026-10-23', 'AAPL', 10, 800, 100, '2026-10-23', 1000)`;
         await sql`INSERT INTO order_plans (user_id, portfolio_id, instrument_type, symbol, side, order_type, quantity, limit_price, time_in_force, status, reference_price, rationale, created_at, updated_at) VALUES (${user}, ${p.id}, 'equity', 'AAPL', 'buy', 'limit', 5, 95, 'day', 'ready', 100, ${JSON.stringify({ thesisId: 't-1', setupType: 'breakout', conviction: 7, mood: 'calm', rationale: 'add on the dip', capturedAt: '2026-10-24T14:00:00.000Z', timeToDecisionMs: 1000 })}::jsonb, '2026-10-24 14:00', '2026-10-24 14:00')`;
         await sql`INSERT INTO user_settings (user_id, version, settings) VALUES (${user}, 15, ${JSON.stringify({ demo: { showSampleData: false } })}::jsonb)`;
+        await sql`INSERT INTO strategies (user_id, name, definition) VALUES (${user}, 'Trend', ${JSON.stringify({ rules: [{ id: 'r1', field: 'Close', op: '>', value: 'SMA(50)' }], conjunctions: [], symbols: ['SPY'], guardrails: { maxPositionPct: 0.1, stopLossPct: 0.1, rebalanceDays: 7 } })}::jsonb)`;
         await sql`INSERT INTO watchlist_items (user_id, id, ticker, company_name, reason, notes, added_at, write_session, write_seq) VALUES (${user}, 'w-1', 'MSFT', 'Microsoft', 'cloud', 'n', '2026-03-01', 'session-1', 1)`;
         await sql`INSERT INTO watchlist_items (user_id, id, ticker, company_name, reason, notes, added_at, dismissed, write_session, write_seq) VALUES (${user}, 'w-2', 'TSLA', '', '', '', '2026-03-01', true, 'session-1', 2)`;
         await sql`INSERT INTO journal_entries (user_id, id, date, type, ticker, decision, rationale, outcome, write_session, write_seq) VALUES (${user}, 'j-1', '2026-03-05', 'entry', 'AAPL', 'Bought', 'cheap', 'pending', 'session-1', 3)`;
@@ -99,6 +100,7 @@ describe('account deletion and export', { skip: !DATABASE_URL && 'SCRIPTS_TEST_D
                 (SELECT count(*) FROM thesis_catalysts WHERE user_id = ${user})::int AS catalysts,
                 (SELECT count(*) FROM thesis_evidence WHERE user_id = ${user})::int AS evidence,
                 (SELECT count(*) FROM ask_messages WHERE user_id = ${user})::int AS ask_messages,
+                (SELECT count(*) FROM strategies WHERE user_id = ${user})::int AS strategies,
                 (SELECT count(*) FROM alert_rules WHERE user_id = ${user})::int AS alert_rules,
                 (SELECT count(*) FROM alert_notifications WHERE user_id = ${user})::int AS alert_notifications,
                 (SELECT count(*) FROM plaid_items WHERE user_id = ${user})::int AS plaid_items,
@@ -151,6 +153,9 @@ describe('account deletion and export', { skip: !DATABASE_URL && 'SCRIPTS_TEST_D
             ['q-1', 'user', 'Where did P&L come from?', []],
             ['a-1', 'assistant', 'Mostly AAPL.', [{ label: 'Closed trades' }]],
         ]);
+
+        // Strategies (launch item i55): the definition and backtest as saved.
+        assert.deepEqual(data.strategies.map((st) => [st.name, (st.definition as { symbols: string[] }).symbols, st.backtest]), [['Trend', ['SPY'], null]]);
 
         // Alert rules and what they raised (launch item i57).
         assert.deepEqual(data.alertRules.map((r) => [r.name, r.metric, r.symbol, r.comparator, r.threshold, r.rearm, r.enabled, r.note, r.createdAt]), [

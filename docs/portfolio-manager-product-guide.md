@@ -338,19 +338,16 @@ Alpha Radar evidence is not a buy signal by itself. Treat it as sourced research
 
 ## Strategies
 
-Open **Strategies** to manage strategy rules and adherence.
+Open **Strategies** to write entry rules, backtest them, and keep discipline rules beside them.
 
-Use it to:
+- **Your strategies** are saved to your account: start one with **New strategy**, or **Duplicate** an example. Edits save a moment after you make them.
+- **Rules** compare an indicator with a number or another indicator: `Close > SMA(50)`, `RSI(14) < 30`, `Mom(6M) > 10%`, `ADV(30) >= $5M`, `Close crosses above SMA(20)`. AND binds tighter than OR. Atlas works these out from daily prices; fundamentals like P/E aren't available.
+- **Tickers** are what the strategy may hold, up to 25: type a ticker or company, or add the index or sector ETFs.
+- **Guardrails** set each buy's size as a share of equity, a stop loss, and how often the rules are checked.
+- **Run backtest** replays the rules over the daily prices Atlas has stored (up to two years): rules are read at a close and trades happen at the next open, long only, from $100,000, with no fees. It shows the return beside SPY's, Sharpe, drawdown, trades, a Monte Carlo resample of the daily returns, and a verdict with its reason. A ticker Atlas has no prices for yet is named and left out; its history arrives over the next few nights. Change a rule and the result is marked out of date until you run it again.
+- **Examples** (labelled Sample) show the builder with illustrative results; edits to them stay in the tab.
 
-- Review strategy cards.
-- Select a strategy.
-- Configure rule builder conditions.
-- Edit adherence rules.
-- Review adherence impact.
-- Inspect backtest panel.
-- Explore builder/deploy pages.
-
-Strategy rules should describe process, not just desired outcomes.
+Strategy rules should describe process, not just desired outcomes. A backtest describes the past, not what will happen next.
 
 ## Execution
 

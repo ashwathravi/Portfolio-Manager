@@ -1,17 +1,14 @@
 import { StrategyBuilderClient } from "@/components/strategies/StrategyBuilderClient";
-import { SEED_STRATEGIES } from "@/lib/strategies/seed";
-import { STRATEGY_QUERY_PARAM, resolveSelectedStrategyId } from "@/lib/strategies/routes";
+import { requirePageUserId } from "@/lib/auth/request-user";
+import { STRATEGY_QUERY_PARAM } from "@/lib/strategies/routes";
+import { loadStrategiesPage } from "@/lib/strategies/server";
 
 /**
- * Phase 6 (AR-80/81/82) Strategy Builder workspace.
+ * Strategy Builder workspace (AR-80/81/82).
  *
- * Thin server shell — the client wrapper owns selection state and renders
- * the strategy row, rule builder, and backtest surface. Rendered dynamic
- * so future persistence (draft strategies from the backend) can hydrate
- * on every request without SSR caching surprises.
- *
- * The client owns the page header (title, crumbs, and the Duplicate
- * action, which needs the selected strategy).
+ * Thin server shell: loads the user's saved strategies (launch item i55)
+ * and hands them to the client, which owns selection, editing, saving
+ * and backtests, and the page header (its actions need the selection).
  */
 
 export const dynamic = "force-dynamic";
@@ -21,15 +18,8 @@ export default async function StrategiesPage({
 }: {
     searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-    const params = await searchParams;
+    const userId = await requirePageUserId();
+    const [params, data] = await Promise.all([searchParams, loadStrategiesPage(userId)]);
     const requested = params[STRATEGY_QUERY_PARAM];
-    const initialStrategyId = resolveSelectedStrategyId(
-        typeof requested === "string" ? requested : null,
-        SEED_STRATEGIES,
-    );
-    return (
-        <>
-            <StrategyBuilderClient initialStrategyId={initialStrategyId} />
-        </>
-    );
+    return <StrategyBuilderClient data={data} requestedId={typeof requested === "string" ? requested : undefined} />;
 }

@@ -1,19 +1,17 @@
-import type { Strategy } from './strategy';
+import { SEED_ADHERENCE_RULES } from '@/lib/adherence/seed';
+
+import type { Strategy, StrategyDefinition } from './strategy';
 
 /**
- * Seed strategies for the Phase 6 Strategy Builder.
+ * Example strategies for the Strategy Builder, shown as Sample data.
  *
- * Three hand-tuned strategies that exercise the full builder surface
- * (rules with AND/OR glue, universe filters, guardrails, a full backtest
- * bundle with Monte Carlo percentiles and promotion ladder). The equity
- * curves are deterministic walks anchored on the Strategy's totalReturnPct
- * so the backtest chart always matches the card stats.
+ * Their rules use the same indicators a saved strategy can (indicators.ts),
+ * so a copy saved to the user's account backtests for real. Their own
+ * backtests are illustrative: deterministic equity curves anchored on the
+ * stats, never a run over stored prices.
  */
 
 // Deterministic 72-point walk from `start` to `end` with `seed`-driven noise.
-// Kept inline so the seed module stays self-contained — the Phase 6 page
-// re-samples this on the fly when users tweak a strategy so we don't want
-// an external dependency loop through `@/lib/charts` here.
 function walk(seed: number, start: number, end: number, points = 72, noisePct = 0.025): number[] {
     let a = seed | 0;
     const rand = () => {
@@ -34,176 +32,154 @@ function walk(seed: number, start: number, end: number, points = 72, noisePct = 
     return out;
 }
 
+const momentum: StrategyDefinition = {
+    rules: [
+        { id: 'rule-mv-1', field: 'Mom(6M)', op: '>', value: '10%' },
+        { id: 'rule-mv-2', field: 'Close', op: '>', value: 'SMA(200)' },
+        { id: 'rule-mv-3', field: 'ADV(30)', op: '>=', value: '$5M' },
+    ],
+    conjunctions: ['AND', 'AND'],
+    symbols: ['AAPL', 'MSFT', 'NVDA', 'AMZN', 'GOOGL', 'META', 'JPM', 'UNH', 'XOM', 'HD'],
+    guardrails: { maxPositionPct: 0.05, stopLossPct: 0.12, rebalanceDays: 30 },
+};
+
+const meanReversion: StrategyDefinition = {
+    rules: [
+        { id: 'rule-mr-1', field: 'RSI(14)', op: '<', value: '30' },
+        { id: 'rule-mr-2', field: 'Close', op: 'crosses above', value: 'SMA(10)' },
+    ],
+    conjunctions: ['OR'],
+    symbols: ['SPY', 'QQQ', 'IWM', 'DIA'],
+    guardrails: { maxPositionPct: 0.03, stopLossPct: 0.08, rebalanceDays: 7 },
+};
+
+const sectorRotation: StrategyDefinition = {
+    rules: [
+        { id: 'rule-sr-1', field: 'Mom(3M)', op: '>', value: '0' },
+        { id: 'rule-sr-2', field: 'Close', op: '>', value: 'SMA(50)' },
+    ],
+    conjunctions: ['AND'],
+    symbols: ['XLB', 'XLC', 'XLE', 'XLF', 'XLI', 'XLK', 'XLP', 'XLRE', 'XLU', 'XLV', 'XLY'],
+    guardrails: { maxPositionPct: 0.25, stopLossPct: 0.1, rebalanceDays: 30 },
+};
+
+const ladder = (active: 'robustness' | 'paper' | 'backtest') => {
+    const keys = ['rules', 'backtest', 'robustness', 'paper', 'live'] as const;
+    const labels = { rules: 'Rules', backtest: 'Backtest', robustness: 'Robustness', paper: 'Paper trade', live: 'Gates real orders' };
+    const at = keys.indexOf(active);
+    return keys.map((key, i) => ({ key, label: labels[key], status: i < at ? 'done' as const : i === at ? 'active' as const : 'pending' as const }));
+};
+
 export const SEED_STRATEGIES: Strategy[] = [
     {
         id: 'strategy-momentum-value',
-        shortId: 'S-001',
-        name: 'Momentum + Value',
-        description: 'Long positions with strong 6M momentum and below-market P/E.',
-        status: 'active',
-        stats: {
-            totalReturnPct: 18.45,
-            sharpe: 1.92,
-            maxDrawdownPct: -8.4,
-            winRatePct: 64.5,
-        },
-        rules: [
-            { id: 'rule-mv-1', field: 'MomScore(6M)', op: '>', value: '0.7' },
-            { id: 'rule-mv-2', field: 'P/E', op: '<', value: '18' },
-            { id: 'rule-mv-3', field: 'ADV(30)', op: '>=', value: '$5M' },
-        ],
-        conjunctions: ['AND', 'AND'],
-        universe: [
-            { id: 'uni-sp500', label: 'S&P 500', enabled: true },
-            { id: 'uni-no-fin', label: 'Exclude financials', enabled: true },
-            { id: 'uni-mktcap', label: 'Min mkt cap $5B', enabled: true },
-        ],
-        guardrails: {
-            maxPositionPct: 0.05, // 5% per position
-            stopLossPct: 0.12, // 12% stop
-            rebalanceDays: 30, // monthly
-        },
+        name: 'Momentum + Trend',
+        description: 'Large caps with strong 6-month momentum, trading above their 200-day average.',
+        example: true,
+        ...momentum,
+        adherenceRules: SEED_ADHERENCE_RULES['strategy-momentum-value'] ?? [],
         backtest: {
-            windowLabel: 'Jan 2020 – Apr 2026',
+            from: '2024-05-01',
+            to: '2026-04-30',
             verdict: 'Robust',
-            equityCurve: walk(1337, 100, 218.45, 72, 0.020),
+            verdictReason: 'Sharpe 1.92, and 95% of the resampled paths ended above the start.',
+            equityCurve: walk(1337, 100, 131.2, 72, 0.02),
             stats: {
-                cagrPct: 14.2,
-                netProfitUsd: 118_450,
+                totalReturnPct: 31.2,
+                cagrPct: 14.5,
+                netProfitUsd: 31_200,
                 sharpe: 1.92,
                 sortino: 2.41,
                 maxDrawdownPct: -8.4,
                 profitFactor: 2.15,
-                tradeCount: 127,
+                tradeCount: 64,
                 winRatePct: 64.5,
             },
+            benchmark: null,
             monteCarlo: [
-                { percentile: 95, value: 2.75, cagrPct: 17.6 },
-                { percentile: 75, value: 2.32, cagrPct: 15.1 },
-                { percentile: 50, value: 2.05, cagrPct: 13.5 },
-                { percentile: 25, value: 1.74, cagrPct: 10.8 },
-                { percentile: 5, value: 1.42, cagrPct: 6.3 },
+                { percentile: 5, value: 1.04 },
+                { percentile: 25, value: 1.18 },
+                { percentile: 50, value: 1.29 },
+                { percentile: 75, value: 1.41 },
+                { percentile: 95, value: 1.62 },
             ],
-            promotion: [
-                { key: 'rules', label: 'Rules', status: 'done' },
-                { key: 'backtest', label: 'Backtest', status: 'done' },
-                { key: 'robustness', label: 'Robustness', status: 'active' },
-                { key: 'paper', label: 'Paper trade', status: 'pending' },
-                { key: 'live', label: 'Gates real orders', status: 'pending' },
-            ],
+            symbolsWithoutHistory: [],
+            definition: momentum,
+            promotion: ladder('robustness'),
         },
     },
     {
         id: 'strategy-mean-reversion',
-        shortId: 'S-002',
         name: 'Mean Reversion',
-        description: 'Short-term trades on oversold conditions with RSI < 30.',
-        status: 'paused',
-        stats: {
-            totalReturnPct: 12.34,
-            sharpe: 1.45,
-            maxDrawdownPct: -11.2,
-            winRatePct: 58.2,
-        },
-        rules: [
-            { id: 'rule-mr-1', field: 'RSI(14)', op: '<', value: '30' },
-            { id: 'rule-mr-2', field: 'Close', op: 'crosses above', value: 'SMA(10)' },
-        ],
-        conjunctions: ['OR'],
-        universe: [
-            { id: 'uni-sp500', label: 'S&P 500', enabled: true },
-            { id: 'uni-no-biotech', label: 'Exclude biotech', enabled: true },
-            { id: 'uni-liquid', label: 'Min liquidity $10M ADV', enabled: false },
-        ],
-        guardrails: {
-            maxPositionPct: 0.03,
-            stopLossPct: 0.08,
-            rebalanceDays: 7,
-        },
+        description: 'Short-term trades on oversold index ETFs, with RSI under 30.',
+        example: true,
+        ...meanReversion,
+        adherenceRules: SEED_ADHERENCE_RULES['strategy-mean-reversion'] ?? [],
         backtest: {
-            windowLabel: 'Jan 2020 – Apr 2026',
+            from: '2024-05-01',
+            to: '2026-04-30',
             verdict: 'Promising',
-            equityCurve: walk(4242, 100, 212.34, 72, 0.030),
+            verdictReason: 'Sharpe of at least 1, but more than 5% of the resampled paths ended below the start.',
+            equityCurve: walk(4242, 100, 122.3, 72, 0.03),
             stats: {
-                cagrPct: 10.8,
-                netProfitUsd: 82_300,
+                totalReturnPct: 22.3,
+                cagrPct: 10.6,
+                netProfitUsd: 22_300,
                 sharpe: 1.45,
                 sortino: 1.72,
                 maxDrawdownPct: -11.2,
                 profitFactor: 1.68,
-                tradeCount: 203,
+                tradeCount: 101,
                 winRatePct: 58.2,
             },
+            benchmark: null,
             monteCarlo: [
-                { percentile: 95, value: 2.40, cagrPct: 14.1 },
-                { percentile: 75, value: 2.06, cagrPct: 11.8 },
-                { percentile: 50, value: 1.82, cagrPct: 10.0 },
-                { percentile: 25, value: 1.55, cagrPct: 7.5 },
-                { percentile: 5, value: 1.18, cagrPct: 2.7 },
+                { percentile: 5, value: 0.97 },
+                { percentile: 25, value: 1.1 },
+                { percentile: 50, value: 1.2 },
+                { percentile: 75, value: 1.31 },
+                { percentile: 95, value: 1.49 },
             ],
-            promotion: [
-                { key: 'rules', label: 'Rules', status: 'done' },
-                { key: 'backtest', label: 'Backtest', status: 'done' },
-                { key: 'robustness', label: 'Robustness', status: 'done' },
-                { key: 'paper', label: 'Paper trade', status: 'active' },
-                { key: 'live', label: 'Gates real orders', status: 'pending' },
-            ],
+            symbolsWithoutHistory: [],
+            definition: meanReversion,
+            promotion: ladder('paper'),
         },
     },
     {
         id: 'strategy-sector-rotation',
-        shortId: 'S-003',
         name: 'Sector Rotation',
-        description: 'Monthly rotation based on sector relative strength.',
-        status: 'backtesting',
-        stats: {
-            totalReturnPct: 0,
-            sharpe: 0,
-            maxDrawdownPct: 0,
-            winRatePct: 0,
-        },
-        rules: [
-            { id: 'rule-sr-1', field: 'SectorRS(3M)', op: '>', value: 'SPX RS' },
-            { id: 'rule-sr-2', field: 'Breadth(40D)', op: '>=', value: '0.55' },
-        ],
-        conjunctions: ['AND'],
-        universe: [
-            { id: 'uni-sectors', label: 'S&P 500 sector ETFs', enabled: true },
-            { id: 'uni-etfs-only', label: 'ETFs only', enabled: true },
-        ],
-        guardrails: {
-            maxPositionPct: 0.25, // bigger sector bets
-            stopLossPct: 0.10,
-            rebalanceDays: 30,
-        },
+        description: 'Monthly rotation into the sector ETFs with positive 3-month momentum.',
+        example: true,
+        ...sectorRotation,
+        adherenceRules: SEED_ADHERENCE_RULES['strategy-sector-rotation'] ?? [],
         backtest: {
-            windowLabel: 'Jan 2020 – Apr 2026',
+            from: '2024-05-01',
+            to: '2026-04-30',
             verdict: 'Unproven',
-            equityCurve: walk(9001, 100, 145, 72, 0.018),
+            verdictReason: '8 closed trades: too few to judge.',
+            equityCurve: walk(9001, 100, 109.5, 72, 0.018),
             stats: {
-                cagrPct: 6.4,
-                netProfitUsd: 45_000,
+                totalReturnPct: 9.5,
+                cagrPct: 4.6,
+                netProfitUsd: 9_500,
                 sharpe: 0.98,
                 sortino: 1.15,
                 maxDrawdownPct: -13.1,
                 profitFactor: 1.32,
-                tradeCount: 48,
-                winRatePct: 52.0,
+                tradeCount: 8,
+                winRatePct: 50,
             },
+            benchmark: null,
             monteCarlo: [
-                { percentile: 95, value: 1.95, cagrPct: 11.4 },
-                { percentile: 75, value: 1.62, cagrPct: 8.2 },
-                { percentile: 50, value: 1.42, cagrPct: 6.2 },
-                { percentile: 25, value: 1.18, cagrPct: 2.8 },
-                { percentile: 5, value: 0.91, cagrPct: -1.5 },
+                { percentile: 5, value: 0.91 },
+                { percentile: 25, value: 1.01 },
+                { percentile: 50, value: 1.09 },
+                { percentile: 75, value: 1.17 },
+                { percentile: 95, value: 1.3 },
             ],
-            promotion: [
-                { key: 'rules', label: 'Rules', status: 'done' },
-                { key: 'backtest', label: 'Backtest', status: 'active' },
-                { key: 'robustness', label: 'Robustness', status: 'pending' },
-                { key: 'paper', label: 'Paper trade', status: 'pending' },
-                { key: 'live', label: 'Gates real orders', status: 'pending' },
-            ],
+            symbolsWithoutHistory: [],
+            definition: sectorRotation,
+            promotion: ladder('backtest'),
         },
     },
 ];
