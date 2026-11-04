@@ -579,11 +579,11 @@ test.describe('Execution page — live adherence panel (AR-111)', () => {
         await expect(page.getByTestId('adherence-live-panel')).toHaveCount(0);
     });
 
-    test('renders with the example NVDA thesis → Momentum + Value strategy', async ({ page }) => {
+    test('renders with the example NVDA thesis → Momentum + Trend strategy', async ({ page }) => {
         const livePanel = await linkNvdaThesis(page);
         await expect(livePanel.locator('.pm-adherence-live-row')).toHaveCount(5);
-        // Header contains "Discipline check · Momentum + Value".
-        await expect(livePanel.locator('.pm-adherence-live-eyebrow')).toContainText('Momentum + Value');
+        // Header contains "Discipline check · Momentum + Trend".
+        await expect(livePanel.locator('.pm-adherence-live-eyebrow')).toContainText('Momentum + Trend');
     });
 
     test('score badge and rule rows carry their tier, tone, severity and rule type', async ({ page }) => {
