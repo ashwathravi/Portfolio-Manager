@@ -18,8 +18,16 @@ describe('figuresIn (launch item i59)', () => {
         );
     });
 
-    test('counts, years and dates are left alone, a word starting with a scale letter included', () => {
+    test('an amount in any currency, as Ask\'s tools write it', () => {
+        assert.deepEqual(
+            figuresIn('€500, £1,200, ¥300, ₹40, CA$700, R$60, CHF 450, PLN 1,234, 80 XAF and €1.1K'),
+            ['500', '1200', '300', '40', '700', '60', '450', '1234', '80', '1100'],
+        );
+    });
+
+    test('counts, years and dates are left alone, a word starting with a scale letter or a word of three letters included', () => {
         assert.deepEqual(figuresIn('Your top 5 positions in 2026, 3 trades on Oct 22, 2026, 2 mega caps and 4 bets'), []);
+        assert.deepEqual(figuresIn('Sold 100 IBM shares, the 5 ETF picks and 3 eur'), []);
     });
 });
 
@@ -32,6 +40,12 @@ describe('unbackedFigures', () => {
 
     test('a rounding, a sum or a figure no tool returned is not', () => {
         assert.deepEqual(unbackedFigures('About $1.9K, or $3,000 together, up 12.5%.', sources), ['1900', '3000', '12.5']);
+    });
+
+    test('regression: an amount in another currency is checked like a dollar amount', () => {
+        assert.deepEqual(unbackedFigures('You made €500.', ['€100']), ['500']);
+        assert.deepEqual(unbackedFigures('You made CHF 500.', ['CHF 100']), ['500']);
+        assert.deepEqual(unbackedFigures('You made €100.', ['€100']), []);
     });
 
     test('regression: a scale word makes it another figure', () => {
