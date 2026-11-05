@@ -5,7 +5,7 @@ Alpha Radar is the Portfolio Manager 13F research workflow. It tracks selected i
 ## Data Sources
 
 - CI and unit tests use local fixtures only. They must not call live EDGAR.
-- Local development can use seeded Alpha Radar data without a database. The Research tab and Dashboard card show seeded fallback data when live storage or SEC access is unavailable.
+- While Atlas tracks no filer, Research › Alpha Radar shows example filers, labelled Sample, to a user who shows example data (Settings › Data), and otherwise says no filer is tracked yet. A tracked filer never falls back to the examples: until Atlas has loaded its 13F data, its page says so.
 - Live refreshes require Postgres-backed Alpha Radar tables and SEC network access.
 
 ## Following and the daily SEC job
@@ -13,6 +13,14 @@ Alpha Radar is the Portfolio Manager 13F research workflow. It tracks selected i
 Tracked filers are shared by every account, and only admins add, change or refresh them. Each user follows the filers they want from Research › Alpha Radar (`alpha_radar_filer_follows`, launch item i60); Today's Alpha Radar card shows reports from the filers they follow, outside the example section, once Atlas tracks any filer. The follows are exported with the account and deleted with it.
 
 `GET /api/cron/alpha-radar` (Vercel Cron, 11:15 UTC every day) runs the `alpha-radar` job: every enabled filer, the one checked longest ago first, until 240 seconds have gone (`src/lib/alpha-radar/daily-refresh.ts`). SEC requests stop at 270 seconds, so a filer still waiting on SEC can't keep the run from being recorded, and a `Retry-After` longer than 10 seconds (SEC's rate-limit block lasts minutes) fails that request instead of waiting. It parses and reports only filings it hasn't seen. `docs/deployment.md` › Scheduled jobs and `docs/monitoring.md` cover running it by hand and what its failures mean.
+
+## Where a filer's changes meet you
+
+Changes and reports are shared by every account, so the ingest stores them without anyone's overlap. When a user reads a filer's changes (`GET /api/alpha-radar/filers/[filerId]/changes`, session-backed), each change gets theirs (launch item i61, `src/lib/alpha-radar/user-overlap.ts`): held in any account (a position that isn't zero), on the watchlist, or with an active thesis. The examples, edited or not, and removed items don't count. Each change is then scored as the ingest would have scored it with that overlap (12 for a holding, 7 for the watchlist, 7 for a thesis, at most 100) and the list is ranked by it.
+
+A 13F names a holding by issuer and CUSIP, never by ticker, and the ingest doesn't map CUSIPs to tickers. So a change matches the user's ticker by company name: the issuer ("BANK AMER CORP") and the names the user's records and SEC's ticker file (`symbol_directory`) give the ticker ("BANK OF AMERICA CORP /DE/") reduce to the same key (`src/lib/alpha-radar/issuer-name.ts`: legal forms, state markers, share classes and the common CUSIP abbreviations). Keys must be equal, so Apple Hospitality is not Apple. Matching is by company: a user holding GOOGL overlaps both of Alphabet's share classes. An issuer whose abbreviation the key doesn't know is missed, never mismatched.
+
+A stored report has no overlap section any more, since it would be the same for everyone. Research shows the reader's own ("Your overlap") in its place, and the clone graph, conviction ranking and thesis drafts read the overlap from the changes. Run planning, provider budgets, external overlays and the backtest still have only example inputs, so they show only with the example filers.
 
 ## SEC Fair Use
 
@@ -41,7 +49,7 @@ node --import tsx scripts/seed.ts
 
 4. Configure `DATABASE_URL` and, for live SEC refreshes, `SEC_EDGAR_USER_AGENT`. E2E servers leave it empty, so tests never call SEC.
 
-Without `DATABASE_URL`, Alpha Radar UI surfaces should still render seeded fallback data.
+Without `DATABASE_URL`, Research › Alpha Radar shows the example filers (with example data on) or says no filer is tracked.
 
 ## Test Fixtures
 
