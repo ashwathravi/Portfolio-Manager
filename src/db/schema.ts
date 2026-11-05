@@ -307,11 +307,31 @@ export const alphaRadarTrackedFilers = pgTable("alpha_radar_tracked_filers", {
     fundStyle: text("fund_style"),
     enabled: boolean("enabled").default(true).notNull(),
     notes: text("notes"),
+    // When the daily SEC job last asked SEC for its filings (launch item
+    // i60): the job takes the filers it checked longest ago first.
+    lastRefreshedAt: timestamp("last_refreshed_at"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (table) => ({
     slugIdx: uniqueIndex("alpha_radar_tracked_filers_slug_idx").on(table.slug),
     cikIdx: uniqueIndex("alpha_radar_tracked_filers_cik_idx").on(table.cik),
+    serverOnlyNoClientAccess: serverOnlyNoClientAccessPolicy(),
+    appRuntimeAccess: appRuntimeAccessPolicy(),
+})).enableRLS();
+
+// The tracked filers each user follows (launch item i60). Filers are shared;
+// following one is the user's own.
+export const alphaRadarFilerFollows = pgTable("alpha_radar_filer_follows", {
+    userId: text("user_id")
+        .notNull()
+        .references(() => authUsers.id, { onDelete: "cascade" }),
+    trackedFilerId: uuid("tracked_filer_id")
+        .notNull()
+        .references(() => alphaRadarTrackedFilers.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => ({
+    pk: primaryKey({ columns: [table.userId, table.trackedFilerId], name: "alpha_radar_filer_follows_pkey" }),
+    trackedFilerIdx: index("alpha_radar_filer_follows_tracked_filer_idx").on(table.trackedFilerId),
     serverOnlyNoClientAccess: serverOnlyNoClientAccessPolicy(),
     appRuntimeAccess: appRuntimeAccessPolicy(),
 })).enableRLS();

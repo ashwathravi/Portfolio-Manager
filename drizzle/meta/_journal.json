@@ -208,8 +208,15 @@
     {
       "idx": 29,
       "version": "7",
-      "when": 1793751661237,
-      "tag": "0029_alerts",
+      "when": 1793828320840,
+      "tag": "0029_alpha_radar_follows",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1793888363877,
+      "tag": "0030_alerts",
       "breakpoints": true
     }
   ]

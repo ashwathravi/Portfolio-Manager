@@ -45,6 +45,9 @@ test.describe('Privacy policy', () => {
     // Launch items i55 and i57.
     await expect(added).toContainText('the strategies you save (their rules, tickers, guardrails and last backtest)');
     await expect(added).toContainText('the alert rules you set and the alerts they raise');
+    // Launch item i60: which filers you follow is yours; the filers are shared.
+    await expect(added).toContainText('the Alpha Radar filers you follow');
+    await expect(added).toContainText('only Atlas’s admins add or change them');
     const browserOnly = collected.getByText(/stored only in your browser/);
     await expect(browserOnly).not.toContainText('watchlist,');
     await expect(browserOnly).not.toContainText('journal');
@@ -55,7 +58,7 @@ test.describe('Privacy policy', () => {
 
   test('says what stays when you remove a watchlist ticker, journal entry or thesis', async ({ page }) => {
     const retention = page.getByRole('region', { name: 'Keeping and deleting your data' });
-    await expect(retention).toContainText('drafted orders, value history, watchlist, journal, theses, strategies, alert rules and alerts, Ask questions and settings');
+    await expect(retention).toContainText('drafted orders, value history, watchlist, journal, theses, strategies, alert rules and alerts, the filers you follow, Ask questions and settings');
     await expect(retention).toContainText('Your alert rules are checked each weekday evening, on our servers');
     await expect(retention).toContainText('Clearing your alerts removes them and erases their text straight away; a short record of which rule fired, for what and when stays');
     await expect(retention).toContainText('alerts are otherwise deleted once they’re 180 days old');

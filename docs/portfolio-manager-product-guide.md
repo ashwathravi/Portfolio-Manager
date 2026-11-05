@@ -324,7 +324,7 @@ Alpha Radar surfaces institutional 13F activity and turns it into research evide
 
 Use it to:
 
-- Track filers.
+- Follow the filers you care about: choose **Follow** on a filer in Research › Alpha Radar, and Today's Alpha Radar card shows their latest reports. Admins choose which filers Atlas tracks, and Atlas checks SEC for their new filings every day.
 - Review quarterly changes.
 - See top adds, trims, exits, and new positions.
 - Review clone tracking and consensus.
@@ -562,7 +562,7 @@ Check:
 
 - `DATABASE_URL`.
 - Alpha Radar migrations.
-- `SEC_EDGAR_USER_AGENT` for live SEC calls.
+- `SEC_EDGAR_USER_AGENT` for any SEC call (a refresh without it answers 503 `SEC_NOT_CONFIGURED`).
 - Provider budgets and circuit-breaker state.
 
 ### E2E Cannot Start Server In Sandbox

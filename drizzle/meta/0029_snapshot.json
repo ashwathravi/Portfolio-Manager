@@ -1,119 +1,39 @@
 {
-  "id": "d9f4c5ea-05f2-4565-8b90-614604d813c9",
+  "id": "c708036f-2d38-4d2d-8fb8-d79f09805e60",
   "prevId": "9f4c672d-da32-4722-8cd9-9ca37e98a2c3",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
-    "public.alert_notifications": {
-      "name": "alert_notifications",
+    "public.alpha_radar_filer_follows": {
+      "name": "alpha_radar_filer_follows",
       "schema": "",
       "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
         "user_id": {
           "name": "user_id",
           "type": "text",
           "primaryKey": false,
           "notNull": true
         },
-        "rule_id": {
-          "name": "rule_id",
+        "tracked_filer_id": {
+          "name": "tracked_filer_id",
           "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
-        "occurrence": {
-          "name": "occurrence",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "rule_name": {
-          "name": "rule_name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "metric": {
-          "name": "metric",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "symbol": {
-          "name": "symbol",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "comparator": {
-          "name": "comparator",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "threshold": {
-          "name": "threshold",
-          "type": "double precision",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "observed_value": {
-          "name": "observed_value",
-          "type": "double precision",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "message": {
-          "name": "message",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "href": {
-          "name": "href",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "triggered_at": {
-          "name": "triggered_at",
+        "created_at": {
+          "name": "created_at",
           "type": "timestamp",
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
-        },
-        "read_at": {
-          "name": "read_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "cleared": {
-          "name": "cleared",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
         }
       },
       "indexes": {
-        "alert_notifications_user_triggered_idx": {
-          "name": "alert_notifications_user_triggered_idx",
+        "alpha_radar_filer_follows_tracked_filer_idx": {
+          "name": "alpha_radar_filer_follows_tracked_filer_idx",
           "columns": [
             {
-              "expression": "user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "triggered_at",
+              "expression": "tracked_filer_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -123,33 +43,12 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
-        },
-        "alert_notifications_rule_occurrence_idx": {
-          "name": "alert_notifications_rule_occurrence_idx",
-          "columns": [
-            {
-              "expression": "rule_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "occurrence",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
         }
       },
       "foreignKeys": {
-        "alert_notifications_user_id_auth_users_id_fk": {
-          "name": "alert_notifications_user_id_auth_users_id_fk",
-          "tableFrom": "alert_notifications",
+        "alpha_radar_filer_follows_user_id_auth_users_id_fk": {
+          "name": "alpha_radar_filer_follows_user_id_auth_users_id_fk",
+          "tableFrom": "alpha_radar_filer_follows",
           "tableTo": "auth_users",
           "columnsFrom": [
             "user_id"
@@ -160,23 +59,29 @@
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
-        "alert_notifications_rule_owner_fk": {
-          "name": "alert_notifications_rule_owner_fk",
-          "tableFrom": "alert_notifications",
-          "tableTo": "alert_rules",
+        "alpha_radar_filer_follows_tracked_filer_id_alpha_radar_tracked_filers_id_fk": {
+          "name": "alpha_radar_filer_follows_tracked_filer_id_alpha_radar_tracked_filers_id_fk",
+          "tableFrom": "alpha_radar_filer_follows",
+          "tableTo": "alpha_radar_tracked_filers",
           "columnsFrom": [
-            "rule_id",
-            "user_id"
+            "tracked_filer_id"
           ],
           "columnsTo": [
-            "id",
-            "user_id"
+            "id"
           ],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
       },
-      "compositePrimaryKeys": {},
+      "compositePrimaryKeys": {
+        "alpha_radar_filer_follows_pkey": {
+          "name": "alpha_radar_filer_follows_pkey",
+          "columns": [
+            "user_id",
+            "tracked_filer_id"
+          ]
+        }
+      },
       "uniqueConstraints": {},
       "policies": {
         "server_only_no_client_access": {
@@ -202,185 +107,6 @@
         }
       },
       "checkConstraints": {},
-      "isRLSEnabled": true
-    },
-    "public.alert_rules": {
-      "name": "alert_rules",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "name": {
-          "name": "name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "metric": {
-          "name": "metric",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "symbol": {
-          "name": "symbol",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "comparator": {
-          "name": "comparator",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "threshold": {
-          "name": "threshold",
-          "type": "double precision",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "rearm": {
-          "name": "rearm",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "enabled": {
-          "name": "enabled",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": true
-        },
-        "note": {
-          "name": "note",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "last_triggered_at": {
-          "name": "last_triggered_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "alert_rules_user_created_idx": {
-          "name": "alert_rules_user_created_idx",
-          "columns": [
-            {
-              "expression": "user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "created_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "alert_rules_user_id_auth_users_id_fk": {
-          "name": "alert_rules_user_id_auth_users_id_fk",
-          "tableFrom": "alert_rules",
-          "tableTo": "auth_users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "alert_rules_id_user_key": {
-          "name": "alert_rules_id_user_key",
-          "nullsNotDistinct": false,
-          "columns": [
-            "id",
-            "user_id"
-          ]
-        }
-      },
-      "policies": {
-        "server_only_no_client_access": {
-          "name": "server_only_no_client_access",
-          "as": "RESTRICTIVE",
-          "for": "ALL",
-          "to": [
-            "anon",
-            "authenticated"
-          ],
-          "using": "false",
-          "withCheck": "false"
-        },
-        "app_runtime_access": {
-          "name": "app_runtime_access",
-          "as": "PERMISSIVE",
-          "for": "ALL",
-          "to": [
-            "app_runtime"
-          ],
-          "using": "true",
-          "withCheck": "true"
-        }
-      },
-      "checkConstraints": {
-        "alert_rules_metric_check": {
-          "name": "alert_rules_metric_check",
-          "value": "\"alert_rules\".\"metric\" in ('price', 'price_change_pct', 'portfolio_value', 'portfolio_day_change_pct', 'alpha_radar_new_position', 'alpha_radar_exit', 'alpha_radar_large_add', 'alpha_radar_large_trim', 'alpha_radar_user_overlap')"
-        },
-        "alert_rules_symbol_check": {
-          "name": "alert_rules_symbol_check",
-          "value": "(\"alert_rules\".\"metric\" in ('price', 'price_change_pct')) = (\"alert_rules\".\"symbol\" is not null)"
-        },
-        "alert_rules_comparator_check": {
-          "name": "alert_rules_comparator_check",
-          "value": "\"alert_rules\".\"comparator\" in ('gte', 'lte', 'gt', 'lt', 'eq')"
-        },
-        "alert_rules_rearm_check": {
-          "name": "alert_rules_rearm_check",
-          "value": "\"alert_rules\".\"rearm\" in ('once', 'always', 'daily')"
-        }
-      },
       "isRLSEnabled": true
     },
     "public.alpha_radar_filing_holdings": {
@@ -1705,6 +1431,12 @@
         "notes": {
           "name": "notes",
           "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_refreshed_at": {
+          "name": "last_refreshed_at",
+          "type": "timestamp",
           "primaryKey": false,
           "notNull": false
         },
