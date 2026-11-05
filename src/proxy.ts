@@ -10,7 +10,7 @@ import {
     isAuthConfigured,
 } from "@/lib/auth/access";
 import { isSchwabIntegrationEnabled } from "@/lib/api/schwab/feature";
-import { buildContentSecurityPolicy, createNonce } from "@/lib/security/content-security-policy";
+import { buildContentSecurityPolicy, createNonce, isLocalHttp } from "@/lib/security/content-security-policy";
 
 type VerifiedRequest = NextRequest & { auth?: Session | null };
 
@@ -32,7 +32,10 @@ const PUBLIC_ASSET_PATHS = new Set([
  * on the scripts it renders; the response carries the policy to the browser.
  */
 export async function proxy(request: NextRequest, event?: NextFetchEvent): Promise<Response> {
-    const policy = buildContentSecurityPolicy({ nonce: createNonce() });
+    const policy = buildContentSecurityPolicy({
+        nonce: createNonce(),
+        upgradeInsecureRequests: !isLocalHttp(request.url),
+    });
     const requestHeaders = new Headers(request.headers);
     requestHeaders.set("content-security-policy", policy);
     const next: Continue = () => NextResponse.next({ request: { headers: requestHeaders } });

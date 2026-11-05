@@ -571,6 +571,16 @@ describe("proxy Content-Security-Policy", () => {
         assert.ok(nonceOf(notFound.headers.get("content-security-policy")));
     });
 
+    test("regression: a page served over http:// on this machine doesn't upgrade its requests to https://", async () => {
+        configureAuth();
+        const local = await proxy({ ...pageRequest("/privacy"), url: "http://localhost:3000/privacy" } as unknown as NextRequest);
+        const live = await proxy(pageRequest("/privacy"));
+
+        // Chrome sent a signed-out prefetch's redirect to https://localhost.
+        assert.doesNotMatch(local.headers.get("content-security-policy") ?? "", /upgrade-insecure-requests/);
+        assert.match(live.headers.get("content-security-policy") ?? "", /upgrade-insecure-requests/);
+    });
+
     test("regression: scripts no longer run from 'unsafe-inline'", async () => {
         localBypass();
 

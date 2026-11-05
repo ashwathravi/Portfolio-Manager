@@ -1,6 +1,6 @@
 import { describe, test } from "node:test";
 import assert from "node:assert";
-import { buildContentSecurityPolicy, createNonce } from "./content-security-policy";
+import { buildContentSecurityPolicy, createNonce, isLocalHttp } from "./content-security-policy";
 
 const NONCE = "bm9uY2UtZm9yLXRlc3Rz";
 
@@ -60,6 +60,22 @@ describe("buildContentSecurityPolicy", () => {
                 ["'self'", "https://cdn.plaid.com", host],
                 `PLAID_ENV=${String(plaidEnv)}`,
             );
+        }
+    });
+
+    test("upgrades the page's http:// requests, unless told not to", () => {
+        assert.match(production(), /; upgrade-insecure-requests$/);
+        assert.doesNotMatch(production({ upgradeInsecureRequests: false }), /upgrade-insecure-requests/);
+        // Mixed content stays blocked either way.
+        assert.match(production({ upgradeInsecureRequests: false }), /block-all-mixed-content/);
+    });
+
+    test("isLocalHttp: only plain http:// on this machine", () => {
+        for (const url of ["http://localhost:3000/privacy", "http://127.0.0.1:3000/", "http://[::1]:3000/"]) {
+            assert.equal(isLocalHttp(url), true, url);
+        }
+        for (const url of ["https://localhost:3000/", "https://atlas.example/", "http://atlas.example/", "http://10.0.0.5:3000/"]) {
+            assert.equal(isLocalHttp(url), false, url);
         }
     });
 

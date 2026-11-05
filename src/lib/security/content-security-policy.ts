@@ -21,6 +21,21 @@ export interface ContentSecurityPolicyOptions {
     sentryDsn?: string;
     /** PLAID_ENV: only that environment's API host is allowed. */
     plaidEnv?: string;
+    /**
+     * Whether the browser upgrades the page's http:// requests to https://
+     * (the default). Not for a page served over http:// on this machine, the
+     * E2E production build: Chrome would send the redirect to sign in that a
+     * signed-out prefetch follows to https://localhost, which nothing answers.
+     */
+    upgradeInsecureRequests?: boolean;
+}
+
+const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
+
+/** A page served over plain http:// on this machine: never the live site. */
+export function isLocalHttp(url: string | URL): boolean {
+    const { protocol, hostname } = new URL(url);
+    return protocol === "http:" && LOCAL_HOSTS.has(hostname);
 }
 
 /** 128 random bits, base64: unguessable and new for every request. */
@@ -76,7 +91,7 @@ export function buildContentSecurityPolicy(options: ContentSecurityPolicyOptions
         directive("form-action", ["'self'"]),
         directive("frame-ancestors", ["'none'"]),
         "block-all-mixed-content",
-        "upgrade-insecure-requests",
+        ...(options.upgradeInsecureRequests === false ? [] : ["upgrade-insecure-requests"]),
     ].join("; ");
 }
 
