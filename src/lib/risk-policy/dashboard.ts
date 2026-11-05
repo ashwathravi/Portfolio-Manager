@@ -216,13 +216,16 @@ export function computeRiskPolicyDashboard(
         policy: input.optionsRiskPolicy,
         asOf: input.asOf,
     });
+    // Of the portfolio net of written options, as every other check here.
     const bucketAllocation = computeBucketAllocation(
         policyHoldings,
         input.bucketPolicies ?? DEFAULT_BUCKET_POLICIES,
+        { totalMarketValue },
     );
     const themeExposure = computeThemeExposure(
         policyHoldings,
         input.themeCaps ?? DEFAULT_THEME_CAPS,
+        { totalMarketValue },
     );
     const cashPolicy = computeCashPolicySummary({
         totalCash: cashTotal,
