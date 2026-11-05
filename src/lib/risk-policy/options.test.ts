@@ -6,6 +6,7 @@ import {
     computeOptionRiskLedger,
     evaluateOptionOrderPolicy,
     optionCurrentValue,
+    optionNetValue,
     optionPremiumAtRisk,
     type OptionRiskPosition,
 } from "./options";
@@ -29,6 +30,14 @@ describe("option value helpers", () => {
     test("calculates premium at risk and current value using contract multiplier", () => {
         assert.equal(optionPremiumAtRisk(AAPL_CALL), 5_460);
         assert.equal(optionCurrentValue(AAPL_CALL), 4_350);
+    });
+
+    test("a written option counts against the portfolio's worth; a bought one for it", () => {
+        assert.equal(optionNetValue(AAPL_CALL), 4_350);
+        const written = { ...AAPL_CALL, quantity: -3 };
+        // Gross value is the same; what it adds to the portfolio is the cost of buying it back, negative.
+        assert.equal(optionCurrentValue(written), 4_350);
+        assert.equal(optionNetValue(written), -4_350);
     });
 });
 

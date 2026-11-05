@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { gotoAppPage, reloadAppPage } from './helpers/app';
-import { databaseAuthEnabled, signInAsFreshUser } from './helpers/users';
+import { databaseAuthEnabled, signInAsFreshUser, signInAsNewUser } from './helpers/users';
 
 /**
  * Portfolio › Holdings (/portfolios/holdings).
@@ -248,6 +248,42 @@ test.describe('Holdings › LEAPS ledger from your option positions', () => {
 
         expect((await page.request.delete(`/api/portfolio/options/${id}`)).status()).toBe(204);
         expect((await page.request.delete(`/api/portfolio/options/${id}`)).status()).toBe(404);
+    });
+});
+
+test.describe('Holdings › LEAPS ledger before any position', () => {
+    test.skip(!databaseAuthEnabled, 'option positions are saved in the database');
+
+    test('regression: an account with no stocks or options can still add its first option', async ({ context, page }) => {
+        await signInAsNewUser(context, { firstSignIn: true });
+        await gotoAppPage(page, '/portfolios/holdings');
+        // No account: nowhere to put an option, so no ledger.
+        await expect(page.getByTestId('holdings-empty')).toBeVisible();
+        await expect(page.getByTestId('options-risk-ledger')).toHaveCount(0);
+
+        expect((await page.request.post('/api/portfolios', { data: { name: 'Options only' } })).status()).toBe(201);
+        await reloadAppPage(page);
+        await expect(page.getByTestId('holdings-empty')).toBeVisible();
+        const ledger = page.getByTestId('options-risk-ledger');
+        await expect(ledger.getByTestId('options-ledger-empty')).toHaveText('No option positions yet.');
+        // Nothing measured against an empty book.
+        await expect(ledger.getByLabel('Options exposure summary')).toHaveCount(0);
+
+        const dialog = page.getByTestId('option-position-dialog');
+        await expect(async () => {
+            await ledger.getByRole('button', { name: 'Add option' }).click();
+            await expect(dialog).toBeVisible({ timeout: 1_000 });
+        }).toPass({ timeout: 10_000 });
+        await expect(dialog.getByRole('combobox', { name: 'Account', exact: true })).toHaveValue(/.+/);
+        await dialog.getByRole('textbox', { name: 'Underlying', exact: true }).fill('SPY');
+        await dialog.getByRole('textbox', { name: 'Strike ($)', exact: true }).fill('550');
+        await dialog.getByRole('textbox', { name: 'Expiry', exact: true }).fill('2027-12-17');
+        await dialog.getByRole('textbox', { name: 'Contracts', exact: true }).fill('1');
+        await dialog.getByRole('textbox', { name: 'Premium paid / share ($)', exact: true }).fill('60');
+        await dialog.getByRole('button', { name: 'Add position' }).click();
+        await expect(dialog).toBeHidden();
+        await expect(ledger.getByTestId('options-risk-row')).toContainText('SPY 2027-12-17 550C');
+        await expect(ledger.getByTestId('options-risk-row')).toContainText('1 long CALL contract · Options only');
     });
 });
 

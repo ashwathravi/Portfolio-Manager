@@ -25,7 +25,7 @@ import {
     type RiskPolicyDashboardTrade,
 } from "./dashboard";
 import type { EmployerStockDeRiskingPlan } from "./de-risking";
-import { optionCurrentValue, type OptionRiskPosition, type OptionsRiskPolicy } from "./options";
+import { optionNetValue, type OptionRiskPosition, type OptionsRiskPolicy } from "./options";
 import type { SellDisciplineRule, SellDisciplineThesis } from "./sell-discipline";
 import type { ThemeId } from "./themes";
 
@@ -90,11 +90,11 @@ export interface PolicyPortfolio {
 
 export const EMPTY_POLICY_PORTFOLIO: PolicyPortfolio = { holdings: [], cashTotal: 0, trades: [], theses: [], options: [] };
 
-/** What the holdings, option positions and cash are worth together. */
+/** What the holdings, option positions and cash are worth together; a written option counts against it. */
 export function policyPortfolioValue(portfolio: Pick<PolicyPortfolio, "holdings" | "cashTotal"> & { options?: readonly OptionRiskPosition[] }): number {
     return portfolio.cashTotal
         + portfolio.holdings.reduce((sum, holding) => sum + holding.marketValue, 0)
-        + (portfolio.options ?? []).reduce((sum, position) => sum + optionCurrentValue(position), 0);
+        + (portfolio.options ?? []).reduce((sum, position) => sum + optionNetValue(position), 0);
 }
 
 export function normalizeTicker(symbol: string | null | undefined): string {

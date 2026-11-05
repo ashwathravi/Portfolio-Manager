@@ -355,6 +355,16 @@ export function optionCurrentValue(position: OptionRiskPosition): number {
     );
 }
 
+/**
+ * What a position adds to the portfolio's worth: its value when bought, and
+ * minus what it would cost to buy back when written (a liability, not an
+ * asset). optionCurrentValue is the gross amount either way.
+ */
+export function optionNetValue(position: OptionRiskPosition): number {
+    const value = optionCurrentValue(position);
+    return position.quantity < 0 ? -value : value;
+}
+
 export function optionPremiumAtRisk(position: Pick<OptionRiskPosition, "quantity" | "premiumPaid" | "contractMultiplier">): number {
     return roundMoney(
         Math.abs(safeQuantity(position.quantity)) *

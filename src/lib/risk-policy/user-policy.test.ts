@@ -125,6 +125,15 @@ describe("riskPolicyInput / evaluateRiskPolicy", () => {
         const speculative = evaluateRiskPolicy(portfolio, POLICY).dimensions.find((d) => d.id === "speculative_options_exposure")!;
         assert.match(speculative.explanation, /Options premium at risk is \$5,460/);
     });
+
+    test("regression: a written option counts against the portfolio's worth, not for it", () => {
+        const written = {
+            id: "o2", underlying: "AAPL", contractType: "call" as const, strike: 250, expiry: "2027-01-15",
+            quantity: -1, premiumPaid: 12, currentPremium: 10,
+        };
+        const cashOnly = { ...EMPTY_POLICY_PORTFOLIO, cashTotal: 10_000, options: [written] };
+        assert.equal(policyPortfolioValue(cashOnly), 9_000);
+    });
 });
 
 describe("withBucketChoice", () => {

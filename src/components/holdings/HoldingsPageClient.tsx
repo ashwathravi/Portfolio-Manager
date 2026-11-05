@@ -10,7 +10,7 @@ import {
     computeBucketAllocation,
     computeThemeExposure,
     employerSymbols,
-    optionCurrentValue,
+    optionNetValue,
     policyBucketLabel,
     resolvePolicyBucketAssignment,
     themeLabel,
@@ -192,11 +192,12 @@ export function HoldingsPageClient({
         () => computeThemeExposure(rows, riskPolicy.themeCaps),
         [rows, riskPolicy.themeCaps],
     );
-    const optionsCurrentValue = useMemo(
-        () => optionPositions.reduce((sum, position) => sum + optionCurrentValue(toOptionRiskPosition(position)), 0),
+    const optionsNetValue = useMemo(
+        // A written option's cost to buy back counts against the portfolio.
+        () => optionPositions.reduce((sum, position) => sum + optionNetValue(toOptionRiskPosition(position)), 0),
         [optionPositions],
     );
-    const totalPolicyValue = summary.marketValue + optionsCurrentValue;
+    const totalPolicyValue = summary.marketValue + optionsNetValue;
 
     // ---- Filter + sort for the table ----
     const tableRows = useMemo<HoldingsTableRow[]>(() => {
@@ -267,8 +268,9 @@ export function HoldingsPageClient({
                         <Link href="/portfolios/accounts" className="pm-btn pm-btn-ghost">View accounts</Link>
                     </div>
                 </section>
-                {/* Option positions without stock: the ledger still shows them. */}
-                {optionPositions.length > 0 && ledger}
+                {/* With an account, the ledger is where option positions are
+                    added, stock or no stock. */}
+                {(optionPositions.length > 0 || importAccounts.length > 0) && ledger}
             </div>
         );
     }

@@ -24,6 +24,7 @@ import {
     type OptionsRiskPolicy,
     computeOptionRiskLedger,
     optionCurrentValue,
+    optionNetValue,
 } from "./options";
 import {
     evaluateSellDiscipline,
@@ -175,7 +176,10 @@ export function computeRiskPolicyDashboard(
     const holdings = normalizeHoldings(input.holdings, employerSymbols);
     const cashTotal = safePositive(input.cashTotal ?? 0);
     const optionPositions = input.optionPositions ?? [];
+    // Bought options are speculative holdings. A written one is a liability:
+    // what buying it back would cost comes off the portfolio's worth.
     const optionHoldings = optionPositions
+        .filter((position) => position.quantity > 0)
         .map((position) => ({
             id: position.id,
             symbol: position.underlying,
@@ -200,7 +204,10 @@ export function computeRiskPolicyDashboard(
         }]
         : [];
     const policyHoldings = [...holdings, ...optionHoldings, ...cashHolding];
-    const totalMarketValue = policyHoldings.reduce((sum, holding) => sum + holding.marketValue, 0);
+    const writtenOptionLiability = optionPositions
+        .filter((position) => position.quantity < 0)
+        .reduce((sum, position) => sum - optionNetValue(position), 0);
+    const totalMarketValue = Math.max(0, policyHoldings.reduce((sum, holding) => sum + holding.marketValue, 0) - writtenOptionLiability);
     const sortedHoldings = [...holdings].sort((a, b) => b.marketValue - a.marketValue);
     const optionsLedger = computeOptionRiskLedger({
         positions: optionPositions,
