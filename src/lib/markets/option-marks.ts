@@ -55,16 +55,16 @@ export async function countOptionContractsToMark(session: string, database: Data
  * found, if any. An older close than the one stored is not kept: the
  * stored one stays until a newer one arrives.
  */
-export async function saveOptionMark(
+export function buildSaveOptionMarkQuery(
     contract: string,
     found: { date: string; close: number } | null,
     { session, at, source }: { session: string; at: Date; source: string },
     database: Database = db,
-): Promise<void> {
+) {
     const newer = found
         ? sql`${optionMarks.closeDate} is null or ${optionMarks.closeDate} <= ${found.date}`
         : sql`false`;
-    await database
+    return database
         .insert(optionMarks)
         .values({ contract, close: found?.close ?? null, closeDate: found?.date ?? null, checkedSession: session, checkedAt: at, source })
         .onConflictDoUpdate({
@@ -79,9 +79,22 @@ export async function saveOptionMark(
         });
 }
 
+export async function saveOptionMark(
+    contract: string,
+    found: { date: string; close: number } | null,
+    options: { session: string; at: Date; source: string },
+    database: Database = db,
+): Promise<void> {
+    await buildSaveOptionMarkQuery(contract, found, options, database);
+}
+
+/** The marks of contracts no one holds any more. */
+export function buildPruneOptionMarksQuery(database: Database = db) {
+    const held = database.selectDistinct({ contract: optionPositions.contract }).from(optionPositions);
+    return database.delete(optionMarks).where(notInArray(optionMarks.contract, held)).returning({ contract: optionMarks.contract });
+}
+
 /** Drops the marks of contracts no one holds any more; returns how many. */
 export async function pruneOptionMarks(database: Database = db): Promise<number> {
-    const held = database.selectDistinct({ contract: optionPositions.contract }).from(optionPositions);
-    const removed = await database.delete(optionMarks).where(notInArray(optionMarks.contract, held)).returning({ contract: optionMarks.contract });
-    return removed.length;
+    return (await buildPruneOptionMarksQuery(database)).length;
 }
