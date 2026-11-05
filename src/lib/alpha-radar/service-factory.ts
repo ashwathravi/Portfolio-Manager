@@ -1,18 +1,20 @@
 import { SecEdgarClient, AlphaRadarSecIngestionService, DrizzleSecFilingRepository } from '@/lib/sec';
 import { DrizzleAlphaRadarReportRepository } from './report-repository';
 import { DrizzleAlphaRadarDataRepository } from './repository';
-import { AlphaRadarRefreshService } from './refresh';
+import { AlphaRadarRefreshService, defaultFetchInformationTableXml } from './refresh';
 
 export function getAlphaRadarDataRepository() {
     return new DrizzleAlphaRadarDataRepository();
 }
 
-export function getAlphaRadarRefreshService() {
+/** With `signal`, every SEC request stops once it aborts (the daily job's deadline). */
+export function getAlphaRadarRefreshService({ signal }: { signal?: AbortSignal } = {}) {
     const secRepository = new DrizzleSecFilingRepository();
     return new AlphaRadarRefreshService({
-        secIngestion: new AlphaRadarSecIngestionService(new SecEdgarClient(), secRepository),
+        secIngestion: new AlphaRadarSecIngestionService(new SecEdgarClient({ signal }), secRepository),
         repository: new DrizzleAlphaRadarDataRepository(),
         reportRepository: new DrizzleAlphaRadarReportRepository(),
+        fetchInformationTableXml: (filing) => defaultFetchInformationTableXml(filing, signal),
         filingLimit: 3,
     });
 }

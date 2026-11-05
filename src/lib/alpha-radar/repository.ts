@@ -1,4 +1,4 @@
-import { and, desc, eq, lt, or } from 'drizzle-orm';
+import { and, desc, eq, inArray, lt, or } from 'drizzle-orm';
 import { db } from '@/db';
 import {
     alphaRadarFilingHoldings,
@@ -28,6 +28,8 @@ export interface AlphaRadarFilingQuery {
 
 export interface AlphaRadarReportQuery {
     trackedFilerId?: string;
+    /** Reports from any of these filers. */
+    trackedFilerIds?: readonly string[];
     reportPeriod?: string;
     limit?: number;
 }
@@ -255,6 +257,7 @@ export class DrizzleAlphaRadarDataRepository {
     async listReports(query: AlphaRadarReportQuery = {}): Promise<AlphaRadarReportRecord[]> {
         const conditions = [
             query.trackedFilerId ? eq(alphaRadarReports.trackedFilerId, query.trackedFilerId) : undefined,
+            query.trackedFilerIds ? inArray(alphaRadarReports.trackedFilerId, [...query.trackedFilerIds]) : undefined,
             query.reportPeriod ? eq(alphaRadarReports.reportPeriod, query.reportPeriod) : undefined,
         ].filter(isDefined);
         const rows = await this.database

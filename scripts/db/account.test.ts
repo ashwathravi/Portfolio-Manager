@@ -58,6 +58,8 @@ describe('account deletion and export', { skip: !DATABASE_URL && 'SCRIPTS_TEST_D
         await sql`INSERT INTO portfolio_snapshot_positions (portfolio_id, date, symbol, quantity, cost_basis, close, close_date, market_value) VALUES (${p.id}, '2026-10-23', 'AAPL', 10, 800, 100, '2026-10-23', 1000)`;
         await sql`INSERT INTO order_plans (user_id, portfolio_id, instrument_type, symbol, side, order_type, quantity, limit_price, time_in_force, status, reference_price, rationale, created_at, updated_at) VALUES (${user}, ${p.id}, 'equity', 'AAPL', 'buy', 'limit', 5, 95, 'day', 'ready', 100, ${JSON.stringify({ thesisId: 't-1', setupType: 'breakout', conviction: 7, mood: 'calm', rationale: 'add on the dip', capturedAt: '2026-10-24T14:00:00.000Z', timeToDecisionMs: 1000 })}::jsonb, '2026-10-24 14:00', '2026-10-24 14:00')`;
         await sql`INSERT INTO user_settings (user_id, version, settings) VALUES (${user}, 15, ${JSON.stringify({ demo: { showSampleData: false } })}::jsonb)`;
+        await sql`INSERT INTO alpha_radar_tracked_filers (name, slug, cik) VALUES ('Followed filer', 'followed-filer', '0000000002') ON CONFLICT DO NOTHING`;
+        await sql`INSERT INTO alpha_radar_filer_follows (user_id, tracked_filer_id) SELECT ${user}, id FROM alpha_radar_tracked_filers WHERE slug = 'followed-filer'`;
         await sql`INSERT INTO strategies (user_id, name, definition) VALUES (${user}, 'Trend', ${JSON.stringify({ rules: [{ id: 'r1', field: 'Close', op: '>', value: 'SMA(50)' }], conjunctions: [], symbols: ['SPY'], guardrails: { maxPositionPct: 0.1, stopLossPct: 0.1, rebalanceDays: 7 } })}::jsonb)`;
         await sql`INSERT INTO watchlist_items (user_id, id, ticker, company_name, reason, notes, added_at, write_session, write_seq) VALUES (${user}, 'w-1', 'MSFT', 'Microsoft', 'cloud', 'n', '2026-03-01', 'session-1', 1)`;
         await sql`INSERT INTO watchlist_items (user_id, id, ticker, company_name, reason, notes, added_at, dismissed, write_session, write_seq) VALUES (${user}, 'w-2', 'TSLA', '', '', '', '2026-03-01', true, 'session-1', 2)`;
@@ -95,6 +97,7 @@ describe('account deletion and export', { skip: !DATABASE_URL && 'SCRIPTS_TEST_D
                 (SELECT count(*) FROM thesis_evidence WHERE user_id = ${user})::int AS evidence,
                 (SELECT count(*) FROM ask_messages WHERE user_id = ${user})::int AS ask_messages,
                 (SELECT count(*) FROM strategies WHERE user_id = ${user})::int AS strategies,
+                (SELECT count(*) FROM alpha_radar_filer_follows WHERE user_id = ${user})::int AS alpha_radar_follows,
                 (SELECT count(*) FROM plaid_items WHERE user_id = ${user})::int AS plaid_items,
                 (SELECT count(*) FROM plaid_accounts WHERE user_id = ${user})::int AS plaid_accounts`;
         return { ...counts };
@@ -148,6 +151,7 @@ describe('account deletion and export', { skip: !DATABASE_URL && 'SCRIPTS_TEST_D
 
         // Strategies (launch item i55): the definition and backtest as saved.
         assert.deepEqual(data.strategies.map((st) => [st.name, (st.definition as { symbols: string[] }).symbols, st.backtest]), [['Trend', ['SPY'], null]]);
+        assert.deepEqual(data.alphaRadarFollows.map((follow) => follow.name), ['Followed filer']);
 
         const text = JSON.stringify(data);
         for (const leak of ['userId', 'writeSession', 'writeSeq', 'dismissed', 'cleared', 'An earlier question', 'secret-cipher', 'item-u-export', 'acc-u-export', 'u-other']) {
@@ -171,6 +175,8 @@ describe('account deletion and export', { skip: !DATABASE_URL && 'SCRIPTS_TEST_D
         assert.deepEqual(await rowsOf('u-delete'), Object.fromEntries(Object.keys(before).map((k) => [k, 0])));
         assert.deepEqual(await rowsOf('u-other'), others);
         assert.equal((await sql`SELECT 1 FROM alpha_radar_tracked_filers WHERE slug = 'shared-filer'`).length, 1);
+        // The filer the user followed is shared: only the follow goes.
+        assert.equal((await sql`SELECT 1 FROM alpha_radar_tracked_filers WHERE slug = 'followed-filer'`).length, 1);
     });
 
     test('regression: a connection Plaid can\'t be told about blocks the deletion, and nothing is deleted', async () => {

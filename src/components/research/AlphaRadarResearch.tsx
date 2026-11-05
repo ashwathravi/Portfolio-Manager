@@ -2,15 +2,17 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { Activity, AlertCircle, CalendarClock, ExternalLink, RefreshCw, Search } from "lucide-react";
+import { Activity, AlertCircle, CalendarClock, Check, ExternalLink, Plus, RefreshCw, Search } from "lucide-react";
 import {
     useAlphaRadarChangesQuery,
     useAlphaRadarFilersQuery,
+    useAlphaRadarFollowsQuery,
     useAlphaRadarMemorySearchQuery,
     useAlphaRadarReportsQuery,
+    useFollowAlphaRadarFilerMutation,
     useRefreshAlphaRadarFilerMutation,
 } from "@/lib/api/alpha-radar/queries";
-import { useViewerIdentity } from "@/components/providers/IdentityProvider";
+import { useAccountStorage, useViewerIdentity } from "@/components/providers/IdentityProvider";
 import { useAlphaRadarAlertEngine } from "@/lib/alerts/useAlphaRadarAlertEngine";
 import {
     buildAlphaRadarReportMemoryChunks,
@@ -79,6 +81,19 @@ export interface AlphaRadarResearchData {
     isLoading: boolean;
     isFallback: boolean;
     errorMessage?: string;
+    /** Following (launch item i60): a signed-in user with a database, and filers that aren't examples. */
+    follows: AlphaRadarFollows;
+}
+
+export interface AlphaRadarFollows {
+    available: boolean;
+    /** False until the user's follows have loaded. */
+    loaded: boolean;
+    followedIds: ReadonlySet<string>;
+    setFollowing: (filerId: string, following: boolean) => void;
+    /** A change is being saved; the next waits for it. */
+    saving: boolean;
+    error: string | null;
 }
 
 export function useAlphaRadarResearchData(): AlphaRadarResearchData {
@@ -92,6 +107,8 @@ export function useAlphaRadarResearchData(): AlphaRadarResearchData {
     const selectedFilerId = requestedFilerId && filers.some((filer) => filer.id === requestedFilerId)
         ? requestedFilerId
         : filers[0]?.id ?? null;
+    const accountStorage = useAccountStorage();
+    const follows = useAlphaRadarFollows(accountStorage && liveFilers.length > 0);
 
     return {
         filers,
@@ -100,6 +117,29 @@ export function useAlphaRadarResearchData(): AlphaRadarResearchData {
         isLoading: filersQuery.isLoading,
         isFallback: liveFilers.length === 0,
         errorMessage: filersQuery.error?.message,
+        follows,
+    };
+}
+
+/** The filers the user follows, kept with their account. */
+export function useAlphaRadarFollows(available: boolean): AlphaRadarFollows {
+    const followsQuery = useAlphaRadarFollowsQuery({
+        enabled: available,
+        retry: false,
+        refetchOnWindowFocus: false,
+    });
+    const mutation = useFollowAlphaRadarFilerMutation();
+    const ids = followsQuery.data;
+    const followedIds = useMemo(() => new Set(ids ?? []), [ids]);
+    return {
+        available,
+        loaded: available && followsQuery.isSuccess,
+        followedIds,
+        setFollowing: (filerId, following) => {
+            if (!mutation.isPending) mutation.mutate({ filerId, following });
+        },
+        saving: mutation.isPending,
+        error: mutation.isError ? "Couldn't save that. Try again." : followsQuery.isError ? "Couldn't load the filers you follow." : null,
     };
 }
 
@@ -138,8 +178,13 @@ export function AlphaRadarFilerColumn({
                             <span className="pm-alpha-filer-name">{filer.name}</span>
                             <span className="pm-alpha-filer-style">{filer.fundStyle ?? "13F manager"}</span>
                         </span>
-                        <span className={`pm-alpha-health${filer.enabled ? " is-on" : ""}`}>
-                            {filer.enabled ? "Tracking" : "Paused"}
+                        <span className="pm-alpha-filer-badges">
+                            {data.follows.followedIds.has(filer.id) && (
+                                <span className="pm-alpha-following" data-testid="alpha-radar-filer-following">Following</span>
+                            )}
+                            <span className={`pm-alpha-health${filer.enabled ? " is-on" : ""}`}>
+                                {filer.enabled ? "Tracking" : "Paused"}
+                            </span>
                         </span>
                     </span>
                     <span className="pm-alpha-filer-meta">
@@ -175,6 +220,8 @@ export function AlphaRadarDetailPane({
     const refresh = useRefreshAlphaRadarFilerMutation(selectedFiler?.id ?? "");
     // Refreshing calls SEC EDGAR for data every user shares: admins only.
     const canRefresh = useViewerIdentity()?.admin === true;
+    const { follows } = data;
+    const following = selectedFiler ? follows.followedIds.has(selectedFiler.id) : false;
     const reports = reportsQuery.data && reportsQuery.data.length > 0
         ? reportsQuery.data
         : fallbackReportsFor(selectedFiler?.id);
@@ -314,6 +361,19 @@ export function AlphaRadarDetailPane({
                         {report?.reportPeriod ?? "Latest quarter"} · {selectedFiler.fundStyle ?? "13F manager"}
                     </p>
                 </div>
+                {follows.available && (
+                    <button
+                        type="button"
+                        className={`pm-btn ${following ? "pm-btn-secondary" : "pm-btn-primary"}`}
+                        aria-pressed={following}
+                        onClick={() => follows.setFollowing(selectedFiler.id, !following)}
+                        disabled={!follows.loaded || follows.saving}
+                        data-testid="alpha-radar-follow"
+                    >
+                        {following ? <Check size={14} aria-hidden="true" /> : <Plus size={14} aria-hidden="true" />}
+                        <span>{following ? "Following" : "Follow"}</span>
+                    </button>
+                )}
                 {canRefresh && (
                     <button
                         type="button"
@@ -331,6 +391,10 @@ export function AlphaRadarDetailPane({
                     <span>Guide</span>
                 </Link>
             </header>
+
+            {follows.error && (
+                <p className="pm-alpha-follow-error" role="alert" data-testid="alpha-radar-follow-error">{follows.error}</p>
+            )}
 
             {(usesFallback || data.errorMessage || reportsQuery.error || changesQuery.error) && (
                 <div className="pm-alpha-status" data-testid="alpha-radar-fallback">

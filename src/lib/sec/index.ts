@@ -1,4 +1,11 @@
-export { SecEdgarClient, type SecEdgarClientOptions, type SecFetch, type SecSleep } from './edgar-client';
+export {
+    configuredSecUserAgent,
+    SEC_USER_AGENT_MISSING,
+    SecEdgarClient,
+    type SecEdgarClientOptions,
+    type SecFetch,
+    type SecSleep,
+} from './edgar-client';
 export { AlphaRadarSecIngestionService, type SecIngestionClient, type SecIngestionOptions } from './ingestion';
 export { DrizzleSecFilingRepository } from './repository';
 export {
