@@ -17,6 +17,7 @@ const PORTFOLIO: PolicyPortfolio = {
     cashTotal: 500,
     trades: [],
     theses: [],
+    options: [],
 };
 
 function sources() {

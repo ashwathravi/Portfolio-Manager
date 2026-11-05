@@ -6,7 +6,7 @@ export const metadata: Metadata = {
     description: "What Atlas Wealth collects, why, who it is shared with, and how to have it deleted.",
 };
 
-const LAST_UPDATED = "November 2, 2026";
+const LAST_UPDATED = "November 5, 2026";
 const PLAID_PRIVACY_URL = "https://plaid.com/legal/#end-user-privacy-policy";
 
 export default function PrivacyPage({ searchParams }: { searchParams: LegalSearchParams }) {
@@ -47,7 +47,8 @@ export default function PrivacyPage({ searchParams }: { searchParams: LegalSearc
                     </li>
                     <li>
                         <strong>Data you add.</strong> Portfolios, holdings and transactions you import from
-                        CSV or enter by hand, orders you draft on Trade (with the reasons and risk-policy
+                        CSV or enter by hand, the option positions you add or import (with the thesis, exit rule
+                        and price you give them), orders you draft on Trade (with the reasons and risk-policy
                         overrides you record for them), your watchlist (tickers, why they&rsquo;re on it, target
                         prices and notes), your decision journal, your research theses (with their catalysts and
                         evidence links), the strategies you save (their rules, tickers, guardrails and last
@@ -124,8 +125,8 @@ export default function PrivacyPage({ searchParams }: { searchParams: LegalSearc
                     </li>
                     <li>
                         <strong>Market data providers (Massive and Finnhub) and SEC EDGAR</strong> supply prices
-                        and filings. We send them ticker symbols, filer IDs and the words you type into ticker
-                        search, never your name, email or account details.
+                        and filings. We send them ticker symbols, the option contracts held, filer IDs and the
+                        words you type into ticker search, never your name, email or account details.
                     </li>
                 </ul>
                 <p>
@@ -139,7 +140,7 @@ export default function PrivacyPage({ searchParams }: { searchParams: LegalSearc
                 <p>
                     We keep your data while your account is open. Download a copy of it at any time in
                     Settings (one JSON file, or your transactions and holdings as CSV). Delete your account in
-                    Settings and we remove, straight away, your account, portfolios, holdings, transactions,
+                    Settings and we remove, straight away, your account, portfolios, holdings, option positions, transactions,
                     drafted orders, value history, watchlist, journal, theses, strategies, the filers you follow, Ask questions and settings from
                     our database, end our access to your linked institutions at Plaid and erase our encrypted
                     access to them, and clear what this browser kept for you. You can also email{" "}

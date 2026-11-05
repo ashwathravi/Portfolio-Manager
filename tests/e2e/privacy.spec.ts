@@ -38,6 +38,8 @@ test.describe('Privacy policy', () => {
     await expect(added).toContainText('your watchlist');
     await expect(added).toContainText('your decision journal');
     await expect(added).toContainText('your research theses');
+    // Launch item i63: option positions for the LEAPS ledger.
+    await expect(added).toContainText('the option positions you add or import (with the thesis, exit rule and price you give them)');
     // Launch item i53: orders drafted on Trade are kept with the account too.
     await expect(added).toContainText('orders you draft on Trade');
     // Launch item i56.
@@ -56,7 +58,7 @@ test.describe('Privacy policy', () => {
 
   test('says what stays when you remove a watchlist ticker, journal entry or thesis', async ({ page }) => {
     const retention = page.getByRole('region', { name: 'Keeping and deleting your data' });
-    await expect(retention).toContainText('drafted orders, value history, watchlist, journal, theses, strategies, the filers you follow, Ask questions and settings');
+    await expect(retention).toContainText('portfolios, holdings, option positions, transactions, drafted orders, value history, watchlist, journal, theses, strategies, the filers you follow, Ask questions and settings');
     await expect(retention).toContainText('When you clear your Ask conversation it disappears straight away. Its questions and answers are deleted once they’re a day old, by the next nightly cleanup');
     await expect(retention.getByText(/When you remove a watchlist ticker or delete a journal entry or thesis/)).toContainText('notes and reasoning are erased');
   });
@@ -86,7 +88,7 @@ test.describe('Privacy policy', () => {
     await expect(sharing.getByText(/Sentry sees your IP address/)).toBeVisible();
     // Both price providers are named (launch item i33), and get ticker symbols only.
     await expect(sharing.getByText('Market data providers (Massive and Finnhub) and SEC EDGAR')).toBeVisible();
-    await expect(sharing).toContainText('We send them ticker symbols, filer IDs and the words you type into ticker search, never your name, email or account details.');
+    await expect(sharing).toContainText('We send them ticker symbols, the option contracts held, filer IDs and the words you type into ticker search, never your name, email or account details.');
   });
 
   test('links to the Plaid end user policy and a contact address', async ({ page }) => {

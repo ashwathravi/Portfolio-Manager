@@ -3,7 +3,6 @@
 import { ImportHoldingsDialog, type ImportAccountOption } from "./ImportHoldingsDialog";
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { SampleGate } from "@/components/data-display/SampleGate";
 import { useAutoRefreshQuotes } from "@/lib/hooks/useAutoRefreshQuotes";
 import { describeQuotes } from "@/lib/markets/quote-label";
 import { sectorFor, type Sector } from "@/lib/holdings/sector";
@@ -15,7 +14,6 @@ import {
     policyBucketLabel,
     resolvePolicyBucketAssignment,
     themeLabel,
-    type OptionRiskPosition,
     themeWeightsForSymbol,
     type PolicyBucketId,
     type PolicyBucketStatus,
@@ -30,6 +28,8 @@ import { useSettingsStore } from "@/lib/stores/settingsStore";
 import { HoldingsFullTable, type HoldingsTableRow } from "./HoldingsFullTable";
 import { HoldingsSummaryStrip } from "./HoldingsSummaryStrip";
 import { OptionsRiskLedgerCard } from "./OptionsRiskLedgerCard";
+import type { OptionThesisOption } from "./OptionPositionDialog";
+import { toOptionRiskPosition, type LoadedOptionPosition } from "@/lib/portfolio/option-positions";
 import { isTodaysQuote } from "@/lib/markets/quote-session";
 import { useEasternDate } from "@/lib/hooks/useEasternDate";
 
@@ -67,17 +67,18 @@ export interface HoldingsSeed {
 
 export interface HoldingsPageClientProps {
     holdings: HoldingsSeed[];
-    optionPositions?: readonly OptionRiskPosition[];
-    /** True while option positions come from example data (no options feed yet). */
-    optionPositionsAreSample?: boolean;
-    /** Accounts offered as the CSV import target. */
+    /** The user's option positions, for the LEAPS ledger (launch item i63). */
+    optionPositions?: readonly LoadedOptionPosition[];
+    /** The user's theses, to link an option position to. */
+    optionTheses?: readonly OptionThesisOption[];
+    /** Accounts offered as the CSV import target, and for option positions. */
     importAccounts?: readonly ImportAccountOption[];
 }
 
 export function HoldingsPageClient({
     holdings,
     optionPositions = [],
-    optionPositionsAreSample = false,
+    optionTheses = [],
     importAccounts = [],
 }: HoldingsPageClientProps) {
     const [sectorFilter, setSectorFilter] = useState<Sector | "All">("All");
@@ -192,7 +193,7 @@ export function HoldingsPageClient({
         [rows, riskPolicy.themeCaps],
     );
     const optionsCurrentValue = useMemo(
-        () => optionPositions.reduce((sum, position) => sum + optionCurrentValue(position), 0),
+        () => optionPositions.reduce((sum, position) => sum + optionCurrentValue(toOptionRiskPosition(position)), 0),
         [optionPositions],
     );
     const totalPolicyValue = summary.marketValue + optionsCurrentValue;
@@ -240,6 +241,16 @@ export function HoldingsPageClient({
         }));
     }, [rows, sectorFilter, bucketFilter, themeFilter, sortKey, policySummary]);
 
+    const ledger = (
+        <OptionsRiskLedgerCard
+            positions={optionPositions}
+            totalPortfolioValue={totalPolicyValue}
+            liquidNetWorth={totalPolicyValue}
+            accounts={importAccounts}
+            theses={optionTheses}
+        />
+    );
+
     if (rows.length === 0) {
         return (
             <div className="pm-holdings-stack">
@@ -256,6 +267,8 @@ export function HoldingsPageClient({
                         <Link href="/portfolios/accounts" className="pm-btn pm-btn-ghost">View accounts</Link>
                     </div>
                 </section>
+                {/* Option positions without stock: the ledger still shows them. */}
+                {optionPositions.length > 0 && ledger}
             </div>
         );
     }
@@ -280,16 +293,7 @@ export function HoldingsPageClient({
                 themeSummary={themeSummary}
             />
 
-            {optionPositions.length > 0 && (
-                <SampleGate>
-                    <OptionsRiskLedgerCard
-                        positions={optionPositions}
-                        totalPortfolioValue={totalPolicyValue}
-                        liquidNetWorth={totalPolicyValue}
-                        isSample={optionPositionsAreSample}
-                    />
-                </SampleGate>
-            )}
+            {ledger}
 
             <HoldingsFilterRow
                 sectors={sectorChips}

@@ -20,6 +20,7 @@
 
 import {
   easternDateTime,
+  getEasternParts,
   getMarketDay,
   lastCompletedSession,
   previousTradingDay,
@@ -228,6 +229,8 @@ const MAX_CACHED_DAYS = 4;
 
 const NYSE_CLOSE_MINUTES = 16 * 60;
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+/** Massive's option ticker: O:, the root, YYMMDD, C or P, the strike × 1000 in eight digits. */
+const OPTION_CONTRACT = /^O:[A-Z0-9]{1,6}\d{6}[CP]\d{8}$/;
 
 // ---------------------------------------------------------------------------
 // Range helpers
@@ -441,6 +444,24 @@ export class PolygonMassiveAdapter implements MarketDataProvider {
     );
 
     return { bars: validBars.map((bar) => this.mapAggToOHLC(bar)), unreadable: rows.length - validBars.length };
+  }
+
+  /**
+   * An option contract's newest daily close from `from` to `to` (Eastern
+   * dates), and the trading day it's from; null when it didn't trade in
+   * that window (launch item i63). `contract` is Massive's ticker,
+   * O:AAPL270115C00250000. A plan without options data answers 403.
+   */
+  async getLatestOptionClose(contract: string, from: string, to: string): Promise<{ date: string; close: number } | null> {
+    this.assertConfigured();
+    if (!OPTION_CONTRACT.test(contract)) throw new Error(`PolygonMassiveAdapter: ${contract} is not an option contract ticker.`);
+    const url =
+      `${this.baseUrl}/v2/aggs/ticker/${encodeURIComponent(contract)}/range/1/day/${from}/${to}` +
+      `?adjusted=true&sort=desc&limit=10&apiKey=${this.apiKey}`;
+    const data = await this.fetchWithRetry<PolygonAggsResponse>(url);
+    const bar = (data.results ?? []).find((b) => b && Number.isFinite(b.t) && Number.isFinite(b.c) && b.c >= 0);
+    if (!bar) return null;
+    return { date: getEasternParts(new Date(bar.t)).date, close: bar.c };
   }
 
   async getFundamentals(symbol: string): Promise<Fundamentals> {

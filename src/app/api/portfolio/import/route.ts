@@ -2,10 +2,11 @@
  * POST /api/portfolio/import
  *
  * Imports parsed holdings rows (from the Holdings "Import CSV" dialog) into
- * an account the signed-in user owns, or a new account for them.
+ * an account the signed-in user owns, or a new account for them, with the
+ * file's option positions (launch item i63).
  *
- * Body:     { portfolioId?: uuid, newPortfolioName?: string, rows: ImportRow[] }
- * Response: { data: { portfolioId, createdPortfolio, insert, update, unchanged } }
+ * Body:     { portfolioId?: uuid, newPortfolioName?: string, rows: ImportRow[], options?: OptionContractRow[] }
+ * Response: { data: { portfolioId, createdPortfolio, insert, update, unchanged, options: { insert, update, unchanged } } }
  * Errors:   400 INVALID_IMPORT; 404 PORTFOLIO_NOT_FOUND; 409 DUPLICATE_ACCOUNT_NAME
  *           or ACCOUNT_LIMIT (a new account, checked as creating one); 413 IMPORT_TOO_LARGE
  */
@@ -51,6 +52,7 @@ export async function POST(request: Request) {
             route: '/api/portfolio/import',
             requestId: requestIdFrom(request.headers),
             rows: parsed.data.rows.length,
+            optionRows: parsed.data.options.length,
             inserted: result.insert,
             updated: result.update,
             createdPortfolio: result.createdPortfolio,

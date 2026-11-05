@@ -8,7 +8,6 @@ import {
     resolvePolicyBucketAssignment,
 } from "./buckets";
 import {
-    DEFAULT_OPTION_RISK_POSITIONS,
     DEFAULT_OPTIONS_RISK_POLICY,
     type OptionRiskPosition,
     type OptionsRiskPolicy,
@@ -195,7 +194,7 @@ export function evaluatePreTradeRiskPolicy(input: PreTradeRiskPolicyInput): PreT
             trade,
             tradeValue,
             portfolioValue,
-            existingOptionPositions: input.existingOptionPositions ?? DEFAULT_OPTION_RISK_POSITIONS,
+            existingOptionPositions: input.existingOptionPositions ?? [],
             policy: input.optionsRiskPolicy,
         }),
         buildMissingBucketCheck({ trade, bucketAssignment, tradeValue, portfolioValue }),

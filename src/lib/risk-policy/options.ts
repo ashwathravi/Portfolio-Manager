@@ -131,41 +131,6 @@ export const DEFAULT_OPTIONS_RISK_POLICY: OptionsRiskPolicy = {
     expiryClusterMaxPremiumPct: 1,
 };
 
-export const DEFAULT_OPTION_RISK_POSITIONS: readonly OptionRiskPosition[] = [
-    {
-        id: "opt-aapl-2027-250c",
-        underlying: "AAPL",
-        contractType: "call",
-        strike: 250,
-        expiry: "2027-01-15",
-        quantity: 3,
-        premiumPaid: 18.2,
-        currentPremium: 14.5,
-        underlyingPrice: 182.45,
-        linkedThesisId: "seed-aapl-services",
-        thesisTitle: "Services margin expansion",
-        whatMustBeTrueByExpiry: "AI and services growth must re-rate earnings before January 2027.",
-        plannedExitRule: "Exit if premium loses 50% or roll 90 days before expiry.",
-        account: "Taxable brokerage",
-        openedAt: "2026-02-01",
-    },
-    {
-        id: "opt-rivn-2027-25c",
-        underlying: "RIVN",
-        contractType: "call",
-        strike: 25,
-        expiry: "2027-01-16",
-        quantity: 30,
-        premiumPaid: 4.4,
-        currentPremium: 1.9,
-        underlyingPrice: 14.2,
-        whatMustBeTrueByExpiry: "Delivery growth and gross margin need to inflect before the 2027 cycle.",
-        plannedExitRule: "Close before 120 days to expiry unless thesis is re-underwritten.",
-        account: "Taxable brokerage",
-        openedAt: "2026-03-12",
-    },
-];
-
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 export function computeOptionRiskLedger(input: OptionRiskLedgerInput): OptionRiskLedgerSummary {

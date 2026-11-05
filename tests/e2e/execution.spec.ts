@@ -701,6 +701,27 @@ test.describe('Trade › risk policy on the user\'s own portfolio', () => {
         await signInAsFreshUser(context);
     });
 
+    test('the options budget counts the option positions the user holds (launch item i63)', async ({ page }) => {
+        const created = await page.request.post('/api/portfolios', { data: { name: 'LEAPS account' } });
+        const { id: portfolioId } = (await created.json()).data;
+        // $100,000 of premium at risk: far over the 5% options cap.
+        const added = await page.request.post('/api/portfolio/options', {
+            data: { portfolioId, position: { underlying: 'NVDA', contractType: 'call', strike: 150, expiry: '2027-01-15', quantity: 20, premium: 50 } },
+        });
+        expect(added.status()).toBe(201);
+
+        await gotoAppPage(page, '/execution');
+        await page.getByRole('tab', { name: 'Option / LEAPS' }).click();
+        await chooseTicker(page, 'RIVN');
+        await page.getByLabel('Quantity').fill('1');
+        await page.getByLabel('Limit price').fill('5');
+        await page.getByLabel('Option strike').fill('25');
+        await page.getByLabel('Option expiry').fill('2027-01-16');
+
+        // Without the user's positions it would start from 0%.
+        await expect(page.getByTestId('risk-policy-impact')).toContainText(/Options premium at risk worsens from [1-9]\d*(\.\d)?%/);
+    });
+
     test('the checks see the user\'s holdings: TSLA is already over the speculative cap', async ({ page }) => {
         await gotoAppPage(page, '/execution');
         await chooseTicker(page, 'TSLA');

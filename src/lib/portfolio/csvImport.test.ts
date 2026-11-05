@@ -206,6 +206,73 @@ describe('parseHoldingsCsv', () => {
     });
 });
 
+describe('parseHoldingsCsv › option rows (launch item i63)', () => {
+    test('a Schwab export: option rows go to the ledger, premium per share from the total cost', () => {
+        const csv = [
+            '"Symbol","Description","Quantity","Price","Market Value","Cost Basis","Security Type",',
+            '"AAPL","APPLE INC","10","$250.00","$2,500.00","$1,500.00","Equity",',
+            '"AAPL 01/15/2027 250.00 C","CALL APPLE INC $250 EXP 01/15/27","3","$21.40","$6,420.00","$5,460.00","Option",',
+            '"RIVN 01/15/2027 25.00 C","CALL RIVIAN AUTOMOTIVE $25 EXP 01/15/27","-2","$1.90","-$380.00","-$880.00","Option",',
+            '"Account Total","--","--","--","$8,540.00","$6,080.00","--",',
+        ].join('\n');
+        const r = parseHoldingsCsv(csv);
+        assert.deepStrictEqual(r.issues, []);
+        assert.deepStrictEqual(r.rows, [{ symbol: 'AAPL', name: 'APPLE INC', quantity: 10, avgCost: 150 }]);
+        assert.deepStrictEqual(r.options, [
+            { underlying: 'AAPL', contractType: 'call', strike: 250, expiry: '2027-01-15', quantity: 3, premium: 18.2 },
+            { underlying: 'RIVN', contractType: 'call', strike: 25, expiry: '2027-01-15', quantity: -2, premium: 4.4 },
+        ]);
+    });
+
+    test('a Fidelity export: the dash-prefixed symbol, and the average cost when there is no total', () => {
+        const csv = [
+            'Account Number,Account Name,Symbol,Description,Quantity,Last Price,Average Cost Basis,Type',
+            'Z12345678,Individual, -SPY261218P552.5,SPY DEC 18 2026 552.5 PUT,1,$9.10,$12.05,Margin,',
+        ].join('\n');
+        const r = parseHoldingsCsv(csv);
+        assert.deepStrictEqual(r.issues, []);
+        assert.deepStrictEqual(r.rows, []);
+        assert.deepStrictEqual(r.options, [{ underlying: 'SPY', contractType: 'put', strike: 552.5, expiry: '2026-12-18', quantity: 1, premium: 12.05 }]);
+    });
+
+    test('a row the file marks as an option is read from its description', () => {
+        const csv = ['Symbol,Description,Quantity,Cost Basis,Asset Type', "AAPL,AAPL Jan 15 '27 $250 Call,3,$5460,Option"].join('\n');
+        const r = parseHoldingsCsv(csv);
+        assert.deepStrictEqual(r.rows, []);
+        assert.deepStrictEqual(r.options.map((o) => [o.underlying, o.expiry, o.strike, o.premium]), [['AAPL', '2027-01-15', 250, 18.2]]);
+    });
+
+    test("regression: an option whose contract can't be read is listed, not imported as shares of its underlying", () => {
+        const csv = ['Symbol,Description,Quantity,Cost Basis,Asset Type', 'AAPL,Some call,3,$5460,Option'].join('\n');
+        const r = parseHoldingsCsv(csv);
+        assert.deepStrictEqual(r.rows, []);
+        assert.deepStrictEqual(r.options, []);
+        assert.match(r.issues[0].message, /an option Atlas can't read the contract of/);
+    });
+
+    test('two lots of one contract combine at the weighted premium; lots that net to nothing drop out', () => {
+        const csv = [
+            'Symbol,Quantity,Average Cost',
+            'AAPL  270115C00250000,1,10',
+            'AAPL  270115C00250000,3,20',
+            'MSFT  270115C00500000,2,5',
+            'MSFT  270115C00500000,-2,5',
+        ].join('\n');
+        const r = parseHoldingsCsv(csv);
+        assert.deepStrictEqual(r.options, [{ underlying: 'AAPL', contractType: 'call', strike: 250, expiry: '2027-01-15', quantity: 4, premium: 17.5 }]);
+    });
+
+    test('contracts must be a whole number; a missing cost is listed', () => {
+        const csv = ['Symbol,Quantity,Average Cost', 'AAPL 01/15/2027 250 C,1.5,10', 'AAPL 01/15/2027 300 C,2,'].join('\n');
+        const r = parseHoldingsCsv(csv);
+        assert.deepStrictEqual(r.options, []);
+        assert.deepStrictEqual(r.issues.map((i) => [i.line, i.message]), [
+            [2, 'AAPL 2027-01-15 250 call: contracts must be a whole number other than 0.'],
+            [3, 'AAPL 2027-01-15 300 call: missing or invalid cost.'],
+        ]);
+    });
+});
+
 describe('planHoldingsImport', () => {
     const existing = [
         { id: 'h1', symbol: 'AAPL', quantity: 10, avgCost: 150 },

@@ -25,7 +25,7 @@ import {
     type RiskPolicyDashboardTrade,
 } from "./dashboard";
 import type { EmployerStockDeRiskingPlan } from "./de-risking";
-import type { OptionsRiskPolicy } from "./options";
+import { optionCurrentValue, type OptionRiskPosition, type OptionsRiskPolicy } from "./options";
 import type { SellDisciplineRule, SellDisciplineThesis } from "./sell-discipline";
 import type { ThemeId } from "./themes";
 
@@ -84,13 +84,17 @@ export interface PolicyPortfolio {
     trades: RiskPolicyDashboardTrade[];
     /** The theses the user wrote (examples left out). */
     theses: SellDisciplineThesis[];
+    /** The option positions the user holds (launch item i63), marked as the LEAPS ledger marks them. */
+    options: OptionRiskPosition[];
 }
 
-export const EMPTY_POLICY_PORTFOLIO: PolicyPortfolio = { holdings: [], cashTotal: 0, trades: [], theses: [] };
+export const EMPTY_POLICY_PORTFOLIO: PolicyPortfolio = { holdings: [], cashTotal: 0, trades: [], theses: [], options: [] };
 
-/** What the holdings and cash are worth together. */
-export function policyPortfolioValue(portfolio: Pick<PolicyPortfolio, "holdings" | "cashTotal">): number {
-    return portfolio.cashTotal + portfolio.holdings.reduce((sum, holding) => sum + holding.marketValue, 0);
+/** What the holdings, option positions and cash are worth together. */
+export function policyPortfolioValue(portfolio: Pick<PolicyPortfolio, "holdings" | "cashTotal"> & { options?: readonly OptionRiskPosition[] }): number {
+    return portfolio.cashTotal
+        + portfolio.holdings.reduce((sum, holding) => sum + holding.marketValue, 0)
+        + (portfolio.options ?? []).reduce((sum, position) => sum + optionCurrentValue(position), 0);
 }
 
 export function normalizeTicker(symbol: string | null | undefined): string {
@@ -192,8 +196,7 @@ export function riskPolicyInput(
         cashJobs: policy.cashJobs,
         cashDeploymentRule: policy.cashDeploymentRule,
         employerStockPlan: policy.employerStockPlan,
-        // No options feed yet: the policy sees no option positions rather than example ones.
-        optionPositions: [],
+        optionPositions: portfolio.options,
         optionsRiskPolicy: policy.optionsRiskPolicy,
         sellDisciplineRules: policy.sellDisciplineRules,
         options: {

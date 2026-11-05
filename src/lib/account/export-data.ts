@@ -54,6 +54,29 @@ export interface ExportedValuationPosition {
     marketValue: number | null;
 }
 
+/** An option position (launch item i63), as entered or imported. */
+export interface ExportedOptionPosition {
+    underlying: string;
+    contractType: string;
+    strike: number;
+    expiry: string;
+    /** Contracts; negative for a written position. */
+    quantity: number;
+    /** Per share. */
+    premium: number;
+    multiplier: number;
+    openedAt: string | null;
+    /** The user's own price per share, and its date. */
+    userMark: number | null;
+    userMarkDate: string | null;
+    thesisId: string | null;
+    expiryTest: string;
+    exitRule: string;
+    /** "manual" or "csv". */
+    source: string;
+    updatedAt: string;
+}
+
 /** An order plan drafted on Trade, as the blotter shows it (src/types/execution.ts). */
 export type ExportedOrderPlan = Order;
 
@@ -67,6 +90,7 @@ export interface ExportedAccount {
     createdAt: string;
     updatedAt: string;
     holdings: ExportedHolding[];
+    optionPositions: ExportedOptionPosition[];
     transactions: ExportedTransaction[];
     valuationHistory: ExportedValuation[];
     /** Oldest first. */

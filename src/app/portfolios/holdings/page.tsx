@@ -8,10 +8,11 @@ import { PageHeaderSync } from "@/components/layout/TopBar";
 import { DataUnavailableNotice } from "@/components/data-display/DataUnavailableNotice";
 import { ImportHoldingsDialog, type ImportAccountOption } from "@/components/holdings/ImportHoldingsDialog";
 import HoldingsLoading from "./loading";
-import { DEFAULT_OPTION_RISK_POSITIONS } from "@/lib/risk-policy";
 import { getSecurityProfiles } from "@/lib/markets/price-store";
 import { holdingName, loadSecurityProfiles } from "@/lib/markets/security-profile";
 import { defaultPolicyBucket } from "@/lib/risk-policy/buckets";
+import type { LoadedOptionPosition } from "@/lib/portfolio/option-positions";
+import { loadOptionPositions, loadThesisChoices } from "@/lib/portfolio/option-positions-store";
 
 /**
  * Phase 4 (AR-74) Holdings page.
@@ -37,11 +38,16 @@ async function HoldingsContent() {
         portfolioName: string;
     }> = [];
     let accounts: ImportAccountOption[] = [];
+    let optionPositions: LoadedOptionPosition[] = [];
+    let optionTheses: Array<{ id: string; ticker: string; title: string }> = [];
     let unavailable = false;
     try {
-        [dbHoldings, accounts] = await Promise.all([
+        [dbHoldings, accounts, optionPositions, optionTheses] = await Promise.all([
             buildUserHoldingsQuery(userId),
             buildUserPortfolioOptionsQuery(userId),
+            // The LEAPS ledger (launch item i63), the underlyings priced as the holdings are.
+            loadOptionPositions(userId, { quotes: loadQuotes }),
+            loadThesisChoices(userId),
         ]);
     } catch (e) {
         // With a configured database a failure is an outage, not an empty
@@ -120,13 +126,11 @@ async function HoldingsContent() {
                 crumbs={["Portfolio", "Holdings"]}
                 actions={seed.length > 0 ? <ImportHoldingsDialog accounts={accounts} /> : undefined}
             />
-            {/* No options feed exists yet, so the LEAPS ledger runs on example
-                positions and is tagged as such. */}
             <HoldingsPageClient
                 holdings={seed}
                 importAccounts={accounts}
-                optionPositions={DEFAULT_OPTION_RISK_POSITIONS}
-                optionPositionsAreSample
+                optionPositions={optionPositions}
+                optionTheses={optionTheses}
             />
         </>
     );

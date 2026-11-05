@@ -43,6 +43,23 @@ describe('portfolioImportSchema', () => {
         assert.strictEqual(portfolioImportSchema.safeParse({ portfolioId: ID, rows: [{ ...row, quantity: Infinity }] }).success, false);
     });
 
+    test('takes a file of option rows alone (launch item i63), but not nothing at all', () => {
+        const option = { underlying: 'AAPL', contractType: 'call', strike: 250, expiry: '2027-01-15', quantity: 3, premium: 18.2 };
+        const r = portfolioImportSchema.safeParse({ portfolioId: ID, rows: [], options: [option] });
+        assert.strictEqual(r.success, true);
+        assert.strictEqual(firstMessage({ portfolioId: ID, rows: [], options: [] }), 'Nothing to import');
+        assert.strictEqual(firstMessage({ portfolioId: ID, rows: [], options: [{ ...option, strike: 0 }] }), 'Enter a strike above 0, to at most three decimals');
+        // Without options the body is as before.
+        const plain = portfolioImportSchema.safeParse({ portfolioId: ID, rows: [row] });
+        assert.deepStrictEqual(plain.success && plain.data.options, []);
+    });
+
+    test('regression: any well-formed account ID is taken, as the other account routes take it', () => {
+        // Not an RFC version-4 ID: refused as "Unknown account" before the
+        // account was even looked up.
+        assert.strictEqual(portfolioImportSchema.safeParse({ portfolioId: 'd41d8cd9-8f00-b204-e980-0998ecf8427e', rows: [row] }).success, true);
+    });
+
     test('a zero average cost is allowed (gifted or transferred shares)', () => {
         assert.strictEqual(portfolioImportSchema.safeParse({ portfolioId: ID, rows: [{ ...row, avgCost: 0 }] }).success, true);
     });

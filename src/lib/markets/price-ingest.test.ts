@@ -24,6 +24,7 @@ import {
     type PriceIngestAdapter,
     type PriceIngestStore,
 } from "./price-ingest";
+import { MAX_OPTION_MARKS_PER_RUN } from "./option-marks";
 import { dedupeBars, isValidBar, normalizeSymbols, type PriceBarInput } from "./price-store";
 
 // Friday 16 October 2026, 6:30 PM EDT: the cron's usual time, after the close.
@@ -64,6 +65,7 @@ function fakeAdapter({
     unreadable = {},
     splits = [],
     references = {},
+    optionCloses = {},
     rateLimitedOnce = [],
     onCall,
 }: {
@@ -76,6 +78,8 @@ function fakeAdapter({
     splits?: SplitEvent[] | Error;
     /** Reference data per symbol; a symbol not listed is one the provider doesn't know. */
     references?: Record<string, TickerReference | Error>;
+    /** The newest close per option contract; a contract not listed didn't trade. */
+    optionCloses?: Record<string, { date: string; close: number } | Error>;
     /** Calls (as recorded in `calls`) answered with a 429 the first time only. */
     rateLimitedOnce?: string[];
     onCall?: () => void;
@@ -113,6 +117,12 @@ function fakeAdapter({
             if (value instanceof Error) throw value;
             return value ?? null;
         },
+        async getLatestOptionClose(contract, from, to) {
+            record(`option ${contract} ${from} ${to}`);
+            const value = optionCloses[contract];
+            if (value instanceof Error) throw value;
+            return value ?? null;
+        },
     };
     return { adapter, calls };
 }
@@ -127,6 +137,8 @@ function fakeStore({
     positions = {},
     heldSince = {},
     unreferenced = [],
+    contracts = [],
+    optionMarks = {},
 }: {
     holdings?: string[];
     /** Tracked symbols whose history is already loaded. */
@@ -149,7 +161,12 @@ function fakeStore({
      * about prices aren't shown reference calls.
      */
     unreferenced?: string[];
+    /** Held, unexpired option contracts. Empty by default, so tests about prices aren't shown option calls. */
+    contracts?: string[];
+    /** Stored option marks: the session each contract was last asked about, and its close. */
+    optionMarks?: Record<string, { checkedSession: string; close: number | null; closeDate: string | null }>;
 } = {}) {
+    const marksStored = new Map(Object.entries(optionMarks));
     const securities = new Map<string, string | null>([
         ...loaded.map((symbol) => [symbol, "2024-10-16"] as const),
         ...queued.map((symbol) => [symbol, null] as const),
@@ -296,8 +313,32 @@ function fakeStore({
             referenceAttempted.delete(symbol);
             unreferenced.splice(unreferenced.indexOf(symbol), 1);
         },
+        // Never asked first, then in the order they were last asked.
+        async listOptionContractsToMark(limit, session) {
+            const waiting = contracts.filter((contract) => (marksStored.get(contract)?.checkedSession ?? "") < session);
+            return [
+                ...waiting.filter((contract) => !marksStored.has(contract)),
+                ...waiting.filter((contract) => marksStored.has(contract)),
+            ].slice(0, limit);
+        },
+        countOptionContractsToMark: async (session) =>
+            contracts.filter((contract) => (marksStored.get(contract)?.checkedSession ?? "") < session).length,
+        async saveOptionMark(contract, found, session) {
+            const before = marksStored.get(contract);
+            const newer = found && (!before?.closeDate || before.closeDate <= found.date);
+            marksStored.set(contract, {
+                checkedSession: session,
+                close: newer ? found.close : before?.close ?? null,
+                closeDate: newer ? found.date : before?.closeDate ?? null,
+            });
+        },
+        async pruneOptionMarks() {
+            const gone = [...marksStored.keys()].filter((contract) => !contracts.includes(contract));
+            for (const contract of gone) marksStored.delete(contract);
+            return gone.length;
+        },
     };
-    return { store, securities, stored, marks, resets, attempted, adjustments, savedReferences };
+    return { store, securities, stored, marks, resets, attempted, adjustments, savedReferences, optionMarks: marksStored };
 }
 
 function storedDates(stored: Map<string, PriceBarInput>, symbol: string): string[] {
@@ -736,7 +777,7 @@ describe("ingestDailyPrices", () => {
 
         assert.deepEqual(calls.slice(0, 3), ["splits 2026-10-15 2026-10-16", "daily 2026-10-15", "daily 2026-10-16"]);
         assert.ok(calls.slice(2).every((call) => call === "daily 2026-10-16"));
-        assert.deepEqual(detail.stopped, { catchUp: "rate-limited", reference: "rate-limited", backfill: "rate-limited" });
+        assert.deepEqual(detail.stopped, { catchUp: "rate-limited", reference: "rate-limited", optionMarks: "rate-limited", backfill: "rate-limited" });
         assert.equal(detail.daysBehind, 1);
         assert.equal(detail.backfillQueue, 1);
     });
@@ -949,7 +990,7 @@ describe("ingestDailyPrices", () => {
         const detail = await ingestDailyPrices({ adapter, store, ...fakeClock() });
 
         assert.ok(calls.length > 1 && calls.every((call) => call === "splits 2026-10-16 2026-10-16"));
-        assert.deepEqual(detail.stopped, { catchUp: "rate-limited", reference: "rate-limited", backfill: "rate-limited" });
+        assert.deepEqual(detail.stopped, { catchUp: "rate-limited", reference: "rate-limited", optionMarks: "rate-limited", backfill: "rate-limited" });
         assert.deepEqual(detail.days, []);
         assert.deepEqual(detail.splits, { skipped: "rate-limited" });
         assert.equal(detail.daysBehind, 1);
@@ -1402,8 +1443,109 @@ describe("ingestDailyPrices › securities master", () => {
         const detail = await ingestDailyPrices({ adapter, store, ...fakeClock(), budgetMs: 10_000 });
 
         assert.deepEqual(calls, ["reference MSFT"]);
-        assert.deepEqual(detail.stopped, { reference: "rate-limited", backfill: "rate-limited" });
+        assert.deepEqual(detail.stopped, { reference: "rate-limited", optionMarks: "rate-limited", backfill: "rate-limited" });
         assert.equal(detail.reference?.queue, 1);
+    });
+});
+
+describe("ingestDailyPrices › option marks (launch item i63)", () => {
+    const AAPL_CALL = "O:AAPL270115C00250000";
+    const RIVN_CALL = "O:RIVN270115C00025000";
+    const upToDate = { loaded: [...BENCHMARK_SYMBOLS], bars: [{ ...dailyBar("SPY", "2026-10-16"), source: "massive" }] };
+
+    test("asks for the newest close of each held contract over the last 30 days, before the backfill", async () => {
+        const { store, optionMarks } = fakeStore({ ...upToDate, queued: ["MSFT"], holdings: ["MSFT"], contracts: [AAPL_CALL, RIVN_CALL] });
+        const { adapter, calls } = fakeAdapter({
+            optionCloses: { [AAPL_CALL]: { date: "2026-10-16", close: 21.4 } },
+            history: { MSFT: [ohlc("2026-10-15T04:00:00.000Z")] },
+        });
+
+        const detail = await ingestDailyPrices({ adapter, store, ...fakeClock() });
+
+        assert.deepEqual(calls, [
+            `option ${AAPL_CALL} 2026-09-16 2026-10-16`,
+            `option ${RIVN_CALL} 2026-09-16 2026-10-16`,
+            "history MSFT 2Y",
+        ]);
+        assert.deepEqual(detail.optionMarks, { updated: [AAPL_CALL], noTrade: [RIVN_CALL], errors: [], queue: 0, pruned: 0 });
+        assert.deepEqual(optionMarks.get(AAPL_CALL), { checkedSession: "2026-10-16", close: 21.4, closeDate: "2026-10-16" });
+        // Asked about, with no close: not asked again this session.
+        assert.deepEqual(optionMarks.get(RIVN_CALL), { checkedSession: "2026-10-16", close: null, closeDate: null });
+    });
+
+    test("asks once a session: a second run the same evening makes no option calls", async () => {
+        const { store } = fakeStore({ ...upToDate, contracts: [AAPL_CALL] });
+        const { adapter, calls } = fakeAdapter({ optionCloses: { [AAPL_CALL]: { date: "2026-10-16", close: 21.4 } } });
+
+        await ingestDailyPrices({ adapter, store, ...fakeClock() });
+        calls.length = 0;
+        const again = await ingestDailyPrices({ adapter, store, ...fakeClock() });
+
+        assert.deepEqual(calls.filter((call) => call.startsWith("option ")), []);
+        assert.deepEqual(again.optionMarks?.updated, []);
+    });
+
+    test("a contract that didn't trade keeps its last close", async () => {
+        const { store, optionMarks } = fakeStore({
+            ...upToDate,
+            contracts: [AAPL_CALL],
+            optionMarks: { [AAPL_CALL]: { checkedSession: "2026-10-15", close: 19.9, closeDate: "2026-10-14" } },
+        });
+        const { adapter } = fakeAdapter();
+
+        const detail = await ingestDailyPrices({ adapter, store, ...fakeClock() });
+
+        assert.deepEqual(detail.optionMarks?.noTrade, [AAPL_CALL]);
+        assert.deepEqual(optionMarks.get(AAPL_CALL), { checkedSession: "2026-10-16", close: 19.9, closeDate: "2026-10-14" });
+    });
+
+    test("a plan without options data (403) ends the step for the run, without failing it or saving anything", async () => {
+        const { store, optionMarks } = fakeStore({ ...upToDate, contracts: [AAPL_CALL, RIVN_CALL] });
+        const { adapter, calls } = fakeAdapter({
+            optionCloses: { [AAPL_CALL]: new PolygonApiError(403, "Forbidden", "https://api.polygon.io/v2/aggs") },
+        });
+
+        const detail = await ingestDailyPrices({ adapter, store, ...fakeClock() });
+
+        assert.deepEqual(calls.filter((call) => call.startsWith("option ")), [`option ${AAPL_CALL} 2026-09-16 2026-10-16`]);
+        assert.equal(detail.optionMarks?.notIncluded, true);
+        assert.equal(detail.optionMarks?.queue, 2);
+        assert.equal(optionMarks.size, 0);
+    });
+
+    test("a failure is recorded as asked, so it's tried next session rather than ahead of the rest every night", async () => {
+        const { store, optionMarks } = fakeStore({ ...upToDate, contracts: [AAPL_CALL] });
+        const { adapter } = fakeAdapter({ optionCloses: { [AAPL_CALL]: new Error("HTTP 500") } });
+
+        const detail = await ingestDailyPrices({ adapter, store, ...fakeClock() });
+
+        assert.deepEqual(detail.optionMarks?.errors.map((e) => e.contract), [AAPL_CALL]);
+        assert.equal(optionMarks.get(AAPL_CALL)?.checkedSession, "2026-10-16");
+        assert.equal(detail.optionMarks?.queue, 0);
+    });
+
+    test("at most a few a run; the rest wait for the next", async () => {
+        const many = Array.from({ length: MAX_OPTION_MARKS_PER_RUN + 2 }, (_, i) => `O:T${i}270115C00010000`);
+        const { store } = fakeStore({ ...upToDate, contracts: many });
+        const { adapter, calls } = fakeAdapter();
+
+        const detail = await ingestDailyPrices({ adapter, store, ...fakeClock() });
+
+        assert.equal(calls.filter((call) => call.startsWith("option ")).length, MAX_OPTION_MARKS_PER_RUN);
+        assert.equal(detail.optionMarks?.queue, 2);
+    });
+
+    test("drops the marks of contracts no one holds any more", async () => {
+        const { store, optionMarks } = fakeStore({
+            ...upToDate,
+            optionMarks: { [RIVN_CALL]: { checkedSession: "2026-10-15", close: 1.9, closeDate: "2026-10-15" } },
+        });
+        const { adapter } = fakeAdapter();
+
+        const detail = await ingestDailyPrices({ adapter, store, ...fakeClock() });
+
+        assert.equal(detail.optionMarks?.pruned, 1);
+        assert.equal(optionMarks.has(RIVN_CALL), false);
     });
 });
 

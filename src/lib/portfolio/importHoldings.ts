@@ -5,6 +5,7 @@ import { holdings, portfolios } from '@/db/schema';
 import type { PortfolioImportBody } from '@/lib/validators/portfolio-import';
 import { planHoldingsImport, summarizePlan } from './csvImport';
 import { checkAccountName } from './manage';
+import { importOptionRows, type OptionImportResult } from './option-positions-store';
 
 export class ImportAccessError extends Error {
     constructor() {
@@ -19,6 +20,8 @@ export interface ImportResult {
     insert: number;
     update: number;
     unchanged: number;
+    /** The file's option positions (launch item i63). */
+    options: OptionImportResult;
 }
 
 /**
@@ -27,7 +30,8 @@ export interface ImportResult {
  * foreign id is a 404 with nothing written); a new account is created for
  * them otherwise, under the same name and limit checks as creating one
  * (`checkAccountName` in manage.ts). Rows for symbols already held replace
- * those positions; other positions are untouched.
+ * those positions; other positions are untouched. Option rows go to the
+ * account's option positions the same way (importOptionRows).
  *
  * `prices` (upper-case symbol → last price, from the price store) gives
  * the rows it covers a stored price, so an imported position shows its
@@ -39,7 +43,7 @@ export interface ImportResult {
  */
 export async function importHoldings(
     userId: string,
-    body: PortfolioImportBody,
+    body: Omit<PortfolioImportBody, 'options'> & Partial<Pick<PortfolioImportBody, 'options'>>,
     prices: Readonly<Record<string, number>> = {},
     database: typeof db = db,
 ): Promise<ImportResult> {
@@ -119,10 +123,11 @@ export async function importHoldings(
         }
 
         const summary = summarizePlan(plan);
-        if (summary.insert + summary.update > 0) {
+        const options = await importOptionRows(tx, userId, portfolioId, body.options ?? [], now);
+        if (summary.insert + summary.update + options.insert + options.update > 0) {
             await tx.update(portfolios).set({ updatedAt: now }).where(eq(portfolios.id, portfolioId));
         }
 
-        return { portfolioId, createdPortfolio, ...summary };
+        return { portfolioId, createdPortfolio, ...summary, options };
     });
 }
