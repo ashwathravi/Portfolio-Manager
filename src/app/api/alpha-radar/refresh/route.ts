@@ -4,6 +4,7 @@ import { apiError, internalServerError, logApiEvent } from '@/lib/api/security';
 import { requestIdFrom } from '@/lib/observability/request-id';
 import { requireAdminApiUserScope } from '@/lib/api/session-security';
 import { getAlphaRadarRefreshService } from '@/lib/alpha-radar';
+import { configuredSecUserAgent } from '@/lib/sec';
 import { ALPHA_RADAR_BODY_MAX_BYTES, alphaRadarRefreshRequestSchema } from '@/lib/validators/alpha-radar';
 
 export async function POST(request: NextRequest) {
@@ -21,6 +22,8 @@ export async function POST(request: NextRequest) {
         if (!parsed.success) {
             return apiError(parsed.error.issues[0]?.message ?? 'Invalid refresh payload', 'INVALID_REFRESH_PAYLOAD', 400);
         }
+        // Every SEC request names who makes it (launch item i60).
+        if (!configuredSecUserAgent()) return apiError('SEC requests are not configured.', 'SEC_NOT_CONFIGURED', 503);
         logApiEvent('alpha_radar_refresh_requested', {
             route: '/api/alpha-radar/refresh',
             requestId: requestIdFrom(request.headers),

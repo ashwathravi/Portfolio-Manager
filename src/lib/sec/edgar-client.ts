@@ -75,7 +75,17 @@ interface SecArchiveIndexResponse {
     };
 }
 
-const DEFAULT_USER_AGENT = 'Portfolio-Manager Alpha Radar local-dev contact@example.invalid';
+/**
+ * SEC_EDGAR_USER_AGENT, trimmed, or null when it isn't set. SEC's fair
+ * access rules ask every client to say who it is, with a contact, so no SEC
+ * request is made without it (launch item i60).
+ */
+export function configuredSecUserAgent(env: Record<string, string | undefined> = process.env): string | null {
+    return env.SEC_EDGAR_USER_AGENT?.trim() || null;
+}
+
+export const SEC_USER_AGENT_MISSING = 'SEC_EDGAR_USER_AGENT is not set: SEC asks every client to name itself and a contact.';
+
 const DEFAULT_DATA_BASE_URL = 'https://data.sec.gov';
 const DEFAULT_ARCHIVES_BASE_URL = 'https://www.sec.gov/Archives';
 const DEFAULT_COMPANY_TICKERS_URL = 'https://www.sec.gov/files/company_tickers.json';
@@ -106,9 +116,9 @@ export class SecEdgarClient {
             throw new SecEdgarError('configuration', 'No fetch implementation is available for SEC EDGAR requests.');
         }
 
-        this.userAgent = (options.userAgent ?? process.env.SEC_EDGAR_USER_AGENT ?? DEFAULT_USER_AGENT).trim();
+        this.userAgent = (options.userAgent ?? configuredSecUserAgent() ?? '').trim();
         if (!this.userAgent) {
-            throw new SecEdgarError('configuration', 'SEC EDGAR user-agent cannot be empty.');
+            throw new SecEdgarError('configuration', SEC_USER_AGENT_MISSING);
         }
 
         this.fetcher = fetcher;

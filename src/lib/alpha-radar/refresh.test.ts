@@ -1,4 +1,4 @@
-import { describe, test } from 'node:test';
+import { afterEach, beforeEach, describe, test } from 'node:test';
 import assert from 'node:assert';
 import {
     AlphaRadarRefreshService,
@@ -203,11 +203,39 @@ describe('AlphaRadarRefreshService', () => {
 });
 
 describe('defaultFetchInformationTableXml', () => {
-    test('uses an abort signal and rejects oversized SEC XML responses', async () => {
+    const savedUserAgent = process.env.SEC_EDGAR_USER_AGENT;
+    beforeEach(() => {
+        process.env.SEC_EDGAR_USER_AGENT = 'Atlas Wealth test contact@example.com';
+    });
+    afterEach(() => {
+        if (savedUserAgent === undefined) delete process.env.SEC_EDGAR_USER_AGENT;
+        else process.env.SEC_EDGAR_USER_AGENT = savedUserAgent;
+    });
+
+    test('regression: asks SEC nothing without SEC_EDGAR_USER_AGENT', async () => {
+        delete process.env.SEC_EDGAR_USER_AGENT;
+        const originalFetch = globalThis.fetch;
+        let requests = 0;
+        globalThis.fetch = async () => {
+            requests += 1;
+            return new Response('<informationTable />');
+        };
+
+        try {
+            await assert.rejects(() => defaultFetchInformationTableXml(FILING), /SEC_EDGAR_USER_AGENT is not set/);
+            assert.strictEqual(requests, 0);
+        } finally {
+            globalThis.fetch = originalFetch;
+        }
+    });
+
+    test('names Atlas and its contact, uses an abort signal and rejects oversized SEC XML responses', async () => {
         const originalFetch = globalThis.fetch;
         let sawAbortSignal = false;
+        let userAgent: string | null = null;
         globalThis.fetch = async (_input: RequestInfo | URL, init?: RequestInit) => {
             sawAbortSignal = init?.signal instanceof AbortSignal;
+            userAgent = new Headers(init?.headers).get('user-agent');
             return new Response('<informationTable />', {
                 headers: { 'content-length': String(26 * 1024 * 1024) },
             });
@@ -219,6 +247,7 @@ describe('defaultFetchInformationTableXml', () => {
                 /SEC information table XML response for https:\/\/example\.test\/info\.xml exceeds 25 MiB/,
             );
             assert.strictEqual(sawAbortSignal, true);
+            assert.strictEqual(userAgent, 'Atlas Wealth test contact@example.com');
         } finally {
             globalThis.fetch = originalFetch;
         }

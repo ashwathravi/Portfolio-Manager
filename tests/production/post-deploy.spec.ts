@@ -6,7 +6,7 @@ import { expect, test, type Page } from '@playwright/test';
 // (playwright.config.ts), so it stays true to the app. Signed out and
 // read-only: it never signs in, writes nothing and runs no job.
 
-const SCHEDULED_JOBS = ['expired-sessions', 'ask-history', 'plaid', 'prices', 'snapshots', 'backup'];
+const SCHEDULED_JOBS = ['expired-sessions', 'ask-history', 'plaid', 'prices', 'snapshots', 'alpha-radar', 'backup'];
 
 function isLocal(baseURL: string | undefined): boolean {
     return /^(localhost|127\.0\.0\.1|\[::1\])$/.test(new URL(baseURL ?? 'http://localhost').hostname);
@@ -169,7 +169,9 @@ test.describe('After a production deploy', () => {
 
         // Without the cron secret the nightly jobs never run: 401, or 503
         // while CRON_SECRET isn't set.
-        const cron = await request.get('/api/cron/daily');
-        expect([401, 503]).toContain(cron.status());
+        for (const path of ['/api/cron/daily', '/api/cron/alpha-radar']) {
+            const cron = await request.get(path);
+            expect([401, 503], path).toContain(cron.status());
+        }
     });
 });

@@ -1,6 +1,6 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert';
-import { SecEdgarClient, type SecEdgarClientOptions, type SecFetch } from './edgar-client';
+import { configuredSecUserAgent, SecEdgarClient, type SecEdgarClientOptions, type SecFetch } from './edgar-client';
 import { SecEdgarError } from './types';
 
 const TRACKED_FILER_ID = '11111111-1111-4111-8111-111111111111';
@@ -60,6 +60,31 @@ function clientFor(
 }
 
 describe('SecEdgarClient', () => {
+    test('regression: makes no request without a user agent, rather than sending a made-up contact', async (t) => {
+        const saved = process.env.SEC_EDGAR_USER_AGENT;
+        t.after(() => {
+            if (saved === undefined) delete process.env.SEC_EDGAR_USER_AGENT;
+            else process.env.SEC_EDGAR_USER_AGENT = saved;
+        });
+        const fetcher: SecFetch = async () => { throw new Error('no request expected'); };
+
+        for (const value of [undefined, '', '   ']) {
+            if (value === undefined) delete process.env.SEC_EDGAR_USER_AGENT;
+            else process.env.SEC_EDGAR_USER_AGENT = value;
+            assert.equal(configuredSecUserAgent(), null);
+            assert.throws(() => new SecEdgarClient({ fetcher }), (error: unknown) => {
+                assert.ok(error instanceof SecEdgarError);
+                assert.strictEqual(error.code, 'configuration');
+                assert.match(error.message, /SEC_EDGAR_USER_AGENT is not set/);
+                return true;
+            });
+        }
+
+        process.env.SEC_EDGAR_USER_AGENT = '  Atlas Wealth ops@example.com ';
+        assert.strictEqual(configuredSecUserAgent(), 'Atlas Wealth ops@example.com');
+        assert.doesNotThrow(() => new SecEdgarClient({ fetcher }));
+    });
+
     test('fetches recent 13F metadata from fixture-backed submissions JSON', async () => {
         const requests: Array<{ url: string; userAgent: string | null }> = [];
         const fetcher: SecFetch = async (url, init) => {

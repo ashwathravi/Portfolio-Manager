@@ -7,7 +7,7 @@
  * (.github/workflows/production-monitor.yml) or any uptime service can alert
  * when a job fails or stops running.
  *
- * The nightly jobs record their runs in job_runs (src/lib/jobs/runner.ts);
+ * The nightly jobs and the daily SEC job record their runs in job_runs (src/lib/jobs/runner.ts);
  * the nightly backup records one row per run from its workflow
  * (scripts/db/record-backup-run.ts).
  */
@@ -42,10 +42,18 @@ export const BACKUP_CRON = "41 6 * * *";
 export const BACKUP_JOB = "backup";
 /** The names in src/lib/jobs/daily-jobs.ts, in order (a test keeps them equal). */
 export const DAILY_JOB_NAMES = ["expired-sessions", "ask-history", "plaid", "prices", "snapshots"] as const;
+/**
+ * vercel.json's schedule for /api/cron/alpha-radar (a test keeps them equal):
+ * every day, after SEC has published the previous business day's filings.
+ */
+export const ALPHA_RADAR_CRON = "15 11 * * *";
+/** The job /api/cron/alpha-radar runs (src/lib/alpha-radar/daily-refresh.ts). */
+export const ALPHA_RADAR_JOB_NAME = "alpha-radar";
 
 export const JOB_SCHEDULES: readonly JobSchedule[] = [
     // The run takes at most five minutes (the route's maxDuration).
     ...DAILY_JOB_NAMES.map((job) => ({ job, cron: DAILY_JOBS_CRON, graceMinutes: 120 })),
+    { job: ALPHA_RADAR_JOB_NAME, cron: ALPHA_RADAR_CRON, graceMinutes: 120 },
     // About ten minutes, after a start GitHub may delay.
     { job: BACKUP_JOB, cron: BACKUP_CRON, graceMinutes: 240 },
 ];

@@ -14,6 +14,7 @@ import type {
 export const alphaRadarQueryKeys = {
     all: ['alpha-radar'] as const,
     filers: () => [...alphaRadarQueryKeys.all, 'filers'] as const,
+    follows: () => [...alphaRadarQueryKeys.all, 'follows'] as const,
     filings: (filerId: string, reportPeriod?: string) => [...alphaRadarQueryKeys.filers(), filerId, 'filings', reportPeriod ?? 'all'] as const,
     holdings: (filerId: string, filingId?: string, reportPeriod?: string) => [
         ...alphaRadarQueryKeys.filers(),
@@ -45,6 +46,16 @@ export interface AlphaRadarRefreshRequest {
 
 export async function fetchAlphaRadarFilers(): Promise<AlphaRadarTrackedFilerRecord[]> {
     return fetchJsonData('/api/alpha-radar/filers');
+}
+
+/** The IDs of the filers the signed-in user follows (launch item i60). */
+export async function fetchAlphaRadarFollows(): Promise<string[]> {
+    const data = await fetchJsonData<{ filerIds: string[] }>('/api/alpha-radar/follows', { cache: 'no-store' });
+    return data.filerIds;
+}
+
+export async function setAlphaRadarFollow(filerId: string, following: boolean): Promise<void> {
+    await fetchJsonData(`/api/alpha-radar/follows/${encodeURIComponent(filerId)}`, { method: following ? 'PUT' : 'DELETE' });
 }
 
 export async function fetchAlphaRadarFilings(
@@ -127,6 +138,42 @@ export function useAlphaRadarFilersQuery(
         queryFn: fetchAlphaRadarFilers,
         staleTime: 5 * 60 * 1000,
         ...options,
+    });
+}
+
+export function useAlphaRadarFollowsQuery(
+    options?: Omit<UseQueryOptions<string[], Error>, 'queryKey' | 'queryFn'>,
+) {
+    return useQuery<string[], Error>({
+        queryKey: alphaRadarQueryKeys.follows(),
+        queryFn: fetchAlphaRadarFollows,
+        staleTime: 60_000,
+        ...options,
+    });
+}
+
+/**
+ * Follows or unfollows a filer, showing the change at once and putting it
+ * back if the save fails. Callers allow one change at a time (isPending), so
+ * two requests can't land in the wrong order.
+ */
+export function useFollowAlphaRadarFilerMutation() {
+    const queryClient = useQueryClient();
+    const key = alphaRadarQueryKeys.follows();
+    return useMutation({
+        mutationFn: ({ filerId, following }: { filerId: string; following: boolean }) => setAlphaRadarFollow(filerId, following),
+        onMutate: async ({ filerId, following }) => {
+            await queryClient.cancelQueries({ queryKey: key });
+            const previous = queryClient.getQueryData<string[]>(key);
+            queryClient.setQueryData<string[]>(key, (ids = []) => (
+                following ? [...ids.filter((id) => id !== filerId), filerId] : ids.filter((id) => id !== filerId)
+            ));
+            return { previous };
+        },
+        onError: (_error, _input, context) => {
+            if (context?.previous) queryClient.setQueryData(key, context.previous);
+        },
+        onSettled: () => queryClient.invalidateQueries({ queryKey: key }),
     });
 }
 

@@ -323,6 +323,12 @@ test.describe('Alpha Radar is managed by admins', () => {
         expect((await oversized.json()).code).toBe('REQUEST_TOO_LARGE');
         const notJson = await page.request.post('/api/alpha-radar/filers', { headers: { 'content-type': 'application/json' }, data: '{"cik":' });
         expect(notJson.status()).toBe(400);
+        // E2E servers have no SEC user agent (launch item i60): a refresh asks SEC nothing.
+        for (const path of ['/api/alpha-radar/refresh', `/api/alpha-radar/filers/${MISSING_FILER}/refresh`]) {
+            const refresh = await page.request.post(path, { data: { force: true } });
+            expect(refresh.status(), path).toBe(503);
+            expect(await refresh.json()).toEqual({ error: 'SEC requests are not configured.', code: 'SEC_NOT_CONFIGURED' });
+        }
 
         const anonymous = await playwright.request.newContext({
             baseURL: 'http://localhost:3000',

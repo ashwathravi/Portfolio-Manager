@@ -58,6 +58,8 @@ from job_runs order by started_at desc limit 10;
 
 To run the jobs by hand, use **Run** next to the job in the Vercel dashboard (Settings → Cron Jobs), which sends the secret for you. A job that hasn't succeeded by midnight UTC after its weekday run shows as late or failed in `/api/health/jobs`, and the production monitor opens an issue (`docs/monitoring.md`). Changing the schedule in `vercel.json` means changing `DAILY_JOBS_CRON` in `src/lib/health/job-health.ts` too (a test checks).
 
+A second cron, `GET /api/cron/alpha-radar` at 11:15 UTC every day, runs one job, `alpha-radar` (launch item i60, `src/lib/alpha-radar/daily-refresh.ts`): it asks SEC for every enabled Alpha Radar filer's recent 13F filings and parses, compares and writes a report for each new one. Filers checked longest ago (`alpha_radar_tracked_filers.last_refreshed_at`) go first, and none is started after 240 seconds, so the rest go first the next day. It is gated, locked and recorded like the nightly route, with its own five minutes, so it never takes time from the price backfill. Without `SEC_EDGAR_USER_AGENT` it asks SEC nothing and fails, and so does a run in which every filer failed; a run where only some failed succeeds and names them in its `detail`. Its schedule is `ALPHA_RADAR_CRON` in `src/lib/health/job-health.ts` (a test checks it against `vercel.json`). A deploy that adds a job shows it as late until its first scheduled run; **Run** in Settings → Cron Jobs clears that sooner.
+
 The route sets `maxDuration = 300`, the most Hobby allows, which needs Fluid compute (on by default for new projects).
 
 ## Error monitoring
@@ -104,7 +106,7 @@ Set these for **Production only**, never Preview: a preview runs branch code, an
 | `CRON_SECRET` | A generated value (`openssl rand -hex 32`). Vercel sends it to the cron route; without it no scheduled job runs. Never print or paste it. |
 | `POLYGON_API_KEY` | The Massive Basic key the nightly price ingest uses. |
 | `FINNHUB_API_KEY` | The Finnhub free key for delayed intraday quotes (launch item i33). During the session, and until the nightly ingest stores the day's close, a tracked US stock is priced from a Finnhub quote kept in `intraday_quotes` and fetched about every 80 seconds; the whole app stays under 50 calls in any minute (`src/lib/markets/intraday-quotes.ts`). Without it every price is the stored close. |
-| `SEC_EDGAR_USER_AGENT` | Set. Who SEC EDGAR requests say they're from, with a contact (SEC fair-access rules): Alpha Radar's, and the nightly job's copy of SEC's ticker file for ticker search (launch item i35). |
+| `SEC_EDGAR_USER_AGENT` | Set. Who SEC EDGAR requests say they're from, with a contact (SEC fair-access rules): Alpha Radar's daily job and refreshes, and the nightly job's copy of SEC's ticker file for ticker search (launch item i35). Required: without it no SEC request is made (launch item i60), the `alpha-radar` job fails and an admin's refresh answers 503 `SEC_NOT_CONFIGURED`. |
 | `PLAID_*`, `PLAID_TOKEN_ENCRYPTION_KEY` | When account linking goes live. The key must be 32 random bytes, base64 or hex (`openssl rand -base64 32`); production stores no Plaid token with a weaker one. `PLAID_ENV` is `sandbox` or `production`. |
 | `PLAID_REDIRECT_URI` | With account linking: `https://<production domain>/settings`, added first to the Plaid Dashboard's allowed redirect URIs (Developers › API). Banks that sign in through OAuth send the user back there when Link can't open them in a pop-up, on phones especially, and Settings finishes the connection (launch item i47). Link refuses to open while it isn't on the Dashboard's list, and the app refuses one that isn't Settings on https. |
 | `KV_REST_API_URL`, `KV_REST_API_TOKEN` (and `KV_URL`, `REDIS_URL`, `KV_REST_API_READ_ONLY_TOKEN`) | Set by the Upstash integration. They are the shared rate limiter's store; without them each instance limits on its own. |
@@ -129,7 +131,7 @@ After every production deploy (launch item i72), `deploy-production` waits until
 - the sign-in page, the privacy policy and the terms answer 200 with their security headers (a nonce-based Content-Security-Policy, HSTS, `X-Frame-Options`), and load without console errors, policy violations or failed requests to the site;
 - those pages ask search engines to leave them out of their results (`noindex, nofollow` as a header and a meta tag, launch item i74), and `robots.txt` lets crawlers in to read that;
 - the sign-in page fits a phone;
-- the API refuses signed-out callers, and `/api/cron/daily` refuses a call without the cron secret.
+- the API refuses signed-out callers, and `/api/cron/daily` and `/api/cron/alpha-radar` refuse a call without the cron secret.
 
 It is read-only: it never signs in, writes nothing and runs no job. A signed-in check would need a standing production account and its session token as a CI secret, so the pages behind sign-in are covered by E2E only.
 
