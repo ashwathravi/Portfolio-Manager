@@ -3,12 +3,16 @@
  * i56).
  *
  * GET     The conversation and the questions asked in the last 24 hours.
- *         Response: { data: { messages: AskMessage[], questionsToday, limit, stored } }
+ *         Response: { data: { messages: AskMessage[], questionsToday, limit, stored, writer } }
  * POST    { question } → the answer, from the user's portfolio, transactions,
  *         theses and saved risk policy. The question and answer are kept
  *         with the account. Past the daily limit: 429 ASK_DAILY_LIMIT.
- *         Response: { data: { messages: [question, answer], questionsToday, limit, stored } }
+ *         Response: { data: { messages: [question, answer], questionsToday, limit, stored, writer } }
  * DELETE  Clears the conversation (the day's questions still count).
+ *
+ * `writer` is "claude" when Claude writes the answers (ASK_MODEL, launch
+ * item i59), else "rules". On POST it's who wrote this answer: the rules
+ * answer when Claude can't.
  *
  * Without a database (local runs) nothing is stored (`stored: false`) and
  * the browser keeps the conversation; the answers have no data to come from.
@@ -22,7 +26,8 @@ import { isDatabaseConfigured } from '@/db/connection-options';
 import { readJsonBody } from '@/lib/api/body';
 import { apiError, internalServerError } from '@/lib/api/security';
 import { requireSessionApiUserScope } from '@/lib/api/session-security';
-import { answerQuestion } from '@/lib/ask/server/answer';
+import { answerQuestionWith } from '@/lib/ask/server/answer';
+import { askModel } from '@/lib/ask/server/claude';
 import {
     ASK_DAILY_LIMIT,
     AskDailyLimitError,
@@ -31,7 +36,7 @@ import {
     questionsAsked,
     saveAskTurn,
 } from '@/lib/ask/server/history';
-import type { AskMessage } from '@/lib/ask/types';
+import type { AskMessage, AskWriter } from '@/lib/ask/types';
 import { askQuestionSchema } from '@/lib/validators/ask';
 
 export const dynamic = 'force-dynamic';
@@ -43,15 +48,26 @@ function dailyLimitReached(): NextResponse {
     return apiError(new AskDailyLimitError().message, 'ASK_DAILY_LIMIT', 429);
 }
 
+/** Who writes the answers: Claude when ASK_MODEL names a model. */
+function configuredWriter(): AskWriter {
+    return askModel() ? 'claude' : 'rules';
+}
+
 export async function GET(request: Request) {
     const auth = await requireSessionApiUserScope(request);
     if (!auth.ok) return auth.response;
     if (!isDatabaseConfigured()) {
-        return NextResponse.json({ data: { messages: [], questionsToday: 0, limit: ASK_DAILY_LIMIT, stored: false } }, { headers: NO_STORE });
+        return NextResponse.json(
+            { data: { messages: [], questionsToday: 0, limit: ASK_DAILY_LIMIT, stored: false, writer: configuredWriter() } },
+            { headers: NO_STORE },
+        );
     }
     try {
         const history = await loadAskHistory(auth.context.userId);
-        return NextResponse.json({ data: { ...history, limit: ASK_DAILY_LIMIT, stored: true } }, { headers: NO_STORE });
+        return NextResponse.json(
+            { data: { ...history, limit: ASK_DAILY_LIMIT, stored: true, writer: configuredWriter() } },
+            { headers: NO_STORE },
+        );
     } catch (err) {
         return internalServerError(err, 'Unable to load the conversation.', 'ASK_HISTORY_LOAD_FAILED');
     }
@@ -79,7 +95,9 @@ export async function POST(request: Request) {
         // Checked before answering, so a user past the limit costs nothing.
         if (stored && (await questionsAsked(userId, now)) >= ASK_DAILY_LIMIT) return dailyLimitReached();
 
-        const answer = await answerQuestion(userId, parsed.data.question, { now });
+        // Claude reads the conversation so far, for follow-up questions.
+        const history = stored && askModel() ? (await loadAskHistory(userId, now)).messages : [];
+        const { answer, writer } = await answerQuestionWith(userId, parsed.data.question, { now, history });
         const question: AskMessage = { id: randomUUID(), role: 'user', content: parsed.data.question, ts: now.getTime() };
         // A millisecond after the question, so the two always sort in order.
         const reply: AskMessage = {
@@ -92,7 +110,7 @@ export async function POST(request: Request) {
         };
         const questionsToday = stored ? await saveAskTurn(userId, [question, reply], now) : 0;
         return NextResponse.json(
-            { data: { messages: [question, reply], questionsToday, limit: ASK_DAILY_LIMIT, stored } },
+            { data: { messages: [question, reply], questionsToday, limit: ASK_DAILY_LIMIT, stored, writer } },
             { headers: NO_STORE },
         );
     } catch (err) {

@@ -22,6 +22,8 @@ export interface AskInputProps {
     showSuggestions?: boolean;
     /** Shown in a small banner above the input when rate-limited. */
     rateLimitMessage?: string;
+    /** Claude writes the answers (launch item i59): the note says so. */
+    writtenByClaude?: boolean;
 }
 
 export function AskInput({
@@ -31,6 +33,7 @@ export function AskInput({
     suggestions = [],
     showSuggestions = true,
     rateLimitMessage,
+    writtenByClaude = false,
 }: AskInputProps) {
     const [value, setValue] = useState('');
     const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -106,7 +109,9 @@ export function AskInput({
                 </button>
             </div>
             <p className="pm-ask-note" data-testid="ask-note">
-                Answers are information, not investment advice.
+                {writtenByClaude
+                    ? 'Answers are written by Claude, an AI model, from your data, and can be wrong. They are information, not investment advice.'
+                    : 'Answers are information, not investment advice.'}
             </p>
         </div>
     );

@@ -72,6 +72,16 @@ const noSentry = {
     SENTRY_AUTH_TOKEN: '',
 };
 
+// No Ask model or AI Gateway credentials, so Ask's answers always come from
+// the rules planner and a test run never sends a question to Anthropic
+// (launch item i59). Claude's answers are covered by unit tests over a mock
+// model (src/lib/ask/server/claude.test.ts).
+const noAskModel = {
+    ASK_MODEL: '',
+    AI_GATEWAY_API_KEY: '',
+    VERCEL_OIDC_TOKEN: '',
+};
+
 // The outage servers run `next dev` from an empty build directory every run.
 // Playwright ends a run by SIGKILLing its servers, so a dev server never saves
 // its Turbopack cache on the way out, while the chunks it wrote stay on disk
@@ -146,6 +156,7 @@ export default defineConfig({
                 ...noMarketData,
                 ...noCronSecret,
                 ...noSentry,
+                ...noAskModel,
             },
             url: 'http://localhost:3000',
             // Never reuse a running server: it may be connected to a real
@@ -173,6 +184,7 @@ export default defineConfig({
                 ...noMarketData,
                 ...noCronSecret,
                 ...noSentry,
+                ...noAskModel,
             },
             url: 'http://localhost:3100/api/health',
             // Never reuse a running server: it may be connected to a real
@@ -206,6 +218,7 @@ export default defineConfig({
                 ...noMarketData,
                 ...noCronSecret,
                 ...noSentry,
+                ...noAskModel,
             },
             url: 'http://localhost:3200/api/health',
             // Never reuse a running server: it may be connected to a real

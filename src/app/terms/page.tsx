@@ -58,6 +58,11 @@ export default function TermsPage({ searchParams }: { searchParams: LegalSearchP
                     backtests, and anything labelled Sample, which is an illustration and not about your money.
                 </p>
                 <p>
+                    Ask&rsquo;s answers can be written by Claude, an AI model, and Ask says so under its question
+                    box when they are. An AI model can get things wrong: check an answer against your own
+                    records before relying on it.
+                </p>
+                <p>
                     We are not a registered investment adviser, broker-dealer or financial planner, and we
                     don&rsquo;t know your full financial situation. Every investment decision is yours. Past
                     performance, including a backtest&rsquo;s, doesn&rsquo;t predict future results. For advice

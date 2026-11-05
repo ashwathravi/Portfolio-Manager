@@ -123,7 +123,7 @@ Semantic memory:
 - `src/lib/alpha-radar/memory-repository.ts` owns persistence and exposes a repository contract with Drizzle and in-memory implementations.
 - `alpha_radar_semantic_chunks` stores the source kind/id, tracked filer, filing/report references, report period, title, text body, citation JSON, metadata JSON, keyword JSON, optional embedding JSON, provider/model/dimensions, and content hash.
 - Migration `0004_alpha_radar_semantic_memory.sql` enables pgvector only if the extension is available; it does not require pgvector for the table to exist. Keyword and metadata GIN indexes keep fallback search usable in local/dev environments.
-- Research renders a small evidence-memory search against live semantic memory when populated and falls back to local report chunks otherwise. Ask Ledger routes Alpha Radar/13F evidence questions to the same deterministic semantic-memory search surface.
+- Research renders a small evidence-memory search against live semantic memory when populated and falls back to local report chunks otherwise. Ask Ledger routes Alpha Radar/13F evidence questions to the same deterministic semantic-memory search surface. With `ASK_MODEL` set, Claude calls Ask's tools through AI Gateway and writes the answer (`src/lib/ask/server/claude.ts`, launch item i59); the rules planner (`src/lib/ask/planner.ts`) answers without it, when the gateway fails, and when Claude writes a figure no tool returned (`src/lib/ask/server/figures.ts`).
 
 Clone tracking:
 

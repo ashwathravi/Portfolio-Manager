@@ -15,7 +15,7 @@ tabs, ⌘K palette, and legacy redirects all read from it):
 | Research | `/research`, `/research/thesis/[ticker]` | Watchlist, journal and theses saved with the account (i38). Alpha Radar: 13F data from SEC EDGAR, shared by every user and managed by admins (i69). |
 | Strategies | `/strategies` (`/strategies/[id]` redirects with the strategy selected) | The user's strategies, saved with the account and backtested over stored prices (i55). Labelled, hideable examples. |
 | Trade | `/execution` | The ticket on the user's accounts, at stored prices, checked against the risk policy, saved as an order plan. Never routes to a broker. |
-| Ask | `/ask` (history) + ⌘K overlay | Deterministic tools over the user's own data; the conversation is kept with the account (i56). |
+| Ask | `/ask` (history) + ⌘K overlay | Tools over the user's own data; the conversation is kept with the account (i56). With `ASK_MODEL` set, Claude picks the tools and writes the answer through AI Gateway, the rules planner answering when it can't (i59). |
 | Settings / Help | `/settings`, `/help` | Settings and the risk policy on the server, Plaid connections, data export and account deletion. |
 
 Retired routes redirect (307): `/portfolios`, `/portfolios/trade-log`,
