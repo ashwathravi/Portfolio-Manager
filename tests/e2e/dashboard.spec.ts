@@ -653,6 +653,35 @@ test.describe('Today › Net worth hero', () => {
     });
 });
 
+// Launch item i63: Today's checks count the option positions the user holds.
+test.describe('Today › option positions in the risk policy', () => {
+    test.skip(!(process.env.CI || process.env.E2E_DATABASE_AUTH === '1'), 'needs the database-auth E2E mode');
+
+    test('regression: an account of cash and options gets the policy checks, with the options in them', async ({ context, page }) => {
+        await signInAsNewUser(context);
+        await gotoAppPage(page, '/');
+        const created = await page.request.post('/api/portfolios', { data: { name: 'Options only', cashBalance: 10_000 } });
+        const { id: portfolioId } = (await created.json()).data;
+        // $5,000 of premium in $15,000: far over the 5% options cap.
+        const added = await page.request.post('/api/portfolio/options', {
+            data: { portfolioId, position: { underlying: 'SPY', contractType: 'call', strike: 550, expiry: '2027-12-17', quantity: 1, premium: 50 } },
+        });
+        expect(added.status()).toBe(201);
+
+        await reloadAppPage(page);
+        const strip = page.getByTestId('policy-strip');
+        await expect(strip).toBeVisible();
+        await expect(page.getByTestId('today-triage-item').filter({ hasText: /option/i }).first()).toBeVisible();
+        await expect(async () => {
+            if ((await strip.getAttribute('open')) === null) await strip.locator('summary').click();
+            await expect(page.getByTestId('risk-policy-dashboard')).toBeVisible({ timeout: 1_500 });
+        }).toPass({ timeout: 15_000 });
+        const options = page.locator('[data-testid="risk-policy-dimension"][data-policy-id="speculative_options_exposure"]');
+        await expect(options).toHaveAttribute('data-status', 'breached');
+        await expect(options).toContainText('$5,000');
+    });
+});
+
 // Launch item i43: a new user's Today walks them to an account with positions.
 test.describe('Today › First run', () => {
     test.skip(!(process.env.CI || process.env.E2E_DATABASE_AUTH === '1'), 'needs the database-auth E2E mode');

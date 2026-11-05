@@ -24,6 +24,8 @@ import { requirePageUserId } from '@/lib/auth/request-user';
 import { loadQuotes } from '@/lib/services/market-data-service';
 import { buildDashboardPortfoliosQuery, buildUserTransactionsQuery } from '@/lib/portfolio-repository';
 import { toActivityRows, type TransactionRowInput } from '@/lib/portfolio/activity';
+import { toOptionRiskPosition, type LoadedOptionPosition } from '@/lib/portfolio/option-positions';
+import { loadOptionPositions } from '@/lib/portfolio/option-positions-store';
 import { toTodayActivity } from '@/lib/today/rows';
 import { getSecurityProfiles } from '@/lib/markets/price-store';
 import { holdingName, loadSecurityProfiles } from '@/lib/markets/security-profile';
@@ -79,7 +81,7 @@ export default async function Today() {
   // Warm quotes for the first paint; the hero keeps polling client-side.
   // Without market data the stored prices stand.
   const heldSymbols = allPortfolios.flatMap((p) => p.holdings.map((h) => h.symbol));
-  const [liveQuotes, profiles, theses, riskPolicy, { journal }, alphaRadarLive] = await Promise.all([
+  const [liveQuotes, profiles, theses, riskPolicy, { journal }, alphaRadarLive, optionPositions] = await Promise.all([
     loadQuotes(heldSymbols),
     // Company names from the securities master (launch item i34).
     loadSecurityProfiles(heldSymbols, getSecurityProfiles),
@@ -101,6 +103,13 @@ export default async function Today() {
         return false;
       })
       : false,
+    // The option positions the user holds, for the options checks (launch item i63).
+    isDatabaseConfigured()
+      ? loadOptionPositions(userId, { quotes: loadQuotes }).catch((e): LoadedOptionPosition[] => {
+        console.warn('Today: option positions fetch failed — the options checks see none.', e);
+        return [];
+      })
+      : [],
   ]);
   const closedTrades = journal && journal.entries.length > 0 ? journal.entries : undefined;
   const patternTrades = closedTrades && inPatternWindow(closedTrades, new Date());
@@ -143,10 +152,13 @@ export default async function Today() {
     profiles,
     activity,
     theses,
+    options: optionPositions.map(toOptionRiskPosition),
     asOf: new Date(),
   });
   // Measured as of now: the trading-activity window ends today, not at the last trade.
   const riskPolicySummary = evaluateRiskPolicy(policyPortfolio, riskPolicy, { asOf: new Date() });
+  // Stocks or options: something for the policy to check.
+  const hasPolicyPositions = allHoldings.length > 0 || policyPortfolio.options.length > 0;
 
   return (
     <div className="pm-dashboard-stack p-6">
@@ -158,14 +170,14 @@ export default async function Today() {
           cashTotal={cashTotal}
           accounts={allPortfolios.map((p) => ({ id: p.id, name: p.name }))}
         />
-        {/* Policy checks only mean something once there are holdings to check. */}
+        {/* Policy checks only mean something once there are positions to check. */}
         <TodayTriage
-          policyActions={allHoldings.length > 0 ? riskPolicySummary.nextActions : []}
+          policyActions={hasPolicyPositions ? riskPolicySummary.nextActions : []}
           reviewEntries={closedTrades}
         />
       </div>
 
-      {allHoldings.length > 0 && <PolicyStrip summary={riskPolicySummary} portfolio={policyPortfolio} />}
+      {hasPolicyPositions && <PolicyStrip summary={riskPolicySummary} portfolio={policyPortfolio} />}
 
       <Suspense fallback={null}>
         <TodayEquityCurve userId={userId} />
