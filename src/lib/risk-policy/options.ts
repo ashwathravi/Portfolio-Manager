@@ -365,6 +365,28 @@ export function optionNetValue(position: OptionRiskPosition): number {
     return position.quantity < 0 ? -value : value;
 }
 
+/**
+ * Bought options as the bucket and theme checks hold them, on Today and
+ * Trade alike: speculative, at their current value, under their underlying.
+ * A written one is a liability, not a holding (optionNetValue).
+ */
+export function optionPolicyHoldings(positions: readonly OptionRiskPosition[]) {
+    return positions
+        .filter((position) => position.quantity > 0)
+        .map((position) => {
+            const underlying = normalizeSymbol(position.underlying);
+            return {
+                id: position.id,
+                symbol: underlying,
+                name: formatOptionSymbol(underlying, position.expiry, position.contractType, position.strike),
+                marketValue: optionCurrentValue(position),
+                policyBucket: "speculative" as const,
+                instrumentType: `${position.contractType} option`,
+            };
+        })
+        .filter((holding) => holding.marketValue > 0);
+}
+
 export function optionPremiumAtRisk(position: Pick<OptionRiskPosition, "quantity" | "premiumPaid" | "contractMultiplier">): number {
     return roundMoney(
         Math.abs(safeQuantity(position.quantity)) *

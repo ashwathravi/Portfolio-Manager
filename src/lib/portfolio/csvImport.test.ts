@@ -250,16 +250,28 @@ describe('parseHoldingsCsv › option rows (launch item i63)', () => {
         assert.match(r.issues[0].message, /an option Atlas can't read the contract of/);
     });
 
-    test('two lots of one contract combine at the weighted premium; lots that net to nothing drop out', () => {
+    test('two lots of one contract the same way round combine at the weighted premium', () => {
         const csv = [
             'Symbol,Quantity,Average Cost',
             'AAPL  270115C00250000,1,10',
             'AAPL  270115C00250000,3,20',
-            'MSFT  270115C00500000,2,5',
-            'MSFT  270115C00500000,-2,5',
+            'MSFT  270115P00500000,-1,5',
+            'MSFT  270115P00500000,-3,9',
         ].join('\n');
         const r = parseHoldingsCsv(csv);
-        assert.deepStrictEqual(r.options, [{ underlying: 'AAPL', contractType: 'call', strike: 250, expiry: '2027-01-15', quantity: 4, premium: 17.5 }]);
+        assert.deepStrictEqual(r.issues, []);
+        assert.deepStrictEqual(r.options, [
+            { underlying: 'AAPL', contractType: 'call', strike: 250, expiry: '2027-01-15', quantity: 4, premium: 17.5 },
+            { underlying: 'MSFT', contractType: 'put', strike: 500, expiry: '2027-01-15', quantity: -4, premium: 8 },
+        ]);
+    });
+
+    test("regression: bought and written lots of one contract are listed, not averaged into a premium that depends on row order", () => {
+        const lots = ['AAPL  270115C00250000,2,10', 'AAPL  270115C00250000,-1,20', 'AAPL  270115C00250000,1,30'];
+        for (const order of [lots, [lots[0], lots[2], lots[1]]]) {
+            const r = parseHoldingsCsv(['Symbol,Quantity,Average Cost', ...order].join('\n'));
+            assert.deepStrictEqual(r.issues.map((i) => i.message), ['AAPL Jan 15 2027 250 call: bought and written lots of one contract. Enter it as one net position.']);
+        }
     });
 
     test('contracts must be a whole number; a missing cost is listed', () => {

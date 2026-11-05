@@ -23,8 +23,8 @@ import {
     type OptionRiskPosition,
     type OptionsRiskPolicy,
     computeOptionRiskLedger,
-    optionCurrentValue,
     optionNetValue,
+    optionPolicyHoldings,
 } from "./options";
 import {
     evaluateSellDiscipline,
@@ -178,17 +178,7 @@ export function computeRiskPolicyDashboard(
     const optionPositions = input.optionPositions ?? [];
     // Bought options are speculative holdings. A written one is a liability:
     // what buying it back would cost comes off the portfolio's worth.
-    const optionHoldings = optionPositions
-        .filter((position) => position.quantity > 0)
-        .map((position) => ({
-            id: position.id,
-            symbol: position.underlying,
-            name: formatOptionName(position),
-            marketValue: optionCurrentValue(position),
-            policyBucket: "speculative" as const,
-            instrumentType: `${position.contractType} option`,
-        }))
-        .filter((holding) => holding.marketValue > 0);
+    const optionHoldings = optionPolicyHoldings(optionPositions);
     const cashHolding = cashTotal > 0
         ? [{
             id: "cash-reserve",
@@ -768,10 +758,6 @@ function normalizeHoldings(
 
 function normalizeSymbol(symbol: string | null | undefined): string {
     return symbol?.trim().toUpperCase() ?? "";
-}
-
-function formatOptionName(position: OptionRiskPosition): string {
-    return `${normalizeSymbol(position.underlying)} ${position.expiry} ${position.strike}${position.contractType === "call" ? "C" : "P"}`;
 }
 
 function percentOf(value: number, total: number): number {

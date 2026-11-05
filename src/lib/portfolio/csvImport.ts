@@ -1,5 +1,5 @@
 import { normalizeTicker } from '@/lib/research/watchlist';
-import { OPTION_POSITION_MULTIPLIER, optionContractTicker, parseOptionContract, type OptionContract } from './option-positions';
+import { describeOptionContract, OPTION_POSITION_MULTIPLIER, optionContractTicker, parseOptionContract, type OptionContract } from './option-positions';
 
 /**
  * Holdings CSV import — the "Import CSV" path from the design review's
@@ -287,13 +287,13 @@ export function parseHoldingsCsv(text: string): ParseResult {
             if (!option) continue;
             const key = optionContractTicker(option);
             const prev = options.get(key);
-            if (prev) {
-                // Two lots of one contract: combined at the weighted premium.
+            if (prev && Math.sign(prev.quantity) !== Math.sign(option.quantity)) {
+                // Bought and written lots of one contract have no single
+                // premium that doesn't depend on which closed which.
+                issues.push({ line: lineNo, message: `${describeOptionContract(option)}: bought and written lots of one contract. Enter it as one net position.` });
+            } else if (prev) {
+                // Two lots of one contract, the same way round: combined at the weighted premium.
                 const quantity = prev.quantity + option.quantity;
-                if (quantity === 0) {
-                    options.delete(key);
-                    continue;
-                }
                 options.set(key, {
                     ...prev,
                     quantity,
