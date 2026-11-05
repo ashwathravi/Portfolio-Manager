@@ -204,6 +204,13 @@
       "when": 1793750326316,
       "tag": "0028_strategies",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1793828320840,
+      "tag": "0029_alpha_radar_follows",
+      "breakpoints": true
     }
   ]
 }

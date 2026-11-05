@@ -15,6 +15,7 @@ const databaseAuthEnabled = Boolean(process.env.CI || process.env.E2E_DATABASE_A
 // that mode and the two outage servers always run `next dev`.
 const productionBuild = databaseAuthEnabled && process.env.E2E_DEV_SERVER !== '1';
 const PRODUCTION_DIST_DIR = '.next/e2e-production';
+const ALPHA_RADAR_LIVE_SPEC = /alpha-radar-live\.spec\.ts$/;
 const authServerEnv: Record<string, string> = databaseAuthEnabled
     ? {
         AUTH_SECRET: process.env.E2E_AUTH_SECRET ?? 'e2e-only-auth-secret-change-outside-tests',
@@ -53,10 +54,12 @@ const noSharedRedis = {
 // No market-data keys either, so test runs never spend the free plans' calls
 // and always see the not-configured state: stored prices on pages, 503 from
 // /api/market-data (tests stub those routes where they need quotes), and
-// closes rather than delayed Finnhub quotes during market hours.
+// closes rather than delayed Finnhub quotes during market hours. No SEC user
+// agent, so nothing asks SEC: an Alpha Radar refresh answers 503.
 const noMarketData = {
     POLYGON_API_KEY: '',
     FINNHUB_API_KEY: '',
+    SEC_EDGAR_USER_AGENT: '',
 };
 
 // No cron secret, so /api/cron/* always refuses (503) and a test run never
@@ -126,7 +129,25 @@ export default defineConfig({
         {
             name: 'chromium',
             use: { ...devices['Desktop Chrome'] },
+            testIgnore: ALPHA_RADAR_LIVE_SPEC,
+            ...(databaseAuthEnabled ? { teardown: 'alpha-radar-live' } : {}),
         },
+        // Alpha Radar with a tracked filer in the database (launch item i60).
+        // Filers are shared by every user, and the other specs expect none
+        // (the examples), so these run after them, one at a time: as the
+        // main project's teardown, which runs whether or not its tests
+        // passed (a dependency would be skipped after a failure, and would
+        // pull in the whole main project for a run of this spec alone). It
+        // also runs after a run of a single other spec. Only with database
+        // sessions.
+        ...(databaseAuthEnabled
+            ? [{
+                name: 'alpha-radar-live',
+                testMatch: ALPHA_RADAR_LIVE_SPEC,
+                fullyParallel: false,
+                use: { ...devices['Desktop Chrome'] },
+            }]
+            : []),
         // The post-deploy smoke test (tests/production, launch item i72),
         // here against the local server so it stays true to the app. Signed
         // out, as on the live site, so only with database sessions: the local
