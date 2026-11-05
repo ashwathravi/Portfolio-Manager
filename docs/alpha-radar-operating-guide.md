@@ -8,9 +8,15 @@ Alpha Radar is the Portfolio Manager 13F research workflow. It tracks selected i
 - Local development can use seeded Alpha Radar data without a database. The Research tab and Dashboard card show seeded fallback data when live storage or SEC access is unavailable.
 - Live refreshes require Postgres-backed Alpha Radar tables and SEC network access.
 
+## Following and the daily SEC job
+
+Tracked filers are shared by every account, and only admins add, change or refresh them. Each user follows the filers they want from Research › Alpha Radar (`alpha_radar_filer_follows`, launch item i60); Today's Alpha Radar card shows reports from the filers they follow, outside the example section, once Atlas tracks any filer. The follows are exported with the account and deleted with it.
+
+`GET /api/cron/alpha-radar` (Vercel Cron, 11:15 UTC every day) runs the `alpha-radar` job: every enabled filer, the one checked longest ago first, until 240 seconds have gone (`src/lib/alpha-radar/daily-refresh.ts`). SEC requests stop at 270 seconds, so a filer still waiting on SEC can't keep the run from being recorded, and a `Retry-After` longer than 10 seconds (SEC's rate-limit block lasts minutes) fails that request instead of waiting. It parses and reports only filings it hasn't seen. `docs/deployment.md` › Scheduled jobs and `docs/monitoring.md` cover running it by hand and what its failures mean.
+
 ## SEC Fair Use
 
-SEC EDGAR requires a descriptive user agent. Set `SEC_EDGAR_USER_AGENT` before live refreshes:
+SEC EDGAR requires a descriptive user agent. `SEC_EDGAR_USER_AGENT` is required: without it Atlas makes no SEC request at all (the daily job fails, and a refresh answers 503 `SEC_NOT_CONFIGURED`):
 
 ```bash
 SEC_EDGAR_USER_AGENT="Portfolio Manager Alpha Radar your-email@example.com"
@@ -33,7 +39,7 @@ Keep live refreshes conservative:
 node --import tsx scripts/seed.ts
 ```
 
-4. Configure `DATABASE_URL` and, for live SEC refreshes, `SEC_EDGAR_USER_AGENT`.
+4. Configure `DATABASE_URL` and, for live SEC refreshes, `SEC_EDGAR_USER_AGENT`. E2E servers leave it empty, so tests never call SEC.
 
 Without `DATABASE_URL`, Alpha Radar UI surfaces should still render seeded fallback data.
 
@@ -148,7 +154,7 @@ npm run test:e2e -- tests/e2e/research.spec.ts
 ## Troubleshooting
 
 - `DATABASE_URL not found`: expected for fixture-only unit tests; live persistence and refresh routes require a database.
-- `SEC EDGAR user-agent cannot be empty`: set `SEC_EDGAR_USER_AGENT` before live refresh.
+- `SEC_EDGAR_USER_AGENT is not set` (or `SEC_NOT_CONFIGURED` from a refresh): set `SEC_EDGAR_USER_AGENT` to Atlas's name and a contact.
 - SEC `429` or rate-limit response: retry later; do not run bulk refreshes from CI.
 - No live reports in UI: confirm migrations ran, seed filers exist, and the refresh route can reach EDGAR.
 - No semantic memory results: confirm `alpha_radar_semantic_chunks` has rows for the selected filer/period. If embeddings are unavailable, keyword fallback should still return report-section matches.

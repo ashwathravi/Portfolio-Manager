@@ -29,9 +29,17 @@ const V1_WORKFLOWS = [
         ],
     },
     {
-        title: "Refresh filing data",
+        title: "Follow a filer",
         steps: [
-            "Use Refresh from Research or the Dashboard card when local database and SEC access are configured.",
+            "Pick a filer in Research › Alpha Radar and choose Follow.",
+            "Today's Alpha Radar card then shows the latest reports from the filers you follow.",
+            "Atlas checks SEC for every tracked filer's new 13F filings once a day, so there is nothing to refresh.",
+        ],
+    },
+    {
+        title: "Refresh filing data (admins)",
+        steps: [
+            "Admins can refresh from Research or the Today card, once SEC_EDGAR_USER_AGENT names Atlas and a contact.",
             "Treat seeded data as a local fallback until live storage is available.",
             "Review failures before retrying so duplicate runs do not create duplicate alerts.",
         ],

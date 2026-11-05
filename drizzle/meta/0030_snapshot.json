@@ -1,6 +1,6 @@
 {
-  "id": "329fe069-7ddf-496a-aca2-bd1fc4a58ee6",
-  "prevId": "d9f4c5ea-05f2-4565-8b90-614604d813c9",
+  "id": "90255cd6-f9a0-4e71-908a-38f80d01a133",
+  "prevId": "c708036f-2d38-4d2d-8fb8-d79f09805e60",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -100,18 +100,6 @@
           "primaryKey": false,
           "notNull": true,
           "default": false
-        },
-        "emailed_at": {
-          "name": "emailed_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "email_claimed_at": {
-          "name": "email_claimed_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": false
         }
       },
       "indexes": {
@@ -393,6 +381,111 @@
           "value": "\"alert_rules\".\"rearm\" in ('once', 'always', 'daily')"
         }
       },
+      "isRLSEnabled": true
+    },
+    "public.alpha_radar_filer_follows": {
+      "name": "alpha_radar_filer_follows",
+      "schema": "",
+      "columns": {
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "tracked_filer_id": {
+          "name": "tracked_filer_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "alpha_radar_filer_follows_tracked_filer_idx": {
+          "name": "alpha_radar_filer_follows_tracked_filer_idx",
+          "columns": [
+            {
+              "expression": "tracked_filer_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "alpha_radar_filer_follows_user_id_auth_users_id_fk": {
+          "name": "alpha_radar_filer_follows_user_id_auth_users_id_fk",
+          "tableFrom": "alpha_radar_filer_follows",
+          "tableTo": "auth_users",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "alpha_radar_filer_follows_tracked_filer_id_alpha_radar_tracked_filers_id_fk": {
+          "name": "alpha_radar_filer_follows_tracked_filer_id_alpha_radar_tracked_filers_id_fk",
+          "tableFrom": "alpha_radar_filer_follows",
+          "tableTo": "alpha_radar_tracked_filers",
+          "columnsFrom": [
+            "tracked_filer_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "alpha_radar_filer_follows_pkey": {
+          "name": "alpha_radar_filer_follows_pkey",
+          "columns": [
+            "user_id",
+            "tracked_filer_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {
+        "server_only_no_client_access": {
+          "name": "server_only_no_client_access",
+          "as": "RESTRICTIVE",
+          "for": "ALL",
+          "to": [
+            "anon",
+            "authenticated"
+          ],
+          "using": "false",
+          "withCheck": "false"
+        },
+        "app_runtime_access": {
+          "name": "app_runtime_access",
+          "as": "PERMISSIVE",
+          "for": "ALL",
+          "to": [
+            "app_runtime"
+          ],
+          "using": "true",
+          "withCheck": "true"
+        }
+      },
+      "checkConstraints": {},
       "isRLSEnabled": true
     },
     "public.alpha_radar_filing_holdings": {
@@ -1720,6 +1813,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "last_refreshed_at": {
+          "name": "last_refreshed_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp",
@@ -2375,114 +2474,6 @@
         }
       },
       "uniqueConstraints": {},
-      "policies": {
-        "server_only_no_client_access": {
-          "name": "server_only_no_client_access",
-          "as": "RESTRICTIVE",
-          "for": "ALL",
-          "to": [
-            "anon",
-            "authenticated"
-          ],
-          "using": "false",
-          "withCheck": "false"
-        },
-        "app_runtime_access": {
-          "name": "app_runtime_access",
-          "as": "PERMISSIVE",
-          "for": "ALL",
-          "to": [
-            "app_runtime"
-          ],
-          "using": "true",
-          "withCheck": "true"
-        }
-      },
-      "checkConstraints": {},
-      "isRLSEnabled": true
-    },
-    "public.email_preferences": {
-      "name": "email_preferences",
-      "schema": "",
-      "columns": {
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "alerts": {
-          "name": "alerts",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
-        "weekly_review": {
-          "name": "weekly_review",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
-        "alerts_since": {
-          "name": "alerts_since",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "weekly_review_week": {
-          "name": "weekly_review_week",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "weekly_review_claimed_at": {
-          "name": "weekly_review_claimed_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "unsubscribe_token": {
-          "name": "unsubscribe_token",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "email_preferences_user_id_auth_users_id_fk": {
-          "name": "email_preferences_user_id_auth_users_id_fk",
-          "tableFrom": "email_preferences",
-          "tableTo": "auth_users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "email_preferences_unsubscribe_token_unique": {
-          "name": "email_preferences_unsubscribe_token_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "unsubscribe_token"
-          ]
-        }
-      },
       "policies": {
         "server_only_no_client_access": {
           "name": "server_only_no_client_access",

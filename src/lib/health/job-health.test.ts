@@ -2,9 +2,12 @@ import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
+import { ALPHA_RADAR_JOB, ALPHA_RADAR_JOBS } from "@/lib/alpha-radar/daily-refresh";
 import { DAILY_JOBS } from "@/lib/jobs/daily-jobs";
 
 import {
+    ALPHA_RADAR_CRON,
+    ALPHA_RADAR_JOB_NAME,
     assessJob,
     BACKUP_CRON,
     BACKUP_JOB,
@@ -41,6 +44,15 @@ describe("the schedules match what runs the jobs", () => {
         assert.equal(crons.find((cron) => cron.path === "/api/cron/daily")?.schedule, DAILY_JOBS_CRON);
     });
 
+    test("vercel.json runs /api/cron/alpha-radar, the SEC job, on its daily schedule", () => {
+        const { crons } = JSON.parse(readFileSync("vercel.json", "utf8")) as { crons: Array<{ path: string; schedule: string }> };
+        assert.equal(crons.find((cron) => cron.path === "/api/cron/alpha-radar")?.schedule, ALPHA_RADAR_CRON);
+        assert.deepEqual(ALPHA_RADAR_JOBS.map((job) => job.name), [ALPHA_RADAR_JOB_NAME]);
+        assert.equal(ALPHA_RADAR_JOB, ALPHA_RADAR_JOB_NAME);
+        // Every cron route is watched: a new one needs a schedule here.
+        assert.deepEqual(crons.map((cron) => cron.path), ["/api/cron/daily", "/api/cron/alpha-radar"]);
+    });
+
     test("the backup workflow runs on the backup schedule", () => {
         const workflow = readFileSync(".github/workflows/database-backup.yml", "utf8");
         assert.deepEqual([...workflow.matchAll(/- cron: '([^']+)'/g)].map((match) => match[1]), [BACKUP_CRON]);
@@ -48,7 +60,7 @@ describe("the schedules match what runs the jobs", () => {
 
     test("every job is watched once", () => {
         const jobs = JOB_SCHEDULES.map((schedule) => schedule.job);
-        assert.deepEqual(jobs, [...DAILY_JOB_NAMES, BACKUP_JOB]);
+        assert.deepEqual(jobs, [...DAILY_JOB_NAMES, ALPHA_RADAR_JOB_NAME, BACKUP_JOB]);
         for (const schedule of JOB_SCHEDULES) assert.doesNotThrow(() => parseDailyCron(schedule.cron));
     });
 });
@@ -135,6 +147,7 @@ describe("createJobHealthCheck", () => {
         latestStatus: "succeeded",
     });
     const backupSucceeded: JobRunSummary = { ...succeeded(BACKUP_JOB), lastSucceededAt: at("2026-10-28T06:50:00Z"), latestStartedAt: at("2026-10-28T06:50:00Z") };
+    const secSucceeded: JobRunSummary = { ...succeeded(ALPHA_RADAR_JOB_NAME), lastSucceededAt: at("2026-10-27T11:20:00Z"), latestStartedAt: at("2026-10-27T11:20:00Z") };
 
     test("ok when every job ran on time, asking for every scheduled job", async () => {
         let asked: readonly string[] = [];
@@ -142,7 +155,7 @@ describe("createJobHealthCheck", () => {
             isConfigured: () => true,
             load: async (jobs) => {
                 asked = jobs;
-                return [...DAILY_JOB_NAMES.map(succeeded), backupSucceeded];
+                return [...DAILY_JOB_NAMES.map(succeeded), secSucceeded, backupSucceeded];
             },
             now,
         });
@@ -168,7 +181,7 @@ describe("createJobHealthCheck", () => {
         assert.equal(report.status, "degraded");
         assert.equal(report.database, "ok");
         const statuses = Object.fromEntries(report.jobs.map((job) => [job.job, job.status]));
-        assert.deepEqual(statuses, { "expired-sessions": "late", "ask-history": "late", plaid: "failed", prices: "ok", snapshots: "late", alerts: "late", email: "late", backup: "late" });
+        assert.deepEqual(statuses, { "expired-sessions": "late", "ask-history": "late", plaid: "failed", prices: "ok", snapshots: "late", alerts: "late", email: "late", "alpha-radar": "late", backup: "late" });
     });
 
     test("not_configured without loading when no database is set", async () => {

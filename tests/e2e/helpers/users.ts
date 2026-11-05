@@ -16,7 +16,8 @@ const FIXTURE_USER_ID = E2E_STORAGE_SCOPE;
 
 let client: ReturnType<typeof postgres> | null = null;
 
-function database() {
+/** The E2E database, as the app login the web server uses. */
+export function database() {
     const url = process.env.DATABASE_URL;
     if (!url) throw new Error('Fresh E2E users need DATABASE_URL (the app login the web server uses).');
     client ??= postgres(url, { max: 1, idle_timeout: 1, onnotice: () => {} });

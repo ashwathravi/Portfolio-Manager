@@ -216,15 +216,18 @@ test.describe('Scheduled jobs without CRON_SECRET', () => {
     // The proxy lets /api/cron/* through without a session and the route
     // checks the secret itself. E2E servers have no secret, so it must refuse
     // with 503, not ask for a session (401/redirect) and never run the jobs.
-    test('/api/cron/daily fails closed, with or without a token or session', async ({ playwright, baseURL }) => {
+    test('/api/cron/daily and /api/cron/alpha-radar fail closed, with or without a token or session', async ({ playwright, baseURL }) => {
         const notConfigured = { error: 'Scheduled jobs are not configured.', code: 'CRON_NOT_CONFIGURED' };
         const sessionless = await playwright.request.newContext({ baseURL, storageState: { cookies: [], origins: [] } });
         try {
             const attempts: Array<Record<string, string>> = [{}, { authorization: 'Bearer guess' }];
-            for (const headers of attempts) {
-                const response = await sessionless.get('/api/cron/daily', { headers, maxRedirects: 0 });
-                expect(response.status()).toBe(503);
-                expect(await response.json()).toEqual(notConfigured);
+            // The SEC job's route (launch item i60) is gated the same way.
+            for (const path of ['/api/cron/daily', '/api/cron/alpha-radar']) {
+                for (const headers of attempts) {
+                    const response = await sessionless.get(path, { headers, maxRedirects: 0 });
+                    expect(response.status(), path).toBe(503);
+                    expect(await response.json()).toEqual(notConfigured);
+                }
             }
         } finally {
             await sessionless.dispose();
@@ -248,7 +251,7 @@ test.describe('Scheduled job health', () => {
             expect(body.status).toBe('degraded');
             if (dbMode) {
                 expect(body.database).toBe('ok');
-                expect(body.jobs.map((job: { job: string }) => job.job)).toEqual(['expired-sessions', 'ask-history', 'plaid', 'prices', 'snapshots', 'alerts', 'email', 'backup']);
+                expect(body.jobs.map((job: { job: string }) => job.job)).toEqual(['expired-sessions', 'ask-history', 'plaid', 'prices', 'snapshots', 'alerts', 'email', 'alpha-radar', 'backup']);
                 for (const job of body.jobs) {
                     expect(Object.keys(job).sort()).toEqual(['dueSince', 'job', 'lastSucceededAt', 'status']);
                     expect(job.status).toBe('late');
