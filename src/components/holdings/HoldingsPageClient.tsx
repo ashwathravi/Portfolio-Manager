@@ -73,6 +73,8 @@ export interface HoldingsPageClientProps {
     optionTheses?: readonly OptionThesisOption[];
     /** Accounts offered as the CSV import target, and for option positions. */
     importAccounts?: readonly ImportAccountOption[];
+    /** Cash across the accounts: part of what the LEAPS ledger measures against. */
+    cashTotal?: number;
 }
 
 export function HoldingsPageClient({
@@ -80,6 +82,7 @@ export function HoldingsPageClient({
     optionPositions = [],
     optionTheses = [],
     importAccounts = [],
+    cashTotal = 0,
 }: HoldingsPageClientProps) {
     const [sectorFilter, setSectorFilter] = useState<Sector | "All">("All");
     const [bucketFilter, setBucketFilter] = useState<PolicyBucketId | "All">("All");
@@ -197,7 +200,9 @@ export function HoldingsPageClient({
         () => optionPositions.reduce((sum, position) => sum + optionNetValue(toOptionRiskPosition(position)), 0),
         [optionPositions],
     );
-    const totalPolicyValue = summary.marketValue + optionsNetValue;
+    // As policyPortfolioValue measures it for Today and Trade: holdings, cash
+    // and options together.
+    const totalPolicyValue = summary.marketValue + cashTotal + optionsNetValue;
 
     // ---- Filter + sort for the table ----
     const tableRows = useMemo<HoldingsTableRow[]>(() => {

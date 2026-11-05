@@ -261,7 +261,7 @@ test.describe('Holdings › LEAPS ledger before any position', () => {
         await expect(page.getByTestId('holdings-empty')).toBeVisible();
         await expect(page.getByTestId('options-risk-ledger')).toHaveCount(0);
 
-        expect((await page.request.post('/api/portfolios', { data: { name: 'Options only' } })).status()).toBe(201);
+        expect((await page.request.post('/api/portfolios', { data: { name: 'Options only', cashBalance: 10_000 } })).status()).toBe(201);
         await reloadAppPage(page);
         await expect(page.getByTestId('holdings-empty')).toBeVisible();
         const ledger = page.getByTestId('options-risk-ledger');
@@ -279,11 +279,16 @@ test.describe('Holdings › LEAPS ledger before any position', () => {
         await dialog.getByRole('textbox', { name: 'Strike ($)', exact: true }).fill('550');
         await dialog.getByRole('textbox', { name: 'Expiry', exact: true }).fill('2027-12-17');
         await dialog.getByRole('textbox', { name: 'Contracts', exact: true }).fill('1');
-        await dialog.getByRole('textbox', { name: 'Premium paid / share ($)', exact: true }).fill('60');
+        await dialog.getByRole('textbox', { name: 'Premium paid / share ($)', exact: true }).fill('10');
         await dialog.getByRole('button', { name: 'Add position' }).click();
         await expect(dialog).toBeHidden();
-        await expect(ledger.getByTestId('options-risk-row')).toContainText('SPY 2027-12-17 550C');
-        await expect(ledger.getByTestId('options-risk-row')).toContainText('1 long CALL contract · Options only');
+        const row = ledger.getByTestId('options-risk-row');
+        await expect(row).toContainText('SPY 2027-12-17 550C');
+        await expect(row).toContainText('1 long CALL contract · Options only');
+        // Regression: measured against cash and options together, as Today
+        // and Trade measure it: $1,000 of premium in $11,000, not 100%.
+        await expect(row).toContainText('9.1%');
+        await expect(ledger.getByLabel('Options exposure summary')).toContainText('9.1%');
     });
 });
 

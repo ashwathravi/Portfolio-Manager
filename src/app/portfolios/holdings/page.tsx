@@ -37,7 +37,7 @@ async function HoldingsContent() {
         createdAt: Date;
         portfolioName: string;
     }> = [];
-    let accounts: ImportAccountOption[] = [];
+    let accounts: Array<ImportAccountOption & { cashBalance: number | null }> = [];
     let optionPositions: LoadedOptionPosition[] = [];
     let optionTheses: Array<{ id: string; ticker: string; title: string }> = [];
     let unavailable = false;
@@ -124,11 +124,14 @@ async function HoldingsContent() {
                 title="Portfolio"
                 subtitle={subtitle}
                 crumbs={["Portfolio", "Holdings"]}
-                actions={seed.length > 0 ? <ImportHoldingsDialog accounts={accounts} /> : undefined}
+                actions={seed.length > 0 ? <ImportHoldingsDialog accounts={accounts.map(({ id, name }) => ({ id, name }))} /> : undefined}
             />
             <HoldingsPageClient
                 holdings={seed}
-                importAccounts={accounts}
+                importAccounts={accounts.map(({ id, name }) => ({ id, name }))}
+                // The LEAPS ledger measures against what Today and Trade do:
+                // holdings, cash and options together.
+                cashTotal={accounts.reduce((sum, account) => sum + (account.cashBalance || 0), 0)}
                 optionPositions={optionPositions}
                 optionTheses={optionTheses}
             />
