@@ -43,6 +43,9 @@ const REASONS: Record<AlphaRadarOverlapKind, string> = {
     thesis: "Linked to active thesis",
 };
 
+/** The most a user's overlap adds to a change's score: held, watched and with an active thesis. */
+export const ALPHA_RADAR_MAX_RELEVANCE_BOOST = alphaRadarRelevanceBoost({ portfolio: true, watchlist: true, thesis: true });
+
 /**
  * The changes with the user's overlap in place of what was stored, scored
  * as the ingest would have scored them with it, highest score first (ties
@@ -52,20 +55,10 @@ export function applyAlphaRadarUserOverlap<T extends AlphaRadarMemoChange>(
     changes: readonly T[],
     overlap: AlphaRadarUserOverlap,
 ): T[] {
-    const matchers = {
-        portfolio: buildMatcher(overlap.portfolio),
-        watchlist: buildMatcher(overlap.watchlist),
-        thesis: buildMatcher(overlap.thesis),
-    };
+    const match = buildOverlapMatcher(overlap);
     return changes
         .map((change, index) => {
-            const key = normalizeIssuerName(change.issuerName);
-            const ticker = change.ticker?.trim().toUpperCase();
-            const matched = {
-                portfolio: matchTickers(matchers.portfolio, ticker, key),
-                watchlist: matchTickers(matchers.watchlist, ticker, key),
-                thesis: matchTickers(matchers.thesis, ticker, key),
-            };
+            const matched = match(change);
             const userRelevance = {
                 portfolio: matched.portfolio.length > 0,
                 watchlist: matched.watchlist.length > 0,
@@ -79,6 +72,81 @@ export function applyAlphaRadarUserOverlap<T extends AlphaRadarMemoChange>(
         })
         .sort((a, b) => b.change.materialityScore - a.change.materialityScore || a.index - b.index)
         .map(({ change }) => change);
+}
+
+export interface AlphaRadarChangeQuery {
+    trackedFilerId: string;
+    reportPeriod?: string;
+}
+
+/** What ranks a stored change: enough to tell whether a user's overlap lifts it. */
+export interface AlphaRadarChangeRank {
+    id: string;
+    issuerName: string;
+    ticker?: string;
+    materialityScore: number;
+}
+
+export interface AlphaRadarChangeReader {
+    /** Stored changes, highest stored score first. */
+    listHoldingChanges(input: AlphaRadarChangeQuery & { ids?: readonly string[]; limit?: number }): Promise<AlphaRadarMemoChange[]>;
+    /** The same changes' ranks, those scoring at least `minScore`, in the same order. */
+    listHoldingChangeRanks(input: AlphaRadarChangeQuery & { minScore: number }): Promise<AlphaRadarChangeRank[]>;
+}
+
+/**
+ * The `limit` changes that rank highest for the user. The stored top
+ * `limit` can miss one their overlap lifts above the last of those, but
+ * only one scoring within ALPHA_RADAR_MAX_RELEVANCE_BOOST of it: the ones
+ * of those the user's overlap meets are read too and ranked with the rest.
+ */
+export async function listAlphaRadarChangesForUser(
+    reader: AlphaRadarChangeReader,
+    query: AlphaRadarChangeQuery & { limit: number },
+    overlap: AlphaRadarUserOverlap,
+): Promise<AlphaRadarMemoChange[]> {
+    const top = await reader.listHoldingChanges(query);
+    const last = top.at(-1);
+    if (!last || top.length < query.limit || KINDS.every((kind) => overlap[kind].length === 0)) {
+        return applyAlphaRadarUserOverlap(top, overlap);
+    }
+
+    const match = buildOverlapMatcher(overlap);
+    const listed = new Set(top.map((change) => change.id));
+    const ranks = await reader.listHoldingChangeRanks({
+        trackedFilerId: query.trackedFilerId,
+        reportPeriod: query.reportPeriod,
+        minScore: last.materialityScore - ALPHA_RADAR_MAX_RELEVANCE_BOOST,
+    });
+    const lifted = ranks
+        .filter((rank) => !listed.has(rank.id) && KINDS.some((kind) => match(rank)[kind].length > 0))
+        .map((rank) => rank.id);
+    // They come after the top in the stored order, so a tie leaves them behind it.
+    const more = lifted.length === 0 ? [] : await reader.listHoldingChanges({
+        trackedFilerId: query.trackedFilerId,
+        reportPeriod: query.reportPeriod,
+        ids: lifted,
+        limit: lifted.length,
+    });
+    return applyAlphaRadarUserOverlap([...top, ...more], overlap).slice(0, query.limit);
+}
+
+/** The user's tickers of each kind that a change meets. */
+function buildOverlapMatcher(overlap: AlphaRadarUserOverlap) {
+    const matchers = {
+        portfolio: buildMatcher(overlap.portfolio),
+        watchlist: buildMatcher(overlap.watchlist),
+        thesis: buildMatcher(overlap.thesis),
+    };
+    return (change: Pick<AlphaRadarMemoChange, "issuerName" | "ticker">): Record<AlphaRadarOverlapKind, string[]> => {
+        const key = normalizeIssuerName(change.issuerName);
+        const ticker = change.ticker?.trim().toUpperCase();
+        return {
+            portfolio: matchTickers(matchers.portfolio, ticker, key),
+            watchlist: matchTickers(matchers.watchlist, ticker, key),
+            thesis: matchTickers(matchers.thesis, ticker, key),
+        };
+    };
 }
 
 interface Matcher {

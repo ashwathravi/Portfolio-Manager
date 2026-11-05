@@ -90,6 +90,9 @@ test.describe('Following Alpha Radar filers', () => {
         await expect(rows.first()).toContainText('APPLE INC');
         await expect(changeRow(page, 'APPLE INC')).toContainText('62');
         await expect(page.getByTestId('alpha-radar-fallback')).toHaveCount(0);
+        // The limit applies to the reader's ranking, not the stored one.
+        const limited = await page.request.get(`/api/alpha-radar/filers/${filerId}/changes?limit=1`);
+        expect((await limited.json()).data.map((change: { issuerName: string }) => change.issuerName)).toEqual(['APPLE INC']);
 
         // Watching Chubb puts it on the list, and above Apple.
         await database()`

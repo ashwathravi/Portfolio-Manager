@@ -2,7 +2,13 @@ import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import type { AlphaRadarMemoChange } from './memo';
-import { applyAlphaRadarUserOverlap, NO_USER_OVERLAP, type AlphaRadarUserOverlap } from './user-overlap';
+import {
+    applyAlphaRadarUserOverlap,
+    listAlphaRadarChangesForUser,
+    NO_USER_OVERLAP,
+    type AlphaRadarChangeReader,
+    type AlphaRadarUserOverlap,
+} from './user-overlap';
 
 const NONE = { portfolio: false, watchlist: false, thesis: false, reasons: [], matchedTickers: [], matchedCusips: [] };
 
@@ -107,5 +113,76 @@ describe('applyAlphaRadarUserOverlap', () => {
         assert.deepEqual(changes.map((item) => item.issuerName), ['FIRST CO', 'SECOND CO']);
         assert.notEqual(changes[0], first);
         assert.deepEqual(first.userRelevance, NONE);
+    });
+});
+
+/** A filer's stored changes, read as the repository reads them, with each read recorded. */
+function storedChanges(changes: readonly AlphaRadarMemoChange[]) {
+    const stored = [...changes].sort((a, b) => b.materialityScore - a.materialityScore || a.issuerName.localeCompare(b.issuerName));
+    const reads: string[] = [];
+    const reader: AlphaRadarChangeReader = {
+        async listHoldingChanges({ ids, limit = 100 }) {
+            reads.push(ids ? `changes ${ids.join(',')}` : `top ${limit}`);
+            return stored.filter((item) => !ids || ids.includes(item.id!)).slice(0, limit);
+        },
+        async listHoldingChangeRanks({ minScore }) {
+            reads.push(`ranks from ${minScore}`);
+            return stored
+                .filter((item) => item.materialityScore >= minScore)
+                .map(({ id, issuerName, ticker, materialityScore }) => ({ id: id!, issuerName, ticker, materialityScore }));
+        },
+    };
+    return { reader, reads };
+}
+
+const QUERY = { trackedFilerId: '11111111-1111-4111-8111-111111111111' };
+const HOLDS_APPLE = overlap({ portfolio: [{ ticker: 'AAPL', names: ['Apple Inc.'] }] });
+
+describe('listAlphaRadarChangesForUser', () => {
+    test('regression (i61): the limit is applied after the user\'s ranking, not to the stored one', async () => {
+        // Chubb is the stored top change, but Apple, held, is the user's: 50 + 12.
+        const { reader } = storedChanges([CHUBB, change('APPLE INC', '037833100', 50), HOSPITALITY]);
+        const changes = await listAlphaRadarChangesForUser(reader, { ...QUERY, limit: 1 }, HOLDS_APPLE);
+        assert.deepEqual(changes.map((item) => [item.issuerName, item.materialityScore, item.userRelevance.reasons]), [
+            ['APPLE INC', 62, ['Held in portfolio']],
+        ]);
+    });
+
+    test('reads in full only the changes the user\'s overlap could lift into the limit', async () => {
+        const { reader, reads } = storedChanges([
+            CHUBB,
+            change('MICROSOFT CORP', '594918104', 45),
+            change('APPLE INC', '037833100', 40),
+            change('ALPHABET INC', '02079K305', 15),
+        ]);
+        const changes = await listAlphaRadarChangesForUser(reader, { ...QUERY, limit: 2 }, overlap({
+            portfolio: [{ ticker: 'AAPL', names: ['Apple Inc.'] }, { ticker: 'GOOGL', names: ['Alphabet Inc.'] }],
+        }));
+
+        // The overlap adds at most 26, so a change below 45 - 26 can't pass
+        // Microsoft: Alphabet, held but at 15, is never read.
+        assert.deepEqual(reads, ['top 2', 'ranks from 19', 'changes change-037833100']);
+        assert.deepEqual(changes.map((item) => [item.issuerName, item.materialityScore]), [
+            ['CHUBB LIMITED', 60],
+            ['APPLE INC', 52],
+        ]);
+    });
+
+    test('a change lifted only to tie the last of the stored top stays behind it', async () => {
+        const { reader } = storedChanges([change('MICROSOFT CORP', '594918104', 52), change('APPLE INC', '037833100', 40)]);
+        const changes = await listAlphaRadarChangesForUser(reader, { ...QUERY, limit: 1 }, HOLDS_APPLE);
+        assert.deepEqual(changes.map((item) => item.issuerName), ['MICROSOFT CORP']);
+    });
+
+    test('reads nothing more when every change fits in the limit or the user has no overlap', async () => {
+        const all = storedChanges([CHUBB, change('APPLE INC', '037833100', 50), HOSPITALITY]);
+        const changes = await listAlphaRadarChangesForUser(all.reader, { ...QUERY, limit: 5 }, HOLDS_APPLE);
+        assert.deepEqual(all.reads, ['top 5']);
+        assert.deepEqual(changes.map((item) => item.issuerName), ['APPLE INC', 'CHUBB LIMITED', 'APPLE HOSPITALITY REIT INC']);
+
+        const none = storedChanges([CHUBB, APPLE, HOSPITALITY]);
+        assert.deepEqual((await listAlphaRadarChangesForUser(none.reader, { ...QUERY, limit: 1 }, NO_USER_OVERLAP))
+            .map((item) => item.issuerName), ['CHUBB LIMITED']);
+        assert.deepEqual(none.reads, ['top 1']);
     });
 });

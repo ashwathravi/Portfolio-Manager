@@ -6,7 +6,8 @@ import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import postgres from 'postgres';
 
 import * as schema from '../../src/db/schema';
-import { applyAlphaRadarUserOverlap, loadAlphaRadarUserOverlap } from '../../src/lib/alpha-radar/user-overlap';
+import { DrizzleAlphaRadarDataRepository } from '../../src/lib/alpha-radar/repository';
+import { applyAlphaRadarUserOverlap, listAlphaRadarChangesForUser, loadAlphaRadarUserOverlap } from '../../src/lib/alpha-radar/user-overlap';
 import type { AlphaRadarMemoChange } from '../../src/lib/alpha-radar/memo';
 
 // Launch item i61: what Alpha Radar reads of a user to show where a filer's
@@ -119,5 +120,29 @@ describe('Alpha Radar overlap with a user', { skip: !DATABASE_URL && 'SCRIPTS_TE
             ['MICROSOFT CORP', []],
         ]);
         assert.ok(reasons(await loadAlphaRadarUserOverlap('user-b', database)).every(([, list]) => list.length === 0));
+    });
+
+    test('regression (i61): a filer\'s top changes are the user\'s, though the stored order cuts one they hold', async () => {
+        const filerId = '00000000-0000-4000-8000-0000000000b2';
+        await sql`
+            INSERT INTO alpha_radar_tracked_filers (id, name, slug, cik, fund_style, enabled)
+            VALUES (${filerId}, 'Overlap Test Fund', 'overlap-test-fund', '0000999001', 'Value', true)`;
+        await sql`
+            INSERT INTO alpha_radar_holding_changes (tracked_filer_id, report_period, change_type, issuer_name, cusip, materiality_score, display_reason)
+            VALUES
+                (${filerId}, '2026-Q3', 'new', 'MICROSOFT CORP', '594918104', 60, ''),
+                (${filerId}, '2026-Q3', 'increased', 'APPLE INC', '037833100', 50, ''),
+                (${filerId}, '2026-Q3', 'increased', 'TESLA INC', '88160R101', 20, ''),
+                (${filerId}, '2026-Q2', 'increased', 'APPLE INC', '037833100', 55, '')`;
+        const repository = new DrizzleAlphaRadarDataRepository(database as never);
+        const top = (userId: string, limit: number, reportPeriod?: string) => loadAlphaRadarUserOverlap(userId, database)
+            .then((overlap) => listAlphaRadarChangesForUser(repository, { trackedFilerId: filerId, reportPeriod, limit }, overlap))
+            .then((changes) => changes.map((item) => [item.reportPeriod, item.issuerName, item.materialityScore]));
+
+        // User A holds Apple (+12), no longer Microsoft, and has an active
+        // thesis on Tesla (+7), too far below to matter.
+        assert.deepEqual(await top('user-a', 2), [['2026-Q2', 'APPLE INC', 67], ['2026-Q3', 'APPLE INC', 62]]);
+        assert.deepEqual(await top('user-a', 1, '2026-Q3'), [['2026-Q3', 'APPLE INC', 62]]);
+        assert.deepEqual(await top('user-b', 2), [['2026-Q3', 'MICROSOFT CORP', 60], ['2026-Q2', 'APPLE INC', 55]]);
     });
 });
