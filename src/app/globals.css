@@ -2097,6 +2097,9 @@
 }
 
 .pm-options-ledger-table-wrap {
+  /* Holds the screen-reader-only header inside the scrolled table, rather
+     than at its place across the page, where it widened a phone's page. */
+  position: relative;
   overflow-x: auto;
 }
 
