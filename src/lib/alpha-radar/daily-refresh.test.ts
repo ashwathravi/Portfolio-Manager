@@ -104,6 +104,29 @@ describe('the daily SEC job', () => {
         assert.equal(detail.remaining, 1);
     });
 
+    test('regression: a filer still waiting on SEC at the deadline stops, and no other starts', async () => {
+        const signals: AbortSignal[] = [];
+        const { deps, refreshed, marked } = harness({ stopAfterMs: 20 });
+        deps.refreshFiler = async (id, stop) => {
+            refreshed.push(id);
+            signals.push(stop);
+            if (id === FILERS[0].id) return runResult();
+            // SEC requests end when `stop` aborts (the SEC client's tests).
+            await new Promise((resolve) => stop.addEventListener('abort', resolve, { once: true }));
+            return runResult({ errors: [{ message: 'SEC EDGAR request stopped: the run is out of time.' }] });
+        };
+
+        const detail = await refreshTrackedFilersDaily(deps);
+
+        assert.deepEqual(refreshed, [FILERS[0].id, FILERS[1].id]);
+        assert.equal(signals[0], signals[1]);
+        assert.equal(signals[1].aborted, true);
+        // Marked, so tomorrow it goes behind the filer it kept waiting.
+        assert.deepEqual(marked.map((mark) => mark.id), [FILERS[0].id, FILERS[1].id]);
+        assert.deepEqual([detail.checked, detail.remaining], [2, 1]);
+        assert.deepEqual(detail.failed, [{ filer: 'Checked last week', error: 'SEC EDGAR request stopped: the run is out of time.' }]);
+    });
+
     test('a filer that fails is reported and still marked, so it goes to the back', async () => {
         const { deps, marked } = harness({
             refreshFiler: async (id) => {

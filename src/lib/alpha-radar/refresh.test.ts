@@ -212,6 +212,27 @@ describe('defaultFetchInformationTableXml', () => {
         else process.env.SEC_EDGAR_USER_AGENT = savedUserAgent;
     });
 
+    test('stops the request at the deadline', async () => {
+        const originalFetch = globalThis.fetch;
+        let signal: AbortSignal | undefined;
+        globalThis.fetch = ((_url: string | URL | Request, init?: RequestInit) => {
+            signal = init?.signal ?? undefined;
+            return new Promise<Response>((_resolve, reject) => {
+                signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+            });
+        }) as typeof fetch;
+        const stop = new AbortController();
+
+        try {
+            const pending = defaultFetchInformationTableXml(FILING, stop.signal);
+            stop.abort();
+            await assert.rejects(pending, /aborted/);
+            assert.strictEqual(signal?.aborted, true);
+        } finally {
+            globalThis.fetch = originalFetch;
+        }
+    });
+
     test('regression: asks SEC nothing without SEC_EDGAR_USER_AGENT', async () => {
         delete process.env.SEC_EDGAR_USER_AGENT;
         const originalFetch = globalThis.fetch;

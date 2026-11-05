@@ -5,7 +5,9 @@
  * the list stays short, and the SEC client keeps to SEC's request rate.
  *
  * The filers checked longest ago go first, and none is started once the
- * budget is spent: the rest go first tomorrow. Every filer is checked, not
+ * budget is spent: the rest go first tomorrow. SEC requests stop at a
+ * later deadline, so a slow filer can't run past the route's limit before
+ * the run is recorded. Every filer is checked, not
  * only the ones someone follows, so a filer has its filings by the time a
  * user looks at it. Without SEC_EDGAR_USER_AGENT nothing is asked and the
  * run fails, and so does a run in which every filer failed (SEC refusing
@@ -26,6 +28,9 @@ type Database = typeof db;
 
 /** The cron route stops at 300 s; the last filer started has the rest. */
 export const ALPHA_RADAR_JOB_BUDGET_MS = 240_000;
+
+/** When SEC requests stop, leaving time to mark the filer and record the run. */
+export const ALPHA_RADAR_JOB_STOP_MS = 270_000;
 
 /** The name its runs are recorded under in job_runs. */
 export const ALPHA_RADAR_JOB = "alpha-radar";
@@ -49,9 +54,11 @@ export interface DailyRefreshDeps {
     userAgent?: () => string | null;
     /** Enabled filers, the one checked longest ago first. */
     listFilers?: () => Promise<Array<{ id: string; name: string }>>;
-    refreshFiler?: (id: string) => Promise<AlphaRadarRefreshRunResult>;
+    /** `stop` aborts at the run's deadline; SEC requests end with it. */
+    refreshFiler?: (id: string, stop: AbortSignal) => Promise<AlphaRadarRefreshRunResult>;
     markRefreshed?: (id: string, at: Date) => Promise<void>;
     budgetMs?: number;
+    stopAfterMs?: number;
     clock?: () => number;
 }
 
@@ -61,11 +68,14 @@ export async function refreshTrackedFilersDaily({
     refreshFiler,
     markRefreshed = async (id, at) => { await buildMarkRefreshedQuery(id, at); },
     budgetMs = ALPHA_RADAR_JOB_BUDGET_MS,
+    stopAfterMs = ALPHA_RADAR_JOB_STOP_MS,
     clock = () => Date.now(),
 }: DailyRefreshDeps = {}): Promise<JobDetail> {
     if (!userAgent()) throw new SecEdgarError("configuration", SEC_USER_AGENT_MISSING);
-    const refresh = refreshFiler ?? ((id: string) => getAlphaRadarRefreshService().refreshFiler(id));
+    const refresh = refreshFiler
+        ?? ((id: string, signal: AbortSignal) => getAlphaRadarRefreshService({ signal }).refreshFiler(id));
 
+    const stop = AbortSignal.timeout(stopAfterMs);
     const deadline = clock() + budgetMs;
     const filers = await listFilers();
     const failed: Array<{ filer: string; error: string }> = [];
@@ -73,10 +83,10 @@ export async function refreshTrackedFilersDaily({
     let newFilings = 0;
     let reports = 0;
     for (const filer of filers) {
-        if (clock() >= deadline) break;
+        if (clock() >= deadline || stop.aborted) break;
         checked++;
         try {
-            const result = await refresh(filer.id);
+            const result = await refresh(filer.id, stop);
             newFilings += result.parsed;
             reports += result.memoGenerated;
             if (result.errors.length > 0) failed.push({ filer: filer.name, error: shorten(result.errors[0].message) });

@@ -43,6 +43,13 @@ export const alphaRadarFilingStatusSchema = z.enum(['discovered', 'fetched', 'pa
 export const alphaRadarChangeTypeSchema = z.enum(['new', 'exited', 'increased', 'decreased', 'unchanged', 'amended']);
 export const alphaRadarReportStatusSchema = z.enum(['generated', 'stale', 'failed']);
 export const alphaRadarPutCallSchema = z.enum(['put', 'call']).optional();
+/** GET /api/alpha-radar/reports?trackedFilerIds=: the filers a user follows, comma-separated. */
+export const alphaRadarTrackedFilerIdsSchema = z.string()
+    .transform((value) => value.split(','))
+    .pipe(z.array(z.guid('Each filer ID must be a UUID'))
+        .min(1, 'Name at least one filer')
+        .max(100, 'Name at most 100 filers'));
+
 export const alphaRadarListLimitSchema = z.coerce.number()
     .int('Limit must be an integer')
     .min(1, 'Limit must be at least 1')

@@ -13,6 +13,7 @@ import {
     refreshTrackedFilersDaily,
 } from '../../src/lib/alpha-radar/daily-refresh';
 import { followFiler, listFollowedFilerIds, unfollowFiler } from '../../src/lib/alpha-radar/follows';
+import { DrizzleAlphaRadarDataRepository } from '../../src/lib/alpha-radar/repository';
 import type { AlphaRadarRefreshRunResult } from '../../src/lib/alpha-radar/refresh';
 
 // Launch item i60: the Alpha Radar filers each user follows, and the order
@@ -131,6 +132,25 @@ describe('Alpha Radar follows and the daily SEC job', { skip: !DATABASE_URL && '
         assert.deepEqual((await buildFilersToRefreshQuery(database)).map((filer) => filer.name), ['Coatue Management', 'Berkshire Hathaway']);
         // Checking a filer isn't editing it.
         assert.deepEqual(await sql`SELECT id, updated_at FROM alpha_radar_tracked_filers ORDER BY id`, updatedBefore);
+    });
+
+    test('regression: the reports of the filers followed come back even when other filers\' are newer', async () => {
+        // Drizzle's driver writes jsonb as given, so the JSON goes in as text.
+        const sections = JSON.stringify([{ id: 'summary', title: 'Summary', kind: 'summary', markdown: 'Summary', changeIds: [] }]);
+        const report = (filerId: string, period: string) => sql`
+            INSERT INTO alpha_radar_reports (tracked_filer_id, report_period, title, summary, sections, markdown, source_filing_ids)
+            VALUES (${filerId}, ${period}, ${`${period} report`}, 'Summary', ${sections}, 'Summary', '[]')`;
+        await report(BERKSHIRE, '2026-Q2');
+        for (const period of ['2026-Q3', '2026-Q4', '2027-Q1']) await report(COATUE, period);
+        const repository = new DrizzleAlphaRadarDataRepository(database);
+        const periods = async (query: Parameters<typeof repository.listReports>[0]) =>
+            (await repository.listReports(query)).map((row) => [row.trackedFilerId, row.reportPeriod]);
+
+        // The latest two of every filer are Coatue's: Berkshire's isn't there.
+        assert.deepEqual(await periods({ limit: 2 }), [[COATUE, '2027-Q1'], [COATUE, '2026-Q4']]);
+        assert.deepEqual(await periods({ trackedFilerIds: [BERKSHIRE], limit: 2 }), [[BERKSHIRE, '2026-Q2']]);
+        assert.deepEqual(await periods({ trackedFilerIds: [BERKSHIRE, COATUE], limit: 2 }), [[COATUE, '2027-Q1'], [COATUE, '2026-Q4']]);
+        assert.deepEqual(await periods({ trackedFilerIds: [MISSING] }), []);
     });
 
     test('follows go with the account, and with a filer if one is ever removed', async () => {

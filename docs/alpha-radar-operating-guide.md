@@ -12,7 +12,7 @@ Alpha Radar is the Portfolio Manager 13F research workflow. It tracks selected i
 
 Tracked filers are shared by every account, and only admins add, change or refresh them. Each user follows the filers they want from Research › Alpha Radar (`alpha_radar_filer_follows`, launch item i60); Today's Alpha Radar card shows reports from the filers they follow, outside the example section, once Atlas tracks any filer. The follows are exported with the account and deleted with it.
 
-`GET /api/cron/alpha-radar` (Vercel Cron, 11:15 UTC every day) runs the `alpha-radar` job: every enabled filer, the one checked longest ago first, until 240 seconds have gone (`src/lib/alpha-radar/daily-refresh.ts`). It parses and reports only filings it hasn't seen. `docs/deployment.md` › Scheduled jobs and `docs/monitoring.md` cover running it by hand and what its failures mean.
+`GET /api/cron/alpha-radar` (Vercel Cron, 11:15 UTC every day) runs the `alpha-radar` job: every enabled filer, the one checked longest ago first, until 240 seconds have gone (`src/lib/alpha-radar/daily-refresh.ts`). SEC requests stop at 270 seconds, so a filer still waiting on SEC can't keep the run from being recorded, and a `Retry-After` longer than 10 seconds (SEC's rate-limit block lasts minutes) fails that request instead of waiting. It parses and reports only filings it hasn't seen. `docs/deployment.md` › Scheduled jobs and `docs/monitoring.md` cover running it by hand and what its failures mean.
 
 ## SEC Fair Use
 

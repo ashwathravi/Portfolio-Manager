@@ -28,9 +28,18 @@ export function AlphaRadarDashboardCard({ following = false }: { following?: boo
         retry: false,
         refetchOnWindowFocus: false,
     });
+    const followsQuery = useAlphaRadarFollowsQuery({
+        enabled: following,
+        retry: false,
+        refetchOnWindowFocus: false,
+    });
+    const followedIds = following && followsQuery.isSuccess ? new Set(followsQuery.data) : null;
+    // Following: the latest reports of the filers followed, asked for by
+    // ID, so other filers' newer reports can't crowd them out of the list.
     const reportsQuery = useAlphaRadarReportsQuery(
-        {},
+        following ? { trackedFilerIds: followsQuery.data ?? [] } : {},
         {
+            enabled: !following || (followedIds?.size ?? 0) > 0,
             retry: false,
             refetchOnWindowFocus: false,
         },
@@ -38,13 +47,6 @@ export function AlphaRadarDashboardCard({ following = false }: { following?: boo
     const refresh = useRefreshAlphaRadarAllMutation();
     // Refreshing calls SEC EDGAR for every tracked filer: admins only.
     const canRefresh = useViewerIdentity()?.admin === true;
-
-    const followsQuery = useAlphaRadarFollowsQuery({
-        enabled: following,
-        retry: false,
-        refetchOnWindowFocus: false,
-    });
-    const followedIds = following && followsQuery.isSuccess ? new Set(followsQuery.data) : null;
 
     const liveFilers = filersQuery.data ?? [];
     const liveReports = reportsQuery.data ?? [];
@@ -124,6 +126,10 @@ export function AlphaRadarDashboardCard({ following = false }: { following?: boo
             ) : followedIds?.size === 0 ? (
                 <p className="pm-card-subtitle" data-testid="alpha-radar-dashboard-follow-prompt">
                     Follow managers in <Link href={RESEARCH_ALPHA_RADAR_HREF}>Research › Alpha Radar</Link> to see their 13F changes here.
+                </p>
+            ) : following && !reportsQuery.isSuccess ? (
+                <p className="pm-card-subtitle" data-testid="alpha-radar-dashboard-reports-loading">
+                    {reportsQuery.isError ? "Couldn't load their reports." : "Loading their latest reports."}
                 </p>
             ) : topReport ? (
                 <Link href={RESEARCH_ALPHA_RADAR_HREF} className="pm-alpha-dashboard-headline">

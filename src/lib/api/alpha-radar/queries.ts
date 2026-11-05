@@ -24,11 +24,12 @@ export const alphaRadarQueryKeys = {
         reportPeriod ?? 'all',
     ] as const,
     changes: (filerId: string, reportPeriod?: string) => [...alphaRadarQueryKeys.filers(), filerId, 'changes', reportPeriod ?? 'latest'] as const,
-    reports: (trackedFilerId?: string, reportPeriod?: string) => [
+    reports: (trackedFilerId?: string, reportPeriod?: string, trackedFilerIds?: readonly string[]) => [
         ...alphaRadarQueryKeys.all,
         'reports',
         trackedFilerId ?? 'all',
         reportPeriod ?? 'latest',
+        ...(trackedFilerIds ? ['filers', [...trackedFilerIds].sort().join(',')] : []),
     ] as const,
     memorySearch: (query: string, trackedFilerId?: string, reportPeriod?: string) => [
         ...alphaRadarQueryKeys.all,
@@ -89,10 +90,13 @@ export async function fetchAlphaRadarChanges(
 
 export async function fetchAlphaRadarReports(input: {
     trackedFilerId?: string;
+    /** Reports from any of these filers (the ones the user follows). */
+    trackedFilerIds?: readonly string[];
     reportPeriod?: string;
 } = {}): Promise<AlphaRadarReportRecord[]> {
     const params = new URLSearchParams();
     if (input.trackedFilerId) params.set('trackedFilerId', input.trackedFilerId);
+    if (input.trackedFilerIds) params.set('trackedFilerIds', input.trackedFilerIds.join(','));
     if (input.reportPeriod) params.set('reportPeriod', input.reportPeriod);
     return fetchJsonData(`/api/alpha-radar/reports${queryString(params)}`);
 }
@@ -178,11 +182,11 @@ export function useFollowAlphaRadarFilerMutation() {
 }
 
 export function useAlphaRadarReportsQuery(
-    input: { trackedFilerId?: string; reportPeriod?: string } = {},
+    input: { trackedFilerId?: string; trackedFilerIds?: readonly string[]; reportPeriod?: string } = {},
     options?: Omit<UseQueryOptions<AlphaRadarReportRecord[], Error>, 'queryKey' | 'queryFn'>,
 ) {
     return useQuery<AlphaRadarReportRecord[], Error>({
-        queryKey: alphaRadarQueryKeys.reports(input.trackedFilerId, input.reportPeriod),
+        queryKey: alphaRadarQueryKeys.reports(input.trackedFilerId, input.reportPeriod, input.trackedFilerIds),
         queryFn: () => fetchAlphaRadarReports(input),
         ...options,
     });

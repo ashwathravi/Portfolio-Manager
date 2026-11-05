@@ -292,7 +292,7 @@ export class AlphaRadarRefreshService {
     }
 }
 
-export async function defaultFetchInformationTableXml(filing: StoredSecFiling): Promise<string> {
+export async function defaultFetchInformationTableXml(filing: StoredSecFiling, stop?: AbortSignal): Promise<string> {
     const url = filing.informationTableUrl ?? filing.primaryDocumentUrl;
     if (!url) {
         throw new Error(`No SEC information table URL available for ${filing.accessionNumber}.`);
@@ -300,7 +300,7 @@ export async function defaultFetchInformationTableXml(filing: StoredSecFiling): 
 
     const userAgent = configuredSecUserAgent();
     if (!userAgent) throw new SecEdgarError('configuration', SEC_USER_AGENT_MISSING);
-    const timeout = createRequestTimeout(SEC_INFORMATION_TABLE_TIMEOUT_MS);
+    const timeout = createRequestTimeout(SEC_INFORMATION_TABLE_TIMEOUT_MS, stop);
     let response: Response;
     try {
         response = await fetch(url, {

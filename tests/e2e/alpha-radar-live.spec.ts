@@ -21,6 +21,9 @@ test.describe('Following Alpha Radar filers', () => {
     const filerId = randomUUID();
     const filerName = 'E2E Follow Capital';
     const summary = 'Added to Apple and trimmed Chubb.';
+    // Nobody follows this one; its 21 newer reports are more than the
+    // latest 20 the reports API returns by default.
+    const crowdId = randomUUID();
 
     test.beforeAll(async () => {
         const sql = database();
@@ -33,11 +36,20 @@ test.describe('Following Alpha Radar filers', () => {
             VALUES (${filerId}, '2026-Q3', ${`${filerName} Alpha Radar 2026-Q3`}, ${summary},
                     ${sql.json([{ id: 'summary', title: 'Summary', kind: 'summary', markdown: summary, changeIds: [] }])},
                     ${summary}, ${sql.json([])})`;
+        await sql`
+            INSERT INTO alpha_radar_tracked_filers (id, name, slug, cik, fund_style, enabled)
+            VALUES (${crowdId}, 'E2E Crowd Partners', ${`e2e-crowd-${crowdId}`}, ${String(Number(cik) + 1).padStart(10, '0')}, 'Macro', true)`;
+        await sql`
+            INSERT INTO alpha_radar_reports (tracked_filer_id, report_period, title, summary, sections, markdown, source_filing_ids)
+            SELECT ${crowdId}, (2027 + n / 4)::text || '-Q' || (n % 4 + 1)::text, 'E2E Crowd Partners report', 'A newer report.',
+                   ${sql.json([{ id: 'summary', title: 'Summary', kind: 'summary', markdown: 'A newer report.', changeIds: [] }])},
+                   'A newer report.', ${sql.json([])}
+            FROM generate_series(0, 20) AS n`;
     });
 
     test.afterAll(async () => {
-        // Its report and every follow go with it.
-        await database()`DELETE FROM alpha_radar_tracked_filers WHERE id = ${filerId}`;
+        // Their reports and every follow go with them.
+        await database()`DELETE FROM alpha_radar_tracked_filers WHERE id IN (${filerId}, ${crowdId})`;
     });
 
     test('a user follows a filer, it stays followed, and Today shows its reports', async ({ page, context }) => {
@@ -67,9 +79,13 @@ test.describe('Following Alpha Radar filers', () => {
         await expect(follow).toHaveAttribute('aria-pressed', 'true');
         await expect(page.getByTestId('alpha-radar-filer').filter({ hasText: filerName }).getByTestId('alpha-radar-filer-following')).toBeVisible();
 
+        // Research opens on the first filer by name, so pick it again.
         await reloadAppPage(page);
+        await page.getByTestId('alpha-radar-filer').filter({ hasText: filerName }).click();
         await expect(page.getByTestId('alpha-radar-follow')).toHaveText('Following');
 
+        // Its report, though another filer has 21 newer ones (a regression:
+        // Today filtered the latest 20 of every filer's).
         await gotoAppPage(page, '/');
         await expect(card.getByTestId('alpha-radar-dashboard-follow-prompt')).toHaveCount(0);
         const row = card.getByTestId('alpha-radar-dashboard-row');
@@ -85,6 +101,7 @@ test.describe('Following Alpha Radar filers', () => {
         await expect(page.getByTestId('alpha-radar-follow')).toHaveText('Follow');
         await expect.poll(async () => (await (await page.request.get('/api/alpha-radar/follows')).json()).data.filerIds).toEqual([]);
         await reloadAppPage(page);
+        await page.getByTestId('alpha-radar-filer').filter({ hasText: filerName }).click();
         await expect(page.getByTestId('alpha-radar-follow')).toHaveText('Follow');
     });
 

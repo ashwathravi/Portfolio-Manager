@@ -274,6 +274,79 @@ describe('SecEdgarClient', () => {
         assert.strictEqual(filings.length, 2);
     });
 
+    test('regression: a Retry-After longer than the cap fails at once instead of waiting', async () => {
+        const sleeps: number[] = [];
+        let calls = 0;
+        const fetcher: SecFetch = async () => {
+            calls += 1;
+            return jsonResponse({ message: 'slow down' }, { status: 429, headers: { 'retry-after': '600' } });
+        };
+
+        const client = clientFor(fetcher, async (ms) => {
+            sleeps.push(ms);
+        }, { maxRetries: 2 });
+
+        await assert.rejects(
+            () => client.fetchRecent13FFilings({ trackedFilerId: TRACKED_FILER_ID, cik: '0001067983' }),
+            (error: unknown) => error instanceof SecEdgarError
+                && error.code === 'rate_limited'
+                && error.retryAfterMs === 600_000,
+        );
+        assert.strictEqual(calls, 1);
+        assert.deepStrictEqual(sleeps, []);
+    });
+
+    test('regression: the deadline ends a retry wait, and no request follows it', async () => {
+        const stop = new AbortController();
+        let calls = 0;
+        const fetcher: SecFetch = async () => {
+            calls += 1;
+            return jsonResponse({ message: 'busy' }, { status: 503 });
+        };
+        // A wait that would outlast the deadline.
+        const client = clientFor(fetcher, () => new Promise(() => undefined), { signal: stop.signal, maxRetries: 2 });
+        setTimeout(() => stop.abort(), 10);
+
+        await assert.rejects(
+            () => client.fetchRecent13FFilings({ trackedFilerId: TRACKED_FILER_ID, cik: '0001067983' }),
+            /stopped: the run is out of time/,
+        );
+        assert.strictEqual(calls, 1);
+    });
+
+    test('the deadline aborts a request under way, and it isn\'t retried', async () => {
+        const stop = new AbortController();
+        let calls = 0;
+        const fetcher: SecFetch = (_url, init) => {
+            calls += 1;
+            return new Promise((_resolve, reject) => {
+                init.signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+            });
+        };
+        const client = clientFor(fetcher, async () => undefined, { signal: stop.signal, requestTimeoutMs: 60_000, maxRetries: 2 });
+        setTimeout(() => stop.abort(), 10);
+
+        await assert.rejects(
+            () => client.fetchRecent13FFilings({ trackedFilerId: TRACKED_FILER_ID, cik: '0001067983' }),
+            /stopped: the run is out of time/,
+        );
+        assert.strictEqual(calls, 1);
+    });
+
+    test('past the deadline, nothing is asked', async () => {
+        let calls = 0;
+        const client = clientFor(async () => {
+            calls += 1;
+            return jsonResponse(submissionsResponse());
+        }, async () => undefined, { signal: AbortSignal.abort() });
+
+        await assert.rejects(
+            () => client.fetchRecent13FFilings({ trackedFilerId: TRACKED_FILER_ID, cik: '0001067983' }),
+            /stopped: the run is out of time/,
+        );
+        assert.strictEqual(calls, 0);
+    });
+
     test('sends an abort signal and rejects oversized SEC JSON responses', async () => {
         let sawAbortSignal = false;
         const fetcher: SecFetch = async (_url, init) => {
