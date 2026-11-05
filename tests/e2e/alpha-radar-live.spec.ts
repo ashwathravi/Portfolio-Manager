@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { test, expect, type Page } from '@playwright/test';
 
 import { gotoAppPage, reloadAppPage } from './helpers/app';
+import { researchLoaded } from './helpers/research';
 import { database, databaseAuthEnabled, signInAsFreshUser, signInAsNewUser } from './helpers/users';
 
 /**
@@ -62,11 +63,18 @@ test.describe('Following Alpha Radar filers', () => {
         await sql`
             INSERT INTO alpha_radar_tracked_filers (id, name, slug, cik, fund_style, enabled)
             VALUES (${quietId}, ${quietName}, ${`e2e-quiet-${quietId}`}, ${String(Number(cik) + 2).padStart(10, '0')}, 'Activist', true)`;
+        // Chubb in SEC's ticker file, as the nightly job stores it, so a CB
+        // added to a watchlist has a company name to meet the 13F's.
+        await sql`
+            INSERT INTO symbol_directory (symbol, name, exchange, cik, position)
+            VALUES ('CB', 'Chubb Ltd', 'NYSE', '0000896159', 300)
+            ON CONFLICT (symbol) DO NOTHING`;
     });
 
     test.afterAll(async () => {
         // Their reports, changes and every follow go with them.
         await database()`DELETE FROM alpha_radar_tracked_filers WHERE id IN (${filerId}, ${crowdId}, ${quietId})`;
+        await database()`DELETE FROM symbol_directory WHERE symbol = 'CB' AND cik = '0000896159'`;
     });
 
     const changeRow = (page: Page, issuer: string) => page.getByTestId('alpha-radar-change-row')
@@ -74,8 +82,10 @@ test.describe('Following Alpha Radar filers', () => {
 
     test('each change shows where it meets the reader, and ranks by it (launch item i61)', async ({ page, context }) => {
         // A copy of user A, who holds AAPL ("Apple Inc.") and doesn't watch Chubb.
-        const userId = await signInAsFreshUser(context);
+        await signInAsFreshUser(context);
+        const watchlistLoaded = researchLoaded(page, 'watchlist');
         await gotoAppPage(page, '/research?tab=alpha-radar');
+        await watchlistLoaded;
         await page.getByTestId('alpha-radar-filer').filter({ hasText: filerName }).click();
 
         // The 13F names Apple, not AAPL: matched by company, and not to
@@ -94,11 +104,20 @@ test.describe('Following Alpha Radar filers', () => {
         const limited = await page.request.get(`/api/alpha-radar/filers/${filerId}/changes?limit=1`);
         expect((await limited.json()).data.map((change: { issuerName: string }) => change.issuerName)).toEqual(['APPLE INC']);
 
-        // Watching Chubb puts it on the list, and above Apple.
-        await database()`
-            INSERT INTO watchlist_items (user_id, id, ticker, company_name, added_at)
-            VALUES (${userId}, 'w-e2e-chubb', 'CB', 'Chubb', current_date)`;
-        await reloadAppPage(page);
+        // Watching Chubb puts it on the list, and above Apple, as soon as
+        // the reader is back on Alpha Radar: no reload (the Codex finding on
+        // PR #191).
+        await page.getByRole('tab', { name: 'Watchlist' }).click();
+        const add = page.getByLabel('Add ticker to watchlist');
+        await expect(async () => {
+            await add.fill('cb');
+            await expect(add).toHaveValue('CB', { timeout: 1_000 });
+        }).toPass({ timeout: 10_000 });
+        const saved = page.waitForResponse((response) =>
+            response.url().includes('/api/research/watchlist/') && response.request().method() === 'PUT' && response.ok());
+        await page.getByRole('button', { name: 'Add', exact: true }).click();
+        await saved;
+        await page.getByRole('tab', { name: 'Alpha Radar' }).click();
         await page.getByTestId('alpha-radar-filer').filter({ hasText: filerName }).click();
         await expect(changeRow(page, 'CHUBB LIMITED').locator('.pm-alpha-overlap')).toHaveText('On watchlist');
         await expect(rows.first()).toContainText('CHUBB LIMITED');

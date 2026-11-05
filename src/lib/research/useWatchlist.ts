@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { useAccountStorage, useViewerIdentity } from '@/components/providers/IdentityProvider';
 import { useRequestTime } from '@/components/providers/RequestTimeProvider';
+import { alphaRadarQueryKeys } from '@/lib/api/alpha-radar/queries';
 import { useShowSampleData } from '@/lib/hooks/useShowSampleData';
 import { getBrowserStorage } from './storage';
 import {
@@ -208,6 +209,8 @@ function useAccountWatchlist(enabled: boolean, key: string, examples: WatchItem[
         send: (id, w, order) => sendWatchWrite(id, w, order),
         apply: applyWatchWrite,
         failedMessage: saveFailedMessage,
+        // Alpha Radar ranks a filer's changes with these (launch item i61).
+        dependents: [alphaRadarQueryKeys.allChanges()],
         loadFailedMessage: "Couldn't load your watchlist. Showing examples only.",
     });
 
