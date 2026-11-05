@@ -6,7 +6,9 @@
  *         Response: { data: { messages: AskMessage[], questionsToday, limit, stored, writer } }
  * POST    { question } → the answer, from the user's portfolio, transactions,
  *         theses and saved risk policy. The question and answer are kept
- *         with the account. Past the daily limit: 429 ASK_DAILY_LIMIT.
+ *         with the account. Past the daily limit: 429 ASK_DAILY_LIMIT. The
+ *         question takes its place in the limit before it's answered, so
+ *         questions sent at once can't be answered past it.
  *         Response: { data: { messages: [question, answer], questionsToday, limit, stored, writer } }
  * DELETE  Clears the conversation (the day's questions still count).
  *
@@ -33,8 +35,9 @@ import {
     AskDailyLimitError,
     clearAskHistory,
     loadAskHistory,
-    questionsAsked,
-    saveAskTurn,
+    releaseAskQuestion,
+    reserveAskQuestion,
+    saveAskAnswer,
 } from '@/lib/ask/server/history';
 import type { AskMessage, AskWriter } from '@/lib/ask/types';
 import { askQuestionSchema } from '@/lib/validators/ask';
@@ -91,14 +94,22 @@ export async function POST(request: Request) {
     const { userId } = auth.context;
     const stored = isDatabaseConfigured();
     const now = new Date();
+    const question: AskMessage = { id: randomUUID(), role: 'user', content: parsed.data.question, ts: now.getTime() };
+    let questionsToday = 0;
     try {
-        // Checked before answering, so a user past the limit costs nothing.
-        if (stored && (await questionsAsked(userId, now)) >= ASK_DAILY_LIMIT) return dailyLimitReached();
-
+        // Kept before answering: a user past the limit costs nothing, and
+        // of questions sent at once only those under it are answered.
+        if (stored) questionsToday = await reserveAskQuestion(userId, question, now);
+    } catch (err) {
+        if (err instanceof AskDailyLimitError) return dailyLimitReached();
+        return internalServerError(err, "Ask couldn't load your data to answer.", 'ASK_FAILED');
+    }
+    try {
         // Claude reads the conversation so far, for follow-up questions.
-        const history = stored && askModel() ? (await loadAskHistory(userId, now)).messages : [];
+        const history = stored && askModel()
+            ? (await loadAskHistory(userId, now)).messages.filter((message) => message.id !== question.id)
+            : [];
         const { answer, writer } = await answerQuestionWith(userId, parsed.data.question, { now, history });
-        const question: AskMessage = { id: randomUUID(), role: 'user', content: parsed.data.question, ts: now.getTime() };
         // A millisecond after the question, so the two always sort in order.
         const reply: AskMessage = {
             id: randomUUID(),
@@ -108,13 +119,14 @@ export async function POST(request: Request) {
             toolRuns: answer.toolRuns,
             ts: now.getTime() + 1,
         };
-        const questionsToday = stored ? await saveAskTurn(userId, [question, reply], now) : 0;
+        if (stored) await saveAskAnswer(userId, question.id, reply, now);
         return NextResponse.json(
             { data: { messages: [question, reply], questionsToday, limit: ASK_DAILY_LIMIT, stored, writer } },
             { headers: NO_STORE },
         );
     } catch (err) {
-        if (err instanceof AskDailyLimitError) return dailyLimitReached();
+        // Unanswered, so it gives its place in the limit back.
+        if (stored) await releaseAskQuestion(userId, question.id).catch(() => undefined);
         return internalServerError(err, "Ask couldn't load your data to answer.", 'ASK_FAILED');
     }
 }
