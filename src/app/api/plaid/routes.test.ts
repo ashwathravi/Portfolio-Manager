@@ -452,18 +452,19 @@ describe("Plaid API routes", () => {
         });
     }
 
-    test("regression (i77): a connection count that fails still ends the connection at Plaid when it can't be saved", async (t) => {
+    test("regression (i77): the most connections are checked as the connection is saved, so two links finishing at once can't both pass", async (t) => {
         t.mock.method(console, "info", () => {});
-        const warn = t.mock.method(console, "warn", () => {});
         configurePlaidEnv();
         process.env.PLAID_TOKEN_STORAGE = "postgres";
         process.env.PLAID_TOKEN_ENCRYPTION_KEY = "test-only-registry-key";
         const registry = createTestRegistryStore();
-        // The database gone: neither counting nor saving works.
+        // A count taken before saving says there's room: the other link
+        // hadn't been saved yet. The save, which takes the user's lock and
+        // counts again, finds it has been.
         setPlaidTokenRegistryStoreForTests({
             ...registry.store,
-            countConnections: async () => { throw new Error("connection refused"); },
-            upsertConnection: async () => { throw new Error("connection refused"); },
+            countConnections: async () => MAX_PLAID_CONNECTIONS_PER_USER - 1,
+            upsertConnection: async (input) => (input.maxConnections === MAX_PLAID_CONNECTIONS_PER_USER ? "limit" : "stored"),
         });
         const removed: string[] = [];
         globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
@@ -480,10 +481,9 @@ describe("Plaid API routes", () => {
 
         const response = await exchangePublicToken(authorizedRequest("/api/plaid/exchange-public-token", { publicToken: "public-route-token" }));
 
-        assert.equal(response.status, 503);
-        assert.equal((await response.json()).code, "PLAID_CONNECTION_NOT_SAVED");
+        assert.equal(response.status, 409);
+        assert.equal((await response.json()).code, "PLAID_CONNECTION_LIMIT");
         assert.deepEqual(removed, ["access-route-token"]);
-        assert.equal(warn.mock.callCount(), 1);
     });
 
     test("regression (i77): a bank link past the day's is refused before Plaid is asked", async (t) => {
@@ -612,8 +612,12 @@ function createTestRegistryStore() {
         },
         store: {
             configured: () => true,
-            upsertConnection: async (input: TestConnectionInput) => {
+            // Refuses past the most connections as it saves, as the database does.
+            upsertConnection: async (input: TestConnectionInput & { maxConnections?: number }) => {
+                const others = state.otherConnections + (state.connection && state.connection.itemId !== input.itemId ? 1 : 0);
+                if (input.maxConnections !== undefined && others >= input.maxConnections) return "limit" as const;
                 state.connection = input;
+                return "stored" as const;
             },
             getActiveToken: async () => {
                 if (!state.connection) return undefined;

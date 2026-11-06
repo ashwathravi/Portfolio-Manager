@@ -84,7 +84,9 @@ export function isGoogleProfileAllowed(
  * removing someone from the list, or blocking them, ends their access
  * immediately rather than when their session expires. At sign-in the domain
  * lists are checked against Google's hosted-domain claim too; here, where
- * only the stored email is available, against the email's domain.
+ * only the stored email is available, against the email's domain. A blocked
+ * Workspace domain is checked against the user's stored Google sign-in too
+ * (src/lib/auth/session-access.ts).
  */
 export function isSessionEmailAllowed(
     email: unknown,
@@ -104,11 +106,21 @@ export function isSessionEmailAllowed(
     return allowedDomains.includes(emailDomain(normalized));
 }
 
+/** Whether AUTH_BLOCKED_DOMAINS names any domain. */
+export function hasBlockedDomains(policy: GoogleAccessPolicy = currentAccessPolicy()): boolean {
+    return parseCsv(policy.blockedDomains).length > 0;
+}
+
+/** Whether `domain` (an email's, or a Google Workspace's) is on the block list. */
+export function isBlockedDomain(domain: string, policy: GoogleAccessPolicy = currentAccessPolicy()): boolean {
+    const normalized = domain.trim().toLowerCase();
+    return normalized !== "" && parseCsv(policy.blockedDomains).some((entry) => entry.toLowerCase() === normalized);
+}
+
 /** On the block list by email, or by the email's or Google Workspace's domain. */
 function isBlocked(email: string, hostedDomain: string, policy: GoogleAccessPolicy): boolean {
     if (parseCsv(policy.blockedEmails).some((entry) => entry.toLowerCase() === email)) return true;
-    const blockedDomains = parseCsv(policy.blockedDomains).map((entry) => entry.toLowerCase());
-    return blockedDomains.includes(emailDomain(email)) || (hostedDomain !== "" && blockedDomains.includes(hostedDomain));
+    return isBlockedDomain(emailDomain(email), policy) || isBlockedDomain(hostedDomain, policy);
 }
 
 function emailDomain(email: string): string {

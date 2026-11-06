@@ -129,7 +129,7 @@ gh secret delete DATABASE_URL --repo ashwathravi/Portfolio-Manager
 
 **Sign-in and sessions** (`src/auth.ts`, `src/lib/auth/access.ts`)
 - **Accounts:** Google only, with a verified email.
-- **Invite list:** production refuses sign-in without one (`AUTH_ALLOWED_EMAILS`) unless sign-up is opened on purpose (`AUTH_OPEN_SIGNUP`, launch item i77, with at most `AUTH_SIGNUP_DAILY_LIMIT` new accounts a day), and every session read checks it again. Removing someone, or adding them to the block list (`AUTH_BLOCKED_EMAILS`, `AUTH_BLOCKED_DOMAINS`), ends their access at once.
+- **Invite list:** production refuses sign-in without one (`AUTH_ALLOWED_EMAILS`) unless sign-up is opened on purpose (`AUTH_OPEN_SIGNUP`, launch item i77, with at most `AUTH_SIGNUP_DAILY_LIMIT` new accounts a day), and every session read checks it again. Removing someone, or adding them to the block list (`AUTH_BLOCKED_EMAILS`, `AUTH_BLOCKED_DOMAINS`), ends their access at once; a blocked domain is matched against the email's domain and, on sign-in and every session read, the user's Google Workspace (`src/lib/auth/session-access.ts`).
 - **Sessions:** stored in the database, last 7 days, and are renewed daily. The cookie is `httpOnly`, `Secure` and `SameSite=Lax`.
 - **Local bypass:** refused in production.
 
@@ -187,7 +187,7 @@ Every ID from a URL or body is checked against the session's user, in the WHERE 
 | Market data | 120 a minute | 240 a minute |
 | Everything else | 180 a minute | 300 a minute |
 
-- **Daily quotas** (`src/lib/api/daily-quota.ts`, launch item i77): per user, on top of these, for what costs more than a request: 20 CSV imports, 10 bank links, 20 syncs on request and 100 backtests a day, in the same Upstash store; Ask keeps its own 30 questions a day. A user keeps at most 10 linked institutions. `docs/deployment.md` › Opening sign-up has the table.
+- **Daily quotas** (`src/lib/api/daily-quota.ts`, launch item i77): per user, on top of these, for what costs more than a request: 20 CSV imports, 10 bank links, 20 syncs on request and 100 backtests a day, in the same Upstash store; Ask keeps its own 30 questions a day. A user keeps at most 10 linked institutions, counted under a per-user lock as each is saved. `docs/deployment.md` › Opening sign-up has the table.
 
 **Delivery**
 - **Actions:** every one is pinned to a commit SHA, and the default token is read-only.

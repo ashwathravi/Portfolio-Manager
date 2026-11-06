@@ -6,7 +6,9 @@ import {
     currentAccessPolicy,
     getLocalDevUserId,
     hasAccessAllowlist,
+    hasBlockedDomains,
     isAdmin,
+    isBlockedDomain,
     isGoogleProfileAllowed,
     isOpenSignup,
     isSessionEmailAllowed,
@@ -265,6 +267,17 @@ describe("open sign-up and the block list (launch item i77)", () => {
             assert.equal(isSessionEmailAllowed("a@throwaway.test", policy), false);
         }
         assert.equal(isSessionEmailAllowed("friend@gmail.com", { openSignup: true, ...blocked }), true);
+    });
+
+    test("a domain is blocked only when AUTH_BLOCKED_DOMAINS names it exactly", () => {
+        const policy = { blockedDomains: " Abuse.example , throwaway.test" };
+        assert.equal(hasBlockedDomains(policy), true);
+        assert.equal(hasBlockedDomains({ blockedDomains: " , " }), false);
+        assert.equal(hasBlockedDomains({}), false);
+        assert.equal(isBlockedDomain("abuse.example", policy), true);
+        assert.equal(isBlockedDomain(" ABUSE.EXAMPLE ", policy), true);
+        assert.equal(isBlockedDomain("sub.abuse.example", policy), false);
+        assert.equal(isBlockedDomain("", policy), false);
     });
 
     test("the block list comes from AUTH_BLOCKED_EMAILS and AUTH_BLOCKED_DOMAINS", () => {

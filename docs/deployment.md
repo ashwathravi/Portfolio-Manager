@@ -103,7 +103,7 @@ Set these for **Production only**, never Preview: a preview runs branch code, an
 | `AUTH_ALLOWED_EMAILS` | Comma-separated invite list. Required while sign-up is by invitation: without it (or `AUTH_OPEN_SIGNUP`) production refuses sign-in. |
 | `AUTH_OPEN_SIGNUP` | Unset during the private beta. `1` opens sign-up to any verified Google account and ignores the invite list (launch item i77): see Opening sign-up below. |
 | `AUTH_SIGNUP_DAILY_LIMIT` | Optional, with open sign-up: the most new accounts made in a UTC day, 50 unless set. Someone who already has an account always signs in; a new one past the limit is asked to come back tomorrow. |
-| `AUTH_BLOCKED_EMAILS`, `AUTH_BLOCKED_DOMAINS` | Optional. Comma-separated emails or domains never let in, whether sign-up is open or not. Adding someone ends their sessions on their next request; their data stays until it's deleted. |
+| `AUTH_BLOCKED_EMAILS`, `AUTH_BLOCKED_DOMAINS` | Optional. Comma-separated emails or domains never let in, whether sign-up is open or not. A domain is matched against the email's domain and the Google Workspace the user signs in with, which can differ. Adding someone ends their sessions on their next request; their data stays until it's deleted. While a domain is blocked, each session read also reads the user's Workspace from the Google ID token stored when they first signed in. |
 | `AUTH_ADMIN_EMAILS` | Who may change Alpha Radar's tracked filers and refresh them from SEC EDGAR (shared by every user). Usually just you. Nobody when unset: the Refresh buttons don't show and those routes answer 403. |
 | `DATABASE_URL` | Supabase **transaction** pooler (port 6543) as `atlas_app.<project-ref>`, the least-privilege login (see `docs/local-database-secrets.md`). |
 | `CRON_SECRET` | A generated value (`openssl rand -hex 32`). Vercel sends it to the cron route; without it no scheduled job runs. Never print or paste it. |
@@ -142,7 +142,7 @@ What each user can do in a day, besides the per-minute rate limits (`src/lib/api
 | Backtests | 100 | 429 `DAILY_QUOTA_REACHED` |
 | Ask questions | 30 in any 24 hours | 429 `ASK_DAILY_LIMIT` |
 
-A user keeps at most 10 linked institutions at once (409 `PLAID_CONNECTION_LIMIT`; Plaid charges for each), 50 accounts, 20 strategies and 5,000 order plans.
+A user keeps at most 10 linked institutions at once (409 `PLAID_CONNECTION_LIMIT`; Plaid charges for each; counted as each is saved, one at a time per user, so links finishing together can't pass it), 50 accounts, 20 strategies and 5,000 order plans.
 
 Closing sign-up again means unsetting `AUTH_OPEN_SIGNUP` with an invite list in place: everyone not on it is signed out on their next request, so add the people who should stay first.
 

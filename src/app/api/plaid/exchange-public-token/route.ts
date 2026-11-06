@@ -12,7 +12,7 @@ import {
     sanitizePlaidExchangeForClient,
 } from "@/lib/plaid/link";
 import { MAX_PLAID_CONNECTIONS_PER_USER, plaidConnectionLimitMessage } from "@/lib/plaid/connections";
-import { countPlaidConnectionsForUser, plaidConnectionsInDatabase, storePlaidConnection } from "@/lib/plaid/server-token-vault";
+import { plaidConnectionsInDatabase, storePlaidConnection } from "@/lib/plaid/server-token-vault";
 import { connectedAccountFingerprints } from "@/lib/plaid/sync";
 import type { PlaidLinkMetadata } from "@/lib/plaid/types";
 import { PLAID_EXCHANGE_MAX_BYTES, plaidLinkMetadataSchema } from "@/lib/validators/plaid-sync";
@@ -67,23 +67,18 @@ export async function POST(request: Request) {
                 );
             }
         };
-        // Checked again here, not only for the link token (launch item i77):
-        // one link token can open Link more than once. A count that fails
-        // doesn't fail the link: saving it would fail too, and end it.
-        let atLimit = false;
-        try {
-            atLimit = (await countPlaidConnectionsForUser(auth.context.userId)) >= MAX_PLAID_CONNECTIONS_PER_USER;
-        } catch (error) {
-            console.warn("Plaid exchange: couldn't count the user's connections.", error instanceof Error ? error.name : "error");
-        }
-        if (atLimit) {
-            await endAtPlaid();
-            return apiError(plaidConnectionLimitMessage(), "PLAID_CONNECTION_LIMIT", 409);
-        }
+        // The most connections are checked again as this one is saved, not
+        // only for the link token (launch item i77): one link token can open
+        // Link more than once, and several can be open at once.
         const tokenStorage = await storePlaidConnection({
             exchange,
             userId: auth.context.userId,
+            maxConnections: MAX_PLAID_CONNECTIONS_PER_USER,
         });
+        if (tokenStorage.limitReached) {
+            await endAtPlaid();
+            return apiError(plaidConnectionLimitMessage(), "PLAID_CONNECTION_LIMIT", 409);
+        }
         if (!tokenStorage.stored) {
             // Without its token Atlas could never sync this connection or end
             // it (storage not set up, or the account deleted while it was

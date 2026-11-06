@@ -12,7 +12,7 @@ import {
     writeFileSync,
 } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { and, count, eq, isNull, ne } from "drizzle-orm";
+import { and, count, eq, isNull, ne, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { isDatabaseConfigured } from "@/db/connection-options";
 import { plaidAccounts, plaidItems } from "@/db/schema";
@@ -25,6 +25,8 @@ export interface PlaidTokenStorageResult {
     durable: boolean;
     mode: PlaidTokenStorageMode;
     reason?: string;
+    /** Not stored: the user already has `maxConnections` others. */
+    limitReached?: boolean;
 }
 
 interface EncryptedVaultEntry {
@@ -55,6 +57,8 @@ interface PlaidTokenRegistryConnectionInput {
     accounts: PlaidDiscoveredAccount[];
     lastSuccessfulSyncAt: Date;
     now: Date;
+    /** Refuse it when the user already has this many other connections. */
+    maxConnections?: number;
 }
 
 interface PlaidTokenRegistryToken {
@@ -64,9 +68,9 @@ interface PlaidTokenRegistryToken {
     keyVersion: string;
 }
 
-interface PlaidTokenRegistryStore {
+export interface PlaidTokenRegistryStore {
     configured: () => boolean;
-    upsertConnection: (input: PlaidTokenRegistryConnectionInput) => Promise<void>;
+    upsertConnection: (input: PlaidTokenRegistryConnectionInput) => Promise<"stored" | "limit">;
     getActiveToken: (input: { userId: string; itemId: string }) => Promise<PlaidTokenRegistryToken | undefined>;
     revokeConnection: (input: { userId: string; itemId: string; now: Date }) => Promise<void>;
     /** The user's connections that aren't revoked. */
@@ -78,27 +82,29 @@ const VAULT_VERSION = 1;
 const AUTH_TAG_LENGTH = 16;
 const DEFAULT_KEY_VERSION = "v1";
 
-const drizzlePlaidTokenRegistryStore: PlaidTokenRegistryStore = {
-    configured: () => isDatabaseConfigured(),
-    async upsertConnection(input) {
-        const [item] = await db.insert(plaidItems)
-            .values({
-                userId: input.userId,
-                plaidItemId: input.itemId,
-                institutionId: input.institutionId,
-                institutionName: input.institutionName,
-                status: "active",
-                accessTokenCiphertext: input.encryptedToken.ciphertext,
-                accessTokenIv: input.encryptedToken.iv,
-                accessTokenAuthTag: input.encryptedToken.tag,
-                keyVersion: input.keyVersion,
-                lastSuccessfulSyncAt: input.lastSuccessfulSyncAt,
-                revokedAt: null,
-                updatedAt: input.now,
-            })
-            .onConflictDoUpdate({
-                target: [plaidItems.userId, plaidItems.plaidItemId],
-                set: {
+type Database = typeof db;
+
+const activeConnections = (userId: string) => and(eq(plaidItems.userId, userId), ne(plaidItems.status, "revoked"), isNull(plaidItems.revokedAt));
+
+/** The token registry in Postgres (plaid_items and plaid_accounts). */
+export function createDrizzlePlaidTokenRegistryStore(database: Database = db): PlaidTokenRegistryStore {
+    return {
+        configured: () => isDatabaseConfigured(),
+        // One connection saved at a time per user, so two links finishing at
+        // once can't both pass the most connections (launch item i77).
+        upsertConnection: (input) => database.transaction(async (tx) => {
+            await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`atlas:plaid-connections:${input.userId}`}))`);
+            if (input.maxConnections !== undefined) {
+                const [others] = await tx.select({ n: count() })
+                    .from(plaidItems)
+                    .where(and(activeConnections(input.userId), ne(plaidItems.plaidItemId, input.itemId)));
+                if (Number(others?.n ?? 0) >= input.maxConnections) return "limit";
+            }
+
+            const [item] = await tx.insert(plaidItems)
+                .values({
+                    userId: input.userId,
+                    plaidItemId: input.itemId,
                     institutionId: input.institutionId,
                     institutionName: input.institutionName,
                     status: "active",
@@ -109,37 +115,32 @@ const drizzlePlaidTokenRegistryStore: PlaidTokenRegistryStore = {
                     lastSuccessfulSyncAt: input.lastSuccessfulSyncAt,
                     revokedAt: null,
                     updatedAt: input.now,
-                },
-            })
-            .returning({ id: plaidItems.id });
-
-        if (!item) throw new Error("Unable to upsert Plaid item token registry row.");
-
-        for (const account of input.accounts) {
-            await db.insert(plaidAccounts)
-                .values({
-                    userId: input.userId,
-                    plaidItemRecordId: item.id,
-                    plaidAccountId: account.plaidAccountId,
-                    name: account.name,
-                    officialName: account.officialName ?? null,
-                    mask: account.mask || null,
-                    type: account.type,
-                    subtype: account.subtype,
-                    currentBalance: Number.isFinite(account.currentBalance) ? String(account.currentBalance) : null,
-                    isoCurrencyCode: account.isoCurrencyCode,
-                    institutionId: account.institution.id,
-                    institutionName: account.institution.name,
-                    capabilities: [...account.capabilities],
-                    verificationStatus: account.verificationStatus,
-                    // Synced once the user picks it (src/lib/plaid/sync.ts),
-                    // not because Link found it.
-                    updatedAt: input.now,
                 })
                 .onConflictDoUpdate({
-                    target: [plaidAccounts.userId, plaidAccounts.plaidAccountId],
+                    target: [plaidItems.userId, plaidItems.plaidItemId],
                     set: {
+                        institutionId: input.institutionId,
+                        institutionName: input.institutionName,
+                        status: "active",
+                        accessTokenCiphertext: input.encryptedToken.ciphertext,
+                        accessTokenIv: input.encryptedToken.iv,
+                        accessTokenAuthTag: input.encryptedToken.tag,
+                        keyVersion: input.keyVersion,
+                        lastSuccessfulSyncAt: input.lastSuccessfulSyncAt,
+                        revokedAt: null,
+                        updatedAt: input.now,
+                    },
+                })
+                .returning({ id: plaidItems.id });
+
+            if (!item) throw new Error("Unable to upsert Plaid item token registry row.");
+
+            for (const account of input.accounts) {
+                await tx.insert(plaidAccounts)
+                    .values({
+                        userId: input.userId,
                         plaidItemRecordId: item.id,
+                        plaidAccountId: account.plaidAccountId,
                         name: account.name,
                         officialName: account.officialName ?? null,
                         mask: account.mask || null,
@@ -151,56 +152,79 @@ const drizzlePlaidTokenRegistryStore: PlaidTokenRegistryStore = {
                         institutionName: account.institution.name,
                         capabilities: [...account.capabilities],
                         verificationStatus: account.verificationStatus,
-                        // Linking again keeps whether it was picked, and when
-                        // it last synced.
+                        // Synced once the user picks it (src/lib/plaid/sync.ts),
+                        // not because Link found it.
                         updatedAt: input.now,
-                    },
-                });
-        }
-    },
-    async getActiveToken({ userId, itemId }) {
-        const [item] = await db.select({
-            ciphertext: plaidItems.accessTokenCiphertext,
-            iv: plaidItems.accessTokenIv,
-            tag: plaidItems.accessTokenAuthTag,
-            keyVersion: plaidItems.keyVersion,
-        })
-            .from(plaidItems)
-            .where(and(
-                eq(plaidItems.userId, userId),
-                eq(plaidItems.plaidItemId, itemId),
-                // A connection waiting for its user to sign in again still has
-                // its token: Link's update mode needs it to repair the login.
-                ne(plaidItems.status, "revoked"),
-                isNull(plaidItems.revokedAt),
-            ))
-            .limit(1);
-
-        return item;
-    },
-    async revokeConnection({ userId, itemId, now }) {
-        await db.update(plaidItems)
-            .set({
-                status: "revoked",
-                revokedAt: now,
-                // The token is no use once revoked: none of it is kept.
-                accessTokenCiphertext: "",
-                accessTokenIv: "",
-                accessTokenAuthTag: "",
-                updatedAt: now,
+                    })
+                    .onConflictDoUpdate({
+                        target: [plaidAccounts.userId, plaidAccounts.plaidAccountId],
+                        set: {
+                            plaidItemRecordId: item.id,
+                            name: account.name,
+                            officialName: account.officialName ?? null,
+                            mask: account.mask || null,
+                            type: account.type,
+                            subtype: account.subtype,
+                            currentBalance: Number.isFinite(account.currentBalance) ? String(account.currentBalance) : null,
+                            isoCurrencyCode: account.isoCurrencyCode,
+                            institutionId: account.institution.id,
+                            institutionName: account.institution.name,
+                            capabilities: [...account.capabilities],
+                            verificationStatus: account.verificationStatus,
+                            // Linking again keeps whether it was picked, and when
+                            // it last synced.
+                            updatedAt: input.now,
+                        },
+                    });
+            }
+            return "stored";
+        }),
+        async getActiveToken({ userId, itemId }) {
+            const [item] = await database.select({
+                ciphertext: plaidItems.accessTokenCiphertext,
+                iv: plaidItems.accessTokenIv,
+                tag: plaidItems.accessTokenAuthTag,
+                keyVersion: plaidItems.keyVersion,
             })
-            .where(and(
-                eq(plaidItems.userId, userId),
-                eq(plaidItems.plaidItemId, itemId),
-            ));
-    },
-    async countConnections({ userId }) {
-        const [row] = await db.select({ n: count() })
-            .from(plaidItems)
-            .where(and(eq(plaidItems.userId, userId), ne(plaidItems.status, "revoked"), isNull(plaidItems.revokedAt)));
-        return Number(row?.n ?? 0);
-    },
-};
+                .from(plaidItems)
+                .where(and(
+                    eq(plaidItems.userId, userId),
+                    eq(plaidItems.plaidItemId, itemId),
+                    // A connection waiting for its user to sign in again still has
+                    // its token: Link's update mode needs it to repair the login.
+                    ne(plaidItems.status, "revoked"),
+                    isNull(plaidItems.revokedAt),
+                ))
+                .limit(1);
+
+            return item;
+        },
+        async revokeConnection({ userId, itemId, now }) {
+            await database.update(plaidItems)
+                .set({
+                    status: "revoked",
+                    revokedAt: now,
+                    // The token is no use once revoked: none of it is kept.
+                    accessTokenCiphertext: "",
+                    accessTokenIv: "",
+                    accessTokenAuthTag: "",
+                    updatedAt: now,
+                })
+                .where(and(
+                    eq(plaidItems.userId, userId),
+                    eq(plaidItems.plaidItemId, itemId),
+                ));
+        },
+        async countConnections({ userId }) {
+            const [row] = await database.select({ n: count() })
+                .from(plaidItems)
+                .where(activeConnections(userId));
+            return Number(row?.n ?? 0);
+        },
+    };
+}
+
+const drizzlePlaidTokenRegistryStore = createDrizzlePlaidTokenRegistryStore();
 
 let plaidTokenRegistryStore: PlaidTokenRegistryStore = drizzlePlaidTokenRegistryStore;
 
@@ -212,10 +236,16 @@ export async function storePlaidConnection({
     exchange,
     userId,
     now = new Date(),
+    maxConnections,
 }: {
     exchange: PlaidPublicTokenExchangeResult;
     userId: string;
     now?: Date;
+    /**
+     * Refuse it when the user already has this many other connections,
+     * checked as it's saved. Only connections kept in the database count.
+     */
+    maxConnections?: number;
 }): Promise<PlaidTokenStorageResult> {
     if (!shouldUsePostgresTokenRegistry()) {
         return storePlaidAccessToken({
@@ -264,7 +294,7 @@ export async function storePlaidConnection({
     }
 
     try {
-        await plaidTokenRegistryStore.upsertConnection({
+        const outcome = await plaidTokenRegistryStore.upsertConnection({
             userId: scopedUserId,
             itemId: exchange.itemId,
             institutionId: exchange.institution.id,
@@ -274,7 +304,17 @@ export async function storePlaidConnection({
             accounts: exchange.accounts,
             lastSuccessfulSyncAt: now,
             now,
+            maxConnections,
         });
+        if (outcome === "limit") {
+            return {
+                stored: false,
+                durable: false,
+                mode: "postgres",
+                reason: "The user already has the most Plaid connections.",
+                limitReached: true,
+            };
+        }
         plaidAccessTokenByScope.set(vaultItemKey(exchange.itemId, scopedUserId), exchange.accessToken);
 
         return {

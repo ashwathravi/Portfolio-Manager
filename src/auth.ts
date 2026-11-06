@@ -10,8 +10,9 @@ import {
     authUsers,
     authVerificationTokens,
 } from "@/db/schema";
-import { isGoogleProfileAllowed, isOpenSignup, isSessionEmailAllowed } from "@/lib/auth/access";
+import { isGoogleProfileAllowed, isOpenSignup } from "@/lib/auth/access";
 import { admitNewAccount, hasGoogleAccount, signInDecision } from "@/lib/auth/new-accounts";
+import { isSessionUserAllowed } from "@/lib/auth/session-access";
 import { SESSION_MAX_AGE_SECONDS, SESSION_UPDATE_AGE_SECONDS } from "@/lib/auth/session-policy";
 import { seedNewUserSettings } from "@/lib/settings/server";
 
@@ -65,9 +66,10 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             );
         },
         async session({ session, user }) {
-            // A session whose user has left the invite list, or been blocked,
-            // carries no user, which every caller treats as signed out.
-            if (!isSessionEmailAllowed(user?.email)) {
+            // A session whose user has left the invite list, or been blocked
+            // (by email, or by their email's or Workspace's domain), carries
+            // no user, which every caller treats as signed out.
+            if (!(await isSessionUserAllowed(user))) {
                 return { expires: session.expires };
             }
             if (session.user && user.id) {
