@@ -42,9 +42,8 @@ Retired routes redirect (307): `/portfolios`, `/portfolios/trade-log`,
   during the beta, and Supabase's Data API is off. `CRON_SECRET` and
   `AUTH_ADMIN_EMAILS` were set on 2026-10-30.
 - **Product gaps still on example data or missing:** server-side alerts and
-  email (i57, i58), and Alpha Radar relevance per user and an empty state
-  instead of sample filers (i61). Option positions (i63) are in the LEAPS
-  ledger and the risk policy's options checks, but not yet in net worth,
-  returns or Plaid syncs.
+  email (i57, i58). Option positions (i63) are in the LEAPS ledger and the
+  risk policy's options checks, but not yet in net worth, returns or Plaid
+  syncs.
 - **Public launch (phase 5):** invite the first users (i75), upgrade plans
   (i76), then open sign-up with per-user quotas (i77).
