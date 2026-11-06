@@ -30,6 +30,7 @@ export interface NotificationSettings {
     alphaRadarSignals: boolean;
     strategySignals: boolean;
     accountSync: boolean;
+    /** Unused since the weekly review email moved to Settings' Email card (launch item i58); kept so stored settings still load. */
     weeklySummary: boolean;
 }
 

@@ -39,11 +39,11 @@ describe("GET /api/cron/daily", () => {
         }
     });
 
-    test("runs the session cleanup, the linked-account sync, the price ingest, then the snapshots valued at those prices, with room for the budgets", () => {
-        assert.deepEqual(DAILY_JOBS.map((job) => job.name), ["expired-sessions", "ask-history", "plaid", "prices", "snapshots"]);
+    test("runs the session cleanup, the linked-account sync, the price ingest, then the snapshots valued at those prices and the alerts on them, with room for the budgets", () => {
+        assert.deepEqual(DAILY_JOBS.map((job) => job.name), ["expired-sessions", "ask-history", "plaid", "prices", "snapshots", "alerts", "email"]);
         assert.equal(maxDuration, 300);
         // The sync and the price backfill each stop at their budget, together
-        // short of the limit, leaving the cleanup and snapshots room.
+        // short of the limit, leaving the cleanup, snapshots and alerts room.
         assert.ok(PLAID_JOB_BUDGET_MS + DEFAULT_BUDGET_MS <= (maxDuration - 20) * 1000);
     });
 });

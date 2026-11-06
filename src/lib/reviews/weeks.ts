@@ -6,6 +6,7 @@
  * tz info we'll switch to US-Eastern. For the seed era the journal
  * records local timestamps so local is correct.
  */
+import { easternDateTime, getEasternParts } from '@/lib/markets/market-hours';
 import type { WeekBounds } from './types';
 
 /**
@@ -111,4 +112,31 @@ export function formatWeekRange(bounds: WeekBounds): string {
     return sameMonth
         ? `${fmtMonth(start)} ${fmtDay(start)}–${fmtDay(end)}`
         : `${fmtMonth(start)} ${fmtDay(start)} – ${fmtMonth(end)} ${fmtDay(end)}`;
+}
+
+/** `YYYY-MM-DD` `days` after (or before) another. */
+function shiftDay(day: string, days: number): string {
+    const d = new Date(`${day}T12:00:00Z`);
+    d.setUTCDate(d.getUTCDate() + days);
+    return d.toISOString().slice(0, 10);
+}
+
+/**
+ * {@link currentWeekBounds} in New York time wherever it runs: Monday 00:00
+ * to Friday 16:00 Eastern of the most recently completed week. For the
+ * weekly review email (launch item i58), which a server on UTC sends; the
+ * card on Today uses the browser's own time.
+ */
+export function easternWeekBounds(now: Date = new Date()): WeekBounds {
+    const { date, weekday, hour } = getEasternParts(now);
+    const pastClose = weekday === 0 || weekday === 6 || (weekday === 5 && hour >= FRIDAY_CLOSE_HOUR);
+    const monday = shiftDay(date, -((weekday + 6) % 7) - (pastClose ? 0 : 7));
+    const friday = shiftDay(monday, 4);
+    return {
+        id: `wk:${monday}`,
+        weekStart: easternDateTime(monday, 0).toISOString(),
+        weekEnd: easternDateTime(friday, FRIDAY_CLOSE_HOUR * 60).toISOString(),
+        firstDay: monday,
+        lastDay: friday,
+    };
 }

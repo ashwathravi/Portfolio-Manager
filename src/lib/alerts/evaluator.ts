@@ -1,8 +1,11 @@
+/**
+ * Comparing an observation with a rule's threshold, and describing a rule.
+ * The nightly alerts job evaluates rules (./nightly-plan.ts).
+ */
+
 import type {
     AlertComparator,
     AlertRule,
-    AlertTrigger,
-    MarketSnapshot,
 } from './types';
 
 function isAlphaRadarMetric(metric: AlertRule['metric']): boolean {
@@ -23,96 +26,6 @@ export function compare(value: number, comparator: AlertComparator, threshold: n
         case 'lt':  return value < threshold;
         case 'eq':  return Math.abs(value - threshold) < EQ_EPSILON;
     }
-}
-
-/**
- * Extracts the observed metric value for a rule from the snapshot, or
- * returns null if the snapshot lacks the data needed to evaluate the rule.
- */
-export function observeMetric(rule: AlertRule, snapshot: MarketSnapshot): number | null {
-    switch (rule.metric) {
-        case 'price': {
-            if (!rule.symbol) return null;
-            const quote = snapshot.quotes[rule.symbol.toUpperCase()];
-            return quote ? quote.price : null;
-        }
-        case 'price_change_pct': {
-            if (!rule.symbol) return null;
-            const quote = snapshot.quotes[rule.symbol.toUpperCase()];
-            return quote?.changePercent ?? null;
-        }
-        case 'portfolio_value':
-            return snapshot.portfolioValue;
-        case 'portfolio_day_change_pct':
-            return snapshot.portfolioDayChangePct;
-        case 'alpha_radar_new_position':
-        case 'alpha_radar_exit':
-        case 'alpha_radar_large_add':
-        case 'alpha_radar_large_trim':
-        case 'alpha_radar_user_overlap':
-            return null;
-    }
-}
-
-/**
- * Decides whether a rule's rearm policy permits it to fire given its last
- * trigger timestamp and the current snapshot time.
- */
-export function canFire(rule: AlertRule, snapshot: MarketSnapshot): boolean {
-    if (!rule.enabled) return false;
-    if (!rule.lastTriggeredAt) return true;
-    switch (rule.rearm) {
-        case 'once':
-            return false;
-        case 'always':
-            return true;
-        case 'daily': {
-            const last = new Date(rule.lastTriggeredAt);
-            const now = new Date(snapshot.observedAt);
-            return (
-                last.getUTCFullYear() !== now.getUTCFullYear() ||
-                last.getUTCMonth() !== now.getUTCMonth() ||
-                last.getUTCDate() !== now.getUTCDate()
-            );
-        }
-    }
-}
-
-/**
- * Pure evaluator. Given a set of rules and a market snapshot, returns the
- * triggers that should fire *right now*. Callers own the side effects of
- * persisting triggers and updating rule `lastTriggeredAt` / auto-disabling
- * 'once' rules.
- */
-export function evaluateAlerts(
-    rules: readonly AlertRule[],
-    snapshot: MarketSnapshot,
-): AlertTrigger[] {
-    const triggers: AlertTrigger[] = [];
-    for (const rule of rules) {
-        if (!canFire(rule, snapshot)) continue;
-        const observed = observeMetric(rule, snapshot);
-        if (observed === null) continue;
-        if (!compare(observed, rule.comparator, rule.threshold)) continue;
-        triggers.push({
-            id: makeTriggerId(rule.id, snapshot.observedAt),
-            ruleId: rule.id,
-            ruleName: rule.name,
-            metric: rule.metric,
-            symbol: rule.symbol,
-            comparator: rule.comparator,
-            threshold: rule.threshold,
-            observedValue: observed,
-            triggeredAt: snapshot.observedAt,
-            acknowledged: false,
-            source: 'market',
-        });
-    }
-    return triggers;
-}
-
-function makeTriggerId(ruleId: string, timestamp: string): string {
-    return `${ruleId}-${timestamp}`;
 }
 
 // --------------------------------------------------------------------------

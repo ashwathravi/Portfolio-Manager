@@ -986,6 +986,116 @@ export const askMessages = pgTable("ask_messages", {
     appRuntimeAccess: appRuntimeAccessPolicy(),
 })).enableRLS();
 
+// ---------------------------------------------------------------------------
+// Alerts (launch item i57)
+// ---------------------------------------------------------------------------
+
+/**
+ * The user's alert rules, evaluated by the nightly "alerts" job after the
+ * day's closes are stored (src/lib/alerts/nightly.ts).
+ */
+export const alertRules = pgTable("alert_rules", {
+    id: uuid("id").default(sql`gen_random_uuid()`).primaryKey(),
+    userId: text("user_id")
+        .notNull()
+        .references(() => authUsers.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    metric: text("metric").notNull(),
+    // The ticker of a price or daily-change rule; null for every other metric.
+    symbol: text("symbol"),
+    comparator: text("comparator").notNull(),
+    // Dollars, a fraction (0.05 = 5%), or an Alpha Radar score out of 100.
+    threshold: doublePrecision("threshold").notNull(),
+    rearm: text("rearm").notNull(),
+    enabled: boolean("enabled").notNull().default(true),
+    note: text("note"),
+    lastTriggeredAt: timestamp("last_triggered_at"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => ({
+    userCreatedIdx: index("alert_rules_user_created_idx").on(table.userId, table.createdAt),
+    // Lets a notification's foreign key name the rule and its owner together.
+    idUser: unique("alert_rules_id_user_key").on(table.id, table.userId),
+    metricCheck: check("alert_rules_metric_check", sql`${table.metric} in ('price', 'price_change_pct', 'portfolio_value', 'portfolio_day_change_pct', 'alpha_radar_new_position', 'alpha_radar_exit', 'alpha_radar_large_add', 'alpha_radar_large_trim', 'alpha_radar_user_overlap')`),
+    symbolCheck: check("alert_rules_symbol_check", sql`(${table.metric} in ('price', 'price_change_pct')) = (${table.symbol} is not null)`),
+    comparatorCheck: check("alert_rules_comparator_check", sql`${table.comparator} in ('gte', 'lte', 'gt', 'lt', 'eq')`),
+    rearmCheck: check("alert_rules_rearm_check", sql`${table.rearm} in ('once', 'always', 'daily')`),
+    serverOnlyNoClientAccess: serverOnlyNoClientAccessPolicy(),
+    appRuntimeAccess: appRuntimeAccessPolicy(),
+})).enableRLS();
+
+/**
+ * What the user's rules found: the in-app notification feed. `occurrence`
+ * names what fired a rule (a session's date, or an Alpha Radar change and
+ * its filing), so a job that runs twice records it once. Clearing the feed
+ * marks the rows `cleared` and erases their text rather than deleting them,
+ * so a rerun can't raise them again; rows go after 180 days or with their
+ * rule.
+ */
+export const alertNotifications = pgTable("alert_notifications", {
+    id: uuid("id").default(sql`gen_random_uuid()`).primaryKey(),
+    userId: text("user_id")
+        .notNull()
+        .references(() => authUsers.id, { onDelete: "cascade" }),
+    // Its rule, which must be the same user's (alert_notifications_rule_owner_fk).
+    ruleId: uuid("rule_id").notNull(),
+    occurrence: text("occurrence").notNull(),
+    // The rule as it was when it fired, so an edit doesn't rewrite the past.
+    ruleName: text("rule_name").notNull(),
+    metric: text("metric").notNull(),
+    symbol: text("symbol"),
+    comparator: text("comparator").notNull(),
+    threshold: doublePrecision("threshold").notNull(),
+    observedValue: doublePrecision("observed_value").notNull(),
+    message: text("message").notNull(),
+    href: text("href"),
+    triggeredAt: timestamp("triggered_at").defaultNow().notNull(),
+    readAt: timestamp("read_at"),
+    cleared: boolean("cleared").notNull().default(false),
+    // When the nightly email job sent it (launch item i58); null until then.
+    emailedAt: timestamp("emailed_at"),
+    // When a run took it to email; a claim this old that never became
+    // emailed_at was cut off, and a later run takes it again.
+    emailClaimedAt: timestamp("email_claimed_at"),
+}, (table) => ({
+    userTriggeredIdx: index("alert_notifications_user_triggered_idx").on(table.userId, table.triggeredAt),
+    ruleOccurrence: uniqueIndex("alert_notifications_rule_occurrence_idx").on(table.ruleId, table.occurrence),
+    ruleOwner: foreignKey({
+        name: "alert_notifications_rule_owner_fk",
+        columns: [table.ruleId, table.userId],
+        foreignColumns: [alertRules.id, alertRules.userId],
+    }).onDelete("cascade"),
+    serverOnlyNoClientAccess: serverOnlyNoClientAccessPolicy(),
+    appRuntimeAccess: appRuntimeAccessPolicy(),
+})).enableRLS();
+
+/**
+ * Which emails the user asked for (launch item i58), and the token their
+ * unsubscribe links carry. Kept out of user_settings, which a browser
+ * writes back whole: a tab still holding the old settings could otherwise
+ * turn an email back on after a one-click unsubscribe. No row means no
+ * email.
+ */
+export const emailPreferences = pgTable("email_preferences", {
+    userId: text("user_id")
+        .primaryKey()
+        .references(() => authUsers.id, { onDelete: "cascade" }),
+    alerts: boolean("alerts").notNull().default(false),
+    weeklyReview: boolean("weekly_review").notNull().default(false),
+    // When alert emails were last turned on: alerts raised before then aren't emailed.
+    alertsSince: timestamp("alerts_since"),
+    // The last week (wk:YYYY-MM-DD) whose review email was sent, or skipped for want of trades.
+    weeklyReviewWeek: text("weekly_review_week"),
+    // When a run took this user's review to send; as email_claimed_at.
+    weeklyReviewClaimedAt: timestamp("weekly_review_claimed_at"),
+    // Random, unguessable; it can only turn emails off.
+    unsubscribeToken: text("unsubscribe_token").notNull().unique(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, () => ({
+    serverOnlyNoClientAccess: serverOnlyNoClientAccessPolicy(),
+    appRuntimeAccess: appRuntimeAccessPolicy(),
+})).enableRLS();
+
 export const portfoliosRelations = relations(portfolios, ({ one, many }) => ({
     user: one(authUsers, {
         fields: [portfolios.userId],

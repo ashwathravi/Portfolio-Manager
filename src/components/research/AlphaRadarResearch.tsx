@@ -14,7 +14,6 @@ import {
 } from "@/lib/api/alpha-radar/queries";
 import { useAccountStorage, useViewerIdentity } from "@/components/providers/IdentityProvider";
 import { SampleTag } from "@/components/data-display/SampleTag";
-import { useAlphaRadarAlertEngine } from "@/lib/alerts/useAlphaRadarAlertEngine";
 import { useShowSampleData } from "@/lib/hooks/useShowSampleData";
 import { useSettingsStore } from "@/lib/stores/settingsStore";
 import {
@@ -247,11 +246,6 @@ export function AlphaRadarDetailPane({
     const liveLoading = !usesFallback && (reportsQuery.isPending || changesQuery.isPending);
     const liveError = !usesFallback && Boolean(reportsQuery.error || changesQuery.error);
     const nothingLoaded = !usesFallback && !liveLoading && !liveError && reports.length === 0 && changes.length === 0;
-    useAlphaRadarAlertEngine({
-        changes,
-        reports,
-        filers: data.filers,
-    });
     const materialChanges = changes.filter((change) => change.changeType !== "unchanged");
     const overlapChanges = changes.filter((change) => change.userRelevance.reasons.length > 0);
     const analysisChanges = usesFallback ? FALLBACK_CHANGES : changes;

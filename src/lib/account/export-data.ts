@@ -97,6 +97,11 @@ export interface AccountExport {
     strategies: Record<string, unknown>[];
     /** The Alpha Radar filers followed, by name. The filers themselves are shared, not the user's. */
     alphaRadarFollows: { filerId: string; name: string; followedAt: string }[];
+    /** Alert rules, oldest first, and the alerts they raised, newest first (launch item i57). */
+    alertRules: Record<string, unknown>[];
+    alerts: Record<string, unknown>[];
+    /** Which emails the account gets (launch item i58); null before any choice. */
+    emailPreferences: { alerts: boolean; weeklyReview: boolean; updatedAt: string } | null;
 }
 
 /** One row per holding, across the user's accounts. */

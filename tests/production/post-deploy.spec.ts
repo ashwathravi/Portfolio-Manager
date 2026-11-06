@@ -6,7 +6,7 @@ import { expect, test, type Page } from '@playwright/test';
 // (playwright.config.ts), so it stays true to the app. Signed out and
 // read-only: it never signs in, writes nothing and runs no job.
 
-const SCHEDULED_JOBS = ['expired-sessions', 'ask-history', 'plaid', 'prices', 'snapshots', 'alpha-radar', 'backup'];
+const SCHEDULED_JOBS = ['expired-sessions', 'ask-history', 'plaid', 'prices', 'snapshots', 'alerts', 'email', 'alpha-radar', 'backup'];
 
 function isLocal(baseURL: string | undefined): boolean {
     return /^(localhost|127\.0\.0\.1|\[::1\])$/.test(new URL(baseURL ?? 'http://localhost').hostname);
@@ -101,6 +101,8 @@ test.describe('After a production deploy', () => {
         { path: '/login', heading: 'Sign in' },
         { path: '/privacy', heading: 'Privacy Policy' },
         { path: '/terms', heading: 'Terms of Service' },
+        // Where every email's footer links (launch item i58); without a token it only says so.
+        { path: '/unsubscribe', heading: 'Unsubscribe' },
     ]) {
         test(`${path} loads cleanly, with its security headers`, async ({ page, baseURL }) => {
             const problems = watchForProblems(page, new URL(baseURL!).origin);

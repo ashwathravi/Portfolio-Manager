@@ -9,8 +9,8 @@ import { TweaksPanel } from "@/components/layout/TweaksPanel";
 import { CommandCenter } from "@/components/command/CommandCenter";
 import { PageHeaderProvider } from "@/components/layout/PageHeaderContext";
 
-// Sign-in and the public legal pages render without the sidebar/topbar.
-const CHROMELESS_PATHS = new Set(["/login", "/privacy", "/terms"]);
+// Sign-in, the public legal pages and the unsubscribe page render without the sidebar/topbar.
+const CHROMELESS_PATHS = new Set(["/login", "/privacy", "/terms", "/unsubscribe"]);
 
 export function AppFrame({ children }: { children: React.ReactNode }) {
     const pathname = usePathname();

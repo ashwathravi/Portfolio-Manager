@@ -104,6 +104,16 @@ describe("API proxy security", () => {
         assert.equal((await proxy(apiRequest({}, "/api/plaid/webhooks", null, [], "POST"))).status, 401);
     });
 
+    test("lets a mail app's one-click unsubscribe through without a session, for the route to check its token", async () => {
+        // Launch item i58: only its POST, only that path.
+        setNodeEnv("production");
+        configureAuth();
+        assert.equal((await proxy(apiRequest({}, "/api/email/unsubscribe", null, [], "POST"))).status, 200);
+        assert.equal((await proxy(apiRequest({}, "/api/email/unsubscribe", null, [], "GET"))).status, 401);
+        assert.equal((await proxy(apiRequest({}, "/api/email/unsubscribe/all", null, [], "POST"))).status, 401);
+        assert.equal((await proxy(apiRequest({}, "/api/email/preferences", null, [], "PUT"))).status, 200, "session-backed: the route checks the session");
+    });
+
     test("runs cron routes even when production sign-in is misconfigured", async () => {
         setNodeEnv("production");
         process.env.AUTH_SECRET = "partial-only";
@@ -129,19 +139,19 @@ describe("API proxy security", () => {
         assert.equal((await proxy(apiRequest(headers, "/api/cron/daily"))).status, 200);
     });
 
-    test("keeps the privacy policy and terms public when production auth is unavailable", async () => {
+    test("keeps the privacy policy, terms and unsubscribe page public when production auth is unavailable", async () => {
         setNodeEnv("production");
 
-        for (const path of ["/privacy", "/terms"]) {
+        for (const path of ["/privacy", "/terms", "/unsubscribe"]) {
             assert.equal((await proxy(pageRequest(path))).status, 200, path);
             assert.equal((await proxy(pageRequest(`${path}/private`))).status, 503, path);
         }
     });
 
-    test("serves the privacy policy and terms to signed-out visitors when sign-in is configured", async () => {
+    test("serves the privacy policy, terms and unsubscribe page to signed-out visitors when sign-in is configured", async () => {
         configureAuth();
 
-        for (const path of ["/privacy", "/terms"]) {
+        for (const path of ["/privacy", "/terms", "/unsubscribe"]) {
             const response = await proxy(pageRequest(path));
 
             assert.equal(response.status, 200, path);
@@ -322,6 +332,15 @@ describe("API proxy security", () => {
             ["/api/research/theses", "GET"],
             ["/api/research/theses/import", "POST"],
             ["/api/research/theses/seed-nvda", "PUT"],
+            ["/api/alerts/rules", "GET"],
+            ["/api/alerts/rules", "POST"],
+            ["/api/alerts/rules/00000000-0000-4000-8000-000000000401", "PUT"],
+            ["/api/alerts/rules/00000000-0000-4000-8000-000000000401", "DELETE"],
+            ["/api/alerts/notifications", "GET"],
+            ["/api/alerts/notifications", "PATCH"],
+            ["/api/alerts/notifications", "DELETE"],
+            ["/api/email/preferences", "GET"],
+            ["/api/email/preferences", "PUT"],
             ["/api/alpha-radar/refresh", "POST"],
             ["/api/alpha-radar/filers", "POST"],
             ["/api/alpha-radar/filers/00000000-0000-4000-8000-000000000001", "PATCH"],
@@ -401,6 +420,13 @@ describe("API proxy security", () => {
             ["/api/research/theses/import", "PUT"],
             ["/api/research/theses/seed-nvda", "DELETE"],
             ["/api/research/theses/seed-nvda/catalysts", "PUT"],
+            ["/api/alerts/rules", "DELETE"],
+            ["/api/alerts/rules/00000000-0000-4000-8000-000000000401", "POST"],
+            ["/api/alerts/rules/00000000-0000-4000-8000-000000000401/notifications", "PUT"],
+            ["/api/alerts/notifications", "POST"],
+            ["/api/alerts/notifications/00000000-0000-4000-8000-000000000402", "PATCH"],
+            ["/api/email/preferences", "POST"],
+            ["/api/email/preferences", "DELETE"],
             ["/api/market-data/search", "POST"],
             ["/api/strategies", "GET"],
             ["/api/strategies/00000000-0000-4000-8000-000000000501", "PATCH"],
