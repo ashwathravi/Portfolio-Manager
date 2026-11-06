@@ -3,10 +3,14 @@ import assert from "node:assert/strict";
 
 import {
     authRuntimeMode,
+    currentAccessPolicy,
     getLocalDevUserId,
     hasAccessAllowlist,
+    hasBlockedDomains,
     isAdmin,
+    isBlockedDomain,
     isGoogleProfileAllowed,
+    isOpenSignup,
     isSessionEmailAllowed,
 } from "./access";
 
@@ -118,6 +122,20 @@ describe("Auth runtime configuration", () => {
         assert.equal(authRuntimeMode({ ...env, AUTH_ALLOWED_DOMAINS: "example.com" }), "configured");
     });
 
+    test("opens production to sign-up only with AUTH_OPEN_SIGNUP=1 (launch item i77)", () => {
+        const env = {
+            NODE_ENV: "production",
+            AUTH_SECRET: "secret",
+            AUTH_GOOGLE_ID: "client-id",
+            AUTH_GOOGLE_SECRET: "client-secret",
+        };
+
+        assert.equal(authRuntimeMode({ ...env, AUTH_OPEN_SIGNUP: "1" }), "configured");
+        for (const value of ["", "0", "true", "yes"]) {
+            assert.equal(authRuntimeMode({ ...env, AUTH_OPEN_SIGNUP: value }), "invalid", value);
+        }
+    });
+
     test("keeps open sign-in available outside production", () => {
         assert.equal(authRuntimeMode({
             NODE_ENV: "development",
@@ -203,6 +221,70 @@ describe("isSessionEmailAllowed", () => {
     test("follows the open or invite-only rule when no list is set", () => {
         assert.equal(isSessionEmailAllowed("anyone@example.com", { requireAllowlist: false }), true);
         assert.equal(isSessionEmailAllowed("anyone@example.com", { requireAllowlist: true }), false);
+    });
+});
+
+describe("open sign-up and the block list (launch item i77)", () => {
+    const verified = (email: string, hd?: string) => ({ email, email_verified: true, ...(hd ? { hd } : {}) });
+
+    test("AUTH_OPEN_SIGNUP=1 is open sign-up, and nothing else is", () => {
+        assert.equal(isOpenSignup({ AUTH_OPEN_SIGNUP: "1" }), true);
+        assert.equal(isOpenSignup({ AUTH_OPEN_SIGNUP: " 1 " }), true);
+        assert.equal(isOpenSignup({}), false);
+        assert.equal(isOpenSignup({ AUTH_OPEN_SIGNUP: "true" }), false);
+        assert.equal(currentAccessPolicy({ NODE_ENV: "production", AUTH_OPEN_SIGNUP: "1" }).openSignup, true);
+    });
+
+    test("open sign-up lets in any verified Google account, the invite lists aside", () => {
+        const policy = { openSignup: true, requireAllowlist: true, allowedEmails: "owner@example.com" };
+
+        assert.equal(isGoogleProfileAllowed(verified("stranger@gmail.com"), policy), true);
+        assert.equal(isGoogleProfileAllowed({ email: "stranger@gmail.com", email_verified: false }, policy), false);
+        assert.equal(isGoogleProfileAllowed({ email_verified: true }, policy), false);
+        assert.equal(isSessionEmailAllowed("stranger@gmail.com", policy), true);
+    });
+
+    test("a blocked email or domain is refused at sign-in, whichever rule applies", () => {
+        const blocked = { blockedEmails: "Spammer@Gmail.com", blockedDomains: "throwaway.test, abuse.example" };
+        for (const rule of [{ openSignup: true }, { allowedDomains: "gmail.com,throwaway.test", requireAllowlist: true }, {}]) {
+            const policy = { ...rule, ...blocked };
+            assert.equal(isGoogleProfileAllowed(verified("spammer@gmail.com"), policy), false, JSON.stringify(rule));
+            assert.equal(isGoogleProfileAllowed(verified(" SPAMMER@gmail.com "), policy), false);
+            assert.equal(isGoogleProfileAllowed(verified("anyone@throwaway.test", "throwaway.test"), policy), false);
+            // A Workspace whose domain is blocked, under an email on another of its domains.
+            assert.equal(isGoogleProfileAllowed(verified("someone@alias.example", "abuse.example"), policy), false);
+        }
+        assert.equal(isGoogleProfileAllowed(verified("friend@gmail.com"), { openSignup: true, ...blocked }), true);
+        // A domain that only ends with a blocked one isn't blocked.
+        assert.equal(isGoogleProfileAllowed(verified("someone@notthrowaway.test"), { openSignup: true, ...blocked }), true);
+    });
+
+    test("blocking someone ends their session at once, whichever rule applies", () => {
+        const blocked = { blockedEmails: "spammer@gmail.com", blockedDomains: "throwaway.test" };
+        for (const rule of [{ openSignup: true }, { allowedEmails: "spammer@gmail.com,a@throwaway.test", requireAllowlist: true }]) {
+            const policy = { ...rule, ...blocked };
+            assert.equal(isSessionEmailAllowed("spammer@gmail.com", policy), false, JSON.stringify(rule));
+            assert.equal(isSessionEmailAllowed("a@throwaway.test", policy), false);
+        }
+        assert.equal(isSessionEmailAllowed("friend@gmail.com", { openSignup: true, ...blocked }), true);
+    });
+
+    test("a domain is blocked only when AUTH_BLOCKED_DOMAINS names it exactly", () => {
+        const policy = { blockedDomains: " Abuse.example , throwaway.test" };
+        assert.equal(hasBlockedDomains(policy), true);
+        assert.equal(hasBlockedDomains({ blockedDomains: " , " }), false);
+        assert.equal(hasBlockedDomains({}), false);
+        assert.equal(isBlockedDomain("abuse.example", policy), true);
+        assert.equal(isBlockedDomain(" ABUSE.EXAMPLE ", policy), true);
+        assert.equal(isBlockedDomain("sub.abuse.example", policy), false);
+        assert.equal(isBlockedDomain("", policy), false);
+    });
+
+    test("the block list comes from AUTH_BLOCKED_EMAILS and AUTH_BLOCKED_DOMAINS", () => {
+        const policy = currentAccessPolicy({ AUTH_OPEN_SIGNUP: "1", AUTH_BLOCKED_EMAILS: "a@gmail.com", AUTH_BLOCKED_DOMAINS: "throwaway.test" });
+        assert.equal(isGoogleProfileAllowed(verified("a@gmail.com"), policy), false);
+        assert.equal(isGoogleProfileAllowed(verified("b@throwaway.test"), policy), false);
+        assert.equal(isGoogleProfileAllowed(verified("b@gmail.com"), policy), true);
     });
 });
 

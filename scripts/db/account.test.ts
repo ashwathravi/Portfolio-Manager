@@ -8,6 +8,8 @@ import postgres from 'postgres';
 import * as schema from '../../src/db/schema';
 import { AccountDeletionBlockedError, deleteAccount } from '../../src/lib/account/delete';
 import { buildAccountExport } from '../../src/lib/account/export';
+import { hasGoogleAccount } from '../../src/lib/auth/new-accounts';
+import { googleWorkspaceDomains } from '../../src/lib/auth/session-access';
 import type { PlaidFetch } from '../../src/lib/plaid/link';
 
 // Launch item i65: deleting an account and exporting its data, against a
@@ -259,5 +261,31 @@ describe('account deletion and export', { skip: !DATABASE_URL && 'SCRIPTS_TEST_D
         assert.deepEqual(await deleteAccount('u-plain', { plaid: null, database, fetchImpl: plaid.fetchImpl, now: NOW }), { accounts: 1, connections: 0 });
         assert.equal(plaid.requests.length, 0);
         assert.equal((await rowsOf('u-plain')).users, 0);
+    });
+
+    test('a Google account that has signed in before is known, so open sign-up\'s daily limit never turns it away (launch item i77)', async () => {
+        await sql`INSERT INTO auth_users (id, email) VALUES ('u-google', 'u-google@example.test')`;
+        await sql`INSERT INTO auth_accounts (user_id, type, provider, provider_account_id) VALUES ('u-google', 'oidc', 'google', 'google-sub-1')`;
+        await sql`INSERT INTO auth_accounts (user_id, type, provider, provider_account_id) VALUES ('u-google', 'oauth', 'schwab', 'google-sub-2')`;
+
+        assert.equal(await hasGoogleAccount('google-sub-1', database), true);
+        assert.equal(await hasGoogleAccount('google-sub-new', database), false);
+        // Another provider's account with the same ID isn't a Google one.
+        assert.equal(await hasGoogleAccount('google-sub-2', database), false);
+    });
+
+    test('a user\'s Google Workspace is read from the ID token stored with their Google account, so blocking it ends their session (launch item i77)', async () => {
+        const token = (claims: Record<string, unknown>) => `h.${Buffer.from(JSON.stringify(claims)).toString('base64url')}.s`;
+        await sql`INSERT INTO auth_users (id, email) VALUES ('u-ws-alias', 'someone@alias.example'), ('u-ws-gmail', 'someone@gmail.com'), ('u-ws-untokened', 'other@abuse.example')`;
+        await sql`INSERT INTO auth_accounts (user_id, type, provider, provider_account_id, id_token) VALUES ('u-ws-alias', 'oidc', 'google', 'google-sub-w', ${token({ sub: 'google-sub-w', hd: 'abuse.example' })})`;
+        await sql`INSERT INTO auth_accounts (user_id, type, provider, provider_account_id, id_token) VALUES ('u-ws-alias', 'oauth', 'schwab', 'schwab-1', ${token({ hd: 'elsewhere.example' })})`;
+        await sql`INSERT INTO auth_accounts (user_id, type, provider, provider_account_id, id_token) VALUES ('u-ws-gmail', 'oidc', 'google', 'google-sub-g', ${token({ sub: 'google-sub-g' })})`;
+        await sql`INSERT INTO auth_accounts (user_id, type, provider, provider_account_id) VALUES ('u-ws-untokened', 'oidc', 'google', 'google-sub-o')`;
+
+        assert.deepEqual(await googleWorkspaceDomains('u-ws-alias', database), ['abuse.example']);
+        // A Gmail account has no Workspace, and an account stored without its token says none.
+        assert.deepEqual(await googleWorkspaceDomains('u-ws-gmail', database), []);
+        assert.deepEqual(await googleWorkspaceDomains('u-ws-untokened', database), []);
+        assert.deepEqual(await googleWorkspaceDomains('u-ws-nobody', database), []);
     });
 });

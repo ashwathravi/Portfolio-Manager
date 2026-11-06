@@ -568,4 +568,37 @@ test.describe('POST /api/portfolio/import', () => {
         const body = await res.json();
         expect(body.data).toMatchObject({ insert: 0, update: 0, unchanged: 1, createdPortfolio: false });
     });
+
+    test('database: past the day\'s CSV imports, holdings and transactions are refused and the dialog says why (launch item i77)', async ({ context, page }) => {
+        test.skip(!dbMode, 'needs the seeded E2E database');
+        // A user of its own: the quota is per user, and this one spends it all.
+        await signInAsFreshUser(context);
+        await gotoAppPage(page, '/portfolios/holdings');
+        const rows = [{ symbol: 'NVDA', name: 'NVIDIA Corp', quantity: 10, avgCost: 450.25 }];
+        const first = await page.request.post('/api/portfolio/import', { data: { newPortfolioName: 'Quota', rows } });
+        expect(first.status()).toBe(200);
+        const { portfolioId } = (await first.json()).data;
+        for (let i = 1; i < 20; i++) {
+            expect((await page.request.post('/api/portfolio/import', { data: { portfolioId, rows } })).status(), `import ${i + 1}`).toBe(200);
+        }
+
+        const refused = await page.request.post('/api/portfolio/import', { data: { portfolioId, rows } });
+        expect(refused.status()).toBe(429);
+        expect(Number(refused.headers()['retry-after'])).toBeGreaterThan(0);
+        expect(await refused.json()).toMatchObject({ code: 'DAILY_QUOTA_REACHED' });
+        // Transactions share it.
+        const transactions = await page.request.post('/api/transactions/import', {
+            data: { portfolioId, rows: [{ type: 'DEPOSIT', date: '2026-10-01', amount: 1000 }] },
+        });
+        expect(transactions.status()).toBe(429);
+
+        await gotoAppPage(page, '/portfolios/holdings');
+        await openImport(page, SAMPLE_CSV.replace('BAD TICKER,Nope,1,1\n', ''));
+        // The account made above: the fresh user's copies of A's have IDs the
+        // import's validator doesn't take as UUIDs (md5 in helpers/users.ts).
+        await page.getByTestId('import-dialog').getByLabel('Import into').selectOption({ label: 'Quota' });
+        await page.getByRole('button', { name: 'Import 2 positions' }).click();
+        await expect(page.getByTestId('import-dialog').getByRole('alert')).toContainText('You can import up to 20 CSV files a day. Try again in');
+        await expect(page.getByText(/Imported \d+ position/)).toHaveCount(0);
+    });
 });
