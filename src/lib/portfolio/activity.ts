@@ -5,6 +5,7 @@
  */
 
 import { computeChurnAnalysis, type ChurnTickerRow } from '../risk-policy/churn';
+import { matchInternalTransfers, type InternalTransfer } from './internal-transfers';
 
 export type ActivitySide = 'BUY' | 'SELL' | 'DIVIDEND' | 'INTEREST' | 'DEPOSIT' | 'WITHDRAWAL' | 'FEE' | 'OTHER';
 
@@ -17,6 +18,7 @@ export interface TransactionRowInput {
     amount?: number | null;
     timestamp: Date | string;
     notes?: string | null;
+    portfolioId: string;
     portfolioName: string;
     fees?: string | number | null;
     currency?: string | null;
@@ -32,12 +34,19 @@ export interface ActivityRow {
     price: number | null;
     /** Absolute cash value of the transaction. */
     value: number;
+    /** Identifies the account: two accounts can share a name. */
+    accountId: string;
     account: string;
     notes: string | null;
     /** Fees and commission on top of the value; null when none were recorded. */
     fees: number | null;
     /** ISO code; amounts are in it. */
     currency: string;
+    /**
+     * A deposit or withdrawal that is one side of a move between two of the
+     * user's accounts (launch item i80); null otherwise.
+     */
+    transfer: InternalTransfer | null;
 }
 
 export interface MoneyAmount {
@@ -55,6 +64,12 @@ export interface ActivitySummary {
      */
     bought: MoneyAmount[];
     sold: MoneyAmount[];
+    /**
+     * Deposits less withdrawals, one total per currency. A transfer between
+     * two accounts whose sides are both among the rows moved nothing in or
+     * out, so it is left out; with one account's rows, it counts.
+     */
+    netDeposits: MoneyAmount[];
     accounts: number;
 }
 
@@ -81,8 +96,8 @@ export function normalizeSide(type: string): ActivitySide {
 }
 
 export function toActivityRows(rows: readonly TransactionRowInput[]): ActivityRow[] {
-    return rows
-        .map((r) => {
+    const activity = rows
+        .map((r): Omit<ActivityRow, 'transfer'> => {
             const quantity = toNumber(r.quantity);
             const price = toNumber(r.price);
             const computed = quantity !== null && price !== null ? Math.abs(quantity * price) : null;
@@ -96,6 +111,7 @@ export function toActivityRows(rows: readonly TransactionRowInput[]): ActivityRo
                 quantity,
                 price,
                 value,
+                accountId: r.portfolioId,
                 account: r.portfolioName,
                 notes: r.notes ?? null,
                 fees: toNumber(r.fees ?? null),
@@ -103,6 +119,8 @@ export function toActivityRows(rows: readonly TransactionRowInput[]): ActivityRo
             };
         })
         .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+    const transfers = matchInternalTransfers(activity);
+    return activity.map((r) => ({ ...r, transfer: transfers.get(r.id) ?? null }));
 }
 
 function byCurrency(a: string, b: string): number {
@@ -120,9 +138,15 @@ export function summarizeActivity(rows: readonly ActivityRow[]): ActivitySummary
     let sellCount = 0;
     const bought = new Map<string, number>();
     const sold = new Map<string, number>();
+    const netDeposits = new Map<string, number>();
     const accounts = new Set<string>();
+    const ids = new Set(rows.map((r) => r.id));
     for (const r of rows) {
         accounts.add(r.account);
+        if ((r.side === 'DEPOSIT' || r.side === 'WITHDRAWAL') && !(r.transfer && ids.has(r.transfer.otherId))) {
+            const signed = r.side === 'DEPOSIT' ? r.value : -r.value;
+            netDeposits.set(r.currency, (netDeposits.get(r.currency) ?? 0) + signed);
+        }
         if (r.side === 'BUY') {
             buyCount += 1;
             bought.set(r.currency, (bought.get(r.currency) ?? 0) + r.value);
@@ -137,6 +161,7 @@ export function summarizeActivity(rows: readonly ActivityRow[]): ActivitySummary
         sellCount,
         bought: totals(bought),
         sold: totals(sold),
+        netDeposits: totals(netDeposits),
         accounts: accounts.size,
     };
 }
