@@ -28,6 +28,11 @@ describe('alphaRadarQueryKeys', () => {
         );
     });
 
+    test('keys every filer\'s changes under one key, which watchlist and thesis saves mark stale (i61)', () => {
+        assert.deepStrictEqual(alphaRadarQueryKeys.changes('filer-1'), ['alpha-radar', 'changes', 'filer-1', 'latest']);
+        assert.deepStrictEqual(alphaRadarQueryKeys.changes('filer-1').slice(0, 2), [...alphaRadarQueryKeys.allChanges()]);
+    });
+
     test('keys reports from several filers by the filers, in any order', () => {
         assert.deepStrictEqual(alphaRadarQueryKeys.reports(), ['alpha-radar', 'reports', 'all', 'latest']);
         assert.deepStrictEqual(

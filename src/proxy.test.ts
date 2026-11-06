@@ -334,6 +334,7 @@ describe("API proxy security", () => {
             ["/api/alpha-radar/filers/00000000-0000-4000-8000-000000000001", "PATCH"],
             ["/api/alpha-radar/filers/00000000-0000-4000-8000-000000000001", "DELETE"],
             ["/api/alpha-radar/filers/00000000-0000-4000-8000-000000000001/refresh", "POST"],
+            ["/api/alpha-radar/filers/00000000-0000-4000-8000-000000000001/changes", "GET"],
             ["/api/alpha-radar/follows", "GET"],
             ["/api/alpha-radar/follows/00000000-0000-4000-8000-000000000001", "PUT"],
             ["/api/alpha-radar/follows/00000000-0000-4000-8000-000000000001", "DELETE"],

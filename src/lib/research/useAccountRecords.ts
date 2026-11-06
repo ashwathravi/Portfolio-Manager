@@ -22,6 +22,8 @@ export interface AccountRecordsOptions<Stored, W extends object> {
     apply: (stored: Stored | undefined, id: string, write: W) => Stored;
     failedMessage: (write: W, error: unknown) => string;
     loadFailedMessage: string;
+    /** Other queries that read these records: marked stale once a write is saved. */
+    dependents?: ReadonlyArray<readonly unknown[]>;
 }
 
 const writers = new WeakMap<QueryClient, Map<string, AccountWriter<object>>>();
@@ -35,7 +37,7 @@ const writers = new WeakMap<QueryClient, Map<string, AccountWriter<object>>>();
  */
 export function accountWriterFor<Stored, W extends object>(
     queryClient: QueryClient,
-    options: Pick<AccountRecordsOptions<Stored, W>, 'queryKey' | 'send' | 'apply' | 'failedMessage'>,
+    options: Pick<AccountRecordsOptions<Stored, W>, 'queryKey' | 'send' | 'apply' | 'failedMessage' | 'dependents'>,
     notify: (message: string) => void = (message) => { toast.error(message); },
 ): AccountWriter<W> {
     let byKey = writers.get(queryClient);
@@ -56,6 +58,7 @@ export function accountWriterFor<Stored, W extends object>(
             }
             // A read that started before this save may not include it: read again.
             if (queryClient.isFetching({ queryKey }) > 0) void queryClient.invalidateQueries({ queryKey });
+            for (const dependent of options.dependents ?? []) void queryClient.invalidateQueries({ queryKey: dependent });
         },
         onFailed: (_id, write, error) => {
             notify(options.failedMessage(write, error));
