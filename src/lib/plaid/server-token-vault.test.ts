@@ -194,6 +194,33 @@ describe("Plaid server token vault", () => {
         );
     });
 
+    test("regression (i77): a connection past the most a user may have isn't stored, and its token isn't kept", async () => {
+        process.env.PLAID_TOKEN_STORAGE = "postgres";
+        process.env.PLAID_TOKEN_ENCRYPTION_KEY = "test-only-registry-key";
+        const registry = createTestRegistryStore();
+        const limits: (number | undefined)[] = [];
+        setPlaidTokenRegistryStoreForTests({
+            ...registry.store,
+            // The store decides, as it saves: another link finished first.
+            upsertConnection: async (input) => {
+                limits.push(input.maxConnections);
+                return "limit";
+            },
+        });
+
+        const result = await storePlaidConnection({
+            userId: "11111111-1111-4111-8111-111111111111",
+            exchange: plaidExchangeFixture(),
+            maxConnections: 10,
+        });
+
+        assert.equal(result.stored, false);
+        assert.equal(result.limitReached, true);
+        assert.deepEqual(limits, [10]);
+        assert.equal(await getPlaidAccessTokenForUser("item-registry", "11111111-1111-4111-8111-111111111111"), undefined);
+        assert.ok(!JSON.stringify(result).includes("access-token-registry"));
+    });
+
     test("fails closed when durable registry encryption key is missing", async () => {
         process.env.PLAID_TOKEN_STORAGE = "postgres";
         const registry = createTestRegistryStore();
@@ -342,6 +369,7 @@ function createTestRegistryStore() {
             configured: () => true,
             upsertConnection: async (input: TestConnectionInput) => {
                 state.connection = input;
+                return "stored" as const;
             },
             getActiveToken: async () => {
                 if (!state.connection || state.revoked) return undefined;
@@ -355,6 +383,7 @@ function createTestRegistryStore() {
             revokeConnection: async (input: { userId: string; itemId: string; now: Date }) => {
                 state.revoked = input;
             },
+            countConnections: async () => (state.connection && !state.revoked ? 1 : 0),
         },
     };
 }

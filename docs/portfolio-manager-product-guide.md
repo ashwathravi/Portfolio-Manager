@@ -324,7 +324,7 @@ Alpha Radar surfaces institutional 13F activity and turns it into research evide
 
 Use it to:
 
-- Track filers.
+- Follow the filers you care about: choose **Follow** on a filer in Research › Alpha Radar, and Today's Alpha Radar card shows their latest reports. Admins choose which filers Atlas tracks, and Atlas checks SEC for their new filings every day.
 - Review quarterly changes.
 - See top adds, trims, exits, and new positions.
 - Review clone tracking and consensus.
@@ -338,19 +338,16 @@ Alpha Radar evidence is not a buy signal by itself. Treat it as sourced research
 
 ## Strategies
 
-Open **Strategies** to manage strategy rules and adherence.
+Open **Strategies** to write entry rules, backtest them, and keep discipline rules beside them.
 
-Use it to:
+- **Your strategies** are saved to your account: start one with **New strategy**, or **Duplicate** an example. Edits save a moment after you make them.
+- **Rules** compare an indicator with a number or another indicator: `Close > SMA(50)`, `RSI(14) < 30`, `Mom(6M) > 10%`, `ADV(30) >= $5M`, `Close crosses above SMA(20)`. AND binds tighter than OR. Atlas works these out from daily prices; fundamentals like P/E aren't available.
+- **Tickers** are what the strategy may hold, up to 25: type a ticker or company, or add the index or sector ETFs.
+- **Guardrails** set each buy's size as a share of equity, a stop loss, and how often the rules are checked.
+- **Run backtest** replays the rules over the daily prices Atlas has stored (up to two years): rules are read at a close and trades happen at the next open, long only, from $100,000, with no fees. It shows the return beside SPY's, Sharpe, drawdown, trades, a Monte Carlo resample of the daily returns, and a verdict with its reason. A ticker Atlas has no prices for yet is named and left out; its history arrives over the next few nights. Change a rule and the result is marked out of date until you run it again.
+- **Examples** (labelled Sample) show the builder with illustrative results; edits to them stay in the tab.
 
-- Review strategy cards.
-- Select a strategy.
-- Configure rule builder conditions.
-- Edit adherence rules.
-- Review adherence impact.
-- Inspect backtest panel.
-- Explore builder/deploy pages.
-
-Strategy rules should describe process, not just desired outcomes.
+Strategy rules should describe process, not just desired outcomes. A backtest describes the past, not what will happen next.
 
 ## Execution
 
@@ -540,7 +537,8 @@ Without database/provider keys, many UI surfaces still render seeded or fallback
 Quotes and the other market-data routes need different settings:
 
 - **Quotes** (`/api/market-data/quote`, `/api/market-data/quotes`) come from the price store in Postgres, never from Massive, so they need `DATABASE_URL`, not `POLYGON_API_KEY`. Without a database they answer 503 `MARKET_DATA_NOT_CONFIGURED`. A symbol with no stored close yet is 404 `QUOTE_UNAVAILABLE` (left out of a batch); the nightly price ingest stores closes, and starts pricing a looked-up symbol from its next run. With `FINNHUB_API_KEY`, during the session a tracked US stock answers with a delayed Finnhub quote instead (`kind: "delayed"`); every price still showing "Close" during market hours means the key is missing, the minute's budget is spent, or Finnhub has no quote for the symbol (the server logs say which).
-- **History, fundamentals and search** (`/api/market-data/history`, `historical`, `fundamentals`, `search`) call Massive, so they need `POLYGON_API_KEY`; without it they answer 503 `MARKET_DATA_NOT_CONFIGURED`. A 429 `RATE_LIMITED` means the free plan's five calls a minute are spent.
+- **History and fundamentals** (`/api/market-data/history`, `historical`, `fundamentals`) call Massive, so they need `POLYGON_API_KEY`; without it they answer 503 `MARKET_DATA_NOT_CONFIGURED`. A 429 `RATE_LIMITED` means the free plan's five calls a minute are spent.
+- **Ticker search** (`/api/market-data/search`) reads the symbol directory in Postgres, so it needs `DATABASE_URL` and no key. Search finding only the benchmark ETFs and your own holdings means the directory is empty: the nightly price job copies it from SEC EDGAR's ticker file, so it fills after the first weekday run (its result is in `job_runs`, under the `prices` job's `symbolDirectory`). Without a database search calls Massive and needs `POLYGON_API_KEY`.
 
 Also check network access to Massive. Pages degrade to dashes, not errors, when a quote is unavailable.
 
@@ -564,7 +562,7 @@ Check:
 
 - `DATABASE_URL`.
 - Alpha Radar migrations.
-- `SEC_EDGAR_USER_AGENT` for live SEC calls.
+- `SEC_EDGAR_USER_AGENT` for any SEC call (a refresh without it answers 503 `SEC_NOT_CONFIGURED`).
 - Provider budgets and circuit-breaker state.
 
 ### E2E Cannot Start Server In Sandbox

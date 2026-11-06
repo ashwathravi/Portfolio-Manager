@@ -58,6 +58,8 @@ from job_runs order by started_at desc limit 10;
 
 To run the jobs by hand, use **Run** next to the job in the Vercel dashboard (Settings → Cron Jobs), which sends the secret for you. A job that hasn't succeeded by midnight UTC after its weekday run shows as late or failed in `/api/health/jobs`, and the production monitor opens an issue (`docs/monitoring.md`). Changing the schedule in `vercel.json` means changing `DAILY_JOBS_CRON` in `src/lib/health/job-health.ts` too (a test checks).
 
+A second cron, `GET /api/cron/alpha-radar` at 11:15 UTC every day, runs one job, `alpha-radar` (launch item i60, `src/lib/alpha-radar/daily-refresh.ts`): it asks SEC for every enabled Alpha Radar filer's recent 13F filings and parses, compares and writes a report for each new one. Filers checked longest ago (`alpha_radar_tracked_filers.last_refreshed_at`) go first, and none is started after 240 seconds, so the rest go first the next day. SEC requests stop at 270 seconds, and a `Retry-After` longer than 10 seconds isn't waited for, so the run is always recorded within the route's five minutes. It is gated, locked and recorded like the nightly route, with its own five minutes, so it never takes time from the price backfill. Without `SEC_EDGAR_USER_AGENT` it asks SEC nothing and fails, and so does a run in which every filer failed; a run where only some failed succeeds and names them in its `detail`. Its schedule is `ALPHA_RADAR_CRON` in `src/lib/health/job-health.ts` (a test checks it against `vercel.json`). A deploy that adds a job shows it as late until its first scheduled run; **Run** in Settings → Cron Jobs clears that sooner.
+
 The route sets `maxDuration = 300`, the most Hobby allows, which needs Fluid compute (on by default for new projects).
 
 ## Error monitoring
@@ -98,13 +100,16 @@ Set these for **Production only**, never Preview: a preview runs branch code, an
 |---|---|
 | `AUTH_SECRET` | Set. |
 | `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET` | From the Google OAuth client (redirect URI `https://atlas-wealth-lovat.vercel.app/api/auth/callback/google`). |
-| `AUTH_ALLOWED_EMAILS` | Comma-separated invite list. Required: without it production refuses sign-in. |
+| `AUTH_ALLOWED_EMAILS` | Comma-separated invite list. Required while sign-up is by invitation: without it (or `AUTH_OPEN_SIGNUP`) production refuses sign-in. |
+| `AUTH_OPEN_SIGNUP` | Unset during the private beta. `1` opens sign-up to any verified Google account and ignores the invite list (launch item i77): see Opening sign-up below. |
+| `AUTH_SIGNUP_DAILY_LIMIT` | Optional, with open sign-up: the most new accounts made in a UTC day, 50 unless set. Someone who already has an account always signs in; a new one past the limit is asked to come back tomorrow. |
+| `AUTH_BLOCKED_EMAILS`, `AUTH_BLOCKED_DOMAINS` | Optional. Comma-separated emails or domains never let in, whether sign-up is open or not. A domain is matched against the email's domain and the Google Workspace the user signs in with, which can differ. Adding someone ends their sessions on their next request; their data stays until it's deleted. While a domain is blocked, each session read also reads the user's Workspace from the Google ID token stored when they first signed in. |
 | `AUTH_ADMIN_EMAILS` | Who may change Alpha Radar's tracked filers and refresh them from SEC EDGAR (shared by every user). Usually just you. Nobody when unset: the Refresh buttons don't show and those routes answer 403. |
 | `DATABASE_URL` | Supabase **transaction** pooler (port 6543) as `atlas_app.<project-ref>`, the least-privilege login (see `docs/local-database-secrets.md`). |
 | `CRON_SECRET` | A generated value (`openssl rand -hex 32`). Vercel sends it to the cron route; without it no scheduled job runs. Never print or paste it. |
 | `POLYGON_API_KEY` | The Massive Basic key the nightly price ingest uses. |
 | `FINNHUB_API_KEY` | The Finnhub free key for delayed intraday quotes (launch item i33). During the session, and until the nightly ingest stores the day's close, a tracked US stock is priced from a Finnhub quote kept in `intraday_quotes` and fetched about every 80 seconds; the whole app stays under 50 calls in any minute (`src/lib/markets/intraday-quotes.ts`). Without it every price is the stored close. |
-| `SEC_EDGAR_USER_AGENT` | Set. Who Alpha Radar's SEC EDGAR requests say they're from, with a contact (SEC fair-access rules). |
+| `SEC_EDGAR_USER_AGENT` | Set. Who SEC EDGAR requests say they're from, with a contact (SEC fair-access rules): Alpha Radar's daily job and refreshes, and the nightly job's copy of SEC's ticker file for ticker search (launch item i35). Required: without it no SEC request is made (launch item i60), the `alpha-radar` job fails and an admin's refresh answers 503 `SEC_NOT_CONFIGURED`. |
 | `PLAID_*`, `PLAID_TOKEN_ENCRYPTION_KEY` | When account linking goes live. The key must be 32 random bytes, base64 or hex (`openssl rand -base64 32`); production stores no Plaid token with a weaker one. `PLAID_ENV` is `sandbox` or `production`. |
 | `PLAID_REDIRECT_URI` | With account linking: `https://<production domain>/settings`, added first to the Plaid Dashboard's allowed redirect URIs (Developers › API). Banks that sign in through OAuth send the user back there when Link can't open them in a pop-up, on phones especially, and Settings finishes the connection (launch item i47). Link refuses to open while it isn't on the Dashboard's list, and the app refuses one that isn't Settings on https. |
 | `KV_REST_API_URL`, `KV_REST_API_TOKEN` (and `KV_URL`, `REDIS_URL`, `KV_REST_API_READ_ONLY_TOKEN`) | Set by the Upstash integration. They are the shared rate limiter's store; without them each instance limits on its own. |
@@ -119,6 +124,28 @@ vercel env add AUTH_ADMIN_EMAILS production
 openssl rand -hex 32 | tr -d '\n' | vercel env add CRON_SECRET production
 ```
 
+### Opening sign-up (phase 5)
+
+Sign-up stays by invitation until the plans allow public use (launch item i76): Vercel Pro, Supabase Pro, a market-data plan whose terms allow it, and Plaid Production's pricing. Then:
+
+1. Check `KV_REST_API_URL` and `KV_REST_API_TOKEN` are set. The daily quotas and the limit on new accounts are counted in the shared Upstash store; without it each instance counts on its own.
+2. `vercel env add AUTH_OPEN_SIGNUP production` with the value `1`, and `AUTH_SIGNUP_DAILY_LIMIT` if 50 new accounts a day is the wrong ceiling. Environment changes reach the next deployment, so redeploy. The terms and the privacy policy then say the beta is public, and the terms no longer ask for an invitation.
+3. Watch Sentry and the AI Gateway and Plaid dashboards for the first days, and block an abuser with `AUTH_BLOCKED_EMAILS` (or a throwaway domain with `AUTH_BLOCKED_DOMAINS`), then redeploy.
+
+What each user can do in a day, besides the per-minute rate limits (`src/lib/api/daily-quota.ts`, counted in UTC days):
+
+| | A day | Refused with |
+|---|---|---|
+| CSV imports, holdings and transactions together | 20 | 429 `DAILY_QUOTA_REACHED` |
+| Opening bank linking (a new connection or a reconnect) | 10 | 429 `DAILY_QUOTA_REACHED` |
+| Syncing linked accounts on request (the nightly sync isn't counted) | 20 | 429 `DAILY_QUOTA_REACHED` |
+| Backtests | 100 | 429 `DAILY_QUOTA_REACHED` |
+| Ask questions | 30 in any 24 hours | 429 `ASK_DAILY_LIMIT` |
+
+A user keeps at most 10 linked institutions at once (409 `PLAID_CONNECTION_LIMIT`; Plaid charges for each; counted as each is saved, one at a time per user, so links finishing together can't pass it), 50 accounts, 20 strategies and 5,000 order plans.
+
+Closing sign-up again means unsetting `AUTH_OPEN_SIGNUP` with an invite list in place: everyone not on it is signed out on their next request, so add the people who should stay first.
+
 ## Post-deploy smoke test
 
 After every production deploy (launch item i72), `deploy-production` waits until `/api/health` reports the commit it just deployed, up to three minutes, then runs a short Playwright suite against `PRODUCTION_URL`: `tests/production/post-deploy.spec.ts`, with `playwright.production.config.ts`. It checks, signed out:
@@ -129,7 +156,7 @@ After every production deploy (launch item i72), `deploy-production` waits until
 - the sign-in page, the privacy policy and the terms answer 200 with their security headers (a nonce-based Content-Security-Policy, HSTS, `X-Frame-Options`), and load without console errors, policy violations or failed requests to the site;
 - those pages ask search engines to leave them out of their results (`noindex, nofollow` as a header and a meta tag, launch item i74), and `robots.txt` lets crawlers in to read that;
 - the sign-in page fits a phone;
-- the API refuses signed-out callers, and `/api/cron/daily` refuses a call without the cron secret.
+- the API refuses signed-out callers, and `/api/cron/daily` and `/api/cron/alpha-radar` refuse a call without the cron secret.
 
 It is read-only: it never signs in, writes nothing and runs no job. A signed-in check would need a standing production account and its session token as a CI secret, so the pages behind sign-in are covered by E2E only.
 

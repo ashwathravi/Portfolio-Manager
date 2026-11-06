@@ -14,6 +14,7 @@ import type {
 export const alphaRadarQueryKeys = {
     all: ['alpha-radar'] as const,
     filers: () => [...alphaRadarQueryKeys.all, 'filers'] as const,
+    follows: () => [...alphaRadarQueryKeys.all, 'follows'] as const,
     filings: (filerId: string, reportPeriod?: string) => [...alphaRadarQueryKeys.filers(), filerId, 'filings', reportPeriod ?? 'all'] as const,
     holdings: (filerId: string, filingId?: string, reportPeriod?: string) => [
         ...alphaRadarQueryKeys.filers(),
@@ -22,12 +23,15 @@ export const alphaRadarQueryKeys = {
         filingId ?? 'latest',
         reportPeriod ?? 'all',
     ] as const,
-    changes: (filerId: string, reportPeriod?: string) => [...alphaRadarQueryKeys.filers(), filerId, 'changes', reportPeriod ?? 'latest'] as const,
-    reports: (trackedFilerId?: string, reportPeriod?: string) => [
+    /** Every filer's changes: each list is ranked with the user's holdings, watchlist and theses (launch item i61). */
+    allChanges: () => [...alphaRadarQueryKeys.all, 'changes'] as const,
+    changes: (filerId: string, reportPeriod?: string) => [...alphaRadarQueryKeys.allChanges(), filerId, reportPeriod ?? 'latest'] as const,
+    reports: (trackedFilerId?: string, reportPeriod?: string, trackedFilerIds?: readonly string[]) => [
         ...alphaRadarQueryKeys.all,
         'reports',
         trackedFilerId ?? 'all',
         reportPeriod ?? 'latest',
+        ...(trackedFilerIds ? ['filers', [...trackedFilerIds].sort().join(',')] : []),
     ] as const,
     memorySearch: (query: string, trackedFilerId?: string, reportPeriod?: string) => [
         ...alphaRadarQueryKeys.all,
@@ -45,6 +49,16 @@ export interface AlphaRadarRefreshRequest {
 
 export async function fetchAlphaRadarFilers(): Promise<AlphaRadarTrackedFilerRecord[]> {
     return fetchJsonData('/api/alpha-radar/filers');
+}
+
+/** The IDs of the filers the signed-in user follows (launch item i60). */
+export async function fetchAlphaRadarFollows(): Promise<string[]> {
+    const data = await fetchJsonData<{ filerIds: string[] }>('/api/alpha-radar/follows', { cache: 'no-store' });
+    return data.filerIds;
+}
+
+export async function setAlphaRadarFollow(filerId: string, following: boolean): Promise<void> {
+    await fetchJsonData(`/api/alpha-radar/follows/${encodeURIComponent(filerId)}`, { method: following ? 'PUT' : 'DELETE' });
 }
 
 export async function fetchAlphaRadarFilings(
@@ -78,10 +92,13 @@ export async function fetchAlphaRadarChanges(
 
 export async function fetchAlphaRadarReports(input: {
     trackedFilerId?: string;
+    /** Reports from any of these filers (the ones the user follows). */
+    trackedFilerIds?: readonly string[];
     reportPeriod?: string;
 } = {}): Promise<AlphaRadarReportRecord[]> {
     const params = new URLSearchParams();
     if (input.trackedFilerId) params.set('trackedFilerId', input.trackedFilerId);
+    if (input.trackedFilerIds) params.set('trackedFilerIds', input.trackedFilerIds.join(','));
     if (input.reportPeriod) params.set('reportPeriod', input.reportPeriod);
     return fetchJsonData(`/api/alpha-radar/reports${queryString(params)}`);
 }
@@ -130,12 +147,48 @@ export function useAlphaRadarFilersQuery(
     });
 }
 
+export function useAlphaRadarFollowsQuery(
+    options?: Omit<UseQueryOptions<string[], Error>, 'queryKey' | 'queryFn'>,
+) {
+    return useQuery<string[], Error>({
+        queryKey: alphaRadarQueryKeys.follows(),
+        queryFn: fetchAlphaRadarFollows,
+        staleTime: 60_000,
+        ...options,
+    });
+}
+
+/**
+ * Follows or unfollows a filer, showing the change at once and putting it
+ * back if the save fails. Callers allow one change at a time (isPending), so
+ * two requests can't land in the wrong order.
+ */
+export function useFollowAlphaRadarFilerMutation() {
+    const queryClient = useQueryClient();
+    const key = alphaRadarQueryKeys.follows();
+    return useMutation({
+        mutationFn: ({ filerId, following }: { filerId: string; following: boolean }) => setAlphaRadarFollow(filerId, following),
+        onMutate: async ({ filerId, following }) => {
+            await queryClient.cancelQueries({ queryKey: key });
+            const previous = queryClient.getQueryData<string[]>(key);
+            queryClient.setQueryData<string[]>(key, (ids = []) => (
+                following ? [...ids.filter((id) => id !== filerId), filerId] : ids.filter((id) => id !== filerId)
+            ));
+            return { previous };
+        },
+        onError: (_error, _input, context) => {
+            if (context?.previous) queryClient.setQueryData(key, context.previous);
+        },
+        onSettled: () => queryClient.invalidateQueries({ queryKey: key }),
+    });
+}
+
 export function useAlphaRadarReportsQuery(
-    input: { trackedFilerId?: string; reportPeriod?: string } = {},
+    input: { trackedFilerId?: string; trackedFilerIds?: readonly string[]; reportPeriod?: string } = {},
     options?: Omit<UseQueryOptions<AlphaRadarReportRecord[], Error>, 'queryKey' | 'queryFn'>,
 ) {
     return useQuery<AlphaRadarReportRecord[], Error>({
-        queryKey: alphaRadarQueryKeys.reports(input.trackedFilerId, input.reportPeriod),
+        queryKey: alphaRadarQueryKeys.reports(input.trackedFilerId, input.reportPeriod, input.trackedFilerIds),
         queryFn: () => fetchAlphaRadarReports(input),
         ...options,
     });
@@ -175,6 +228,9 @@ export function useAlphaRadarChangesQuery(
         queryKey: alphaRadarQueryKeys.changes(filerId, reportPeriod),
         queryFn: () => fetchAlphaRadarChanges(filerId, reportPeriod),
         enabled: Boolean(filerId),
+        // Ranked with the user's holdings, watchlist and theses, which change
+        // elsewhere: read again whenever the list is shown.
+        staleTime: 0,
         ...options,
     });
 }

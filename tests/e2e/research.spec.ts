@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { gotoAppPage, reloadAppPage, selectAppTab } from './helpers/app';
+import { clickUntil, gotoAppPage, reloadAppPage, selectAppTab } from './helpers/app';
 import { researchLoaded } from './helpers/research';
 import { signInAsFreshUser } from './helpers/users';
 
@@ -270,6 +270,37 @@ test.describe('Research page', () => {
         await expect(page.getByRole('tab', { name: 'Alpha Radar' })).toHaveAttribute('aria-selected', 'true');
         await expect(page.getByTestId('alpha-radar-detail')).toBeVisible();
     });
+
+    test('Alpha Radar\'s example filers are labelled examples', async ({ page }) => {
+        await gotoAppPage(page, '/research?tab=alpha-radar');
+
+        await expect(page.getByTestId('alpha-radar-fallback')).toContainText('Example filers and reports, not real 13F data');
+        await expect(page.getByTestId('alpha-radar-fallback').getByTestId('sample-tag')).toBeVisible();
+        await expect(page.getByTestId('alpha-radar-your-overlap')).toContainText('Your overlap');
+    });
+
+    test('regression (i61): with example data off and no filer tracked, Alpha Radar says so instead of showing examples', async ({ page, context }) => {
+        await signInAsFreshUser(context);
+        await gotoAppPage(page, '/settings');
+        const card = page.getByTestId('example-data-card');
+        const toggle = card.getByRole('checkbox');
+        await expect(toggle).toBeChecked();
+        await clickUntil(card.locator('label.pm-switch'), async () => {
+            await expect(toggle).not.toBeChecked({ timeout: 1000 });
+        });
+
+        await gotoAppPage(page, '/research?tab=alpha-radar');
+        await expect(page.getByTestId('alpha-radar-no-filers')).toHaveText('No filers are tracked yet.');
+        await expect(page.getByTestId('alpha-radar-filer')).toHaveCount(0);
+        const empty = page.getByTestId('alpha-radar-detail-empty');
+        await expect(empty).toContainText(/tracking any 13F filers yet/);
+        await expect(page.getByTestId('alpha-radar-fallback')).toHaveCount(0);
+        await expect(page.getByTestId('alpha-radar-change-row')).toHaveCount(0);
+
+        await empty.getByTestId('alpha-radar-show-examples').click();
+        await expect(page.getByTestId('alpha-radar-filer').first()).toBeVisible();
+        await expect(page.getByTestId('alpha-radar-fallback').getByTestId('sample-tag')).toBeVisible();
+    });
 });
 
 // Alpha Radar's tracked filers are shared by every user, and a refresh calls
@@ -323,6 +354,12 @@ test.describe('Alpha Radar is managed by admins', () => {
         expect((await oversized.json()).code).toBe('REQUEST_TOO_LARGE');
         const notJson = await page.request.post('/api/alpha-radar/filers', { headers: { 'content-type': 'application/json' }, data: '{"cik":' });
         expect(notJson.status()).toBe(400);
+        // E2E servers have no SEC user agent (launch item i60): a refresh asks SEC nothing.
+        for (const path of ['/api/alpha-radar/refresh', `/api/alpha-radar/filers/${MISSING_FILER}/refresh`]) {
+            const refresh = await page.request.post(path, { data: { force: true } });
+            expect(refresh.status(), path).toBe(503);
+            expect(await refresh.json()).toEqual({ error: 'SEC requests are not configured.', code: 'SEC_NOT_CONFIGURED' });
+        }
 
         const anonymous = await playwright.request.newContext({
             baseURL: 'http://localhost:3000',
@@ -433,6 +470,45 @@ test.describe('Research watchlist', () => {
         await expect(page.locator('.pm-research-list').getByRole('button', { name: /AMD/ })).toBeVisible();
     });
 
+    test('a ticker found by company name is added with its name (i35)', async ({ page }) => {
+        test.skip(!databaseAuthEnabled, 'ticker search reads the symbol directory in the database');
+        const add = page.getByLabel('Add ticker to watchlist');
+        await add.fill('coca');
+        const option = page.getByRole('option', { name: /KO\s*COCA COLA CO\s*NYSE/ });
+        await expect(option).toBeVisible();
+        await expect(add).toHaveAttribute('aria-expanded', 'true');
+        const saved = watchlistSaved(page, '"KO"');
+        await option.click();
+        await saved;
+        const card = page.locator('.pm-research-list').getByRole('button', { name: /KO/ });
+        await expect(card.locator('.pm-watch-list-company')).toHaveText('COCA COLA CO');
+        await expect(add).toHaveValue('');
+        await expect(page.getByRole('listbox', { name: 'Matching tickers' })).toBeHidden();
+    });
+
+    test('regression: Enter adds the ticker typed, not a longer match that starts the same way (i35)', async ({ page }) => {
+        test.skip(!databaseAuthEnabled, 'ticker search reads the symbol directory in the database');
+        const add = page.getByLabel('Add ticker to watchlist');
+        // APL isn't in the directory; APLE starts the same way.
+        await add.fill('apl');
+        await expect(page.getByRole('option', { name: /APLE/ })).toBeVisible();
+        await expect(page.getByRole('option', { selected: true })).toHaveCount(0);
+        const saved = watchlistSaved(page, '"APL"');
+        await add.press('Enter');
+        await saved;
+        await expect(page.locator('.pm-research-pane .pm-thesis-detail-sym')).toHaveText('APL');
+
+        // The arrows pick a match, and Enter adds it.
+        await add.fill('micro');
+        await expect(page.getByRole('option', { name: /MSFT/ })).toBeVisible();
+        await add.press('ArrowDown');
+        await expect(page.getByRole('option', { name: /MSFT/ })).toHaveAttribute('aria-selected', 'true');
+        const msft = watchlistSaved(page, '"MSFT"');
+        await add.press('Enter');
+        await msft;
+        await expect(page.locator('.pm-research-pane .pm-thesis-detail-sym')).toHaveText('MSFT');
+    });
+
     test('duplicates and malformed tickers are refused with a message', async ({ page }) => {
         const add = page.getByLabel('Add ticker to watchlist');
         const addButton = page.getByRole('button', { name: 'Add', exact: true });
@@ -462,6 +538,55 @@ test.describe('Research watchlist', () => {
         await page.locator('.pm-research-list').getByRole('button', { name: /SHOP/ }).click();
         await expect(pane.getByRole('textbox', { name: 'Notes' })).toHaveValue('Check margins first');
         await expect(pane.getByLabel('Target entry ($)')).toHaveValue('70');
+    });
+
+    test('regression: an item opened while the list loads shows what was saved, and leaving a field keeps it', async ({ page }) => {
+        // Found running E2E locally: SHOP opened on its example row before
+        // the saved list arrived kept the example's text, and leaving a
+        // field then saved that text over the user's.
+        test.skip(!databaseAuthEnabled, 'Without a database the list is read from this browser before anything can be opened.');
+        const list = page.locator('.pm-research-list');
+        const pane = page.locator('.pm-research-pane');
+        const notes = pane.getByRole('textbox', { name: 'Notes' });
+        const target = pane.getByLabel('Target entry ($)');
+        await list.getByRole('button', { name: /SHOP/ }).click();
+        await target.fill('70');
+        const saved = watchlistSaved(page, 'Check margins first');
+        await notes.fill('Check margins first');
+        await notes.blur();
+        await saved;
+
+        // Hold the next read of the list until SHOP is open on its example row.
+        let releaseList = () => {};
+        const listHeld = new Promise<void>((resolve) => { releaseList = resolve; });
+        await page.route('**/api/research/watchlist', async (route) => {
+            await listHeld;
+            await route.continue();
+        });
+        await reloadAppPage(page);
+        await list.getByRole('button', { name: /SHOP/ }).click();
+        await expect(notes).toHaveValue('Add on a market-wide pullback');
+        const loaded = researchLoaded(page, 'watchlist');
+        releaseList();
+        await loaded;
+        await page.unroute('**/api/research/watchlist');
+        await expect(notes).toHaveValue('Check margins first');
+        await expect(target).toHaveValue('70');
+
+        // Leaving the notes unchanged saves nothing, so the next save keeps them.
+        await notes.focus();
+        await notes.blur();
+        const why = pane.getByLabel('Why it is on the list');
+        const savedWhy = watchlistSaved(page, 'Waiting for the margin turn');
+        await why.fill('Waiting for the margin turn');
+        await why.blur();
+        await savedWhy;
+        const reloaded = researchLoaded(page, 'watchlist');
+        await reloadAppPage(page);
+        await reloaded;
+        await list.getByRole('button', { name: /SHOP/ }).click();
+        await expect(notes).toHaveValue('Check margins first');
+        await expect(why).toHaveValue('Waiting for the margin turn');
     });
 
     test("regression: why and notes stop at what the account keeps", async ({ page }) => {

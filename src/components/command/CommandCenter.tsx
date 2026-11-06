@@ -5,7 +5,8 @@ import { useRouter } from 'next/navigation';
 import { ArrowRight, Search, Sparkles } from 'lucide-react';
 import { useUiStore } from '@/lib/stores/uiStore';
 import { useThesisStore } from '@/lib/research/useThesisStore';
-import { searchCommands, type CommandItem } from '@/lib/command/search';
+import { useTickerSearch } from '@/lib/api/market-data/queries';
+import { looksLikeQuestion, searchCommands, type CommandItem } from '@/lib/command/search';
 import { AskSheet } from '@/components/ask/AskSheet';
 
 /**
@@ -13,8 +14,9 @@ import { AskSheet } from '@/components/ask/AskSheet';
  *
  * Opens a search palette (also reachable from the top bar's "Search or
  * jump to…" box, which used to do nothing): jump to any page or view,
- * open a ticker or thesis, draft an order, or hand the query to Ask
- * Ledger, which opens in the same overlay with the question asked.
+ * open a ticker (found by symbol or company name) or thesis, draft an
+ * order, or hand the query to Ask Ledger, which opens in the same overlay
+ * with the question asked.
  */
 export function CommandCenter() {
     const open = useUiStore((s) => s.commandOpen);
@@ -73,7 +75,9 @@ function CommandPalette() {
     const [active, setActive] = useState(0);
     const inputRef = useRef<HTMLInputElement>(null);
 
-    const items = useMemo(() => searchCommands(query, { theses }), [query, theses]);
+    // Tickers by symbol or company name (launch item i35); a question isn't searched.
+    const { matches } = useTickerSearch(query, { enabled: !looksLikeQuestion(query) });
+    const items = useMemo(() => searchCommands(query, { theses, symbols: matches }), [query, theses, matches]);
 
     useEffect(() => {
         inputRef.current?.focus();

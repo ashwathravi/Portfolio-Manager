@@ -17,10 +17,30 @@ export interface SecEdgarClientOptions {
     maxRetries?: number;
     retryBaseDelayMs?: number;
     requestTimeoutMs?: number;
+    /** A retry SEC asks to wait longer than this for (Retry-After) isn't made. */
+    maxRetryDelayMs?: number;
+    /** Ends every request and retry wait once it aborts: a run's deadline. */
+    signal?: AbortSignal;
     maxJsonResponseBytes?: number;
     dataBaseUrl?: string;
     archivesBaseUrl?: string;
     companyTickersUrl?: string;
+    exchangeTickersUrl?: string;
+}
+
+/** SEC's company_tickers_exchange.json: column names, then one array per ticker. */
+interface SecExchangeTickersResponse {
+    fields?: unknown;
+    data?: unknown;
+}
+
+/** One row of SEC's exchange ticker file, as published. */
+export interface SecExchangeTicker {
+    cik: string;
+    name: string;
+    ticker: string;
+    /** "Nasdaq", "NYSE", "CBOE", "OTC", ...; null when it has none. */
+    exchange: string | null;
 }
 
 interface SecCompanyTickerRow {
@@ -59,12 +79,26 @@ interface SecArchiveIndexResponse {
     };
 }
 
-const DEFAULT_USER_AGENT = 'Portfolio-Manager Alpha Radar local-dev contact@example.invalid';
+/**
+ * SEC_EDGAR_USER_AGENT, trimmed, or null when it isn't set. SEC's fair
+ * access rules ask every client to say who it is, with a contact, so no SEC
+ * request is made without it (launch item i60).
+ */
+export function configuredSecUserAgent(env: Record<string, string | undefined> = process.env): string | null {
+    return env.SEC_EDGAR_USER_AGENT?.trim() || null;
+}
+
+export const SEC_USER_AGENT_MISSING = 'SEC_EDGAR_USER_AGENT is not set: SEC asks every client to name itself and a contact.';
+
 const DEFAULT_DATA_BASE_URL = 'https://data.sec.gov';
 const DEFAULT_ARCHIVES_BASE_URL = 'https://www.sec.gov/Archives';
 const DEFAULT_COMPANY_TICKERS_URL = 'https://www.sec.gov/files/company_tickers.json';
+const DEFAULT_EXCHANGE_TICKERS_URL = 'https://www.sec.gov/files/company_tickers_exchange.json';
+const EXCHANGE_TICKER_FIELDS = ['cik', 'name', 'ticker', 'exchange'];
 const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
 const DEFAULT_MAX_JSON_RESPONSE_BYTES = 10 * 1024 * 1024;
+// SEC's rate-limit block lasts minutes; a Retry-After that long fails now.
+const DEFAULT_MAX_RETRY_DELAY_MS = 10_000;
 
 export class SecEdgarClient {
     private readonly userAgent: string;
@@ -74,10 +108,13 @@ export class SecEdgarClient {
     private readonly maxRetries: number;
     private readonly retryBaseDelayMs: number;
     private readonly requestTimeoutMs: number;
+    private readonly maxRetryDelayMs: number;
+    private readonly signal?: AbortSignal;
     private readonly maxJsonResponseBytes: number;
     private readonly dataBaseUrl: string;
     private readonly archivesBaseUrl: string;
     private readonly companyTickersUrl: string;
+    private readonly exchangeTickersUrl: string;
     private lastRequestAt = 0;
     private companyCache: SecCompanyMatch[] | null = null;
 
@@ -87,9 +124,9 @@ export class SecEdgarClient {
             throw new SecEdgarError('configuration', 'No fetch implementation is available for SEC EDGAR requests.');
         }
 
-        this.userAgent = (options.userAgent ?? process.env.SEC_EDGAR_USER_AGENT ?? DEFAULT_USER_AGENT).trim();
+        this.userAgent = (options.userAgent ?? configuredSecUserAgent() ?? '').trim();
         if (!this.userAgent) {
-            throw new SecEdgarError('configuration', 'SEC EDGAR user-agent cannot be empty.');
+            throw new SecEdgarError('configuration', SEC_USER_AGENT_MISSING);
         }
 
         this.fetcher = fetcher;
@@ -98,10 +135,46 @@ export class SecEdgarClient {
         this.maxRetries = options.maxRetries ?? 2;
         this.retryBaseDelayMs = options.retryBaseDelayMs ?? 1_000;
         this.requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+        this.maxRetryDelayMs = options.maxRetryDelayMs ?? DEFAULT_MAX_RETRY_DELAY_MS;
+        this.signal = options.signal;
         this.maxJsonResponseBytes = options.maxJsonResponseBytes ?? DEFAULT_MAX_JSON_RESPONSE_BYTES;
         this.dataBaseUrl = trimTrailingSlash(options.dataBaseUrl ?? DEFAULT_DATA_BASE_URL);
         this.archivesBaseUrl = trimTrailingSlash(options.archivesBaseUrl ?? DEFAULT_ARCHIVES_BASE_URL);
         this.companyTickersUrl = options.companyTickersUrl ?? DEFAULT_COMPANY_TICKERS_URL;
+        this.exchangeTickersUrl = options.exchangeTickersUrl ?? DEFAULT_EXCHANGE_TICKERS_URL;
+    }
+
+    /**
+     * Every ticker in SEC's exchange ticker file (launch item i35's symbol
+     * directory). Rows that aren't a CIK, a name and a ticker are skipped;
+     * a file whose columns aren't the expected ones is refused.
+     */
+    async fetchExchangeTickers(): Promise<SecExchangeTicker[]> {
+        const response = await this.requestJson<SecExchangeTickersResponse>(this.exchangeTickersUrl);
+        const { fields, data } = response ?? {};
+        if (
+            !Array.isArray(fields)
+            || fields.length !== EXCHANGE_TICKER_FIELDS.length
+            || fields.some((field, index) => field !== EXCHANGE_TICKER_FIELDS[index])
+            || !Array.isArray(data)
+        ) {
+            throw new SecEdgarError('malformed_response', `SEC exchange ticker file at ${this.exchangeTickersUrl} has unexpected columns.`);
+        }
+
+        const tickers: SecExchangeTicker[] = [];
+        for (const row of data) {
+            if (!Array.isArray(row)) continue;
+            const [cik, name, ticker, exchange] = row;
+            if (typeof cik !== 'number' || !Number.isInteger(cik) || cik <= 0) continue;
+            if (typeof name !== 'string' || !name.trim() || typeof ticker !== 'string' || !ticker.trim()) continue;
+            tickers.push({
+                cik: String(cik).padStart(10, '0'),
+                name: name.trim(),
+                ticker: ticker.trim().toUpperCase(),
+                exchange: typeof exchange === 'string' && exchange.trim() ? exchange.trim() : null,
+            });
+        }
+        return tickers;
     }
 
     async resolveCik(query: string): Promise<SecCompanyMatch> {
@@ -258,13 +331,16 @@ export class SecEdgarClient {
 
         for (let attempt = 0; attempt <= this.maxRetries; attempt += 1) {
             if (attempt > 0 && lastError) {
-                await this.sleep(lastError.retryAfterMs ?? this.retryBaseDelayMs * attempt);
+                const delayMs = lastError.retryAfterMs ?? this.retryBaseDelayMs * attempt;
+                if (delayMs > this.maxRetryDelayMs) throw lastError;
+                await this.wait(delayMs);
             }
 
+            this.throwIfStopped(url);
             await this.paceRequest();
 
             let response: Response;
-            const timeout = createRequestTimeout(this.requestTimeoutMs);
+            const timeout = createRequestTimeout(this.requestTimeoutMs, this.signal);
             try {
                 response = await this.fetcher(url, {
                     headers: {
@@ -275,6 +351,7 @@ export class SecEdgarClient {
                     signal: timeout.signal,
                 });
             } catch (error) {
+                this.throwIfStopped(url);
                 lastError = new SecEdgarError('network', `SEC EDGAR request failed for ${url}.`, { cause: error });
                 continue;
             } finally {
@@ -290,6 +367,27 @@ export class SecEdgarClient {
         }
 
         throw lastError ?? new SecEdgarError('network', `SEC EDGAR request failed for ${url}.`);
+    }
+
+    /** Sleeps, but no further than the deadline. */
+    private async wait(ms: number): Promise<void> {
+        const signal = this.signal;
+        if (!signal) return this.sleep(ms);
+        if (signal.aborted) return;
+        let stopWaiting!: () => void;
+        const aborted = new Promise<void>((resolve) => { stopWaiting = resolve; });
+        signal.addEventListener('abort', stopWaiting, { once: true });
+        try {
+            await Promise.race([this.sleep(ms), aborted]);
+        } finally {
+            signal.removeEventListener('abort', stopWaiting);
+        }
+    }
+
+    private throwIfStopped(url: string): void {
+        if (this.signal?.aborted) {
+            throw new SecEdgarError('network', `SEC EDGAR request for ${url} stopped: the run is out of time.`);
+        }
     }
 
     private async paceRequest(): Promise<void> {

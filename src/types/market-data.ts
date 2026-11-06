@@ -73,6 +73,16 @@ export interface SymbolResult {
   active: boolean;
 }
 
+/** A ticker search result (launch item i35): what the pickers and ⌘K show. */
+export interface TickerMatch {
+  symbol: string;
+  name: string;
+  /** Where it lists ("Nasdaq", "NYSE", "NYSE Arca", "OTC"), when known. */
+  exchange: string | null;
+  /** In one of the user's own accounts. */
+  held: boolean;
+}
+
 // ---------------------------------------------------------------------------
 // MarketDataProvider — the abstraction every adapter must implement
 // ---------------------------------------------------------------------------

@@ -3,8 +3,11 @@ import assert from 'node:assert';
 import {
     fetchQuotes,
     fetchHistorical,
+    fetchTickerMatches,
+    normalizeTickerSearch,
     quotesQueryKey,
     historicalQueryKey,
+    tickerSearchQueryKey,
 } from './queries.ts';
 
 type FetchCall = { url: string; init?: RequestInit };
@@ -194,5 +197,34 @@ describe('fetchHistorical', () => {
             fetchHistorical('AAPL', '1D'),
             /Failed to fetch historical data \(500\)/,
         );
+    });
+});
+
+describe('ticker search (launch item i35)', () => {
+    afterEach(() => {
+        globalThis.fetch = originalFetch;
+    });
+
+    test('searches share a cache entry however the text is spaced or cased', () => {
+        assert.strictEqual(normalizeTickerSearch('  Apple   INC '), 'apple inc');
+        assert.deepStrictEqual(tickerSearchQueryKey('Apple'), tickerSearchQueryKey(' apple '));
+        assert.strictEqual(normalizeTickerSearch('x'.repeat(100)).length, 80);
+    });
+
+    test('sends the normalized text and keeps only well-formed matches', async () => {
+        const apple = { symbol: 'AAPL', name: 'Apple Inc.', exchange: 'Nasdaq', held: true };
+        mockFetch({
+            ok: true,
+            json: { data: [apple, { symbol: '', name: 'Blank', exchange: null, held: false }, { symbol: 'X', name: 'No held flag', exchange: null }, null] },
+        });
+        assert.deepStrictEqual(await fetchTickerMatches('  Apple  & Co '), [apple]);
+        assert.strictEqual(calls[0].url, '/api/market-data/search?query=apple%20%26%20co');
+    });
+
+    test('a refused search is an error the picker shows as no matches', async () => {
+        mockFetch({ ok: false, status: 503, json: { error: 'Market data is not configured.' } });
+        await assert.rejects(fetchTickerMatches('apple'), /Market data is not configured/);
+        mockFetch({ ok: true, json: { results: [] } });
+        await assert.rejects(fetchTickerMatches('apple'), /Invalid search response/);
     });
 });

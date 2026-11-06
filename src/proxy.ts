@@ -179,6 +179,10 @@ function isSessionBackedApiRoute(pathname: string, method: string): boolean {
     if (pathname === "/api/portfolio/import" && method === "POST") return true;
     if (pathname === "/api/settings" && method === "PUT") return true;
     if (pathname === "/api/ask" && (method === "GET" || method === "POST" || method === "DELETE")) return true;
+    if (pathname === "/api/market-data/search" && method === "GET") return true;
+    if (pathname === "/api/strategies" && method === "POST") return true;
+    if (/^\/api\/strategies\/[^/]+$/.test(pathname) && (method === "PUT" || method === "DELETE")) return true;
+    if (/^\/api\/strategies\/[^/]+\/backtest$/.test(pathname) && method === "POST") return true;
     if (pathname === "/api/research/watchlist" && method === "GET") return true;
     if (pathname === "/api/research/watchlist/import" && method === "POST") return true;
     if (/^\/api\/research\/watchlist\/(?!import$)[^/]+$/.test(pathname) && method === "PUT") return true;
@@ -192,6 +196,9 @@ function isSessionBackedApiRoute(pathname: string, method: string): boolean {
     if (pathname === "/api/alpha-radar/filers" && method === "POST") return true;
     if (/^\/api\/alpha-radar\/filers\/[^/]+\/refresh$/.test(pathname) && method === "POST") return true;
     if (/^\/api\/alpha-radar\/filers\/[^/]+$/.test(pathname) && (method === "PATCH" || method === "DELETE")) return true;
+    if (/^\/api\/alpha-radar\/filers\/[^/]+\/changes$/.test(pathname) && method === "GET") return true;
+    if (pathname === "/api/alpha-radar/follows" && method === "GET") return true;
+    if (/^\/api\/alpha-radar\/follows\/[^/]+$/.test(pathname) && (method === "PUT" || method === "DELETE")) return true;
     return false;
 }
 

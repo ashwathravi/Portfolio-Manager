@@ -11,9 +11,13 @@ export interface RequestTimeout {
 
 const TEXT_ENCODER = new TextEncoder();
 
-export function createRequestTimeout(timeoutMs: number): RequestTimeout {
+/**
+ * A signal that aborts after `timeoutMs`, or as soon as `stop` does (a run's
+ * deadline), whichever comes first.
+ */
+export function createRequestTimeout(timeoutMs: number, stop?: AbortSignal): RequestTimeout {
     if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
-        return { clear: () => undefined };
+        return { signal: stop, clear: () => undefined };
     }
 
     const controller = new AbortController();
@@ -22,7 +26,7 @@ export function createRequestTimeout(timeoutMs: number): RequestTimeout {
     }, timeoutMs);
 
     return {
-        signal: controller.signal,
+        signal: stop ? AbortSignal.any([controller.signal, stop]) : controller.signal,
         clear: () => clearTimeout(timeout),
     };
 }

@@ -152,7 +152,6 @@ test.describe('Market data without a provider key', () => {
         '/api/market-data/history?symbol=AAPL&range=1M',
         '/api/market-data/historical?symbol=AAPL&timeframe=1D',
         '/api/market-data/fundamentals?symbol=AAPL',
-        '/api/market-data/search?query=apple',
     ]) {
         test(`${path.split('?')[0]} answers 503 MARKET_DATA_NOT_CONFIGURED`, async ({ page }) => {
             const response = await page.request.get(path);
@@ -182,6 +181,28 @@ test.describe('Market data without a provider key', () => {
         }
     });
 
+    test('ticker search answers from the symbol directory, or 503 without a database (i35)', async ({ page }) => {
+        const response = await page.request.get('/api/market-data/search?query=apple');
+        if (!dbMode) {
+            expect(response.status()).toBe(503);
+            expect(await response.json()).toEqual(notConfigured);
+            return;
+        }
+        expect(response.status()).toBe(200);
+        // User A holds AAPL; the fixtures' directory names both.
+        expect((await response.json()).data).toEqual([
+            { symbol: 'AAPL', name: 'Apple Inc.', exchange: 'Nasdaq', held: true },
+            { symbol: 'APLE', name: 'Apple Hospitality REIT, Inc.', exchange: 'NYSE', held: false },
+        ]);
+        // Another user's holding (XUSR, user B's) is never anyone else's match.
+        for (const query of ['xusr', 'cross tenant']) {
+            const other = await page.request.get(`/api/market-data/search?query=${encodeURIComponent(query)}`);
+            expect((await other.json()).data).toEqual([]);
+        }
+        const empty = await page.request.get('/api/market-data/search?query=%20');
+        expect(empty.status()).toBe(400);
+    });
+
     test('portfolio valuation lists unpriced holdings instead of failing', async ({ page }) => {
         test.skip(!dbMode, 'requires the database-auth E2E mode');
         const response = await page.request.get('/api/portfolio/00000000-0000-4000-8000-000000000001/value');
@@ -195,15 +216,18 @@ test.describe('Scheduled jobs without CRON_SECRET', () => {
     // The proxy lets /api/cron/* through without a session and the route
     // checks the secret itself. E2E servers have no secret, so it must refuse
     // with 503, not ask for a session (401/redirect) and never run the jobs.
-    test('/api/cron/daily fails closed, with or without a token or session', async ({ playwright, baseURL }) => {
+    test('/api/cron/daily and /api/cron/alpha-radar fail closed, with or without a token or session', async ({ playwright, baseURL }) => {
         const notConfigured = { error: 'Scheduled jobs are not configured.', code: 'CRON_NOT_CONFIGURED' };
         const sessionless = await playwright.request.newContext({ baseURL, storageState: { cookies: [], origins: [] } });
         try {
             const attempts: Array<Record<string, string>> = [{}, { authorization: 'Bearer guess' }];
-            for (const headers of attempts) {
-                const response = await sessionless.get('/api/cron/daily', { headers, maxRedirects: 0 });
-                expect(response.status()).toBe(503);
-                expect(await response.json()).toEqual(notConfigured);
+            // The SEC job's route (launch item i60) is gated the same way.
+            for (const path of ['/api/cron/daily', '/api/cron/alpha-radar']) {
+                for (const headers of attempts) {
+                    const response = await sessionless.get(path, { headers, maxRedirects: 0 });
+                    expect(response.status(), path).toBe(503);
+                    expect(await response.json()).toEqual(notConfigured);
+                }
             }
         } finally {
             await sessionless.dispose();
@@ -227,7 +251,7 @@ test.describe('Scheduled job health', () => {
             expect(body.status).toBe('degraded');
             if (dbMode) {
                 expect(body.database).toBe('ok');
-                expect(body.jobs.map((job: { job: string }) => job.job)).toEqual(['expired-sessions', 'ask-history', 'plaid', 'prices', 'snapshots', 'backup']);
+                expect(body.jobs.map((job: { job: string }) => job.job)).toEqual(['expired-sessions', 'ask-history', 'plaid', 'prices', 'snapshots', 'alpha-radar', 'backup']);
                 for (const job of body.jobs) {
                     expect(Object.keys(job).sort()).toEqual(['dueSince', 'job', 'lastSucceededAt', 'status']);
                     expect(job.status).toBe('late');

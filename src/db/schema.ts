@@ -21,6 +21,9 @@ import {
 } from "drizzle-orm/pg-core";
 import { sql, relations } from "drizzle-orm";
 
+import type { AdherenceRule } from "@/lib/adherence/rules";
+import type { StrategyBacktest, StrategyDefinition } from "@/lib/strategies/strategy";
+
 const serverOnlyNoClientAccessPolicy = () => pgPolicy("server_only_no_client_access", {
     as: "restrictive",
     for: "all",
@@ -304,11 +307,31 @@ export const alphaRadarTrackedFilers = pgTable("alpha_radar_tracked_filers", {
     fundStyle: text("fund_style"),
     enabled: boolean("enabled").default(true).notNull(),
     notes: text("notes"),
+    // When the daily SEC job last asked SEC for its filings (launch item
+    // i60): the job takes the filers it checked longest ago first.
+    lastRefreshedAt: timestamp("last_refreshed_at"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (table) => ({
     slugIdx: uniqueIndex("alpha_radar_tracked_filers_slug_idx").on(table.slug),
     cikIdx: uniqueIndex("alpha_radar_tracked_filers_cik_idx").on(table.cik),
+    serverOnlyNoClientAccess: serverOnlyNoClientAccessPolicy(),
+    appRuntimeAccess: appRuntimeAccessPolicy(),
+})).enableRLS();
+
+// The tracked filers each user follows (launch item i60). Filers are shared;
+// following one is the user's own.
+export const alphaRadarFilerFollows = pgTable("alpha_radar_filer_follows", {
+    userId: text("user_id")
+        .notNull()
+        .references(() => authUsers.id, { onDelete: "cascade" }),
+    trackedFilerId: uuid("tracked_filer_id")
+        .notNull()
+        .references(() => alphaRadarTrackedFilers.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => ({
+    pk: primaryKey({ columns: [table.userId, table.trackedFilerId], name: "alpha_radar_filer_follows_pkey" }),
+    trackedFilerIdx: index("alpha_radar_filer_follows_tracked_filer_idx").on(table.trackedFilerId),
     serverOnlyNoClientAccess: serverOnlyNoClientAccessPolicy(),
     appRuntimeAccess: appRuntimeAccessPolicy(),
 })).enableRLS();
@@ -566,6 +589,26 @@ export const intradayQuotes = pgTable("intraday_quotes", {
     source: text("source").notNull(),
 }, (table) => ({
     claimedAtIdx: index("intraday_quotes_claimed_at_idx").on(table.claimedAt),
+    serverOnlyNoClientAccess: serverOnlyNoClientAccessPolicy(),
+    appRuntimeAccess: appRuntimeAccessPolicy(),
+})).enableRLS();
+
+// Ticker search (launch item i35): every listed US company's ticker and
+// name, from SEC EDGAR's ticker file, replaced by the nightly job. Separate
+// from securities, which holds only what Atlas tracks and prices.
+export const symbolDirectory = pgTable("symbol_directory", {
+    // As the rest of the app writes it: BRK.B, where SEC writes BRK-B.
+    symbol: text("symbol").primaryKey(),
+    name: text("name").notNull(),
+    // SEC's listing venue: "Nasdaq", "NYSE", "CBOE", "OTC"; null when it
+    // has none yet (a company about to list).
+    exchange: text("exchange"),
+    cik: text("cik").notNull(),
+    // The row's place in SEC's file, which lists the largest companies
+    // first: matches that tie on everything else come in this order.
+    position: integer("position").notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, () => ({
     serverOnlyNoClientAccess: serverOnlyNoClientAccessPolicy(),
     appRuntimeAccess: appRuntimeAccessPolicy(),
 })).enableRLS();
@@ -882,6 +925,34 @@ export const orderPlans = pgTable("order_plans", {
     timeInForceCheck: check("order_plans_time_in_force_check", sql`${table.timeInForce} in ('day', 'gtc', 'ioc', 'fok')`),
     statusCheck: check("order_plans_status_check", sql`${table.status} in ('pending_approval', 'ready', 'placed', 'cancelled')`),
     quantityCheck: check("order_plans_quantity_check", sql`${table.quantity} > 0`),
+    serverOnlyNoClientAccess: serverOnlyNoClientAccessPolicy(),
+    appRuntimeAccess: appRuntimeAccessPolicy(),
+})).enableRLS();
+
+// ---------------------------------------------------------------------------
+// Strategies (launch item i55)
+// ---------------------------------------------------------------------------
+
+// A strategy the user built: its definition (rules, tickers, guardrails),
+// its discipline rules and its last backtest, with the definition that ran.
+export const strategies = pgTable("strategies", {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: text("user_id")
+        .notNull()
+        .references(() => authUsers.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    description: text("description").notNull().default(""),
+    definition: jsonb("definition").$type<StrategyDefinition>().notNull(),
+    adherenceRules: jsonb("adherence_rules").$type<AdherenceRule[]>().notNull().default([]),
+    backtest: jsonb("backtest").$type<StrategyBacktest>(),
+    // The page and its count of saves behind the last save: of two saves
+    // from one page, the newer wins even if it arrives first.
+    writeSession: text("write_session"),
+    writeSeq: bigint("write_seq", { mode: "number" }),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => ({
+    userCreatedIdx: index("strategies_user_created_idx").on(table.userId, table.createdAt),
     serverOnlyNoClientAccess: serverOnlyNoClientAccessPolicy(),
     appRuntimeAccess: appRuntimeAccessPolicy(),
 })).enableRLS();
