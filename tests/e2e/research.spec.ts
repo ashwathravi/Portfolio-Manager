@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { gotoAppPage, reloadAppPage, selectAppTab } from './helpers/app';
+import { clickUntil, gotoAppPage, reloadAppPage, selectAppTab } from './helpers/app';
 import { researchLoaded } from './helpers/research';
 import { signInAsFreshUser } from './helpers/users';
 
@@ -269,6 +269,37 @@ test.describe('Research page', () => {
 
         await expect(page.getByRole('tab', { name: 'Alpha Radar' })).toHaveAttribute('aria-selected', 'true');
         await expect(page.getByTestId('alpha-radar-detail')).toBeVisible();
+    });
+
+    test('Alpha Radar\'s example filers are labelled examples', async ({ page }) => {
+        await gotoAppPage(page, '/research?tab=alpha-radar');
+
+        await expect(page.getByTestId('alpha-radar-fallback')).toContainText('Example filers and reports, not real 13F data');
+        await expect(page.getByTestId('alpha-radar-fallback').getByTestId('sample-tag')).toBeVisible();
+        await expect(page.getByTestId('alpha-radar-your-overlap')).toContainText('Your overlap');
+    });
+
+    test('regression (i61): with example data off and no filer tracked, Alpha Radar says so instead of showing examples', async ({ page, context }) => {
+        await signInAsFreshUser(context);
+        await gotoAppPage(page, '/settings');
+        const card = page.getByTestId('example-data-card');
+        const toggle = card.getByRole('checkbox');
+        await expect(toggle).toBeChecked();
+        await clickUntil(card.locator('label.pm-switch'), async () => {
+            await expect(toggle).not.toBeChecked({ timeout: 1000 });
+        });
+
+        await gotoAppPage(page, '/research?tab=alpha-radar');
+        await expect(page.getByTestId('alpha-radar-no-filers')).toHaveText('No filers are tracked yet.');
+        await expect(page.getByTestId('alpha-radar-filer')).toHaveCount(0);
+        const empty = page.getByTestId('alpha-radar-detail-empty');
+        await expect(empty).toContainText(/tracking any 13F filers yet/);
+        await expect(page.getByTestId('alpha-radar-fallback')).toHaveCount(0);
+        await expect(page.getByTestId('alpha-radar-change-row')).toHaveCount(0);
+
+        await empty.getByTestId('alpha-radar-show-examples').click();
+        await expect(page.getByTestId('alpha-radar-filer').first()).toBeVisible();
+        await expect(page.getByTestId('alpha-radar-fallback').getByTestId('sample-tag')).toBeVisible();
     });
 });
 

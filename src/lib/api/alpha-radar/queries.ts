@@ -23,7 +23,9 @@ export const alphaRadarQueryKeys = {
         filingId ?? 'latest',
         reportPeriod ?? 'all',
     ] as const,
-    changes: (filerId: string, reportPeriod?: string) => [...alphaRadarQueryKeys.filers(), filerId, 'changes', reportPeriod ?? 'latest'] as const,
+    /** Every filer's changes: each list is ranked with the user's holdings, watchlist and theses (launch item i61). */
+    allChanges: () => [...alphaRadarQueryKeys.all, 'changes'] as const,
+    changes: (filerId: string, reportPeriod?: string) => [...alphaRadarQueryKeys.allChanges(), filerId, reportPeriod ?? 'latest'] as const,
     reports: (trackedFilerId?: string, reportPeriod?: string, trackedFilerIds?: readonly string[]) => [
         ...alphaRadarQueryKeys.all,
         'reports',
@@ -226,6 +228,9 @@ export function useAlphaRadarChangesQuery(
         queryKey: alphaRadarQueryKeys.changes(filerId, reportPeriod),
         queryFn: () => fetchAlphaRadarChanges(filerId, reportPeriod),
         enabled: Boolean(filerId),
+        // Ranked with the user's holdings, watchlist and theses, which change
+        // elsewhere: read again whenever the list is shown.
+        staleTime: 0,
         ...options,
     });
 }
