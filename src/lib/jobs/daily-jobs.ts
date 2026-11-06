@@ -9,8 +9,11 @@
  * job stopped early). The price job first refreshes the ticker search's
  * symbol directory from SEC (launch item i35): one quick request, taken out
  * of the price budget, and run even before a market data key is set.
+ * Alerts go last, on the closes and holdings the jobs before them stored
+ * (launch item i57).
  */
 
+import { evaluateAlertRules } from "@/lib/alerts/nightly";
 import { pruneAskHistory } from "@/lib/ask/server/history";
 import { DEFAULT_BUDGET_MS, ingestDailyPrices } from "@/lib/markets/price-ingest";
 import { refreshSymbolDirectory } from "@/lib/markets/symbol-directory";
@@ -42,4 +45,5 @@ export const DAILY_JOBS: readonly ScheduledJob[] = [
     { name: "plaid", run: () => syncAllPlaidItems() },
     { name: "prices", run: () => refreshMarketData() },
     { name: "snapshots", run: () => recordValuationSnapshots() },
+    { name: "alerts", run: async () => ({ ...(await evaluateAlertRules()) }) },
 ];

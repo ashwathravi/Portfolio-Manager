@@ -43,46 +43,10 @@ export const preferencesSchema = z.object({
     marketDataRefreshSeconds: z.number().int().min(15, "Minimum 15 seconds").max(3600, "Maximum 60 minutes"),
 });
 
-export const alertRuleSchema = z.object({
-    name: z.string().trim().min(1, "Name is required").max(60, "Name is too long").pipe(safeText),
-    metric: z.enum([
-        'price',
-        'price_change_pct',
-        'portfolio_value',
-        'portfolio_day_change_pct',
-        'alpha_radar_new_position',
-        'alpha_radar_exit',
-        'alpha_radar_large_add',
-        'alpha_radar_large_trim',
-        'alpha_radar_user_overlap',
-    ]),
-    symbol: z.string().trim().toUpperCase().max(10, "Symbol is too long").regex(/^[A-Z.\-]*$/, "Invalid symbol").optional().or(z.literal('')),
-    comparator: z.enum(['gte', 'lte', 'gt', 'lt', 'eq']),
-    threshold: z.number().finite(),
-    enabled: z.boolean(),
-    rearm: z.enum(['once', 'always', 'daily']),
-    note: z.string().trim().max(200, "Note is too long").optional().or(z.literal('')),
-}).superRefine((data, ctx) => {
-    const needsSymbol = data.metric === 'price' || data.metric === 'price_change_pct';
-    const isAlphaRadarMetric = data.metric.startsWith('alpha_radar_');
-    if (needsSymbol && !data.symbol) {
-        ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            message: "Symbol is required for this metric",
-            path: ['symbol'],
-        });
-    }
-    if (isAlphaRadarMetric && (data.threshold < 0 || data.threshold > 100)) {
-        ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            message: "Alpha Radar materiality score must be between 0 and 100",
-            path: ['threshold'],
-        });
-    }
-});
+// The alert rule form lives with the API's rule schema (launch item i57).
+export { alertRuleSchema, type AlertRuleFormValues } from './alerts';
 
 export type ProfileFormValues = z.infer<typeof profileSchema>;
 export type PasswordChangeValues = z.infer<typeof passwordChangeSchema>;
 export type TagFormValues = z.infer<typeof tagSchema>;
 export type PreferencesFormValues = z.infer<typeof preferencesSchema>;
-export type AlertRuleFormValues = z.infer<typeof alertRuleSchema>;

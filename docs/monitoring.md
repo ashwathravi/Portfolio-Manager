@@ -9,7 +9,7 @@ Every half hour, `.github/workflows/production-monitor.yml` runs `scripts/monito
 | Check | Endpoint | Fails when |
 |---|---|---|
 | The site and its database | `/api/health/ready` | No answer, an error page or a redirect (deployment protection, say), or the app can't reach its database or has none configured. |
-| The nightly jobs | `/api/health/jobs` | `expired-sessions`, `ask-history`, `plaid`, `prices` or `snapshots` hasn't succeeded after 22:00 UTC on a weekday by midnight UTC. Vercel Hobby starts the 22:30 cron at any minute of that hour. |
+| The nightly jobs | `/api/health/jobs` | `expired-sessions`, `ask-history`, `plaid`, `prices`, `snapshots` or `alerts` hasn't succeeded after 22:00 UTC on a weekday by midnight UTC. Vercel Hobby starts the 22:30 cron at any minute of that hour. |
 | Alpha Radar's SEC job | `/api/health/jobs` | `alpha-radar` hasn't succeeded after 11:00 UTC by 13:00 UTC (launch item i60). It runs every day; it fails without `SEC_EDGAR_USER_AGENT` or when every filer failed (SEC refusing Atlas, say). |
 | The nightly backup | `/api/health/jobs` | The `backup` workflow hasn't succeeded after 06:00 UTC by 10:00 UTC. It's scheduled at 06:41, and GitHub sometimes starts scheduled runs late. |
 

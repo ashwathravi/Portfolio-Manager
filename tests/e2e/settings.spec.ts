@@ -532,8 +532,12 @@ test.describe('Settings page', () => {
         await gotoAppPage(page, '/settings');
         expect(await accountRowsLeft(userId)).toEqual({ users: 1, sessions: 1, portfolios: expect.any(Number), settings: expect.any(Number) });
 
-        await page.getByTestId('data-management').getByRole('button', { name: 'Delete account' }).click();
+        // The settings sections hydrate inside a Suspense boundary; retry the
+        // click until React has attached handlers.
         const dialog = page.getByRole('alertdialog');
+        await clickUntil(page.getByTestId('data-management').getByRole('button', { name: 'Delete account' }), async () => {
+            await expect(dialog).toBeVisible({ timeout: 1500 });
+        });
         const confirm = dialog.getByRole('button', { name: 'Delete account' });
         await expect(confirm).toBeDisabled();
         await dialog.getByLabel('Type DELETE to confirm').fill('delete');
@@ -571,8 +575,9 @@ test.describe('Settings page', () => {
 
     test('deep-links via ?tab=alerts expose Alpha Radar alert configuration', async ({ page }) => {
         await gotoAppPage(page, '/settings?tab=alerts');
-
-        await expect(page.getByText('Alpha Radar overlap score ≥ 80', { exact: true }).first()).toBeVisible();
+        await expect(page.getByText('Alert Rules', { exact: true })).toBeVisible();
+        // Rules are kept with the account (launch item i57): without a database none can be made.
+        test.skip(!databaseAuthEnabled, 'alert rules are kept with the account');
 
         await clickUntil(page.getByRole('button', { name: /New Alert/ }), async () => {
             await expect(page.getByRole('dialog')).toBeVisible({ timeout: 1500 });

@@ -251,7 +251,7 @@ test.describe('Scheduled job health', () => {
             expect(body.status).toBe('degraded');
             if (dbMode) {
                 expect(body.database).toBe('ok');
-                expect(body.jobs.map((job: { job: string }) => job.job)).toEqual(['expired-sessions', 'ask-history', 'plaid', 'prices', 'snapshots', 'alpha-radar', 'backup']);
+                expect(body.jobs.map((job: { job: string }) => job.job)).toEqual(['expired-sessions', 'ask-history', 'plaid', 'prices', 'snapshots', 'alerts', 'alpha-radar', 'backup']);
                 for (const job of body.jobs) {
                     expect(Object.keys(job).sort()).toEqual(['dueSince', 'job', 'lastSucceededAt', 'status']);
                     expect(job.status).toBe('late');

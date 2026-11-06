@@ -38,10 +38,16 @@ import {
     SelectValue,
 } from "@/components/ui/select";
 import { Plus, Pencil, Trash2, BellRing, BellOff } from "lucide-react";
-import { useAlertsStore } from "@/lib/stores/alertsStore";
 import { describeRule } from "@/lib/alerts/evaluator";
-import { isAlphaRadarAlertMetric } from "@/lib/alerts/metrics";
+import {
+    useAlertRules,
+    useCreateAlertRule,
+    useDeleteAlertRule,
+    useUpdateAlertRule,
+    type AlertRuleBody,
+} from "@/lib/alerts/queries";
 import type { AlertRule, AlertMetric } from "@/lib/alerts/types";
+import { needsSymbol } from "@/lib/validators/alerts";
 import { alertRuleSchema, type AlertRuleFormValues } from "@/lib/validators/settings";
 import { toast } from "sonner";
 
@@ -66,10 +72,46 @@ const COMPARATOR_OPTIONS = [
 ] as const;
 
 const REARM_OPTIONS = [
-    { value: "once", label: "Once (then disable)" },
-    { value: "always", label: "Always" },
-    { value: "daily", label: "Daily (max once/day)" },
+    { value: "daily", label: "Each evening it holds" },
+    { value: "once", label: "Once, then pause" },
+    { value: "always", label: "Every Alpha Radar change" },
 ] as const;
+
+const REARM_BADGES: Record<AlertRule["rearm"], string> = {
+    daily: "Each evening",
+    once: "Once",
+    always: "Every change",
+};
+
+function toBody(values: AlertRuleFormValues): AlertRuleBody {
+    return {
+        name: values.name,
+        metric: values.metric,
+        ...(needsSymbol(values.metric) && values.symbol ? { symbol: values.symbol.toUpperCase() } : {}),
+        comparator: values.comparator,
+        threshold: values.threshold,
+        enabled: values.enabled,
+        rearm: values.rearm,
+        ...(values.note ? { note: values.note } : {}),
+    };
+}
+
+function ruleBody(rule: AlertRule): AlertRuleBody {
+    return {
+        name: rule.name,
+        metric: rule.metric,
+        ...(rule.symbol ? { symbol: rule.symbol } : {}),
+        comparator: rule.comparator,
+        threshold: rule.threshold,
+        enabled: rule.enabled,
+        rearm: rule.rearm,
+        ...(rule.note ? { note: rule.note } : {}),
+    };
+}
+
+function formatFired(iso: string): string {
+    return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
 
 const defaultFormValues: AlertRuleFormValues = {
     name: "",
@@ -78,16 +120,23 @@ const defaultFormValues: AlertRuleFormValues = {
     comparator: "gte",
     threshold: 0,
     enabled: true,
-    rearm: "always",
+    rearm: "daily",
     note: "",
 };
 
+/**
+ * Settings › Alerts: the user's alert rules, kept with the account and
+ * checked by the nightly alerts job (launch item i57).
+ */
 export function AlertRulesManager() {
-    const rules = useAlertsStore((s) => s.rules);
-    const addRule = useAlertsStore((s) => s.addRule);
-    const updateRule = useAlertsStore((s) => s.updateRule);
-    const deleteRule = useAlertsStore((s) => s.deleteRule);
-    const toggleRule = useAlertsStore((s) => s.toggleRule);
+    const rulesQuery = useAlertRules();
+    const createRule = useCreateAlertRule();
+    const updateRule = useUpdateAlertRule();
+    const deleteRule = useDeleteAlertRule();
+    const rules = rulesQuery.data?.rules ?? [];
+    const stored = rulesQuery.data?.stored ?? true;
+    const atLimit = rulesQuery.data ? rules.length >= rulesQuery.data.limit : false;
+    const saving = createRule.isPending || updateRule.isPending;
 
     const [dialogOpen, setDialogOpen] = useState(false);
     const [editing, setEditing] = useState<AlertRule | null>(null);
@@ -127,33 +176,34 @@ export function AlertRulesManager() {
         setDialogOpen(true);
     };
 
-    const onSubmit = (values: AlertRuleFormValues) => {
-        const needsSymbol = values.metric === "price" || values.metric === "price_change_pct";
-        const cleaned = {
-            name: values.name,
-            metric: values.metric,
-            symbol: needsSymbol ? values.symbol?.toUpperCase() || undefined : undefined,
-            comparator: values.comparator,
-            threshold: values.threshold,
-            enabled: values.enabled,
-            rearm: values.rearm,
-            note: values.note || undefined,
-            source: isAlphaRadarAlertMetric(values.metric) ? "alpha_radar" as const : "market" as const,
-        };
-
-        if (editing) {
-            updateRule(editing.id, cleaned);
-            toast.success(`Alert "${values.name}" updated`);
-        } else {
-            addRule(cleaned);
-            toast.success(`Alert "${values.name}" created`);
+    const onSubmit = async (values: AlertRuleFormValues) => {
+        const rule = toBody(values);
+        try {
+            if (editing) {
+                await updateRule.mutateAsync({ id: editing.id, rule });
+                toast.success(`Alert "${values.name}" updated`);
+            } else {
+                await createRule.mutateAsync(rule);
+                toast.success(`Alert "${values.name}" created`);
+            }
+            setDialogOpen(false);
+        } catch (error) {
+            toast.error(error instanceof Error ? error.message : "Couldn't save the alert. Try again.");
         }
-        setDialogOpen(false);
+    };
+
+    const toggleRule = (rule: AlertRule) => {
+        updateRule.mutate(
+            { id: rule.id, rule: { ...ruleBody(rule), enabled: !rule.enabled } },
+            { onError: (error) => toast.error(error.message) },
+        );
     };
 
     const handleDelete = (rule: AlertRule) => {
-        deleteRule(rule.id);
-        toast.success(`Alert "${rule.name}" deleted`);
+        deleteRule.mutate(rule.id, {
+            onSuccess: () => toast.success(`Alert "${rule.name}" deleted`),
+            onError: (error) => toast.error(error.message),
+        });
     };
 
     return (
@@ -162,7 +212,8 @@ export function AlertRulesManager() {
                 <div>
                     <CardTitle>Alert Rules</CardTitle>
                     <CardDescription className="mt-1.5">
-                        Fire a notification when a price, portfolio, or Alpha Radar signal crosses a threshold.{" "}
+                        Get a notification when a close, your accounts, or an Alpha Radar change crosses a threshold.
+                        Rules are kept with your account and checked each weekday evening after the close.{" "}
                         <Link href="/help#alpha-radar-v1" data-testid="alpha-radar-alert-help">
                             Read the Alpha Radar guide.
                         </Link>
@@ -170,7 +221,7 @@ export function AlertRulesManager() {
                 </div>
                 <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
                     <DialogTrigger asChild>
-                        <Button size="sm" onClick={openAdd}>
+                        <Button size="sm" onClick={openAdd} disabled={!stored || atLimit || !rulesQuery.isSuccess}>
                             <Plus className="h-4 w-4 mr-1.5" />
                             New Alert
                         </Button>
@@ -179,7 +230,7 @@ export function AlertRulesManager() {
                         <DialogHeader>
                             <DialogTitle>{editing ? "Edit alert" : "New alert"}</DialogTitle>
                             <DialogDescription>
-                                Threshold rules are evaluated against live market snapshots and Alpha Radar 13F changes.
+                                Checked each weekday evening on that day&apos;s closing prices, and on Alpha Radar 13F changes stored since the last check.
                             </DialogDescription>
                         </DialogHeader>
                         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
@@ -323,19 +374,34 @@ export function AlertRulesManager() {
                                 <Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>
                                     Cancel
                                 </Button>
-                                <Button type="submit">{editing ? "Save" : "Create"}</Button>
+                                <Button type="submit" disabled={saving}>{editing ? "Save" : "Create"}</Button>
                             </DialogFooter>
                         </form>
                     </DialogContent>
                 </Dialog>
             </CardHeader>
             <CardContent>
-                {rules.length === 0 ? (
+                {atLimit && (
+                    <p className="mb-3 text-xs text-muted-foreground" data-testid="alert-rule-limit">
+                        You have {rulesQuery.data?.limit} rules, the most an account can have. Delete one to add another.
+                    </p>
+                )}
+                {rulesQuery.isPending ? (
+                    <p className="py-12 text-center text-sm text-muted-foreground">Loading your alerts…</p>
+                ) : rulesQuery.isError ? (
+                    <p className="py-12 text-center text-sm text-muted-foreground" role="alert">
+                        Couldn&apos;t load your alerts. Reload the page to try again.
+                    </p>
+                ) : !stored ? (
+                    <p className="py-12 text-center text-sm text-muted-foreground" data-testid="alerts-not-stored">
+                        Alert rules are kept with your account, and this server has no database, so none can be saved here.
+                    </p>
+                ) : rules.length === 0 ? (
                     <div className="flex flex-col items-center justify-center py-12 text-center">
                         <BellOff className="h-10 w-10 text-muted-foreground/50 mb-3" />
                         <p className="text-sm font-medium text-muted-foreground">No alerts yet</p>
                         <p className="text-xs text-muted-foreground/70 mt-1">
-                            Create an alert to get notified when prices move.
+                            Create an alert to hear when a close or your accounts cross a level.
                         </p>
                     </div>
                 ) : (
@@ -355,7 +421,7 @@ export function AlertRulesManager() {
                                             </Badge>
                                         )}
                                         <Badge variant="secondary" className="text-xs">
-                                            {rule.rearm}
+                                            {REARM_BADGES[rule.rearm]}
                                         </Badge>
                                     </div>
                                     <p className="text-xs text-muted-foreground mt-1 font-mono">
@@ -364,11 +430,14 @@ export function AlertRulesManager() {
                                     {rule.note && (
                                         <p className="text-xs text-muted-foreground/80 mt-1">{rule.note}</p>
                                     )}
+                                    <p className="text-xs text-muted-foreground/80 mt-1">
+                                        {rule.lastTriggeredAt ? `Last fired ${formatFired(rule.lastTriggeredAt)}` : "Hasn't fired yet"}
+                                    </p>
                                 </div>
                                 <div className="flex items-center gap-1">
                                     <Switch
                                         checked={rule.enabled}
-                                        onCheckedChange={() => toggleRule(rule.id)}
+                                        onCheckedChange={() => toggleRule(rule)}
                                         aria-label={`Toggle ${rule.name}`}
                                     />
                                     <Button
@@ -395,7 +464,7 @@ export function AlertRulesManager() {
                                             <AlertDialogHeader>
                                                 <AlertDialogTitle>Delete &ldquo;{rule.name}&rdquo;?</AlertDialogTitle>
                                                 <AlertDialogDescription>
-                                                    This removes the rule and its trigger history.
+                                                    This removes the rule and the alerts it raised.
                                                 </AlertDialogDescription>
                                             </AlertDialogHeader>
                                             <AlertDialogFooter>

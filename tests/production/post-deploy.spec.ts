@@ -6,7 +6,7 @@ import { expect, test, type Page } from '@playwright/test';
 // (playwright.config.ts), so it stays true to the app. Signed out and
 // read-only: it never signs in, writes nothing and runs no job.
 
-const SCHEDULED_JOBS = ['expired-sessions', 'ask-history', 'plaid', 'prices', 'snapshots', 'alpha-radar', 'backup'];
+const SCHEDULED_JOBS = ['expired-sessions', 'ask-history', 'plaid', 'prices', 'snapshots', 'alerts', 'alpha-radar', 'backup'];
 
 function isLocal(baseURL: string | undefined): boolean {
     return /^(localhost|127\.0\.0\.1|\[::1\])$/.test(new URL(baseURL ?? 'http://localhost').hostname);
