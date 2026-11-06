@@ -9,7 +9,8 @@
  * Body:     { itemId, plaidAccountIds? }
  * Response: 200 { data: { itemId, accounts: [...] } }; 400 INVALID_PLAID_SYNC;
  *           404 PLAID_ITEM_NOT_FOUND; 409 PLAID_LOGIN_REQUIRED or
- *           PLAID_TOKEN_MISSING; 502 PLAID_SYNC_FAILED; 503 PLAID_NOT_CONFIGURED or
+ *           PLAID_TOKEN_MISSING; 429 DAILY_QUOTA_REACHED (the day's syncs; the
+ *           nightly sync isn't counted); 502 PLAID_SYNC_FAILED; 503 PLAID_NOT_CONFIGURED or
  *           PLAID_CONNECTIONS_NOT_STORED;
  *           504 PLAID_SYNC_TIMED_OUT
  */
@@ -17,6 +18,7 @@
 import { NextResponse } from "next/server";
 
 import { readJsonBody } from "@/lib/api/body";
+import { consumeDailyQuota } from "@/lib/api/daily-quota";
 import { apiError, internalServerError, logApiEvent } from "@/lib/api/security";
 import { requireSessionApiUserScope } from "@/lib/api/session-security";
 import { requestIdFrom } from "@/lib/observability/request-id";
@@ -46,6 +48,8 @@ export async function POST(request: Request) {
     }
 
     const { userId } = auth.context;
+    const overQuota = await consumeDailyQuota(userId, "bankSyncs");
+    if (overQuota) return overQuota;
     const { itemId, plaidAccountIds, reconnected } = parsed.data;
     const requestId = requestIdFrom(request.headers);
     try {

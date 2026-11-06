@@ -11,7 +11,8 @@ import {
     resolvePlaidEnvironment,
     sanitizePlaidExchangeForClient,
 } from "@/lib/plaid/link";
-import { plaidConnectionsInDatabase, storePlaidConnection } from "@/lib/plaid/server-token-vault";
+import { MAX_PLAID_CONNECTIONS_PER_USER, plaidConnectionLimitMessage } from "@/lib/plaid/connections";
+import { countPlaidConnectionsForUser, plaidConnectionsInDatabase, storePlaidConnection } from "@/lib/plaid/server-token-vault";
 import { connectedAccountFingerprints } from "@/lib/plaid/sync";
 import type { PlaidLinkMetadata } from "@/lib/plaid/types";
 import { PLAID_EXCHANGE_MAX_BYTES, plaidLinkMetadataSchema } from "@/lib/validators/plaid-sync";
@@ -55,15 +56,8 @@ export async function POST(request: Request) {
             products: readListEnv("PLAID_PRODUCTS", ["investments", "transactions"]),
             selectedAccountIds,
         });
-        const tokenStorage = await storePlaidConnection({
-            exchange,
-            userId: auth.context.userId,
-        });
-        if (!tokenStorage.stored) {
-            // Without its token Atlas could never sync this connection or end
-            // it (storage not set up, or the account deleted while it was
-            // being linked): end it at Plaid now rather than leave its access
-            // open.
+        // End a connection Atlas won't keep at Plaid now, rather than leave its access open.
+        const endAtPlaid = async () => {
             try {
                 await postPlaid({ endpoint: "/item/remove", environment, credentials, fetchImpl: fetch, body: { access_token: exchange.accessToken } });
             } catch (error) {
@@ -72,6 +66,29 @@ export async function POST(request: Request) {
                     error instanceof PlaidApiError ? error.errorCode ?? error.name : error instanceof Error ? error.name : "error",
                 );
             }
+        };
+        // Checked again here, not only for the link token (launch item i77):
+        // one link token can open Link more than once. A count that fails
+        // doesn't fail the link: saving it would fail too, and end it.
+        let atLimit = false;
+        try {
+            atLimit = (await countPlaidConnectionsForUser(auth.context.userId)) >= MAX_PLAID_CONNECTIONS_PER_USER;
+        } catch (error) {
+            console.warn("Plaid exchange: couldn't count the user's connections.", error instanceof Error ? error.name : "error");
+        }
+        if (atLimit) {
+            await endAtPlaid();
+            return apiError(plaidConnectionLimitMessage(), "PLAID_CONNECTION_LIMIT", 409);
+        }
+        const tokenStorage = await storePlaidConnection({
+            exchange,
+            userId: auth.context.userId,
+        });
+        if (!tokenStorage.stored) {
+            // Without its token Atlas could never sync this connection or end
+            // it (storage not set up, or the account deleted while it was
+            // being linked).
+            await endAtPlaid();
             return apiError("Atlas couldn't save this connection, so it was ended. Try linking it again.", "PLAID_CONNECTION_NOT_SAVED", 503);
         }
         // Accounts the user already has through another connection (the same

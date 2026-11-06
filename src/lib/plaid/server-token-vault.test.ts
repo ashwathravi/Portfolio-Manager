@@ -355,6 +355,7 @@ function createTestRegistryStore() {
             revokeConnection: async (input: { userId: string; itemId: string; now: Date }) => {
                 state.revoked = input;
             },
+            countConnections: async () => (state.connection && !state.revoked ? 1 : 0),
         },
     };
 }

@@ -12,7 +12,7 @@ import {
     writeFileSync,
 } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { and, eq, isNull, ne } from "drizzle-orm";
+import { and, count, eq, isNull, ne } from "drizzle-orm";
 import { db } from "@/db";
 import { isDatabaseConfigured } from "@/db/connection-options";
 import { plaidAccounts, plaidItems } from "@/db/schema";
@@ -69,6 +69,8 @@ interface PlaidTokenRegistryStore {
     upsertConnection: (input: PlaidTokenRegistryConnectionInput) => Promise<void>;
     getActiveToken: (input: { userId: string; itemId: string }) => Promise<PlaidTokenRegistryToken | undefined>;
     revokeConnection: (input: { userId: string; itemId: string; now: Date }) => Promise<void>;
+    /** The user's connections that aren't revoked. */
+    countConnections: (input: { userId: string }) => Promise<number>;
 }
 
 const plaidAccessTokenByScope = new Map<string, string>();
@@ -191,6 +193,12 @@ const drizzlePlaidTokenRegistryStore: PlaidTokenRegistryStore = {
                 eq(plaidItems.userId, userId),
                 eq(plaidItems.plaidItemId, itemId),
             ));
+    },
+    async countConnections({ userId }) {
+        const [row] = await db.select({ n: count() })
+            .from(plaidItems)
+            .where(and(eq(plaidItems.userId, userId), ne(plaidItems.status, "revoked"), isNull(plaidItems.revokedAt)));
+        return Number(row?.n ?? 0);
     },
 };
 
@@ -454,6 +462,15 @@ function readEncryptionSecret(): string | undefined {
 
 function readKeyVersion(): string {
     return process.env.PLAID_TOKEN_KEY_VERSION?.trim() || DEFAULT_KEY_VERSION;
+}
+
+/**
+ * How many connections the user has that aren't revoked, as Settings lists
+ * them; none when connections aren't kept in the database.
+ */
+export async function countPlaidConnectionsForUser(userId: string): Promise<number> {
+    if (!plaidConnectionsInDatabase()) return 0;
+    return plaidTokenRegistryStore.countConnections({ userId });
 }
 
 /**

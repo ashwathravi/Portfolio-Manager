@@ -18,6 +18,8 @@ import {
 } from "@/lib/plaid/server-token-vault";
 import type { PlaidPublicTokenExchangeResult } from "@/lib/plaid/types";
 import { resetApiSecurityForTests } from "@/lib/api/security";
+import { createMemoryRateLimitStore, setRateLimitStoreForTests, type RateLimitStore } from "@/lib/api/rate-limit";
+import { MAX_PLAID_CONNECTIONS_PER_USER } from "@/lib/plaid/connections";
 
 const USER_ID = "11111111-1111-4111-8111-111111111111";
 const ORIGINAL_FETCH = globalThis.fetch;
@@ -373,6 +375,166 @@ describe("Plaid API routes", () => {
             assert.ok(!JSON.stringify(warn.mock.calls.map((c) => c.arguments)).includes("access-route-token"));
         });
     }
+
+    // Launch item i77: Plaid charges for each connection, and is called on every sync.
+    test("regression (i77): a new bank link is refused once the user has the most connections, before Plaid is asked; reconnecting one still works", async (t) => {
+        t.mock.method(console, "info", () => {});
+        configurePlaidEnv();
+        process.env.PLAID_TOKEN_STORAGE = "postgres";
+        process.env.PLAID_TOKEN_ENCRYPTION_KEY = "test-only-registry-key";
+        const registry = createTestRegistryStore();
+        setPlaidTokenRegistryStoreForTests(registry.store);
+        const endpoints: string[] = [];
+        globalThis.fetch = (async (url: string | URL | Request) => {
+            const endpoint = String(url);
+            endpoints.push(endpoint.slice(endpoint.lastIndexOf("/")));
+            if (endpoint.endsWith("/item/public_token/exchange")) {
+                return Response.json({ access_token: "access-route-token", item_id: "item-route", request_id: "r" });
+            }
+            if (endpoint.endsWith("/link/token/create")) {
+                return Response.json({ link_token: "link-route-token", expiration: "2026-05-17T10:00:00Z", request_id: "r" });
+            }
+            return Response.json({ accounts: [] });
+        }) as typeof fetch;
+
+        registry.otherConnections = MAX_PLAID_CONNECTIONS_PER_USER - 1;
+        assert.equal((await createLinkToken(authorizedRequest("/api/plaid/link-token"))).status, 200);
+        assert.equal((await exchangePublicToken(authorizedRequest("/api/plaid/exchange-public-token", { publicToken: "public-route-token" }))).status, 200);
+
+        endpoints.length = 0;
+        const refused = await createLinkToken(authorizedRequest("/api/plaid/link-token"));
+        assert.equal(refused.status, 409);
+        assert.deepEqual(await refused.json(), {
+            error: `You can link up to ${MAX_PLAID_CONNECTIONS_PER_USER} institutions. Disconnect one in Settings to link another.`,
+            code: "PLAID_CONNECTION_LIMIT",
+        });
+        assert.deepEqual(endpoints, []);
+
+        // Update mode repairs a connection the user has, so it isn't a new one.
+        const reconnect = await createLinkToken(authorizedRequest("/api/plaid/link-token", { itemId: "item-route" }));
+        assert.equal(reconnect.status, 200);
+    });
+
+    for (const plaidRemoves of [true, false]) {
+        test(`regression (i77): a link token used again past the most connections ends the new one at Plaid (Plaid ${plaidRemoves ? "answers" : "is down"})`, async (t) => {
+            t.mock.method(console, "info", () => {});
+            const warn = t.mock.method(console, "warn", () => {});
+            configurePlaidEnv();
+            process.env.PLAID_TOKEN_STORAGE = "postgres";
+            process.env.PLAID_TOKEN_ENCRYPTION_KEY = "test-only-registry-key";
+            const registry = createTestRegistryStore();
+            registry.otherConnections = MAX_PLAID_CONNECTIONS_PER_USER;
+            setPlaidTokenRegistryStoreForTests(registry.store);
+            const removed: string[] = [];
+            globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+                const endpoint = String(url);
+                if (endpoint.endsWith("/item/public_token/exchange")) {
+                    return Response.json({ access_token: "access-route-token", item_id: "item-route", request_id: "r" });
+                }
+                if (endpoint.endsWith("/item/remove")) {
+                    removed.push(JSON.parse(String(init?.body)).access_token);
+                    return plaidRemoves
+                        ? Response.json({ request_id: "r" })
+                        : Response.json({ error_type: "API_ERROR", error_code: "INTERNAL_SERVER_ERROR", error_message: "down" }, { status: 500 });
+                }
+                return Response.json({ accounts: [] });
+            }) as typeof fetch;
+
+            const response = await exchangePublicToken(authorizedRequest("/api/plaid/exchange-public-token", { publicToken: "public-route-token" }));
+            const body = await response.json();
+
+            assert.equal(response.status, 409);
+            assert.equal(body.code, "PLAID_CONNECTION_LIMIT");
+            assert.deepEqual(removed, ["access-route-token"]);
+            assert.equal(registry.connection, undefined);
+            assert.ok(!JSON.stringify(body).includes("access-route-token"));
+            assert.equal(warn.mock.callCount(), plaidRemoves ? 0 : 1);
+        });
+    }
+
+    test("regression (i77): a connection count that fails still ends the connection at Plaid when it can't be saved", async (t) => {
+        t.mock.method(console, "info", () => {});
+        const warn = t.mock.method(console, "warn", () => {});
+        configurePlaidEnv();
+        process.env.PLAID_TOKEN_STORAGE = "postgres";
+        process.env.PLAID_TOKEN_ENCRYPTION_KEY = "test-only-registry-key";
+        const registry = createTestRegistryStore();
+        // The database gone: neither counting nor saving works.
+        setPlaidTokenRegistryStoreForTests({
+            ...registry.store,
+            countConnections: async () => { throw new Error("connection refused"); },
+            upsertConnection: async () => { throw new Error("connection refused"); },
+        });
+        const removed: string[] = [];
+        globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+            const endpoint = String(url);
+            if (endpoint.endsWith("/item/public_token/exchange")) {
+                return Response.json({ access_token: "access-route-token", item_id: "item-route", request_id: "r" });
+            }
+            if (endpoint.endsWith("/item/remove")) {
+                removed.push(JSON.parse(String(init?.body)).access_token);
+                return Response.json({ request_id: "r" });
+            }
+            return Response.json({ accounts: [] });
+        }) as typeof fetch;
+
+        const response = await exchangePublicToken(authorizedRequest("/api/plaid/exchange-public-token", { publicToken: "public-route-token" }));
+
+        assert.equal(response.status, 503);
+        assert.equal((await response.json()).code, "PLAID_CONNECTION_NOT_SAVED");
+        assert.deepEqual(removed, ["access-route-token"]);
+        assert.equal(warn.mock.callCount(), 1);
+    });
+
+    test("regression (i77): a bank link past the day's is refused before Plaid is asked", async (t) => {
+        t.mock.method(console, "info", () => {});
+        configurePlaidEnv();
+        setRateLimitStoreForTests(quotaSpentStore("bankLinks"));
+        let called = false;
+        globalThis.fetch = (async () => {
+            called = true;
+            return Response.json({});
+        }) as typeof fetch;
+
+        const response = await createLinkToken(authorizedRequest("/api/plaid/link-token"));
+
+        assert.equal(response.status, 429);
+        assert.equal(response.headers.get("Retry-After"), String(3 * 60 * 60));
+        assert.deepEqual(await response.json(), {
+            error: "You can open bank linking up to 10 times a day. Try again in about 3 hours.",
+            code: "DAILY_QUOTA_REACHED",
+        });
+        assert.equal(called, false);
+    });
+
+    test("regression (i77): a sync past the day's is refused before the database is touched", async () => {
+        configureStoredPlaid();
+        setRateLimitStoreForTests(quotaSpentStore("bankSyncs"));
+
+        const response = await syncPlaid(authorizedRequest("/api/plaid/sync", { itemId: "item-route" }));
+
+        assert.equal(response.status, 429);
+        const body = await response.json();
+        assert.equal(body.code, "DAILY_QUOTA_REACHED");
+        assert.match(body.error, /^You can sync your linked accounts up to 20 times a day\. They still sync every night\./);
+    });
+
+    test("regression (i77): a sync that isn't one, or can't happen here, doesn't spend the day's", async () => {
+        let spent = 0;
+        const memory = createMemoryRateLimitStore();
+        setRateLimitStoreForTests({
+            kind: "memory",
+            consume: (key, rule) => {
+                if (key.startsWith("quota:")) spent += 1;
+                return memory.consume(key, rule);
+            },
+        });
+        configurePlaidEnv();
+        assert.equal((await syncPlaid(authorizedRequest("/api/plaid/sync", { itemId: "item-route" }))).status, 503);
+        configureStoredPlaid();
+        assert.equal((await syncPlaid(authorizedRequest("/api/plaid/sync", { itemId: "has space" }))).status, 400);
+        assert.equal(spent, 0);
+    });
 });
 
 // Signs in as the fixed local-bypass principal (non-production only) and
@@ -390,6 +552,17 @@ function configureStoredPlaid(): void {
     configurePlaidEnv();
     process.env.DATABASE_URL = "postgres://atlas_app:pw@db.example.invalid:6543/postgres";
     process.env.PLAID_TOKEN_STORAGE = "postgres";
+}
+
+// The day's `quota` already spent, with three hours until the next day's.
+function quotaSpentStore(quota: string): RateLimitStore {
+    const memory = createMemoryRateLimitStore();
+    return {
+        kind: "memory",
+        consume: (key, rule) => key.startsWith(`quota:${quota}:`)
+            ? Promise.resolve({ allowed: false, retryAfterSeconds: 3 * 60 * 60 })
+            : memory.consume(key, rule),
+    };
 }
 
 function authorizedRequest(pathname: string, body?: unknown): Request {
@@ -427,11 +600,15 @@ function createTestRegistryStore() {
         lastSuccessfulSyncAt: Date;
         now: Date;
     };
-    const state: { connection?: TestConnectionInput } = {};
+    const state: { connection?: TestConnectionInput; otherConnections: number } = { otherConnections: 0 };
 
     return {
         get connection() {
             return state.connection;
+        },
+        /** Connections the user already has besides the one a test links. */
+        set otherConnections(n: number) {
+            state.otherConnections = n;
         },
         store: {
             configured: () => true,
@@ -448,6 +625,7 @@ function createTestRegistryStore() {
                 };
             },
             revokeConnection: async () => {},
+            countConnections: async () => (state.connection ? 1 : 0) + state.otherConnections,
         },
     };
 }
