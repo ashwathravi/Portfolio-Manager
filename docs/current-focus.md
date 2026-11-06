@@ -42,8 +42,6 @@ Retired routes redirect (307): `/portfolios`, `/portfolios/trade-log`,
   during the beta, and Supabase's Data API is off. `CRON_SECRET` and
   `AUTH_ADMIN_EMAILS` were set on 2026-10-30.
 - **Product gaps still on example data or missing:** server-side alerts and
-  email (i57, i58), Alpha Radar relevance per user and an empty state
-  instead of sample filers (i61),
-  and options positions for the LEAPS ledger (i63).
+  email (i57, i58), and options positions for the LEAPS ledger (i63).
 - **Public launch (phase 5):** invite the first users (i75), upgrade plans
   (i76), then open sign-up with per-user quotas (i77).
