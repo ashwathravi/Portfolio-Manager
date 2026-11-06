@@ -196,6 +196,7 @@ function isSessionBackedApiRoute(pathname: string, method: string): boolean {
     if (pathname === "/api/alpha-radar/filers" && method === "POST") return true;
     if (/^\/api\/alpha-radar\/filers\/[^/]+\/refresh$/.test(pathname) && method === "POST") return true;
     if (/^\/api\/alpha-radar\/filers\/[^/]+$/.test(pathname) && (method === "PATCH" || method === "DELETE")) return true;
+    if (/^\/api\/alpha-radar\/filers\/[^/]+\/changes$/.test(pathname) && method === "GET") return true;
     if (pathname === "/api/alpha-radar/follows" && method === "GET") return true;
     if (/^\/api\/alpha-radar\/follows\/[^/]+$/.test(pathname) && (method === "PUT" || method === "DELETE")) return true;
     return false;

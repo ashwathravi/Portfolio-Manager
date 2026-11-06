@@ -31,7 +31,7 @@ function change(input: {
         currentWeight: 0.05,
         weightDelta: 0.04,
         valueDeltaUsd: 500_000_000,
-        userRelevance: { ...BASE_RELEVANCE, thesis: true, reasons: ['active thesis'], matchedTickers: [input.ticker] },
+        userRelevance: { ...BASE_RELEVANCE, portfolio: true, reasons: ['Held in portfolio'], matchedTickers: [input.ticker] },
         displayReason: `${input.issuerName} ${input.changeType} in the 2025-Q4 13F.`,
         ...input,
     };
@@ -130,6 +130,33 @@ describe('generateAlphaRadarThesisDrafts', () => {
         assert.match(draft.title, /Existing thesis review/);
         assert.match(draft.hypothesis, /not a replacement/);
         assert.strictEqual(draft.reviewStatus, 'needs-review');
+    });
+
+    test('regression (i61): a change the user has an active thesis on is a duplicate, though the 13F gave no ticker', () => {
+        const changes = [
+            {
+                ...change({
+                    issuerName: 'APPLE INC',
+                    cusip: '037833100',
+                    ticker: 'AAPL',
+                    changeType: 'increased',
+                    materialityScore: 95,
+                    currentWeight: 0.35,
+                    weightDelta: 0.08,
+                    userRelevance: { ...BASE_RELEVANCE, thesis: true, reasons: ['Linked to active thesis'], matchedTickers: ['AAPL'] },
+                }),
+                ticker: undefined,
+            },
+        ];
+        const [draft] = generateAlphaRadarThesisDrafts({
+            changes,
+            convictionItems: scoreAlphaRadarConviction({ changes }),
+            reportPeriod: '2025-Q4',
+            sourceFilingIds: ['filing-current'],
+        });
+
+        assert.strictEqual(draft.duplicateOfExistingThesis, true);
+        assert.match(draft.title, /Existing thesis review/);
     });
 
     test('filters low-conviction and unchanged ideas from generated drafts', () => {
