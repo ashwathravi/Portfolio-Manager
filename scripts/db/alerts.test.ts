@@ -231,8 +231,9 @@ describe('alerts kept with the account', { skip: !DATABASE_URL && 'SCRIPTS_TEST_
         await change('171232101', 'CB', '2026-11-02 15:00');
 
         await evaluateAlertRules({ database, now: EVENING });
+        // The score with what the watchlist adds, as Research shows it.
         assert.deepEqual((await notifications('u-1')).map((n) => n.message), [
-            'Berkshire Hathaway opened a new position in CB (CB) in 2026-Q3. Materiality 90/100. It\'s on your watchlist.',
+            'Berkshire Hathaway opened a new position in CB (CB) in 2026-Q3. Materiality 97/100. It\'s on your watchlist.',
         ]);
         assert.deepEqual([...await notifications('u-2')], []);
 
@@ -253,6 +254,28 @@ describe('alerts kept with the account', { skip: !DATABASE_URL && 'SCRIPTS_TEST_
         await change('171232101', 'CB', '2026-11-04 15:00');
         await change('X2', 'CB2', '2026-11-04 15:00');
         assert.equal((await evaluateAlertRules({ database, now: new Date('2026-11-04T22:35:00.000Z') })).fired, 0);
+    });
+
+    test('regression: a change SEC stored without a ticker meets the user by the company\'s name', async () => {
+        const [filer] = await sql<{ id: string }[]>`INSERT INTO alpha_radar_tracked_filers (name, slug, cik) VALUES ('Berkshire Hathaway', 'berkshire', '0001067983') RETURNING id`;
+        const [account] = await sql<{ id: string }[]>`INSERT INTO portfolios (user_id, name) VALUES ('u-1', 'Brokerage') RETURNING id`;
+        await sql`INSERT INTO holdings (portfolio_id, symbol, name, quantity, avg_cost, current_price) VALUES (${account.id}, 'AAPL', 'Apple Inc.', 10, 150, 150)`;
+        for (const user of ['u-1', 'u-2']) {
+            await createAlertRule(user, rule({ name: 'On my lists', metric: 'alpha_radar_user_overlap', threshold: 50, rearm: 'always' }), { database, now: new Date('2026-10-01T00:00:00Z') });
+        }
+        // As SEC's refresh stores a 13F: the issuer's name, no ticker.
+        for (const [cusip, issuer] of [['037833100', 'APPLE INC'], ['03784Y200', 'APPLE HOSPITALITY REIT INC']]) {
+            await sql`
+                INSERT INTO alpha_radar_holding_changes (tracked_filer_id, report_period, change_type, issuer_name, cusip, ticker, materiality_score, created_at)
+                VALUES (${filer.id}, '2026-Q3', 'increased', ${issuer}, ${cusip}, NULL, 70, '2026-11-02 15:00')`;
+        }
+
+        await evaluateAlertRules({ database, now: EVENING });
+        assert.deepEqual((await notifications('u-1')).map((n) => n.message), [
+            // 70 with 12 for the holding: past the default delivery minimum of 75, as Research ranks it.
+            'Berkshire Hathaway added to APPLE INC (AAPL) in 2026-Q3. Materiality 82/100. You hold it.',
+        ]);
+        assert.deepEqual([...await notifications('u-2')], []);
     });
 
     test('the feed: newest first, read one or all, others\' IDs ignored, cleared; old alerts pruned', async () => {
