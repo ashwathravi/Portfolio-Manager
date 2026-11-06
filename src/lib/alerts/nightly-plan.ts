@@ -11,8 +11,10 @@
  *     latest close (at cost without one in the last week, as Today counts
  *     them), and a day-change rule on the holdings priced that session.
  * Alpha Radar rules are evaluated on 13F changes Atlas stored since the job
- * last ran (and since the rule was made), with the user's own overlap: the
- * change's ticker in their holdings, watchlist or open theses.
+ * last ran (and since the rule was made), with the user's own overlap, as
+ * Research shows it (../alpha-radar/user-overlap.ts): the company in their
+ * holdings, watchlist or active theses, by ticker or, as a 13F names it, by
+ * name, and the change's score with what that overlap adds.
  *
  * Each rule raises at most one notification an evening, except an Alpha
  * Radar rule set to "always", which raises one per change (up to
@@ -23,6 +25,9 @@
  * which kinds they get: Price Alerts, Portfolio Updates, and Alpha Radar
  * Signals with its in-app channel and delivery filters.
  */
+
+import { alphaRadarRelevanceBoost } from "@/lib/alpha-radar/diff";
+import { buildAlphaRadarOverlapMatcher, NO_USER_OVERLAP, type AlphaRadarUserOverlap } from "@/lib/alpha-radar/user-overlap";
 
 import { compare } from "./evaluator";
 import { isAlphaRadarAlertMetric } from "./metrics";
@@ -57,12 +62,6 @@ export interface UserAccounts {
     cash: number;
     /** `updatedAt`: when the holding last changed (split readiness compares it with split dates). */
     positions: readonly { symbol: string; quantity: number; avgCost: number; updatedAt?: Date }[];
-}
-
-export interface UserOverlap {
-    holdings: ReadonlySet<string>;
-    watchlist: ReadonlySet<string>;
-    theses: ReadonlySet<string>;
 }
 
 export interface AlertableChange {
@@ -102,7 +101,8 @@ export interface AlertPlanInput {
     closes: ReadonlyMap<string, readonly StoredClose[]>;
     /** Per user with at least one account. */
     accounts: ReadonlyMap<string, UserAccounts>;
-    overlap: ReadonlyMap<string, UserOverlap>;
+    /** Per user with an Alpha Radar rule. */
+    overlap: ReadonlyMap<string, AlphaRadarUserOverlap>;
     changes: readonly AlertableChange[];
     preferences: ReadonlyMap<string, AlertPreferences>;
     /** When the job last succeeded: Alpha Radar changes stored before it were seen then. */
@@ -248,31 +248,53 @@ function alphaRadarFirings(rule: PlannedRule, input: AlertPlanInput, preferences
     // A rule set to "daily" that already fired today (a rerun) waits for tomorrow.
     if (rule.rearm === "daily" && rule.lastTriggeredAt?.toISOString().slice(0, 10) === input.runDate) return [];
     const since = input.alphaRadarSince && input.alphaRadarSince > rule.createdAt ? input.alphaRadarSince : rule.createdAt;
-    const overlap = input.overlap.get(rule.userId);
+    const match = buildAlphaRadarOverlapMatcher(input.overlap.get(rule.userId) ?? NO_USER_OVERLAP);
     const notified = input.notified.get(rule.id);
     const delivery = preferences.alphaRadar;
     const matching = input.changes
         .filter((change) => change.createdAt > since && !notified?.has(changeOccurrence(change)))
-        .map((change) => ({ change, reasons: overlapReasons(change, overlap) }))
-        .filter(({ change, reasons }) =>
+        .map((change) => observe(change, match))
+        .filter(({ change, score, reasons, tickers }) =>
             matchesMetric(rule.metric, change, reasons)
-            && compare(change.materialityScore, rule.comparator, rule.threshold)
+            && compare(score, rule.comparator, rule.threshold)
             && (!delivery.overlapOnly || reasons.length > 0)
-            && change.materialityScore >= delivery.minMaterialityScore
-            && (delivery.tickerFilters.length === 0 || (change.ticker !== null && delivery.tickerFilters.includes(change.ticker.toUpperCase())))
+            && score >= delivery.minMaterialityScore
+            && (delivery.tickerFilters.length === 0 || tickers.some((ticker) => delivery.tickerFilters.includes(ticker)))
             && (delivery.trackedFilerIds.length === 0 || delivery.trackedFilerIds.includes(change.trackedFilerId)))
-        .sort((a, b) => b.change.materialityScore - a.change.materialityScore
+        .sort((a, b) => b.score - a.score
             || a.change.createdAt.getTime() - b.change.createdAt.getTime()
             || changeKey(a.change).localeCompare(changeKey(b.change)));
 
     const chosen = rule.rearm === "always" ? matching.slice(0, MAX_CHANGES_PER_RULE) : matching.slice(0, 1);
-    return chosen.map(({ change, reasons }) => firing(
+    return chosen.map((observed) => firing(
         rule,
-        changeOccurrence(change),
-        change.materialityScore,
-        alphaRadarMessage(change, reasons),
+        changeOccurrence(observed.change),
+        observed.score,
+        alphaRadarMessage(observed),
         ALPHA_RADAR_HREF,
     ));
+}
+
+interface ObservedChange {
+    change: AlertableChange;
+    /** The stored score with what the user's overlap adds, as Research shows it. */
+    score: number;
+    reasons: string[];
+    /** The change's ticker, or without one the user's tickers its company matched. */
+    tickers: string[];
+}
+
+function observe(change: AlertableChange, match: ReturnType<typeof buildAlphaRadarOverlapMatcher>): ObservedChange {
+    const matched = match({ issuerName: change.issuerName, ticker: change.ticker ?? undefined });
+    const relevance = { portfolio: matched.portfolio.length > 0, watchlist: matched.watchlist.length > 0, thesis: matched.thesis.length > 0 };
+    const reasons = [
+        relevance.portfolio ? "You hold it" : null,
+        relevance.watchlist ? "It's on your watchlist" : null,
+        relevance.thesis ? "You have a thesis on it" : null,
+    ].filter((reason): reason is string => reason !== null);
+    const own = change.ticker?.trim().toUpperCase();
+    const tickers = own ? [own] : [...new Set([...matched.portfolio, ...matched.watchlist, ...matched.thesis])].sort();
+    return { change, score: Math.min(100, change.materialityScore + alphaRadarRelevanceBoost(relevance)), reasons, tickers };
 }
 
 function changeKey(change: AlertableChange): string {
@@ -282,16 +304,6 @@ function changeKey(change: AlertableChange): string {
 
 function changeOccurrence(change: AlertableChange): string {
     return `change:${changeKey(change)}`;
-}
-
-function overlapReasons(change: AlertableChange, overlap: UserOverlap | undefined): string[] {
-    const ticker = change.ticker?.toUpperCase();
-    if (!ticker || !overlap) return [];
-    return [
-        overlap.holdings.has(ticker) ? "You hold it" : null,
-        overlap.watchlist.has(ticker) ? "It's on your watchlist" : null,
-        overlap.theses.has(ticker) ? "You have a thesis on it" : null,
-    ].filter((reason): reason is string => reason !== null);
 }
 
 function matchesMetric(metric: AlertMetric, change: AlertableChange, reasons: readonly string[]): boolean {
@@ -314,11 +326,11 @@ const CHANGE_VERBS: Record<string, string> = {
     unchanged: "held",
 };
 
-function alphaRadarMessage(change: AlertableChange, reasons: readonly string[]): string {
-    const issuer = change.ticker ? `${change.issuerName} (${change.ticker})` : change.issuerName;
+function alphaRadarMessage({ change, score, reasons, tickers }: ObservedChange): string {
+    const issuer = tickers.length > 0 ? `${change.issuerName} (${tickers.join(", ")})` : change.issuerName;
     const verb = CHANGE_VERBS[change.changeType] ?? change.changeType;
     const why = reasons.length > 0 ? ` ${reasons.join("; ")}.` : "";
-    return `${change.filerName} ${verb} ${issuer} in ${change.reportPeriod}. Materiality ${Math.round(change.materialityScore)}/100.${why}`;
+    return `${change.filerName} ${verb} ${issuer} in ${change.reportPeriod}. Materiality ${Math.round(score)}/100.${why}`;
 }
 
 // ---------------------------------------------------------------------------

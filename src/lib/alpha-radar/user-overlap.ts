@@ -55,7 +55,7 @@ export function applyAlphaRadarUserOverlap<T extends AlphaRadarMemoChange>(
     changes: readonly T[],
     overlap: AlphaRadarUserOverlap,
 ): T[] {
-    const match = buildOverlapMatcher(overlap);
+    const match = buildAlphaRadarOverlapMatcher(overlap);
     return changes
         .map((change, index) => {
             const matched = match(change);
@@ -111,7 +111,7 @@ export async function listAlphaRadarChangesForUser(
         return applyAlphaRadarUserOverlap(top, overlap);
     }
 
-    const match = buildOverlapMatcher(overlap);
+    const match = buildAlphaRadarOverlapMatcher(overlap);
     const listed = new Set(top.map((change) => change.id));
     const ranks = await reader.listHoldingChangeRanks({
         trackedFilerId: query.trackedFilerId,
@@ -131,8 +131,8 @@ export async function listAlphaRadarChangesForUser(
     return applyAlphaRadarUserOverlap([...top, ...more], overlap).slice(0, query.limit);
 }
 
-/** The user's tickers of each kind that a change meets. */
-function buildOverlapMatcher(overlap: AlphaRadarUserOverlap) {
+/** The user's tickers of each kind that a change meets (the nightly alerts job matches with it too). */
+export function buildAlphaRadarOverlapMatcher(overlap: AlphaRadarUserOverlap) {
     const matchers = {
         portfolio: buildMatcher(overlap.portfolio),
         watchlist: buildMatcher(overlap.watchlist),
@@ -187,20 +187,31 @@ export async function loadAlphaRadarUserOverlap(
     userId: string,
     database: Pick<Database, "select"> = db,
 ): Promise<AlphaRadarUserOverlap> {
+    return (await loadAlphaRadarUserOverlaps([userId], database)).get(userId) ?? NO_USER_OVERLAP;
+}
+
+/** loadAlphaRadarUserOverlap for several users at once, each user's apart. */
+export async function loadAlphaRadarUserOverlaps(
+    userIds: readonly string[],
+    database: Pick<Database, "select"> = db,
+): Promise<Map<string, AlphaRadarUserOverlap>> {
+    const result = new Map<string, AlphaRadarUserOverlap>();
+    if (userIds.length === 0) return result;
+    const ids = [...new Set(userIds)];
     const [held, watched, active] = await Promise.all([
         database
-            .select({ ticker: holdings.symbol, name: holdings.name })
+            .select({ userId: portfolios.userId, ticker: holdings.symbol, name: holdings.name })
             .from(holdings)
             .innerJoin(portfolios, eq(holdings.portfolioId, portfolios.id))
-            .where(and(eq(portfolios.userId, userId), sql`${holdings.quantity} <> 0`)),
+            .where(and(inArray(portfolios.userId, ids), sql`${holdings.quantity} <> 0`)),
         database
-            .select({ id: watchlistItems.id, ticker: watchlistItems.ticker, name: watchlistItems.companyName })
+            .select({ userId: watchlistItems.userId, id: watchlistItems.id, ticker: watchlistItems.ticker, name: watchlistItems.companyName })
             .from(watchlistItems)
-            .where(and(eq(watchlistItems.userId, userId), eq(watchlistItems.dismissed, false))),
+            .where(and(inArray(watchlistItems.userId, ids), eq(watchlistItems.dismissed, false))),
         database
-            .select({ id: theses.id, ticker: theses.ticker, name: theses.companyName })
+            .select({ userId: theses.userId, id: theses.id, ticker: theses.ticker, name: theses.companyName })
             .from(theses)
-            .where(and(eq(theses.userId, userId), eq(theses.dismissed, false), eq(theses.status, "active"))),
+            .where(and(inArray(theses.userId, ids), eq(theses.dismissed, false), eq(theses.status, "active"))),
     ]);
     const rows = {
         portfolio: held,
@@ -230,9 +241,13 @@ export async function loadAlphaRadarUserOverlap(
             .map(([ticker, set]) => ({ ticker, names: [...set].sort() }))
             .sort((a, b) => a.ticker.localeCompare(b.ticker));
     };
-    return {
-        portfolio: securities(rows.portfolio),
-        watchlist: securities(rows.watchlist),
-        thesis: securities(rows.thesis),
-    };
+    for (const userId of ids) {
+        const own = <T extends { userId: string }>(list: readonly T[]) => list.filter((row) => row.userId === userId);
+        result.set(userId, {
+            portfolio: securities(own(rows.portfolio)),
+            watchlist: securities(own(rows.watchlist)),
+            thesis: securities(own(rows.thesis)),
+        });
+    }
+    return result;
 }

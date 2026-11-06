@@ -1,6 +1,8 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 
+import { NO_USER_OVERLAP, type AlphaRadarUserOverlap } from '@/lib/alpha-radar/user-overlap';
+
 import {
     DEFAULT_ALERT_PREFERENCES,
     MAX_CHANGES_PER_RULE,
@@ -29,6 +31,13 @@ function rule(overrides: Partial<PlannedRule> = {}): PlannedRule {
         lastTriggeredAt: null,
         ...overrides,
     };
+}
+
+/** What a user holds, watches and has an active thesis on, by ticker and with each company's names. */
+function overlapOf(partial: Partial<Record<keyof AlphaRadarUserOverlap, readonly (string | [string, ...string[]])[]>>): AlphaRadarUserOverlap {
+    const securities = (list: readonly (string | [string, ...string[]])[] = []) =>
+        list.map((item) => (typeof item === 'string' ? { ticker: item, names: [] } : { ticker: item[0], names: item.slice(1) }));
+    return { ...NO_USER_OVERLAP, portfolio: securities(partial.portfolio), watchlist: securities(partial.watchlist), thesis: securities(partial.thesis) };
 }
 
 function plan(overrides: Partial<AlertPlanInput>) {
@@ -193,18 +202,41 @@ describe('planAlertFirings: Alpha Radar', () => {
         assert.deepEqual(fired('alpha_radar_large_trim'), ['change:f-1:2026-Q3:filing-q3:X3:decreased']);
     });
 
-    test('overlap is the user\'s own: tickers they hold, watch or have an open thesis on', () => {
-        const changes = [change(), change({ cusip: 'X2', changeType: 'increased', ticker: 'AAPL', issuerName: 'Apple' })];
+    test('overlap is the user\'s own: what they hold, watch or have an active thesis on, scored as Research scores it', () => {
+        const changes = [change(), change({ cusip: 'X2', changeType: 'increased', ticker: 'AAPL', issuerName: 'Apple', materialityScore: 60 })];
         const overlapRule = radar({ metric: 'alpha_radar_user_overlap' });
         assert.deepEqual(plan({ rules: [overlapRule], changes }), []);
-        const overlap = new Map([['u-1', { holdings: new Set(['AAPL']), watchlist: new Set(['AAPL', 'CB']), theses: new Set<string>() }]]);
+        const overlap = new Map([['u-1', overlapOf({ portfolio: ['AAPL'], watchlist: ['AAPL', 'CB'] })]]);
         const fired = plan({ rules: [overlapRule], changes, overlap });
-        assert.deepEqual(fired.map((f) => f.message), [
-            'Berkshire Hathaway opened a new position in Chubb (CB) in 2026-Q3. Materiality 82/100. It\'s on your watchlist.',
-            'Berkshire Hathaway added to Apple (AAPL) in 2026-Q3. Materiality 82/100. You hold it; It\'s on your watchlist.',
+        // The user's overlap adds to the stored score: 12 held, 7 watched, 7 with a thesis.
+        assert.deepEqual(fired.map((f) => [f.observedValue, f.message]), [
+            [89, 'Berkshire Hathaway opened a new position in Chubb (CB) in 2026-Q3. Materiality 89/100. It\'s on your watchlist.'],
+            [79, 'Berkshire Hathaway added to Apple (AAPL) in 2026-Q3. Materiality 79/100. You hold it; It\'s on your watchlist.'],
         ]);
         // Another user's lists say nothing about this one's.
         assert.deepEqual(plan({ rules: [overlapRule], changes, overlap: new Map([['u-2', overlap.get('u-1')!]]) }), []);
+    });
+
+    test('regression: a 13F change without a ticker meets the user by company name', () => {
+        // As SEC's refresh stores them: issuer names, no tickers.
+        const changes = [
+            change({ cusip: '037833100', ticker: null, issuerName: 'APPLE INC', changeType: 'increased', materialityScore: 60 }),
+            change({ cusip: '03784Y200', ticker: null, issuerName: 'APPLE HOSPITALITY REIT INC', changeType: 'increased', materialityScore: 60 }),
+        ];
+        const overlap = new Map([['u-1', overlapOf({ portfolio: [['AAPL', 'Apple Inc.']] })]]);
+        const fired = plan({ rules: [radar({ metric: 'alpha_radar_user_overlap' })], changes, overlap });
+        assert.deepEqual(fired.map((f) => [f.occurrence.split(':')[4], f.observedValue, f.message]), [
+            ['037833100', 72, 'Berkshire Hathaway added to APPLE INC (AAPL) in 2026-Q3. Materiality 72/100. You hold it.'],
+        ]);
+        // The delivery filters see the same overlap and the ticker it matched.
+        const delivered = (alphaRadar: Partial<AlertPreferences['alphaRadar']>) => plan({
+            rules: [radar({ metric: 'alpha_radar_large_add' })],
+            changes,
+            overlap,
+            preferences: new Map([['u-1', { ...DEFAULT_ALERT_PREFERENCES, alphaRadar: { ...DEFAULT_ALERT_PREFERENCES.alphaRadar, ...alphaRadar } }]]),
+        }).map((f) => f.occurrence.split(':')[4]);
+        assert.deepEqual(delivered({ overlapOnly: true }), ['037833100']);
+        assert.deepEqual(delivered({ tickerFilters: ['AAPL'] }), ['037833100']);
     });
 
     test('"daily" raises the most material new change once a day, "once" the most material change', () => {
@@ -245,13 +277,15 @@ describe('planAlertFirings: Alpha Radar', () => {
         const withDelivery = (alphaRadar: Partial<AlertPreferences['alphaRadar']>) => plan({
             rules: [radar()],
             changes,
-            overlap: new Map([['u-1', { holdings: new Set(['AAPL']), watchlist: new Set<string>(), theses: new Set<string>() }]]),
+            overlap: new Map([['u-1', overlapOf({ portfolio: ['AAPL'] })]]),
             preferences: new Map([['u-1', { ...DEFAULT_ALERT_PREFERENCES, alphaRadar: { ...DEFAULT_ALERT_PREFERENCES.alphaRadar, ...alphaRadar } }]]),
         }).map((f) => f.occurrence.split(':')[4]);
         assert.deepEqual(withDelivery({}), ['171232101', 'X2']);
         assert.deepEqual(withDelivery({ inApp: false }), []);
         assert.deepEqual(withDelivery({ overlapOnly: true }), ['X2']);
-        assert.deepEqual(withDelivery({ minMaterialityScore: 60 }), ['171232101']);
+        // Apple's 55 is 67 with the holding: the score the user sees is the one filtered.
+        assert.deepEqual(withDelivery({ minMaterialityScore: 60 }), ['171232101', 'X2']);
+        assert.deepEqual(withDelivery({ minMaterialityScore: 70 }), ['171232101']);
         assert.deepEqual(withDelivery({ tickerFilters: ['AAPL'] }), ['X2']);
         assert.deepEqual(withDelivery({ trackedFilerIds: ['f-1'] }), ['171232101']);
     });

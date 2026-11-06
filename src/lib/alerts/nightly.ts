@@ -18,7 +18,7 @@
  * old share counts at post-split prices would raise a false alert.
  */
 
-import { and, desc, eq, gt, inArray, lt, ne, or, sql } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, lt, or, sql } from "drizzle-orm";
 
 import { db } from "@/db";
 import {
@@ -29,10 +29,9 @@ import {
     holdings,
     jobRuns,
     portfolios,
-    theses,
     userSettings,
-    watchlistItems,
 } from "@/db/schema";
+import { loadAlphaRadarUserOverlaps, type AlphaRadarUserOverlap } from "@/lib/alpha-radar/user-overlap";
 import { buildRecentClosesQuery, getLatestBarDate } from "@/lib/markets/price-store";
 import { awaitsSplit, buildLatestHoldingSplitsQuery, splitReadiness, type SplitReadiness } from "@/lib/portfolio/valuation-snapshots";
 import { storedAlertPreferences } from "@/lib/settings/alert-preferences";
@@ -47,7 +46,6 @@ import {
     type PlannedRule,
     type StoredClose,
     type UserAccounts,
-    type UserOverlap,
 } from "./nightly-plan";
 
 type Database = typeof db;
@@ -147,28 +145,6 @@ export function accountsOnSessionScale(
     if (!readiness.ready) return { ready: new Map(), waiting: accounts.size };
     const ready = new Map([...accounts].filter(([, user]) => !user.positions.some((p) => awaitsSplit(p, readiness.unadjusted))));
     return { ready, waiting: accounts.size - ready.size };
-}
-
-/** The tickers each user holds, watches or has an open thesis on. */
-async function loadOverlap(userIds: string[], accounts: ReadonlyMap<string, UserAccounts>, database: Database): Promise<Map<string, UserOverlap>> {
-    const overlap = new Map<string, { holdings: Set<string>; watchlist: Set<string>; theses: Set<string> }>();
-    if (userIds.length === 0) return overlap;
-    for (const userId of userIds) {
-        overlap.set(userId, {
-            holdings: new Set(accounts.get(userId)?.positions.map((p) => p.symbol)),
-            watchlist: new Set(),
-            theses: new Set(),
-        });
-    }
-    const [watched, thesisTickers] = await Promise.all([
-        database.select({ userId: watchlistItems.userId, ticker: watchlistItems.ticker }).from(watchlistItems)
-            .where(and(inArray(watchlistItems.userId, userIds), eq(watchlistItems.dismissed, false))),
-        database.select({ userId: theses.userId, ticker: theses.ticker }).from(theses)
-            .where(and(inArray(theses.userId, userIds), eq(theses.dismissed, false), ne(theses.status, "archived"))),
-    ]);
-    for (const row of watched) overlap.get(row.userId)?.watchlist.add(row.ticker.toUpperCase());
-    for (const row of thesisTickers) overlap.get(row.userId)?.theses.add(row.ticker.toUpperCase());
-    return overlap;
 }
 
 /** Alpha Radar changes stored after `after`, with their filer's name. */
@@ -311,7 +287,7 @@ export async function evaluateAlertRules({
     const [session, settingsRows, accounts, lastRun, holdingSplits] = await Promise.all([
         getLatestBarDate(database),
         database.select().from(userSettings).where(inArray(userSettings.userId, userIds)),
-        loadAccounts(uniq([...portfolioUsers, ...alphaUsers]), database),
+        loadAccounts(portfolioUsers, database),
         alphaRules.length > 0 ? buildLastSuccessfulRunQuery(database) : Promise.resolve([]),
         portfolioUsers.length > 0 ? buildLatestHoldingSplitsQuery(database) : Promise.resolve([]),
     ]);
@@ -319,7 +295,7 @@ export async function evaluateAlertRules({
     const readiness = session
         ? splitReadiness(holdingSplits[0]?.holdingSplits, session)
         : { ready: false as const, reason: "no closes stored yet" };
-    const valued = accountsOnSessionScale(new Map([...accounts].filter(([userId]) => portfolioUsers.includes(userId))), readiness);
+    const valued = accountsOnSessionScale(accounts, readiness);
 
     const stored = new Map(settingsRows.map((row) => [row.userId, { version: row.version, settings: row.settings as SettingsDocument["settings"] }]));
     const preferences = new Map<string, AlertPreferences>(userIds.map((userId) => [userId, storedAlertPreferences(stored.get(userId) ?? null)]));
@@ -346,7 +322,7 @@ export async function evaluateAlertRules({
         changes = await buildChangesSinceQuery(earliest, database);
     }
     const [overlap, notified] = await Promise.all([
-        changes.length > 0 ? loadOverlap(alphaUsers, accounts, database) : Promise.resolve(new Map<string, UserOverlap>()),
+        changes.length > 0 ? loadAlphaRadarUserOverlaps(alphaUsers, database) : Promise.resolve(new Map<string, AlphaRadarUserOverlap>()),
         loadNotified(rules, session, database),
     ]);
 
