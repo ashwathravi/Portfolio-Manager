@@ -1,7 +1,7 @@
 /**
  * What the risk policy evaluates, loaded on the server once per page
- * (launch items i52 and i54): the user's portfolio (./portfolio.ts) and
- * their saved policy. Today evaluates them as it renders; Trade and the
+ * (launch items i52 and i54): the user's portfolio (./portfolio.ts), with
+ * their option positions (i63), and their saved policy. Today evaluates them as it renders; Trade and the
  * Settings previews get them from the page and evaluate them with the
  * settings as the user edits them.
  */
@@ -16,6 +16,8 @@ import { loadSecurityProfiles, type SecurityProfile } from "@/lib/markets/securi
 import { loggableError } from "@/lib/observability/loggable-error";
 import { buildDashboardPortfoliosQuery, buildUserTransactionsQuery } from "@/lib/portfolio-repository";
 import { toActivityRows, type ActivityRow } from "@/lib/portfolio/activity";
+import { toOptionRiskPosition } from "@/lib/portfolio/option-positions";
+import { loadOptionPositions } from "@/lib/portfolio/option-positions-store";
 import { isSeedThesis } from "@/lib/research/thesis";
 import { loadQuotes } from "@/lib/services/market-data-service";
 import { storedRiskPolicy } from "@/lib/settings/risk-policy";
@@ -63,10 +65,11 @@ export interface PolicyData {
 
 /** The user's portfolio and transactions; throws when the database fails. */
 export async function loadPolicyData(userId: string, now: Date = new Date()): Promise<PolicyData> {
-    const [accounts, transactions, policyTheses] = await Promise.all([
+    const [accounts, transactions, policyTheses, options] = await Promise.all([
         buildDashboardPortfoliosQuery(userId),
         buildUserTransactionsQuery(userId),
         loadPolicyTheses(userId),
+        loadOptionPositions(userId, { quotes: loadQuotes }),
     ]);
     const symbols = accounts.flatMap((account) => account.holdings.map((holding) => holding.symbol));
     const [quotes, profiles] = await Promise.all([
@@ -75,7 +78,15 @@ export async function loadPolicyData(userId: string, now: Date = new Date()): Pr
     ]);
     const activity = toActivityRows(transactions);
     return {
-        portfolio: buildPolicyPortfolio({ accounts, quotes, profiles, activity, theses: policyTheses, asOf: now }),
+        portfolio: buildPolicyPortfolio({
+            accounts,
+            quotes,
+            profiles,
+            activity,
+            theses: policyTheses,
+            options: options.map(toOptionRiskPosition),
+            asOf: now,
+        }),
         activity,
         profiles,
     };

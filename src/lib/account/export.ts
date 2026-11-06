@@ -15,6 +15,7 @@ import {
     authUsers,
     holdings,
     journalEntries,
+    optionPositions,
     orderPlans,
     plaidAccounts,
     plaidItems,
@@ -57,8 +58,10 @@ export async function buildAccountExport(userId: string, database: Database = db
 
         const accounts = await tx.select().from(portfolios).where(eq(portfolios.userId, userId)).orderBy(asc(portfolios.name), asc(portfolios.id));
         const ids = accounts.map((a) => a.id);
-        const [held, activity, history, historyPositions, plans] = ids.length === 0 ? [[], [], [], [], []] : await Promise.all([
+        const [held, options, activity, history, historyPositions, plans] = ids.length === 0 ? [[], [], [], [], [], []] : await Promise.all([
             tx.select().from(holdings).where(inArray(holdings.portfolioId, ids)).orderBy(asc(holdings.symbol)),
+            tx.select().from(optionPositions).where(and(eq(optionPositions.userId, userId), inArray(optionPositions.portfolioId, ids)))
+                .orderBy(asc(optionPositions.expiry), asc(optionPositions.underlying), asc(optionPositions.id)),
             tx.select().from(transactions).where(inArray(transactions.portfolioId, ids)).orderBy(asc(transactions.timestamp), asc(transactions.id)),
             tx.select().from(portfolioSnapshots).where(inArray(portfolioSnapshots.portfolioId, ids)).orderBy(asc(portfolioSnapshots.date)),
             tx.select().from(portfolioSnapshotPositions).where(inArray(portfolioSnapshotPositions.portfolioId, ids)).orderBy(asc(portfolioSnapshotPositions.symbol)),
@@ -128,6 +131,23 @@ export async function buildAccountExport(userId: string, database: Database = db
                     avgCost: Number(h.avgCost),
                     lastPrice: h.currentPrice,
                     updatedAt: h.updatedAt.toISOString(),
+                })),
+                optionPositions: options.filter((o) => o.portfolioId === account.id).map((o) => ({
+                    underlying: o.underlying,
+                    contractType: o.contractType,
+                    strike: Number(o.strike),
+                    expiry: o.expiry,
+                    quantity: Number(o.quantity),
+                    premium: Number(o.premium),
+                    multiplier: o.multiplier,
+                    openedAt: o.openedAt,
+                    userMark: num(o.userMark),
+                    userMarkDate: o.userMarkDate,
+                    thesisId: o.thesisId,
+                    expiryTest: o.expiryTest,
+                    exitRule: o.exitRule,
+                    source: o.source,
+                    updatedAt: o.updatedAt.toISOString(),
                 })),
                 transactions: activity.filter((t) => t.portfolioId === account.id).map((t) => ({
                     date: t.timestamp.toISOString(),

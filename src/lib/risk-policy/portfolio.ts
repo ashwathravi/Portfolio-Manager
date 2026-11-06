@@ -1,7 +1,8 @@
 /**
  * The user's portfolio as the risk policy reads it (./user-policy.ts), from
  * what the server loaded: every account's holdings valued as Today values
- * them, their cash, their buys and sells, and the theses they wrote.
+ * them, their cash, their buys and sells, the theses they wrote and the
+ * option positions they hold.
  */
 
 import type { ActivityRow } from "@/lib/portfolio/activity";
@@ -10,6 +11,7 @@ import { holdingName } from "@/lib/markets/security-profile";
 import type { Quote } from "@/types/market-data";
 
 import { defaultPolicyBucket } from "./buckets";
+import type { OptionRiskPosition } from "./options";
 import type { SellDisciplineThesis } from "./sell-discipline";
 import type { PolicyPortfolio, PolicyPortfolioHolding } from "./user-policy";
 
@@ -61,6 +63,7 @@ export function buildPolicyPortfolio({
     profiles = new Map(),
     activity = [],
     theses = [],
+    options = [],
     asOf,
 }: {
     accounts: readonly StoredPolicyAccount[];
@@ -68,6 +71,7 @@ export function buildPolicyPortfolio({
     profiles?: ReadonlyMap<string, SecurityProfile>;
     activity?: readonly ActivityRow[];
     theses?: readonly SellDisciplineThesis[];
+    options?: readonly OptionRiskPosition[];
     asOf?: Date;
 }): PolicyPortfolio {
     const since = asOf ? asOf.getTime() - (MAX_CHURN_WINDOW_DAYS + 1) * 86_400_000 : -Infinity;
@@ -99,5 +103,6 @@ export function buildPolicyPortfolio({
                 amount: row.value,
             })),
         theses: [...theses],
+        options: [...options],
     };
 }

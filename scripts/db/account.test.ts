@@ -59,6 +59,7 @@ describe('account deletion and export', { skip: !DATABASE_URL && 'SCRIPTS_TEST_D
         await sql`INSERT INTO portfolio_snapshots (portfolio_id, date, holdings_value, cash, total_value, cost_basis, positions, unpriced) VALUES (${p.id}, '2026-10-23', 1000, 250, 1250, 800, 1, '{}')`;
         await sql`INSERT INTO portfolio_snapshot_positions (portfolio_id, date, symbol, quantity, cost_basis, close, close_date, market_value) VALUES (${p.id}, '2026-10-23', 'AAPL', 10, 800, 100, '2026-10-23', 1000)`;
         await sql`INSERT INTO order_plans (user_id, portfolio_id, instrument_type, symbol, side, order_type, quantity, limit_price, time_in_force, status, reference_price, rationale, created_at, updated_at) VALUES (${user}, ${p.id}, 'equity', 'AAPL', 'buy', 'limit', 5, 95, 'day', 'ready', 100, ${JSON.stringify({ thesisId: 't-1', setupType: 'breakout', conviction: 7, mood: 'calm', rationale: 'add on the dip', capturedAt: '2026-10-24T14:00:00.000Z', timeToDecisionMs: 1000 })}::jsonb, '2026-10-24 14:00', '2026-10-24 14:00')`;
+        await sql`INSERT INTO option_positions (user_id, portfolio_id, contract, underlying, contract_type, strike, expiry, quantity, premium, thesis_id, exit_rule) VALUES (${user}, ${p.id}, 'O:AAPL270115C00250000', 'AAPL', 'call', 250, '2027-01-15', 3, 18.2, 't-1', 'Exit at half')`;
         await sql`INSERT INTO user_settings (user_id, version, settings) VALUES (${user}, 15, ${JSON.stringify({ demo: { showSampleData: false } })}::jsonb)`;
         await sql`INSERT INTO alpha_radar_tracked_filers (name, slug, cik) VALUES ('Followed filer', 'followed-filer', '0000000002') ON CONFLICT DO NOTHING`;
         await sql`INSERT INTO alpha_radar_filer_follows (user_id, tracked_filer_id) SELECT ${user}, id FROM alpha_radar_tracked_filers WHERE slug = 'followed-filer'`;
@@ -91,6 +92,7 @@ describe('account deletion and export', { skip: !DATABASE_URL && 'SCRIPTS_TEST_D
                 (SELECT count(*) FROM holdings h JOIN portfolios p ON p.id = h.portfolio_id WHERE p.user_id = ${user})::int AS holdings,
                 (SELECT count(*) FROM portfolio_snapshot_positions s JOIN portfolios p ON p.id = s.portfolio_id WHERE p.user_id = ${user})::int AS snapshot_positions,
                 (SELECT count(*) FROM order_plans WHERE user_id = ${user})::int AS order_plans,
+                (SELECT count(*) FROM option_positions WHERE user_id = ${user})::int AS option_positions,
                 (SELECT count(*) FROM user_settings WHERE user_id = ${user})::int AS settings,
                 (SELECT count(*) FROM watchlist_items WHERE user_id = ${user})::int AS watchlist,
                 (SELECT count(*) FROM journal_entries WHERE user_id = ${user})::int AS journal,
@@ -136,6 +138,10 @@ describe('account deletion and export', { skip: !DATABASE_URL && 'SCRIPTS_TEST_D
             date: '2026-10-23', totalValue: 1250, holdingsValue: 1000, cash: 250, costBasis: 800,
             positions: [{ symbol: 'AAPL', quantity: 10, costBasis: 800, close: 100, closeDate: '2026-10-23', marketValue: 1000 }],
         }]);
+        // Option positions (launch item i63), as entered.
+        assert.deepEqual(account.optionPositions.map((o) => [o.underlying, o.contractType, o.strike, o.expiry, o.quantity, o.premium, o.thesisId, o.exitRule, o.source]), [
+            ['AAPL', 'call', 250, '2027-01-15', 3, 18.2, 't-1', 'Exit at half', 'manual'],
+        ]);
         // What the user drafted on Trade, with the reasons they gave.
         assert.deepEqual(account.orderPlans.map((o) => [o.ticker, o.side, o.type, o.quantity, o.limitPrice, o.status, o.referencePrice, o.rationale?.rationale, o.createdAt]), [
             ['AAPL', 'buy', 'limit', 5, 95, 'ready', 100, 'add on the dip', '2026-10-24T14:00:00.000Z'],

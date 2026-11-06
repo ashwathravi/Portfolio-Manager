@@ -8,10 +8,10 @@ import {
     resolvePolicyBucketAssignment,
 } from "./buckets";
 import {
-    DEFAULT_OPTION_RISK_POSITIONS,
     DEFAULT_OPTIONS_RISK_POLICY,
     type OptionRiskPosition,
     type OptionsRiskPolicy,
+    optionPolicyHoldings,
     optionPremiumAtRisk,
 } from "./options";
 import {
@@ -167,10 +167,14 @@ export function evaluatePreTradeRiskPolicy(input: PreTradeRiskPolicyInput): PreT
     const employerSymbols = new Set((input.employerSymbols ?? []).map(normalizeSymbol).filter(Boolean));
     const tradeHolding = holdingForTrade(trade, tradeValue, holdings, employerSymbols);
     const bucketAssignment = resolvePolicyBucketAssignment(tradeHolding);
-    const currentBucketAllocation = computeBucketAllocation(holdings, input.bucketPolicies ?? DEFAULT_BUCKET_POLICIES);
-    const postHoldings = buildPostTradeHoldings(holdings, tradeHolding, tradeValue, trade.side);
+    // The options held count in the buckets and themes as Today counts them
+    // (launch item i63); the trade changes only the stock holdings.
+    const optionHoldings = optionPolicyHoldings(input.existingOptionPositions ?? []);
+    const currentHoldings = [...holdings, ...optionHoldings];
+    const currentBucketAllocation = computeBucketAllocation(currentHoldings, input.bucketPolicies ?? DEFAULT_BUCKET_POLICIES);
+    const postHoldings = [...buildPostTradeHoldings(holdings, tradeHolding, tradeValue, trade.side), ...optionHoldings];
     const postBucketAllocation = computeBucketAllocation(postHoldings, input.bucketPolicies ?? DEFAULT_BUCKET_POLICIES);
-    const currentThemeExposure = computeThemeExposure(holdings, input.themeCaps ?? DEFAULT_THEME_CAPS);
+    const currentThemeExposure = computeThemeExposure(currentHoldings, input.themeCaps ?? DEFAULT_THEME_CAPS);
     const postThemeExposure = computeThemeExposure(postHoldings, input.themeCaps ?? DEFAULT_THEME_CAPS);
 
     const checks: PreTradeRiskPolicyCheck[] = [
@@ -195,7 +199,7 @@ export function evaluatePreTradeRiskPolicy(input: PreTradeRiskPolicyInput): PreT
             trade,
             tradeValue,
             portfolioValue,
-            existingOptionPositions: input.existingOptionPositions ?? DEFAULT_OPTION_RISK_POSITIONS,
+            existingOptionPositions: input.existingOptionPositions ?? [],
             policy: input.optionsRiskPolicy,
         }),
         buildMissingBucketCheck({ trade, bucketAssignment, tradeValue, portfolioValue }),

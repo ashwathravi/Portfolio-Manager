@@ -131,41 +131,6 @@ export const DEFAULT_OPTIONS_RISK_POLICY: OptionsRiskPolicy = {
     expiryClusterMaxPremiumPct: 1,
 };
 
-export const DEFAULT_OPTION_RISK_POSITIONS: readonly OptionRiskPosition[] = [
-    {
-        id: "opt-aapl-2027-250c",
-        underlying: "AAPL",
-        contractType: "call",
-        strike: 250,
-        expiry: "2027-01-15",
-        quantity: 3,
-        premiumPaid: 18.2,
-        currentPremium: 14.5,
-        underlyingPrice: 182.45,
-        linkedThesisId: "seed-aapl-services",
-        thesisTitle: "Services margin expansion",
-        whatMustBeTrueByExpiry: "AI and services growth must re-rate earnings before January 2027.",
-        plannedExitRule: "Exit if premium loses 50% or roll 90 days before expiry.",
-        account: "Taxable brokerage",
-        openedAt: "2026-02-01",
-    },
-    {
-        id: "opt-rivn-2027-25c",
-        underlying: "RIVN",
-        contractType: "call",
-        strike: 25,
-        expiry: "2027-01-16",
-        quantity: 30,
-        premiumPaid: 4.4,
-        currentPremium: 1.9,
-        underlyingPrice: 14.2,
-        whatMustBeTrueByExpiry: "Delivery growth and gross margin need to inflect before the 2027 cycle.",
-        plannedExitRule: "Close before 120 days to expiry unless thesis is re-underwritten.",
-        account: "Taxable brokerage",
-        openedAt: "2026-03-12",
-    },
-];
-
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 export function computeOptionRiskLedger(input: OptionRiskLedgerInput): OptionRiskLedgerSummary {
@@ -388,6 +353,38 @@ export function optionCurrentValue(position: OptionRiskPosition): number {
         safeMultiplier(position.contractMultiplier) *
         safeMoney(position.currentPremium),
     );
+}
+
+/**
+ * What a position adds to the portfolio's worth: its value when bought, and
+ * minus what it would cost to buy back when written (a liability, not an
+ * asset). optionCurrentValue is the gross amount either way.
+ */
+export function optionNetValue(position: OptionRiskPosition): number {
+    const value = optionCurrentValue(position);
+    return position.quantity < 0 ? -value : value;
+}
+
+/**
+ * Bought options as the bucket and theme checks hold them, on Today and
+ * Trade alike: speculative, at their current value, under their underlying.
+ * A written one is a liability, not a holding (optionNetValue).
+ */
+export function optionPolicyHoldings(positions: readonly OptionRiskPosition[]) {
+    return positions
+        .filter((position) => position.quantity > 0)
+        .map((position) => {
+            const underlying = normalizeSymbol(position.underlying);
+            return {
+                id: position.id,
+                symbol: underlying,
+                name: formatOptionSymbol(underlying, position.expiry, position.contractType, position.strike),
+                marketValue: optionCurrentValue(position),
+                policyBucket: "speculative" as const,
+                instrumentType: `${position.contractType} option`,
+            };
+        })
+        .filter((holding) => holding.marketValue > 0);
 }
 
 export function optionPremiumAtRisk(position: Pick<OptionRiskPosition, "quantity" | "premiumPaid" | "contractMultiplier">): number {

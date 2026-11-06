@@ -12,6 +12,7 @@ import {
     DialogTitle,
 } from "@/components/ui/dialog";
 import { parseHoldingsCsv, type ParseResult } from "@/lib/portfolio/csvImport";
+import { describeOptionContract } from "@/lib/portfolio/option-positions";
 import { formatQty, formatUsd } from "@/lib/format";
 
 export interface ImportAccountOption {
@@ -24,7 +25,8 @@ const NEW_ACCOUNT = "__new__";
 /**
  * Holdings › Import CSV. Choose a positions export from your broker, check
  * what was read (and what was not), pick the account, then import. Nothing
- * is sent until the user confirms the preview.
+ * is sent until the user confirms the preview. Option rows go to the LEAPS
+ * ledger (launch item i63).
  */
 export function ImportHoldingsDialog({
     accounts,
@@ -65,7 +67,9 @@ export function ImportHoldingsDialog({
     };
 
     const rows = useMemo(() => parsed?.rows ?? [], [parsed]);
-    const canImport = rows.length > 0 && parsed?.issues.length === 0 && !submitting && (target !== NEW_ACCOUNT || newName.trim().length > 0);
+    const options = useMemo(() => parsed?.options ?? [], [parsed]);
+    const total = rows.length + options.length;
+    const canImport = total > 0 && parsed?.issues.length === 0 && !submitting && (target !== NEW_ACCOUNT || newName.trim().length > 0);
 
     const submit = async () => {
         if (!canImport) return;
@@ -78,6 +82,7 @@ export function ImportHoldingsDialog({
                 body: JSON.stringify({
                     ...(target === NEW_ACCOUNT ? { newPortfolioName: newName.trim() } : { portfolioId: target }),
                     rows,
+                    options,
                 }),
             });
             const body = await res.json().catch(() => ({}));
@@ -86,9 +91,12 @@ export function ImportHoldingsDialog({
                 setSubmitting(false);
                 return;
             }
-            const d = body.data as { insert: number; update: number; unchanged: number };
+            const d = body.data as { insert: number; update: number; unchanged: number; options: { insert: number; update: number; unchanged: number } };
+            const optionsNote = options.length > 0
+                ? ` Option positions: ${d.options.insert} new, ${d.options.update} updated${d.options.unchanged ? `, ${d.options.unchanged} unchanged` : ""}.`
+                : "";
             toast.success(
-                `Imported ${rows.length} position${rows.length === 1 ? "" : "s"}: ${d.insert} new, ${d.update} updated${d.unchanged ? `, ${d.unchanged} unchanged` : ""}.`,
+                `Imported ${total} position${total === 1 ? "" : "s"}: ${d.insert} new, ${d.update} updated${d.unchanged ? `, ${d.unchanged} unchanged` : ""}.${optionsNote}`,
             );
             setOpen(false);
             reset();
@@ -132,7 +140,8 @@ export function ImportHoldingsDialog({
                         <DialogDescription>
                             Use your broker&apos;s positions export. Atlas reads the symbol, quantity, and average cost
                             (or total cost basis). A symbol you already hold in the chosen account is replaced; other
-                            positions are left alone.
+                            positions are left alone. Option rows go to the LEAPS ledger, priced per share from the total
+                            cost basis, or else the average cost; check the preview.
                         </DialogDescription>
                     </DialogHeader>
 
@@ -156,7 +165,8 @@ export function ImportHoldingsDialog({
                         {parsed && (
                             <div className="pm-import-preview" data-testid="import-preview">
                                 <p className="pm-import-summary">
-                                    {fileName}: {rows.length} position{rows.length === 1 ? "" : "s"} ready
+                                    {fileName}: {rows.length} position{rows.length === 1 ? "" : "s"}
+                                    {options.length > 0 && ` and ${options.length} option position${options.length === 1 ? "" : "s"}`} ready
                                     {parsed.issues.length > 0 && `, ${parsed.issues.length} ${parsed.issues.length === 1 ? "row needs" : "rows need"} attention`}
                                     {parsed.skipped > 0 && `, ${parsed.skipped} cash or total row${parsed.skipped === 1 ? "" : "s"} skipped`}.
                                 </p>
@@ -185,6 +195,31 @@ export function ImportHoldingsDialog({
                                         {rows.length > 50 && <p className="pm-import-more">…and {rows.length - 50} more</p>}
                                     </div>
                                 )}
+                                {options.length > 0 && (
+                                    <div className="pm-table-scroll pm-import-table">
+                                        <table className="pm-table-full" aria-label="Option positions to import">
+                                            <thead>
+                                                <tr>
+                                                    <th scope="col">Option</th>
+                                                    <th scope="col" className="num">Contracts</th>
+                                                    <th scope="col" className="num">Premium / share</th>
+                                                    <th scope="col" className="num">Cost</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {options.slice(0, 50).map((o) => (
+                                                    <tr key={`${o.underlying}-${o.expiry}-${o.contractType}-${o.strike}`}>
+                                                        <td>{describeOptionContract(o)}</td>
+                                                        <td className="num">{formatQty(o.quantity)}</td>
+                                                        <td className="num">{formatUsd(o.premium)}</td>
+                                                        <td className="num">{formatUsd(Math.abs(o.quantity) * o.premium * 100)}</td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                        {options.length > 50 && <p className="pm-import-more">…and {options.length - 50} more</p>}
+                                    </div>
+                                )}
                                 {parsed.issues.length > 0 && (
                                     <>
                                         <p role="alert">Fix the listed issues and upload the CSV again before importing.</p>
@@ -200,7 +235,7 @@ export function ImportHoldingsDialog({
                             </div>
                         )}
 
-                        {rows.length > 0 && (
+                        {total > 0 && (
                             <div className="pm-import-target">
                                 <label className="pm-exec-field">
                                     <span className="pm-exec-field-label">Import into</span>
@@ -246,7 +281,7 @@ export function ImportHoldingsDialog({
                             Cancel
                         </button>
                         <button type="button" className="pm-btn pm-btn-primary" disabled={!canImport} onClick={submit}>
-                            {submitting ? "Importing…" : rows.length > 0 ? `Import ${rows.length} position${rows.length === 1 ? "" : "s"}` : "Import"}
+                            {submitting ? "Importing…" : total > 0 ? `Import ${total} position${total === 1 ? "" : "s"}` : "Import"}
                         </button>
                     </DialogFooter>
                 </DialogContent>

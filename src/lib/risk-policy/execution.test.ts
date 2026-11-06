@@ -354,4 +354,29 @@ describe("pre-trade risk policy evaluator", () => {
         assert.equal(buildRiskPolicyExceptions(result.failedChecks, "NVDA", "short").length, 0);
         assert.ok(buildRiskPolicyExceptions(result.failedChecks, "NVDA", "Documented exception for test.").length > 0);
     });
+
+    test("regression: options held count in the theme checks, as on Today (launch item i63)", () => {
+        // $80,000 cash and $20,000 of NVDA calls, a 10% semiconductor cap,
+        // and a $5,000 NVDA stock buy: 9% to 11.25% of semiconductors.
+        const calls = {
+            id: "nvda-calls", underlying: "NVDA", contractType: "call" as const, strike: 150, expiry: "2027-01-15",
+            quantity: 4, premiumPaid: 40, currentPremium: 50,
+        };
+        const evaluate = (existingOptionPositions: (typeof calls)[]) => evaluatePreTradeRiskPolicy({
+            holdings: [],
+            portfolioValue: 100_000,
+            trade: { ticker: "NVDA", side: "buy", quantity: 10, price: 500 },
+            themeCaps: { semiconductors: 10 },
+            existingOptionPositions,
+            asOf: "2026-11-05",
+        });
+        const semis = evaluate([calls]).checks.find((check) => check.label === "Semiconductors cap");
+        assert.equal(semis?.status, "fail");
+        assert.equal(semis?.currentPct, 9);
+        assert.equal(semis?.postPct, 11.25);
+        // A written call is a liability, not exposure the checks count.
+        const written = evaluate([{ ...calls, quantity: -4 }]).checks.find((check) => check.label === "Semiconductors cap");
+        assert.equal(written?.status, "pass");
+        assert.equal(written?.currentPct, 0);
+    });
 });

@@ -221,3 +221,10 @@ VALUES
   ('IBM', 'INTERNATIONAL BUSINESS MACHINES CORP', 'NYSE', '0000051143', 60),
   ('APLE', 'Apple Hospitality REIT, Inc.', 'NYSE', '0001418121', 1525)
 ON CONFLICT (symbol) DO NOTHING;
+
+-- The LEAPS ledger (launch item i63): one option contract's close, as the
+-- nightly job stores it. No fixture user holds an option; a test that adds
+-- this contract sees it marked at the close.
+INSERT INTO option_marks (contract, close, close_date, checked_session, checked_at, source)
+VALUES ('O:NVDA270115C00150000', 31.25, '2026-10-01', '2026-10-01', '2026-10-01 22:30:00', 'e2e')
+ON CONFLICT (contract) DO NOTHING;

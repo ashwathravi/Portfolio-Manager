@@ -2053,6 +2053,24 @@
   min-width: min(460px, 100%);
 }
 
+.pm-options-ledger-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.pm-options-row-actions {
+  display: flex;
+  gap: 4px;
+  justify-content: flex-end;
+}
+
+.pm-options-ledger-table .num .pm-options-contract {
+  align-items: flex-end;
+}
+
 .pm-options-ledger-metric {
   min-width: 0;
   padding: 10px;
@@ -2079,6 +2097,9 @@
 }
 
 .pm-options-ledger-table-wrap {
+  /* Holds the screen-reader-only header inside the scrolled table, rather
+     than at its place across the page, where it widened a phone's page. */
+  position: relative;
   overflow-x: auto;
 }
 
@@ -2124,6 +2145,7 @@
 .pm-options-contract-symbol {
   color: var(--pm-fg);
   font-weight: 700;
+  white-space: nowrap;
 }
 
 .pm-options-contract-sub,
@@ -2600,6 +2622,11 @@
     width: 100%;
     min-width: 0;
     grid-template-columns: 1fr;
+  }
+
+  .pm-options-ledger-actions {
+    width: 100%;
+    justify-content: flex-start;
   }
 }
 

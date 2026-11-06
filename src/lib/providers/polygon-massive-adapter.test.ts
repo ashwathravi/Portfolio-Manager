@@ -466,6 +466,43 @@ describe('PolygonMassiveAdapter', () => {
       assert.equal(await provider.getTickerReference('ZZZZZ'), null);
     });
 
+    test("an option contract's newest close in the window, dated in New York (launch item i63)", async () => {
+      const { fetch, calls } = fakeFetch((url) => {
+        if (url.includes('O%3AAAPL270115C00250000')) {
+          return {
+            body: {
+              status: 'OK',
+              // Newest first, as asked; midnight New York time (04:00Z in summer).
+              results: [
+                { t: Date.parse('2026-10-16T04:00:00Z'), o: 21, h: 22, l: 20.5, c: 21.4, v: 12 },
+                { t: Date.parse('2026-10-15T04:00:00Z'), o: 20, h: 21, l: 19.5, c: 20.1, v: 3 },
+              ],
+            },
+          };
+        }
+        return { body: { status: 'OK', resultsCount: 0 } };
+      });
+      const provider = adapter(fetch);
+
+      assert.deepEqual(await provider.getLatestOptionClose('O:AAPL270115C00250000', '2026-09-16', '2026-10-16'), { date: '2026-10-16', close: 21.4 });
+      assert.equal(
+        calls[0],
+        `${BASE}/v2/aggs/ticker/O%3AAAPL270115C00250000/range/1/day/2026-09-16/2026-10-16?adjusted=true&sort=desc&limit=10&apiKey=${KEY}`,
+      );
+      // No trade in the window.
+      assert.equal(await provider.getLatestOptionClose('O:RIVN270115C00025000', '2026-09-16', '2026-10-16'), null);
+    });
+
+    test('an option close: a plan without options answers 403, and only contract tickers are asked about', async () => {
+      const { fetch, calls } = fakeFetch(() => ({ status: 403, body: { status: 'NOT_AUTHORIZED' } }));
+      const provider = adapter(fetch);
+
+      await assert.rejects(provider.getLatestOptionClose('O:AAPL270115C00250000', '2026-09-16', '2026-10-16'),
+        (err: unknown) => err instanceof PolygonApiError && err.status === 403);
+      await assert.rejects(provider.getLatestOptionClose('AAPL', '2026-09-16', '2026-10-16'), /not an option contract ticker/);
+      assert.equal(calls.length, 1);
+    });
+
     test('daily history counts the rows it had to leave out; charts get the same bars', async () => {
       const { fetch } = fakeFetch(() => ({
         body: {
