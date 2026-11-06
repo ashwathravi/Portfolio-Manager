@@ -10,7 +10,8 @@ import {
     authUsers,
     authVerificationTokens,
 } from "@/db/schema";
-import { isGoogleProfileAllowed, isSessionEmailAllowed } from "@/lib/auth/access";
+import { isGoogleProfileAllowed, isOpenSignup, isSessionEmailAllowed } from "@/lib/auth/access";
+import { admitNewAccount, hasGoogleAccount, signInDecision } from "@/lib/auth/new-accounts";
 import { SESSION_MAX_AGE_SECONDS, SESSION_UPDATE_AGE_SECONDS } from "@/lib/auth/session-policy";
 import { seedNewUserSettings } from "@/lib/settings/server";
 
@@ -54,11 +55,18 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     callbacks: {
         async signIn({ account, profile }) {
             if (account?.provider !== "google") return false;
-            return isGoogleProfileAllowed(profile);
+            // Open sign-up takes at most the day's new accounts (launch item i77).
+            return signInDecision(
+                { allowed: isGoogleProfileAllowed(profile), openSignup: isOpenSignup() },
+                {
+                    isExistingAccount: () => hasGoogleAccount(account.providerAccountId),
+                    admit: () => admitNewAccount(),
+                },
+            );
         },
         async session({ session, user }) {
-            // A session whose user has left the invite list carries no user,
-            // which every caller treats as signed out.
+            // A session whose user has left the invite list, or been blocked,
+            // carries no user, which every caller treats as signed out.
             if (!isSessionEmailAllowed(user?.email)) {
                 return { expires: session.expires };
             }

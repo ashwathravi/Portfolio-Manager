@@ -5,6 +5,7 @@ import { BrandMark } from "@/components/layout/BrandMark";
 import { auth, signIn } from "@/auth";
 import { isAuthConfigured } from "@/lib/auth/access";
 import { safeCallbackPath, withCallback } from "@/lib/auth/callback-url";
+import { SIGNUP_LIMIT_ERROR } from "@/lib/auth/new-accounts";
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 
@@ -48,8 +49,11 @@ export default async function LoginPage({
                 )}
 
                 {error && (
-                    <p className="pm-login-error" role="alert">
-                        Google sign-in was not approved for this workspace.
+                    <p className="pm-login-error" role="alert" data-testid="login-error">
+                        {error === SIGNUP_LIMIT_ERROR
+                            // Open sign-up's daily limit on new accounts (launch item i77).
+                            ? "Atlas has opened all the new accounts it can for today. Try again tomorrow."
+                            : "Google sign-in was not approved for this workspace."}
                     </p>
                 )}
 

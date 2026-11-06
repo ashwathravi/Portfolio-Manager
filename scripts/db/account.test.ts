@@ -8,6 +8,7 @@ import postgres from 'postgres';
 import * as schema from '../../src/db/schema';
 import { AccountDeletionBlockedError, deleteAccount } from '../../src/lib/account/delete';
 import { buildAccountExport } from '../../src/lib/account/export';
+import { hasGoogleAccount } from '../../src/lib/auth/new-accounts';
 import type { PlaidFetch } from '../../src/lib/plaid/link';
 
 // Launch item i65: deleting an account and exporting its data, against a
@@ -253,5 +254,16 @@ describe('account deletion and export', { skip: !DATABASE_URL && 'SCRIPTS_TEST_D
         assert.deepEqual(await deleteAccount('u-plain', { plaid: null, database, fetchImpl: plaid.fetchImpl, now: NOW }), { accounts: 1, connections: 0 });
         assert.equal(plaid.requests.length, 0);
         assert.equal((await rowsOf('u-plain')).users, 0);
+    });
+
+    test('a Google account that has signed in before is known, so open sign-up\'s daily limit never turns it away (launch item i77)', async () => {
+        await sql`INSERT INTO auth_users (id, email) VALUES ('u-google', 'u-google@example.test')`;
+        await sql`INSERT INTO auth_accounts (user_id, type, provider, provider_account_id) VALUES ('u-google', 'oidc', 'google', 'google-sub-1')`;
+        await sql`INSERT INTO auth_accounts (user_id, type, provider, provider_account_id) VALUES ('u-google', 'oauth', 'schwab', 'google-sub-2')`;
+
+        assert.equal(await hasGoogleAccount('google-sub-1', database), true);
+        assert.equal(await hasGoogleAccount('google-sub-new', database), false);
+        // Another provider's account with the same ID isn't a Google one.
+        assert.equal(await hasGoogleAccount('google-sub-2', database), false);
     });
 });
