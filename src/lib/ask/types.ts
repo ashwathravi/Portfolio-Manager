@@ -70,6 +70,9 @@ export type AskToolName =
     | 'churn_risks'
     | 'trade_policy_impact';
 
+/** Who wrote an answer: Claude (launch item i59), or the rules planner. */
+export type AskWriter = 'claude' | 'rules';
+
 /** The full assistant reply, as returned by `runAsk`. */
 export interface AskAnswer {
     text: string; // Markdown with [[tool:...]] markers

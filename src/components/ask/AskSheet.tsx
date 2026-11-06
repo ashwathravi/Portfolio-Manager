@@ -12,12 +12,13 @@
  * count live in the account too (GET and DELETE /api/ask); without one,
  * this browser keeps them (`storage.ts`). A transcript a browser kept
  * before answers came from the user's data was about example data, so it
- * goes once the account keeps the conversation.
+ * goes once the account keeps the conversation. When Claude writes the
+ * answers (launch item i59), the note under the input says so.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { RotateCcw, X } from 'lucide-react';
 import { useAccountStorage } from '@/components/providers/IdentityProvider';
-import type { AskMessage } from '@/lib/ask/types';
+import type { AskMessage, AskWriter } from '@/lib/ask/types';
 import {
     ASK_STORAGE_KEY,
     clearHistory,
@@ -54,7 +55,7 @@ interface Conversation {
 }
 
 interface AskReply {
-    data?: { messages: AskMessage[]; questionsToday: number; limit: number; stored: boolean };
+    data?: { messages: AskMessage[]; questionsToday: number; limit: number; stored: boolean; writer?: AskWriter };
     error?: string;
     code?: string;
 }
@@ -78,6 +79,7 @@ export function AskSheet({ onClose, variant = 'sheet', initialQuestion = null }:
     const [loaded, setLoaded] = useState(false);
     const [pending, setPending] = useState(false);
     const [conversation, setConversation] = useState<Conversation>({ messages: [], questionsToday: 0, limit: DAILY_LIMIT });
+    const [writer, setWriter] = useState<AskWriter>('rules');
     const endRef = useRef<HTMLDivElement>(null);
     const { messages, questionsToday, limit } = conversation;
 
@@ -100,6 +102,7 @@ export function AskSheet({ onClose, variant = 'sheet', initialQuestion = null }:
             .then(async (response) => {
                 const body = (await response.json()) as AskReply;
                 if (!response.ok || !body.data) throw new Error(body.error ?? 'Ask history unavailable');
+                if (!cancelled && body.data.writer) setWriter(body.data.writer);
                 finish({ messages: body.data.messages, questionsToday: body.data.questionsToday, limit: body.data.limit });
             })
             .catch(() => finish({
@@ -142,6 +145,7 @@ export function AskSheet({ onClose, variant = 'sheet', initialQuestion = null }:
                 return;
             }
             const data = body.data;
+            if (data.writer === 'claude') setWriter('claude');
             if (!data.stored) {
                 // No database: this browser keeps the conversation and the count.
                 for (const message of data.messages) saveMessage(message);
@@ -274,6 +278,7 @@ export function AskSheet({ onClose, variant = 'sheet', initialQuestion = null }:
                     showSuggestions={messages.length === 0}
                     suggestions={DEFAULT_SUGGESTIONS}
                     rateLimitMessage={rateLimitMessage}
+                    writtenByClaude={writer === 'claude'}
                 />
             </footer>
         </section>

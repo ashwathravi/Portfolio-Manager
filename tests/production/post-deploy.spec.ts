@@ -16,7 +16,7 @@ function isLocal(baseURL: string | undefined): boolean {
 function watchForProblems(page: Page, origin: string): string[] {
     const problems: string[] = [];
     page.on('console', (message) => {
-        if (message.type() === 'error') problems.push(`console: ${message.text()}`);
+        if (message.type() === 'error') problems.push(`console: ${message.text()} (${message.location().url})`);
     });
     page.on('pageerror', (error) => problems.push(`page error: ${String(error)}`));
     page.on('response', (response) => {
@@ -119,6 +119,10 @@ test.describe('After a production deploy', () => {
             expect(scriptSrc).toContain("'strict-dynamic'");
             expect(scriptSrc).not.toContain("'unsafe-inline'");
             expect(policy).toContain("frame-ancestors 'none'");
+            // The live site upgrades its http:// requests; a local http://
+            // server doesn't, or Chrome would send the redirect a signed-out
+            // prefetch of / follows to https://localhost.
+            expect(policy.includes('upgrade-insecure-requests')).toBe(new URL(baseURL!).protocol === 'https:');
             expect(headers['strict-transport-security']).toMatch(/max-age=\d+/);
             expect(headers['x-frame-options']).toBe('DENY');
             expect(headers['x-content-type-options']).toBe('nosniff');

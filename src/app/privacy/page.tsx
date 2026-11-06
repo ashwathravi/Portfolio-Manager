@@ -91,8 +91,10 @@ export default function PrivacyPage({ searchParams }: { searchParams: LegalSearc
                 </ul>
                 <p>
                     We do not sell your data, use it for advertising, or use it to make credit decisions.
-                    Atlas Wealth does not place trades or move money. Ask answers questions inside Atlas
-                    Wealth itself; your questions are not sent to an outside AI service.
+                    Atlas Wealth does not place trades or move money. When Ask says under its question box
+                    that its answers are written by Claude, your question goes to Anthropic to answer, as
+                    described below; otherwise Ask answers inside Atlas Wealth itself and your questions
+                    aren&rsquo;t sent to an outside AI service.
                 </p>
             </section>
 
@@ -122,6 +124,15 @@ export default function PrivacyPage({ searchParams }: { searchParams: LegalSearc
                         and your browser and device type. Reports never include your name, email, cookies, what
                         you typed or your account details. Your browser sends its reports to Sentry directly, so
                         Sentry sees your IP address the way any website you connect to does.
+                    </li>
+                    <li>
+                        <strong>Anthropic</strong>, through Vercel&rsquo;s AI Gateway, writes Ask&rsquo;s answers
+                        when Ask says they&rsquo;re written by Claude. For each question it receives the question,
+                        your last few questions and answers, and what Ask looks up in your data to answer it:
+                        figures from your holdings, trades, theses, risk policy or Alpha Radar, with the ticker,
+                        holding and account names they come with, never your name or email. The gateway sends
+                        it only to providers that keep none of it once they&rsquo;ve answered and don&rsquo;t
+                        train AI models on it.
                     </li>
                     <li>
                         <strong>Market data providers (Massive and Finnhub) and SEC EDGAR</strong> supply prices

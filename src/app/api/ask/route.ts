@@ -3,12 +3,18 @@
  * i56).
  *
  * GET     The conversation and the questions asked in the last 24 hours.
- *         Response: { data: { messages: AskMessage[], questionsToday, limit, stored } }
+ *         Response: { data: { messages: AskMessage[], questionsToday, limit, stored, writer } }
  * POST    { question } → the answer, from the user's portfolio, transactions,
  *         theses and saved risk policy. The question and answer are kept
- *         with the account. Past the daily limit: 429 ASK_DAILY_LIMIT.
- *         Response: { data: { messages: [question, answer], questionsToday, limit, stored } }
+ *         with the account. Past the daily limit: 429 ASK_DAILY_LIMIT. The
+ *         question takes its place in the limit before it's answered, so
+ *         questions sent at once can't be answered past it.
+ *         Response: { data: { messages: [question, answer], questionsToday, limit, stored, writer } }
  * DELETE  Clears the conversation (the day's questions still count).
+ *
+ * `writer` is "claude" when Claude writes the answers (ASK_MODEL, launch
+ * item i59), else "rules". On POST it's who wrote this answer: the rules
+ * answer when Claude can't.
  *
  * Without a database (local runs) nothing is stored (`stored: false`) and
  * the browser keeps the conversation; the answers have no data to come from.
@@ -22,16 +28,18 @@ import { isDatabaseConfigured } from '@/db/connection-options';
 import { readJsonBody } from '@/lib/api/body';
 import { apiError, internalServerError } from '@/lib/api/security';
 import { requireSessionApiUserScope } from '@/lib/api/session-security';
-import { answerQuestion } from '@/lib/ask/server/answer';
+import { answerQuestionWith } from '@/lib/ask/server/answer';
+import { askModel } from '@/lib/ask/server/claude';
 import {
     ASK_DAILY_LIMIT,
     AskDailyLimitError,
     clearAskHistory,
     loadAskHistory,
-    questionsAsked,
-    saveAskTurn,
+    releaseAskQuestion,
+    reserveAskQuestion,
+    saveAskAnswer,
 } from '@/lib/ask/server/history';
-import type { AskMessage } from '@/lib/ask/types';
+import type { AskMessage, AskWriter } from '@/lib/ask/types';
 import { askQuestionSchema } from '@/lib/validators/ask';
 
 export const dynamic = 'force-dynamic';
@@ -43,15 +51,26 @@ function dailyLimitReached(): NextResponse {
     return apiError(new AskDailyLimitError().message, 'ASK_DAILY_LIMIT', 429);
 }
 
+/** Who writes the answers: Claude when ASK_MODEL names a model. */
+function configuredWriter(): AskWriter {
+    return askModel() ? 'claude' : 'rules';
+}
+
 export async function GET(request: Request) {
     const auth = await requireSessionApiUserScope(request);
     if (!auth.ok) return auth.response;
     if (!isDatabaseConfigured()) {
-        return NextResponse.json({ data: { messages: [], questionsToday: 0, limit: ASK_DAILY_LIMIT, stored: false } }, { headers: NO_STORE });
+        return NextResponse.json(
+            { data: { messages: [], questionsToday: 0, limit: ASK_DAILY_LIMIT, stored: false, writer: configuredWriter() } },
+            { headers: NO_STORE },
+        );
     }
     try {
         const history = await loadAskHistory(auth.context.userId);
-        return NextResponse.json({ data: { ...history, limit: ASK_DAILY_LIMIT, stored: true } }, { headers: NO_STORE });
+        return NextResponse.json(
+            { data: { ...history, limit: ASK_DAILY_LIMIT, stored: true, writer: configuredWriter() } },
+            { headers: NO_STORE },
+        );
     } catch (err) {
         return internalServerError(err, 'Unable to load the conversation.', 'ASK_HISTORY_LOAD_FAILED');
     }
@@ -75,12 +94,22 @@ export async function POST(request: Request) {
     const { userId } = auth.context;
     const stored = isDatabaseConfigured();
     const now = new Date();
+    const question: AskMessage = { id: randomUUID(), role: 'user', content: parsed.data.question, ts: now.getTime() };
+    let questionsToday = 0;
     try {
-        // Checked before answering, so a user past the limit costs nothing.
-        if (stored && (await questionsAsked(userId, now)) >= ASK_DAILY_LIMIT) return dailyLimitReached();
-
-        const answer = await answerQuestion(userId, parsed.data.question, { now });
-        const question: AskMessage = { id: randomUUID(), role: 'user', content: parsed.data.question, ts: now.getTime() };
+        // Kept before answering: a user past the limit costs nothing, and
+        // of questions sent at once only those under it are answered.
+        if (stored) questionsToday = await reserveAskQuestion(userId, question, now);
+    } catch (err) {
+        if (err instanceof AskDailyLimitError) return dailyLimitReached();
+        return internalServerError(err, "Ask couldn't load your data to answer.", 'ASK_FAILED');
+    }
+    try {
+        // Claude reads the conversation so far, for follow-up questions.
+        const history = stored && askModel()
+            ? (await loadAskHistory(userId, now)).messages.filter((message) => message.id !== question.id)
+            : [];
+        const { answer, writer } = await answerQuestionWith(userId, parsed.data.question, { now, history });
         // A millisecond after the question, so the two always sort in order.
         const reply: AskMessage = {
             id: randomUUID(),
@@ -90,13 +119,14 @@ export async function POST(request: Request) {
             toolRuns: answer.toolRuns,
             ts: now.getTime() + 1,
         };
-        const questionsToday = stored ? await saveAskTurn(userId, [question, reply], now) : 0;
+        if (stored) await saveAskAnswer(userId, question.id, reply, now);
         return NextResponse.json(
-            { data: { messages: [question, reply], questionsToday, limit: ASK_DAILY_LIMIT, stored } },
+            { data: { messages: [question, reply], questionsToday, limit: ASK_DAILY_LIMIT, stored, writer } },
             { headers: NO_STORE },
         );
     } catch (err) {
-        if (err instanceof AskDailyLimitError) return dailyLimitReached();
+        // Unanswered, so it gives its place in the limit back.
+        if (stored) await releaseAskQuestion(userId, question.id).catch(() => undefined);
         return internalServerError(err, "Ask couldn't load your data to answer.", 'ASK_FAILED');
     }
 }

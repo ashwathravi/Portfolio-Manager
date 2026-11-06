@@ -49,6 +49,9 @@ test.describe('Terms of Service', () => {
       await expect(advice).toContainText(surface);
     }
     await expect(advice).toContainText('We are not a registered investment adviser, broker-dealer or financial planner');
+    // Launch item i59: an answer Claude writes can be wrong.
+    await expect(advice).toContainText('Ask’s answers can be written by Claude, an AI model, and Ask says so under its question box when they are.');
+    await expect(advice).toContainText('check an answer against your own records before relying on it');
   });
 
   test('says Atlas never places trades or moves money, and drafted orders are plans', async ({ page }) => {
