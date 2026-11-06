@@ -87,6 +87,9 @@ test.describe('Privacy policy', () => {
     // Both price providers are named (launch item i33), and get ticker symbols only.
     await expect(sharing.getByText('Market data providers (Massive and Finnhub) and SEC EDGAR')).toBeVisible();
     await expect(sharing).toContainText('We send them ticker symbols, filer IDs and the words you type into ticker search, never your name, email or account details.');
+    // Launch item i62: Alpha Radar's evidence search by meaning.
+    await expect(sharing.getByText('An embedding model provider', { exact: true })).toBeVisible();
+    await expect(sharing).toContainText('It receives the words you type into that search, and the text of SEC filings and Alpha Radar reports, never your name, email or account details.');
   });
 
   test('links to the Plaid end user policy and a contact address', async ({ page }) => {

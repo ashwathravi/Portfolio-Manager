@@ -86,14 +86,17 @@ export async function embedAlphaRadarSemanticChunks(
 ): Promise<AlphaRadarSemanticChunk[]> {
     if (!provider.isEnabled() || chunks.length === 0) return [...chunks];
 
-    const embeddings = await provider.embedTexts(chunks.map((chunk) => chunk.text));
-    return chunks.map((chunk, index) => ({
-        ...chunk,
-        embedding: embeddings[index] ?? [],
-        embeddingProvider: provider.name,
-        embeddingModel: provider.model,
-        embeddingDimensions: provider.dimensions,
-    }));
+    const embeddings = await provider.embedTexts(chunks.map((chunk) => `${chunk.title}\n${chunk.text}`));
+    return chunks.map((chunk, index) => {
+        const embedding = embeddings[index] ?? [];
+        return embedding.length === 0 ? chunk : {
+            ...chunk,
+            embedding,
+            embeddingProvider: provider.name,
+            embeddingModel: provider.model,
+            embeddingDimensions: embedding.length,
+        };
+    });
 }
 
 export function chunkAlphaRadarText(
@@ -181,12 +184,68 @@ export function buildAlphaRadarFilingMemoryChunks(input: {
 }
 
 export function searchAlphaRadarSemanticChunks(options: AlphaRadarSemanticSearchOptions): AlphaRadarSemanticSearchResult {
-    const query = options.query.trim();
-    if (!query) {
-        return { provider: options.provider ?? 'keyword-fallback', matches: [] };
+    return {
+        provider: options.provider ?? 'keyword-fallback',
+        matches: keywordMatches(options.query, options.chunks)
+            .slice(0, options.limit ?? 5)
+            .map(({ chunk, score }) => toContextSnippet(chunk, score, options.includeRawText)),
+    };
+}
+
+/** How far down the similarity ranking a chunk without the query's words can come from. */
+const SIMILAR_CANDIDATES_PER_RESULT = 2;
+// Reciprocal rank fusion's usual constant: ranks matter, not the scores' scales.
+const RRF_K = 60;
+
+/**
+ * Keyword matches and the chunks most similar to the query (launch item
+ * i62), ranked together by reciprocal rank fusion, so a chunk that shares
+ * the query's meaning but not its words can be found, and one with both
+ * comes first. Only chunks embedded by the query's model are compared.
+ * Without a query embedding, or no chunk embedded by that model, this is
+ * the keyword search. A match's score is its keyword score plus its
+ * similarity to the query.
+ */
+export function searchAlphaRadarMemoryChunks(options: AlphaRadarSemanticSearchOptions & {
+    queryEmbedding?: readonly number[];
+    embeddingModel?: string;
+}): AlphaRadarSemanticSearchResult {
+    const queryEmbedding = options.queryEmbedding ?? [];
+    const embedded = queryEmbedding.length === 0 ? [] : options.chunks.filter((chunk) =>
+        chunk.embeddingModel === options.embeddingModel && chunk.embedding?.length === queryEmbedding.length);
+    if (embedded.length === 0) return searchAlphaRadarSemanticChunks(options);
+
+    const limit = options.limit ?? 5;
+    const keyword = keywordMatches(options.query, options.chunks);
+    const similar = embedded
+        .map((chunk) => ({ chunk, score: cosineSimilarity(queryEmbedding, chunk.embedding ?? []) }))
+        .filter((item) => item.score > 0)
+        .sort((a, b) => b.score - a.score || a.chunk.title.localeCompare(b.chunk.title))
+        .slice(0, limit * SIMILAR_CANDIDATES_PER_RESULT);
+
+    const fused = new Map<string, { chunk: AlphaRadarSemanticChunk; rank: number; score: number }>();
+    for (const list of [keyword, similar]) {
+        list.forEach(({ chunk, score }, index) => {
+            const entry = fused.get(chunk.id) ?? { chunk, rank: 0, score: 0 };
+            entry.rank += 1 / (RRF_K + index + 1);
+            entry.score += score;
+            fused.set(chunk.id, entry);
+        });
     }
 
-    const scored = options.chunks
+    return {
+        provider: 'embeddings',
+        matches: [...fused.values()]
+            .sort((a, b) => b.rank - a.rank || b.score - a.score || a.chunk.title.localeCompare(b.chunk.title))
+            .slice(0, limit)
+            .map(({ chunk, score }) => toContextSnippet(chunk, score, options.includeRawText)),
+    };
+}
+
+function keywordMatches(rawQuery: string, chunks: readonly AlphaRadarSemanticChunk[]) {
+    const query = rawQuery.trim();
+    if (!query) return [];
+    return chunks
         .map((chunk) => ({ chunk, score: scoreKeywordMatch(chunk, query) }))
         .filter((item) => item.score > 0)
         .sort((a, b) => {
@@ -194,11 +253,6 @@ export function searchAlphaRadarSemanticChunks(options: AlphaRadarSemanticSearch
             if (scoreDelta !== 0) return scoreDelta;
             return a.chunk.title.localeCompare(b.chunk.title);
         });
-
-    return {
-        provider: options.provider ?? 'keyword-fallback',
-        matches: scored.slice(0, options.limit ?? 5).map(({ chunk, score }) => toContextSnippet(chunk, score, options.includeRawText)),
-    };
 }
 
 export function searchAlphaRadarVectorChunks(options: {
@@ -217,7 +271,7 @@ export function searchAlphaRadarVectorChunks(options: {
         .sort((a, b) => b.score - a.score);
 
     return {
-        provider: 'pgvector',
+        provider: 'embeddings',
         matches: scored.slice(0, options.limit ?? 5).map(({ chunk, score }) => toContextSnippet(chunk, score, options.includeRawText)),
     };
 }
@@ -234,7 +288,9 @@ export function createSemanticChunk(input: AlphaRadarSemanticChunkInput): AlphaR
 
     return {
         ...input,
-        id: `ar-memory-${contentHash}`,
+        // One per source and position (as the table's unique index has it),
+        // so two sources whose text hashes alike can't clash.
+        id: `ar-memory:${input.sourceKind}:${input.sourceId}:${input.chunkIndex}`,
         contentHash,
         keywords,
     };

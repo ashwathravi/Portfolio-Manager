@@ -22,6 +22,7 @@ export {
     chunkAlphaRadarText,
     createSemanticChunk,
     embedAlphaRadarSemanticChunks,
+    searchAlphaRadarMemoryChunks,
     searchAlphaRadarSemanticChunks,
     searchAlphaRadarVectorChunks,
     type AlphaRadarChunkTextOptions,
