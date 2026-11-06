@@ -8,12 +8,14 @@
  *
  * Body:     { portfolioId, rows: Transaction[] }
  * Response: 200 { data: { inserted, duplicates } }; 400 INVALID_TRANSACTION_IMPORT;
- *           404 PORTFOLIO_NOT_FOUND; 413
+ *           404 PORTFOLIO_NOT_FOUND; 413; 429 DAILY_QUOTA_REACHED (the day's CSV
+ *           imports, shared with holdings)
  */
 
 import { NextResponse } from 'next/server';
 
 import { readJsonBody } from '@/lib/api/body';
+import { consumeDailyQuota } from '@/lib/api/daily-quota';
 import { apiError, internalServerError, logApiEvent } from '@/lib/api/security';
 import { requestIdFrom } from '@/lib/observability/request-id';
 import { requireSessionApiUserScope } from '@/lib/api/session-security';
@@ -42,6 +44,8 @@ export async function POST(request: Request) {
         const row = issue?.path[0] === 'rows' && typeof issue.path[1] === 'number' ? `Row ${issue.path[1] + 1}: ` : '';
         return apiError(`${row}${issue?.message ?? 'Invalid import'}`, 'INVALID_TRANSACTION_IMPORT', 400);
     }
+    const overQuota = await consumeDailyQuota(auth.context.userId, 'imports');
+    if (overQuota) return overQuota;
 
     try {
         const data = await importTransactions(auth.context.userId, parsed.data.portfolioId, parsed.data.rows);

@@ -12,7 +12,7 @@ How the app, its data and its jobs fit together. The reasons behind the big choi
 
   The sign-in page, the privacy policy, the terms and the health routes are public. Cron routes and the Plaid webhook take no session and check their own secret or signature.
 - Pages are server components that read the signed-in user's data through Drizzle (Today, Holdings, Accounts, Activity, Performance, Trade), with client components for interaction. Writes and the per-user stores (settings, watchlist, journal, theses, Ask) go through API routes under `src/app/api`, which take the user from the session (`requireSessionApiUserScope`, `src/lib/api/session-security.ts`) and nothing else.
-- Sign-in is Auth.js with Google, the Drizzle adapter and database sessions (`src/auth.ts`). The invite list and the Alpha Radar admins come from `AUTH_ALLOWED_EMAILS`, `AUTH_ALLOWED_DOMAINS` and `AUTH_ADMIN_EMAILS` (`src/lib/auth/access.ts`). Local development signs in as a fixed user without Google (`AUTH_LOCAL_DEV_BYPASS`), which production refuses.
+- Sign-in is Auth.js with Google, the Drizzle adapter and database sessions (`src/auth.ts`). The invite list and the Alpha Radar admins come from `AUTH_ALLOWED_EMAILS`, `AUTH_ALLOWED_DOMAINS` and `AUTH_ADMIN_EMAILS` (`src/lib/auth/access.ts`); `AUTH_OPEN_SIGNUP` opens sign-up to any verified Google account instead, at most `AUTH_SIGNUP_DAILY_LIMIT` new ones a day (`src/lib/auth/new-accounts.ts`), and `AUTH_BLOCKED_EMAILS` and `AUTH_BLOCKED_DOMAINS` keep people out either way (launch item i77). Local development signs in as a fixed user without Google (`AUTH_LOCAL_DEV_BYPASS`), which production refuses.
 
 ## Data model
 
