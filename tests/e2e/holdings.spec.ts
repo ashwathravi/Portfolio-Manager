@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { gotoAppPage } from './helpers/app';
+import { gotoAppPage, reloadAppPage } from './helpers/app';
 import { signInAsFreshUser } from './helpers/users';
 
 /**
@@ -142,6 +142,89 @@ test.describe('Holdings today P&L', () => {
         test.skip(!(await hasHoldings(page)), 'no holdings in this database');
         await expect(todayPnL(page)).toHaveText('$0');
         await expect(aaplToday(page)).toHaveText('—');
+    });
+});
+
+test.describe('Holdings › By symbol', () => {
+    // Launch item i79: one row per symbol across accounts, next to one row per
+    // account position.
+    const dbMode = Boolean(process.env.CI || process.env.E2E_DATABASE_AUTH === '1');
+    const table = (page: Page) => page.getByTestId('holdings-table');
+    const rowsFor = (page: Page, symbol: string) =>
+        table(page).locator('tbody tr').filter({ has: page.getByText(symbol, { exact: true }) });
+    const rowChoice = (page: Page) => page.getByRole('radiogroup', { name: 'Show holdings' });
+
+    test.beforeEach(async ({ page }) => {
+        test.skip(!dbMode, 'needs the seeded E2E database');
+        await page.route('**/api/market-data/historical**', (route) => route.fulfill({ status: 200, json: { data: [] } }));
+        // One quote for AAPL in every account.
+        await page.route('**/api/market-data/quotes**', (route) => route.fulfill({ status: 200, json: {
+            data: [{ symbol: 'AAPL', price: 190, change: 2, changePercent: 1.06, timestamp: new Date().toISOString(), kind: 'delayed', isRealtime: false }],
+        } }));
+    });
+
+    test('a symbol in two accounts is one row, with the shares added up and the cost blended', async ({ context, page }) => {
+        await signInAsFreshUser(context);
+        await gotoAppPage(page, '/portfolios/holdings');
+        // The fixture holds 500 AAPL at $165.30 in Main Portfolio; 100 more at $200 elsewhere.
+        const res = await page.request.post('/api/portfolio/import', {
+            data: { newPortfolioName: 'Roth IRA', rows: [{ symbol: 'AAPL', name: 'Apple Inc.', quantity: 100, avgCost: 200 }] },
+        });
+        expect(res.status()).toBe(200);
+
+        await gotoAppPage(page, '/portfolios/holdings');
+        await expect(rowChoice(page).getByRole('radio', { name: 'By account' })).toHaveAttribute('aria-checked', 'true');
+        await expect(rowsFor(page, 'AAPL')).toHaveCount(2);
+
+        await rowChoice(page).getByRole('radio', { name: 'By symbol' }).click();
+        await expect(rowsFor(page, 'AAPL')).toHaveCount(1);
+        const aapl = rowsFor(page, 'AAPL');
+        await expect(aapl.getByRole('cell').nth(3)).toHaveText('600');
+        // (500 × $165.30 + 100 × $200) / 600 shares.
+        await expect(aapl.getByRole('cell').nth(4)).toHaveText('$171.08');
+        await expect(aapl.getByRole('cell').nth(5)).toHaveText('$190.00');
+        await expect(aapl.getByTestId('holding-value')).toHaveText('$114,000');
+        await expect(aapl.getByTestId('holding-today')).toHaveText('+1.06%');
+        await expect(aapl.getByRole('cell').nth(8)).toHaveText('+11.06%');
+        const accounts = aapl.getByRole('link', { name: '2 accounts: Main Portfolio, Roth IRA' });
+        await expect(accounts).toHaveAttribute('href', '/portfolios/detail/AAPL');
+        // A symbol in one account still names it.
+        await expect(rowsFor(page, 'MSFT').locator('.pm-account-pill')).toHaveText('Main Portfolio');
+        // Today P&L is the same either way: $2 a share on 600 shares.
+        await expect(page.locator('.pm-summary-cell').filter({ hasText: 'Today P&L' }).locator('.pm-summary-value')).toHaveText('+$1,200');
+
+        // Kept in the address, so a reload opens the same view.
+        await expect(page).toHaveURL(/[?&]view=symbol(&|$)/);
+        await reloadAppPage(page);
+        await expect(rowChoice(page).getByRole('radio', { name: 'By symbol' })).toHaveAttribute('aria-checked', 'true');
+        await expect(rowsFor(page, 'AAPL')).toHaveCount(1);
+
+        await rowChoice(page).getByRole('radio', { name: 'By account' }).click();
+        await expect(rowsFor(page, 'AAPL')).toHaveCount(2);
+        await expect(page).not.toHaveURL(/view=/);
+
+        // The choice fits a phone without the page scrolling sideways (loaded
+        // at that width, as the phone layout checks in smoke.spec.ts are).
+        await page.setViewportSize({ width: 390, height: 844 });
+        await reloadAppPage(page);
+        await expect(rowChoice(page)).toBeVisible();
+        const overflow = await page.evaluate(() => {
+            const main = document.querySelector('main');
+            return {
+                doc: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+                main: main ? main.scrollWidth - main.clientWidth : 0,
+            };
+        });
+        expect(overflow.doc).toBeLessThanOrEqual(1);
+        expect(overflow.main).toBeLessThanOrEqual(1);
+    });
+
+    test('without a symbol in more than one account there is no choice of rows', async ({ context, page }) => {
+        await signInAsFreshUser(context);
+        await gotoAppPage(page, '/portfolios/holdings?view=symbol');
+        await expect(rowsFor(page, 'AAPL')).toHaveCount(1);
+        await expect(rowChoice(page)).toHaveCount(0);
+        await expect(rowsFor(page, 'AAPL').locator('.pm-account-pill')).toHaveText('Main Portfolio');
     });
 });
 
