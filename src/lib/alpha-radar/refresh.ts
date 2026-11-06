@@ -18,7 +18,17 @@ import {
 } from '@/lib/sec';
 import { createRequestTimeout, readResponseTextWithLimit } from '@/lib/sec/fetch-limits';
 import type { ParsedThirteenFHolding } from '@/lib/sec/thirteenf-parser';
+import { reportError as reportToSentry } from '@/lib/observability/report-error';
 import type { AlphaRadarFilingRecord, AlphaRadarHoldingRecord, AlphaRadarTrackedFilerRecord } from './contracts';
+import { MAX_EMBEDDED_CHUNKS } from './embeddings';
+import {
+    buildAlphaRadarFilingMemoryChunks,
+    buildAlphaRadarReportMemoryChunks,
+    embedAlphaRadarSemanticChunks,
+    type AlphaRadarEmbeddingProvider,
+    type AlphaRadarSemanticChunk,
+} from './memory';
+import type { AlphaRadarFilingMemoryInput } from './memory-repository';
 import type { StoredAlphaRadarReport } from './report-repository';
 import type { AlphaRadarReportInput } from '@/lib/validators/alpha-radar';
 
@@ -45,6 +55,10 @@ export interface AlphaRadarSecRefreshService {
 
 export type AlphaRadarInformationTableFetcher = (filing: StoredSecFiling) => Promise<string>;
 
+export interface AlphaRadarMemoryWriter {
+    replaceFilingMemory(input: AlphaRadarFilingMemoryInput): Promise<{ inserted: number }>;
+}
+
 export interface AlphaRadarRefreshServiceOptions {
     secIngestion: AlphaRadarSecRefreshService;
     repository: AlphaRadarRefreshRepository;
@@ -52,6 +66,12 @@ export interface AlphaRadarRefreshServiceOptions {
     memoAdapter?: AlphaRadarMemoAdapter;
     fetchInformationTableXml?: AlphaRadarInformationTableFetcher;
     filingLimit?: number;
+    /** Where a parsed filing's evidence memory is stored (launch item i62); none without it. */
+    memory?: AlphaRadarMemoryWriter;
+    /** Embeds that memory; without one it's found by keyword. */
+    embeddings?: AlphaRadarEmbeddingProvider | null;
+    /** Where a memory that couldn't be stored or embedded is reported; Sentry by default. */
+    reportError?: (error: unknown) => void;
 }
 
 export interface AlphaRadarRefreshOptions {
@@ -69,6 +89,9 @@ export interface AlphaRadarFilingRefreshResult {
     changesGenerated: number;
     memoGenerated: boolean;
     reportId?: string;
+    /** Chunks of the filing and its report stored in evidence memory, and how many were embedded. */
+    memoryChunks?: number;
+    embeddedChunks?: number;
     message?: string;
 }
 
@@ -179,8 +202,13 @@ export class AlphaRadarRefreshService {
         result.cik = secResult.cik;
         result.fetched = secResult.fetched;
 
-        for (const filing of secResult.filings) {
-            if (!filing.created && !options.force) {
+        // Oldest quarter first, so each quarter's changes are counted from the
+        // one before it, parsed by then: SEC lists the newest first.
+        const oldestFirst = [...secResult.filings].sort((a, b) => a.reportPeriod.localeCompare(b.reportPeriod));
+        for (const filing of oldestFirst) {
+            // A filing seen before is parsed again only while it's waiting
+            // to be: never tried, or SEC now lists another table for it.
+            if (!filing.created && filing.status !== 'discovered' && !options.force) {
                 result.skipped += 1;
                 result.filings.push({
                     filingId: filing.id,
@@ -268,6 +296,7 @@ export class AlphaRadarRefreshService {
                 changes: storedChanges,
             });
             const storedReport = await this.options.reportRepository.upsertReport(report);
+            const memory = await this.storeMemory(filer, { ...filing, id: filing.id }, parsed.holdings, { ...report, id: storedReport.id });
 
             return {
                 ...base,
@@ -276,6 +305,7 @@ export class AlphaRadarRefreshService {
                 changesGenerated: storedChanges.filter((change) => change.changeType !== 'unchanged').length,
                 memoGenerated: true,
                 reportId: storedReport.id,
+                ...memory,
             };
         } catch (error) {
             const message = error instanceof Error ? error.message : 'Unknown Alpha Radar parse error';
@@ -290,12 +320,68 @@ export class AlphaRadarRefreshService {
             };
         }
     }
+
+    /**
+     * The filing's holdings and its report, chunked into evidence memory
+     * (launch item i62) and embedded when embeddings are on. The report is
+     * stored either way: a memory that can't be stored is reported, and is
+     * stored the next time the filing is parsed; one that can't be embedded
+     * is stored without embeddings.
+     */
+    private async storeMemory(
+        filer: AlphaRadarTrackedFilerRecord,
+        filing: StoredSecFiling & { id: string },
+        holdings: readonly ParsedThirteenFHolding[],
+        report: AlphaRadarReportInput & { id: string },
+    ): Promise<Pick<AlphaRadarFilingRefreshResult, 'memoryChunks' | 'embeddedChunks'>> {
+        const memory = this.options.memory;
+        if (!memory) return {};
+        const record: AlphaRadarFilingRecord = {
+            id: filing.id,
+            trackedFilerId: filing.trackedFilerId,
+            accessionNumber: filing.accessionNumber,
+            filingType: filing.filingType,
+            reportPeriod: filing.reportPeriod,
+            primaryDocumentUrl: filing.primaryDocumentUrl,
+            informationTableUrl: filing.informationTableUrl,
+            status: 'parsed',
+        };
+        const chunks = [
+            ...buildAlphaRadarFilingMemoryChunks({ filing: record, holdings, filer }),
+            ...buildAlphaRadarReportMemoryChunks({ report, filer }),
+        ];
+        const embedded = await this.embed(chunks);
+        try {
+            await memory.replaceFilingMemory({ filingId: filing.id, reportId: report.id, chunks: embedded });
+        } catch (error) {
+            this.report(error);
+            return { memoryChunks: 0, embeddedChunks: 0 };
+        }
+        return { memoryChunks: embedded.length, embeddedChunks: embedded.filter((chunk) => chunk.embedding?.length).length };
+    }
+
+    private async embed(chunks: AlphaRadarSemanticChunk[]): Promise<AlphaRadarSemanticChunk[]> {
+        const provider = this.options.embeddings;
+        if (!provider?.isEnabled() || chunks.length === 0) return chunks;
+        try {
+            const embedded = await embedAlphaRadarSemanticChunks(chunks.slice(0, MAX_EMBEDDED_CHUNKS), provider);
+            return [...embedded, ...chunks.slice(MAX_EMBEDDED_CHUNKS)];
+        } catch (error) {
+            this.report(error);
+            return chunks;
+        }
+    }
+
+    private report(error: unknown): void {
+        (this.options.reportError ?? ((cause) => reportToSentry(cause, { tags: { job: 'alpha-radar', step: 'memory' } })))(error);
+    }
 }
 
 export async function defaultFetchInformationTableXml(filing: StoredSecFiling, stop?: AbortSignal): Promise<string> {
-    const url = filing.informationTableUrl ?? filing.primaryDocumentUrl;
+    // The primary document is the cover page, never the table (launch item i62).
+    const url = filing.informationTableUrl;
     if (!url) {
-        throw new Error(`No SEC information table URL available for ${filing.accessionNumber}.`);
+        throw new Error(`SEC lists no information table among the documents of filing ${filing.accessionNumber}.`);
     }
 
     const userAgent = configuredSecUserAgent();

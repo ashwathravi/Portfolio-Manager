@@ -160,6 +160,29 @@ test.describe('Research page', () => {
         await expect(page.getByTestId('alpha-radar-memory-result').first()).toBeVisible();
         await expect(page.getByTestId('alpha-radar-memory-result').first()).toContainText(/insurance|Chubb/);
         await expect(page.getByTestId('alpha-radar-memory-fallback')).toBeVisible();
+        await expect(page.getByTestId('alpha-radar-memory-by-meaning')).toHaveCount(0);
+    });
+
+    test('says when Alpha Radar evidence is ranked by meaning (launch item i62)', async ({ page }) => {
+        // Embeddings are off in E2E (no gateway): the answer is the one a search gives with them on.
+        await page.route('**/api/alpha-radar/memory/search**', (route) => route.fulfill({ status: 200, json: { data: {
+            provider: 'embeddings',
+            matches: [{
+                chunkId: 'ar-memory:filing-text:f-1:0',
+                sourceId: 'f-1',
+                sourceKind: 'filing-text',
+                text: 'CHUBB LIMITED CUSIP H1467J104 $7,800,000,000',
+                score: 1,
+                citation: { kind: 'filing', id: 'f-1', title: '0001193125-26-352200 information table', url: 'https://www.sec.gov/Archives/edgar/data/1067983/000119312526352200/56757.xml' },
+            }],
+        } } }));
+        await selectAppTab(page, 'Alpha Radar');
+
+        await page.getByTestId('alpha-radar-memory-search').fill('property insurers');
+
+        await expect(page.getByTestId('alpha-radar-memory-result').first()).toContainText('CHUBB LIMITED');
+        await expect(page.getByTestId('alpha-radar-memory-by-meaning')).toHaveText('Ranked by meaning as well as by the words you typed.');
+        await expect(page.getByTestId('alpha-radar-memory-fallback')).toHaveCount(0);
     });
 
     test('should show Alpha Radar clone tracking clusters and fund-style filters', async ({ page }) => {

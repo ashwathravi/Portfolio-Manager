@@ -127,6 +127,13 @@ export default function PrivacyPage({ searchParams }: { searchParams: LegalSearc
                         and filings. We send them ticker symbols, filer IDs and the words you type into ticker
                         search, never your name, email or account details.
                     </li>
+                    <li>
+                        <strong>An embedding model provider</strong>, through Vercel&rsquo;s AI Gateway, when
+                        Alpha Radar&rsquo;s evidence search says it ranks by meaning. It receives the words you
+                        type into that search, and the text of SEC filings and Alpha Radar reports, never your
+                        name, email or account details. The gateway sends them only to providers that keep none
+                        of it and don&rsquo;t train AI models on it.
+                    </li>
                 </ul>
                 <p>
                     We may also disclose information when the law requires it, or to protect the safety of
