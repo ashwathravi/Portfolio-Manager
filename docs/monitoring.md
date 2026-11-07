@@ -9,7 +9,7 @@ Every half hour, `.github/workflows/production-monitor.yml` runs `scripts/monito
 | Check | Endpoint | Fails when |
 |---|---|---|
 | The site and its database | `/api/health/ready` | No answer, an error page or a redirect (deployment protection, say), or the app can't reach its database or has none configured. |
-| The nightly jobs | `/api/health/jobs` | `expired-sessions`, `ask-history`, `plaid`, `prices` or `snapshots` hasn't succeeded after 22:00 UTC on a weekday by midnight UTC. Vercel Hobby starts the 22:30 cron at any minute of that hour. |
+| The nightly jobs | `/api/health/jobs` | `expired-sessions`, `ask-history`, `plaid`, `prices` or `snapshots` hasn't succeeded after 22:00 UTC on a weekday by midnight UTC. Vercel Hobby starts the 22:30 cron at any minute of that hour. `prices` fails without `POLYGON_API_KEY`. |
 | Alpha Radar's SEC job | `/api/health/jobs` | `alpha-radar` hasn't succeeded after 11:00 UTC by 13:00 UTC (launch item i60). It runs every day; it fails without `SEC_EDGAR_USER_AGENT` or when every filer failed (SEC refusing Atlas, say). |
 | The nightly backup | `/api/health/jobs` | The `backup` workflow hasn't succeeded after 06:00 UTC by 10:00 UTC. It's scheduled at 06:41, and GitHub sometimes starts scheduled runs late. |
 
@@ -80,7 +80,9 @@ from job_runs order by started_at desc limit 20;
 **"The nightly job "…" failed on its last run."**
 1. Read its `error` in `job_runs`, and the Vercel logs for `/api/cron/daily` around 22:00 UTC.
 2. Fix the cause.
-3. Run the jobs again with **Run** in Vercel › Settings › Cron Jobs. A job that skips because its provider isn't configured (`prices` without `POLYGON_API_KEY`) succeeds, so it never shows here.
+3. Run the jobs again with **Run** in Vercel › Settings › Cron Jobs.
+
+An error naming `POLYGON_API_KEY` means the key is missing in Vercel: add it, then redeploy, because a variable only reaches new deployments. `plaid` is different. It skips and succeeds without Plaid's keys, because Plaid is optional, so it never shows here.
 
 **"The nightly job "…" has never succeeded" or "hasn't succeeded since …".** Usually every nightly job is late together, because nothing called `/api/cron/daily`.
 1. Check `CRON_SECRET` in Vercel. Without it the route answers 503 `CRON_NOT_CONFIGURED`.
