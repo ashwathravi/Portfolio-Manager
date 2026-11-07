@@ -35,8 +35,9 @@ Retired routes redirect (307): `/portfolios`, `/portfolios/trade-log`,
 ## Next
 
 - **Before the first invite (phase 4):** clear the dev data from production
-  (i70), `POLYGON_API_KEY` for the nightly prices and `FINNHUB_API_KEY` for
-  delayed quotes (i08), and Plaid's approval (i09, i67), then
+  (i70), `POLYGON_API_KEY` for the nightly prices (the `prices` job fails
+  without it, so the production monitor keeps an issue open until it's set)
+  and `FINNHUB_API_KEY` for delayed quotes (i08), and Plaid's approval (i09, i67), then
   `PLAID_REDIRECT_URI` for banks that sign in through OAuth (i47,
   `docs/deployment.md`). Every page already asks search engines to stay away
   during the beta, and Supabase's Data API is off. `CRON_SECRET` and
