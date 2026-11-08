@@ -7,11 +7,13 @@ import postgres from 'postgres';
 
 import * as schema from '../../src/db/schema';
 import { buildJobHealthQuery, createJobHealthCheck, JOB_SCHEDULES, loadJobHealthData } from '../../src/lib/health/job-health';
-import { createJobRunStore } from '../../src/lib/jobs/runner';
+import { createJobRunStore, runJob } from '../../src/lib/jobs/runner';
+import { recordValuationSnapshots, type SnapshotStore } from '../../src/lib/portfolio/valuation-snapshots';
 import { BACKUP_JOB, recordBackupRun } from './backups';
 
 // Launch item i71: /api/health/jobs reads the runs the nightly jobs and the
-// backup workflow record, and the newest stored close, against a scratch
+// backup workflow record, the newest stored close and how far the snapshots
+// got, against a scratch
 // database with every migration applied, on a session in another time zone
 // (started_at holds UTC without one; price_bars.date is an Eastern date). Needs a local Postgres it may create databases in; CI's e2e job sets
 // this.
@@ -103,6 +105,7 @@ describe('job health', { skip: !DATABASE_URL && 'SCRIPTS_TEST_DATABASE_URL is no
 
         assert.equal(report.status, 'degraded');
         assert.deepEqual(report.closes, { status: 'stale', latest: null, oldestAllowed: '2026-10-26' });
+        assert.deepEqual(report.snapshots, { status: 'stale', latest: null, oldestAllowed: '2026-10-26' });
         assert.deepEqual(
             Object.fromEntries(report.jobs.map((job) => [job.job, job.status])),
             Object.fromEntries(JOB_SCHEDULES.map(({ job }) => [job, ({ prices: 'failed', plaid: 'failed', backup: 'ok' } as Record<string, string>)[job] ?? 'late'])),
@@ -124,5 +127,53 @@ describe('job health', { skip: !DATABASE_URL && 'SCRIPTS_TEST_DATABASE_URL is no
 
         assert.deepEqual((await checkAt('2026-10-28T12:00:00Z')).closes, { status: 'ok', latest: '2026-10-26', oldestAllowed: '2026-10-26' });
         assert.deepEqual((await checkAt('2026-10-29T12:00:00Z')).closes, { status: 'stale', latest: '2026-10-26', oldestAllowed: '2026-10-27' });
+    });
+
+    test('regression: a snapshots run that skipped succeeds, yet leaves the snapshots stale', async () => {
+        /** The snapshot job's reads, with no portfolio to value. */
+        const snapshotStore = (latest: string, holdingSplits: unknown): SnapshotStore => ({
+            latestCloseDate: async () => latest,
+            latestHoldingSplits: async () => holdingSplits,
+            portfolios: async () => [],
+            closes: async () => new Map(),
+            completeDays: async () => new Map(),
+            write: async () => {},
+        });
+        const runs = createJobRunStore(database);
+        const snapshots = (latest: string, holdingSplits: unknown, startedAt: string) => runJob(
+            'snapshots',
+            () => recordValuationSnapshots({ store: snapshotStore(latest, holdingSplits) }),
+            { store: runs, now: () => new Date(startedAt) },
+        );
+
+        // Monday's run values everything at Monday's close.
+        const monday = await snapshots('2026-10-26', { skipped: 'nothing held' }, '2026-10-26T22:35:00Z');
+        assert.equal(monday.status, 'succeeded');
+        // Tuesday's: the price run was rate-limited before checking held
+        // positions against splits, so nothing is valued, and it succeeds.
+        const tuesday = await snapshots('2026-10-27', { skipped: 'rate-limited' }, '2026-10-27T22:35:00Z');
+        assert.equal(tuesday.status, 'succeeded');
+        assert.deepEqual(tuesday.detail, { skipped: "the holdings split check didn't run: rate-limited" });
+        // A failed run's detail never counts.
+        const failed = await runs.start('snapshots', new Date('2026-10-27T23:00:00Z'));
+        await runs.finish(failed, { status: 'failed', finishedAt: new Date('2026-10-27T23:01:00Z'), detail: { latest: '2026-10-27' }, error: 'boom' });
+
+        assert.equal((await loadJobHealthData(JOB_SCHEDULES.map(({ job }) => job), database)).snapshotsThrough, '2026-10-26');
+        const checkAt = (iso: string) => createJobHealthCheck({
+            isConfigured: () => true,
+            load: (jobs) => loadJobHealthData(jobs, database),
+            now: () => new Date(iso).getTime(),
+        })();
+
+        // One session behind is allowed.
+        const wednesday = await checkAt('2026-10-28T12:00:00Z');
+        assert.deepEqual(wednesday.snapshots, { status: 'ok', latest: '2026-10-26', oldestAllowed: '2026-10-26' });
+
+        // Wednesday's run skips too: the job is ok, the snapshots aren't.
+        assert.equal((await snapshots('2026-10-28', { skipped: 'budget' }, '2026-10-28T22:35:00Z')).status, 'succeeded');
+        const thursday = await checkAt('2026-10-29T12:00:00Z');
+        assert.equal(thursday.jobs.find(({ job }) => job === 'snapshots')?.status, 'ok');
+        assert.deepEqual(thursday.snapshots, { status: 'stale', latest: '2026-10-26', oldestAllowed: '2026-10-27' });
+        assert.equal(thursday.status, 'degraded');
     });
 });

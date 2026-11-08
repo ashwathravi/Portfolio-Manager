@@ -7,7 +7,8 @@
  * It asks production three things through its public health endpoints: can
  * the app reach its database (/api/health/ready), has every scheduled job,
  * the nightly backup included, succeeded on schedule, and are the stored
- * closing prices recent enough (both /api/health/jobs).
+ * closing prices and the portfolio snapshots valued at them recent enough
+ * (both /api/health/jobs).
  * Then it keeps one GitHub issue in step with the answer: opened, mentioning
  * the repository's owner, when something fails; commented on when what fails
  * changes; closed once every check passes.
@@ -67,6 +68,7 @@ export async function checkProduction(siteUrl: string, options: CheckOptions = {
     }
     const problems = report.jobs.filter((job) => job.status !== "ok").map(jobProblem);
     if (report.closes?.status === "stale") problems.push(closesProblem(report.closes));
+    if (report.snapshots?.status === "stale") problems.push(snapshotsProblem(report.snapshots));
     return problems;
 }
 
@@ -77,14 +79,20 @@ interface JobReport {
     dueSince: string;
 }
 
-interface ClosesReport {
+interface FreshnessReport {
     status: "ok" | "stale";
     latest: string | null;
     oldestAllowed: string;
 }
 
-/** The jobs and closes in a well-formed answer from a reachable database, or null. */
-function readJobs(answer: Answer): { jobs: JobReport[]; closes: ClosesReport | undefined } | null {
+interface JobsAnswer {
+    jobs: JobReport[];
+    closes: FreshnessReport | undefined;
+    snapshots: FreshnessReport | undefined;
+}
+
+/** The jobs, closes and snapshots in a well-formed answer from a reachable database, or null. */
+function readJobs(answer: Answer): JobsAnswer | null {
     if (!answer.reached || ![200, 503].includes(answer.status) || answer.body?.database !== "ok") return null;
     const jobs = answer.body.jobs;
     if (!Array.isArray(jobs) || jobs.length === 0) return null;
@@ -97,28 +105,42 @@ function readJobs(answer: Answer): { jobs: JobReport[]; closes: ClosesReport | u
     });
     if (!valid) return null;
     const report = jobs as JobReport[];
-    // A release from before the closes were reported has none (the monitor
-    // runs from master, ahead of the deploy); otherwise they must be readable.
-    const closes = answer.body.closes;
-    if (closes !== undefined && !isClosesReport(closes)) return null;
-    // 200 means every job is ok and the closes are recent, and 503 that something isn't.
-    const allOk = report.every((job) => job.status === "ok") && (closes === undefined || closes.status === "ok");
-    return (answer.status === 200) === allOk ? { jobs: report, closes } : null;
+    // A release from before the closes or snapshots were reported has none
+    // (the monitor runs from master, ahead of the deploy); otherwise they
+    // must be readable.
+    const { closes, snapshots } = answer.body;
+    if (closes !== undefined && !isFreshnessReport(closes)) return null;
+    if (snapshots !== undefined && !isFreshnessReport(snapshots)) return null;
+    // 200 means every job is ok and the data is recent, and 503 that something isn't.
+    const allOk = report.every((job) => job.status === "ok")
+        && [closes, snapshots].every((freshness) => freshness === undefined || freshness.status === "ok");
+    return (answer.status === 200) === allOk ? { jobs: report, closes, snapshots } : null;
 }
 
-function isClosesReport(value: unknown): value is ClosesReport {
+function isFreshnessReport(value: unknown): value is FreshnessReport {
     return isRecord(value)
         && (value.status === "ok" || value.status === "stale")
         && (value.latest === null || (typeof value.latest === "string" && ISO_DATE.test(value.latest)))
         && typeof value.oldestAllowed === "string" && ISO_DATE.test(value.oldestAllowed);
 }
 
-function closesProblem(closes: ClosesReport): Problem {
+function closesProblem(closes: FreshnessReport): Problem {
     const stored = closes.latest ? `The newest stored closing prices are from ${closes.latest}` : "No closing prices are stored";
     return {
         key: "closes:stale",
         short: "prices are stale",
         message: `${stored}; the nightly price job should have stored ${closes.oldestAllowed}'s or a later session's by now.`,
+    };
+}
+
+function snapshotsProblem(snapshots: FreshnessReport): Problem {
+    const valued = snapshots.latest
+        ? `The portfolio snapshots were last brought up to ${snapshots.latest}'s close`
+        : "No snapshots run has valued the portfolios yet";
+    return {
+        key: "snapshots:stale",
+        short: "snapshots are stale",
+        message: `${valued}; the nightly snapshots job should have valued them at ${snapshots.oldestAllowed}'s or a later session's by now.`,
     };
 }
 

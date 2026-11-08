@@ -20,9 +20,10 @@ const checkJobs = createJobHealthCheck({
 /**
  * Public: whether every scheduled job (the nightly jobs and the backup) has
  * succeeded since its last run fell due, and whether the stored closing
- * prices are recent enough. 200 when both hold, 503 otherwise, with each
- * job's status and when it last succeeded and the newest close's date, never
- * error details. The production monitor polls it (launch item i71).
+ * prices and the portfolio snapshots valued at them are recent enough. 200
+ * when all hold, 503 otherwise, with each job's status and when it last
+ * succeeded, and the dates the closes and snapshots are through, never error
+ * details. The production monitor polls it (launch item i71).
  */
 export async function GET() {
     const report = await checkJobs();

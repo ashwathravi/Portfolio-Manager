@@ -55,7 +55,7 @@ Plaid Link runs in the browser; the server exchanges the public token and stores
 
 - Vercel Cron calls `GET /api/cron/daily` once a weekday (`vercel.json`), with `CRON_SECRET` as its bearer token. The route runs `expired-sessions`, `ask-history`, `plaid`, `prices` and `snapshots` in order (`src/lib/jobs/daily-jobs.ts`), one run at a time, and records each in `job_runs` (`src/lib/jobs/runner.ts`).
 - `GET /api/cron/alpha-radar` runs `alpha-radar` every morning (launch item i60, `src/lib/alpha-radar/daily-refresh.ts`): every enabled tracked filer's new 13F filings from SEC, parsed into holdings, changes and a report. Filers are shared and only admins add them; each user follows the ones they want (`alpha_radar_filer_follows`), and Today's Alpha Radar card shows those.
-- Health: `/api/health` (the process, and the commit it runs), `/api/health/ready` (the database) and `/api/health/jobs` (each scheduled job, the backup included, on time or not, and whether the stored closes are recent; `src/lib/health/job-health.ts`). The production monitor reads the last two every half hour (`docs/monitoring.md`); every deploy ends with a smoke test of the live site (`docs/deployment.md`).
+- Health: `/api/health` (the process, and the commit it runs), `/api/health/ready` (the database) and `/api/health/jobs` (each scheduled job, the backup included, on time or not, and whether the stored closes and snapshots are recent; `src/lib/health/job-health.ts`). The production monitor reads the last two every half hour (`docs/monitoring.md`); every deploy ends with a smoke test of the live site (`docs/deployment.md`).
 - The nightly backup is a GitHub workflow, not a job here (`docs/backups.md`); it records its run in `job_runs`.
 
 ## Integrations kept off

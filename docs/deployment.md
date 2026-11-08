@@ -32,7 +32,7 @@ A failed migration stops the job before anything is deployed. Migrations are not
 |---|---|
 | `/api/health` | The process is up, and `release` is the commit it was built from (`SENTRY_RELEASE`, or null). No database call. Used by the Docker `HEALTHCHECK`. |
 | `/api/health/ready` | The app can reach its database: 200, or 503 with `database: "not_configured"` or `"unavailable"`. Cached for 10 seconds. |
-| `/api/health/jobs` | Every scheduled job, the backup included, has succeeded since its last run fell due, and the newest stored close is at most one session older than the last due `prices` run was for: 200, or 503 with each job `ok`, `late` or `failed` and when it last succeeded, and the closes `ok` or `stale` with the newest one's date, never an error. Cached for a minute. |
+| `/api/health/jobs` | Every scheduled job, the backup included, has succeeded since its last run fell due, and the newest stored close and the newest close the snapshots were valued at are at most one session older than the last due nightly run was for: 200, or 503 with each job `ok`, `late` or `failed` and when it last succeeded, and the closes and snapshots `ok` or `stale` with the date each is through, never an error. Cached for a minute. |
 
 All three are public. The production monitor (`.github/workflows/production-monitor.yml`) reads the last two every half hour and keeps an issue open while either fails; see `docs/monitoring.md`.
 
@@ -150,7 +150,7 @@ Closing sign-up again means unsetting `AUTH_OPEN_SIGNUP` with an invite list in 
 
 After every production deploy (launch item i72), `deploy-production` waits until `/api/health` reports the commit it just deployed, up to three minutes, then runs a short Playwright suite against `PRODUCTION_URL`: `tests/production/post-deploy.spec.ts`, with `playwright.production.config.ts`. It checks, signed out:
 
-- the site can reach its database, and `/api/health/jobs` reads every scheduled job and the newest stored close (whether they ran on time and the closes are recent is the production monitor's alert, not the deploy's);
+- the site can reach its database, and `/api/health/jobs` reads every scheduled job, the newest stored close and how far the snapshots got (whether they ran on time and the data is recent is the production monitor's alert, not the deploy's);
 - a signed-out visit to an app page goes to sign in, and the sign-in button is on;
 - **Continue with Google** sends the browser to Google with a real client ID and this site's callback. The test answers that request itself, so Google's page never loads;
 - the sign-in page, the privacy policy and the terms answer 200 with their security headers (a nonce-based Content-Security-Policy, HSTS, `X-Frame-Options`), and load without console errors, policy violations or failed requests to the site;

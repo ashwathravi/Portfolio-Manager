@@ -13,6 +13,7 @@ Every half hour, `.github/workflows/production-monitor.yml` runs `scripts/monito
 | Alpha Radar's SEC job | `/api/health/jobs` | `alpha-radar` hasn't succeeded after 11:00 UTC by 13:00 UTC (launch item i60). It runs every day; it fails without `SEC_EDGAR_USER_AGENT` or when every filer failed (SEC refusing Atlas, say). |
 | The nightly backup | `/api/health/jobs` | The `backup` workflow hasn't succeeded after 06:00 UTC by 10:00 UTC. It's scheduled at 06:41, and GitHub sometimes starts scheduled runs late. |
 | The stored closing prices | `/api/health/jobs` | The newest close in `price_bars` is older than the trading session before the one the last due `prices` run was for, or none is stored. That means two runs in a row stored no new day, even if they succeeded: a run that is rate-limited, out of its time budget or finds the day's file not yet published stops early and still counts as a success. One session behind is allowed, because the day's file may not be out by 22:30 UTC; the next run stores it. |
+| The portfolio snapshots | `/api/health/jobs` | The newest close a successful `snapshots` run valued the portfolios at (`latest` in its `job_runs.detail`) is older than that same session, or no run has. A run skips, and still succeeds, while held positions haven't been checked against splits through the newest close, for example when the price run was rate-limited first. Portfolios that changed after the close or wait for a re-import after a split don't hold it back. |
 
 The monitor waits 30 seconds and asks again, up to three times, before counting no answer, an error or an unreachable database. A late or failed job is a settled answer and isn't retried.
 
@@ -32,7 +33,7 @@ The repository is public, so the issue is too. It says which check failed and wh
 
 ## `/api/health/jobs`
 
-Public, like `/api/health/ready`. It answers 200 when every scheduled job has succeeded since its last run fell due and the stored closes are recent enough, and 503 otherwise:
+Public, like `/api/health/ready`. It answers 200 when every scheduled job has succeeded since its last run fell due and the stored closes and snapshots are recent enough, and 503 otherwise:
 
 ```json
 {
@@ -43,6 +44,7 @@ Public, like `/api/health/ready`. It answers 200 when every scheduled job has su
     { "job": "backup", "status": "ok", "lastSucceededAt": "2026-10-29T06:49:58.000Z", "dueSince": "2026-10-29T06:00:00.000Z" }
   ],
   "closes": { "status": "ok", "latest": "2026-10-27", "oldestAllowed": "2026-10-27" },
+  "snapshots": { "status": "ok", "latest": "2026-10-27", "oldestAllowed": "2026-10-27" },
   "checkedAt": "2026-10-29T09:07:12.401Z"
 }
 ```
@@ -51,8 +53,9 @@ Public, like `/api/health/ready`. It answers 200 when every scheduled job has su
 - **`failed`:** its run since then failed, or was cut off (still `running` after 15 minutes).
 - **`late`:** nothing has run since then, or it never has (`lastSucceededAt` is null).
 - **`closes`:** `latest` is the newest Eastern trading date in `price_bars` (null when none is stored), and `oldestAllowed` the oldest it may be: one session before the session that had closed when the last due `prices` run began (Friday's run on a weekend, and the calendar's holidays skipped). `status` is `stale` when `latest` is older, or null. It is `null` when the database couldn't be read.
+- **`snapshots`:** the same, where `latest` is the newest close a successful `snapshots` run valued every portfolio it could at (null when none has).
 
-The endpoint has a 3-second statement timeout. Its answer is reused for a minute, or for 10 seconds while the database is unavailable, when `database` is `"unavailable"` (or `"not_configured"`), `jobs` is empty and `closes` is null.
+The endpoint has a 3-second statement timeout. Its answer is reused for a minute, or for 10 seconds while the database is unavailable, when `database` is `"unavailable"` (or `"not_configured"`), `jobs` is empty and `closes` and `snapshots` are null.
 
 The schedules live in `src/lib/health/job-health.ts`. Tests keep them equal to `vercel.json` and the backup workflow. The nightly jobs record their runs themselves (`src/lib/jobs/runner.ts`). The backup workflow records one row per run as its last step (`scripts/db/record-backup-run.ts`): `succeeded` only when the backup was kept and restored exactly.
 
@@ -111,6 +114,11 @@ A backup that ran but couldn't record itself (the database was down at the end) 
 3. Check Massive's status page, and that the key's plan still allows grouped daily bars.
 4. Run the jobs again with **Run** in Vercel › Settings › Cron Jobs once the cause is fixed. Until then, everything valued at a close uses the last one stored.
 
+**"The portfolio snapshots were last brought up to …" or "No snapshots run has valued the portfolios yet".** Two `snapshots` runs valued nothing.
+1. If the closes are stale too, start there: snapshots are valued at stored closes, and catch up on the first run after prices do.
+2. Otherwise read the latest `snapshots` runs' `detail` in `job_runs`. A `skipped` reason about the holdings split check means the `prices` run didn't check held positions against splits through the newest close: its `holdingSplits.skipped` says why (`rate-limited`, `budget`, or the error from Massive's splits endpoint).
+3. Once a `prices` run checks them, the next `snapshots` run fills in the missed days from stored closes. Run the jobs again with **Run** in Vercel › Settings › Cron Jobs to do it now.
+
 **"…/api/health/jobs answered HTTP 404" (or something it can't read).** The deployment is older than this check, or the route is failing. See the Vercel logs.
 
 ## When the monitor itself stops
@@ -121,7 +129,7 @@ For a check that doesn't depend on GitHub, add two monitors in a free uptime ser
 - `https://atlas-wealth-lovat.vercel.app/api/health/ready`
 - `https://atlas-wealth-lovat.vercel.app/api/health/jobs`
 
-The second answers 503 whenever a job or the backup is late or failed, or the closes are stale, so it covers them as well.
+The second answers 503 whenever a job or the backup is late or failed, or the closes or snapshots are stale, so it covers them as well.
 
 ## Running it yourself
 
