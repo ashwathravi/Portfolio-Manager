@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 
 import { db } from "@/db";
 import { isDatabaseConfigured } from "@/db/connection-options";
-import { buildJobHealthQuery, createJobHealthCheck } from "@/lib/health/job-health";
+import { createJobHealthCheck, loadJobHealthData } from "@/lib/health/job-health";
 
 export const dynamic = "force-dynamic";
 
@@ -13,15 +13,17 @@ const checkJobs = createJobHealthCheck({
     // database frees the connection instead of holding it open.
     load: (jobs) => db.transaction(async (tx) => {
         await tx.execute(sql`set local statement_timeout = '3s'`);
-        return buildJobHealthQuery(jobs, tx);
+        return loadJobHealthData(jobs, tx);
     }),
 });
 
 /**
  * Public: whether every scheduled job (the nightly jobs and the backup) has
- * succeeded since its last run fell due. 200 when all have, 503 otherwise,
- * with each job's status and when it last succeeded, never error details.
- * The production monitor polls it (launch item i71).
+ * succeeded since its last run fell due, and whether the stored closing
+ * prices and the portfolio snapshots valued at them are recent enough. 200
+ * when all hold, 503 otherwise, with each job's status and when it last
+ * succeeded, and the dates the closes and snapshots are through, never error
+ * details. The production monitor polls it (launch item i71).
  */
 export async function GET() {
     const report = await checkJobs();

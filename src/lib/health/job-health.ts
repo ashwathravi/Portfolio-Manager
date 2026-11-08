@@ -10,12 +10,23 @@
  * The nightly jobs and the daily SEC job record their runs in job_runs (src/lib/jobs/runner.ts);
  * the nightly backup records one row per run from its workflow
  * (scripts/db/record-backup-run.ts).
+ *
+ * A run can succeed without doing its work. A price run stores no day when
+ * it is rate-limited, out of its time budget or the day's file isn't out yet;
+ * a snapshots run values nothing while held positions haven't been checked
+ * against splits through the newest close. So the report also says whether
+ * the newest stored close, and the newest close the snapshots were brought up
+ * to, are recent enough ({@link assessFreshness}), and counts as degraded when
+ * either isn't, whatever the jobs say.
  */
 
-import { inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 
 import { db } from "@/db";
 import { jobRuns, type JobRunStatus } from "@/db/schema";
+import { lastCompletedSession, previousTradingDay } from "@/lib/markets/market-hours";
+import { buildLatestBarDateQuery } from "@/lib/markets/price-store";
+import type { SnapshotJobDetail } from "@/lib/portfolio/valuation-snapshots";
 
 import type { DatabaseReadiness } from "./readiness";
 
@@ -50,9 +61,12 @@ export const ALPHA_RADAR_CRON = "15 11 * * *";
 /** The job /api/cron/alpha-radar runs (src/lib/alpha-radar/daily-refresh.ts). */
 export const ALPHA_RADAR_JOB_NAME = "alpha-radar";
 
+/** How long after its hour begins a nightly run must have succeeded. */
+const DAILY_GRACE_MINUTES = 120;
+
 export const JOB_SCHEDULES: readonly JobSchedule[] = [
     // The run takes at most five minutes (the route's maxDuration).
-    ...DAILY_JOB_NAMES.map((job) => ({ job, cron: DAILY_JOBS_CRON, graceMinutes: 120 })),
+    ...DAILY_JOB_NAMES.map((job) => ({ job, cron: DAILY_JOBS_CRON, graceMinutes: DAILY_GRACE_MINUTES })),
     { job: ALPHA_RADAR_JOB_NAME, cron: ALPHA_RADAR_CRON, graceMinutes: 120 },
     // About ten minutes, after a start GitHub may delay.
     { job: BACKUP_JOB, cron: BACKUP_CRON, graceMinutes: 240 },
@@ -72,11 +86,35 @@ export interface JobHealth {
     dueSince: string;
 }
 
+/** Whether data the nightly jobs keep is as recent as their schedule says it should be. */
+export interface FreshnessHealth {
+    /** "stale" when `latest` is older than `oldestAllowed`, or null. */
+    status: "ok" | "stale";
+    /** The newest Eastern trading date the data is through, or null when there is none. */
+    latest: string | null;
+    /** The oldest `latest` may be: one session before the one the last due nightly run was for. */
+    oldestAllowed: string;
+}
+
 export interface JobHealthReport {
     status: "ok" | "degraded";
     database: DatabaseReadiness;
     jobs: JobHealth[];
+    /** The newest stored close. Null when the database couldn't be read. */
+    closes: FreshnessHealth | null;
+    /** The newest close a snapshots run valued the portfolios at. Null when the database couldn't be read. */
+    snapshots: FreshnessHealth | null;
     checkedAt: string;
+}
+
+/** What one check reads from the database. */
+export interface JobHealthData {
+    /** Each job's runs; a job that never ran has none. */
+    runs: readonly JobRunSummary[];
+    /** The newest date in price_bars, or null when nothing is stored. */
+    latestClose: string | null;
+    /** The newest close a successful snapshots run was brought up to ({@link buildSnapshotsThroughQuery}), or null. */
+    snapshotsThrough: string | null;
 }
 
 /** One job's runs, summarised by {@link buildJobHealthQuery}. */
@@ -152,6 +190,26 @@ export function assessJob(schedule: JobSchedule, summary: JobRunSummary | undefi
     };
 }
 
+/** The nightly jobs' schedule, which the stored closes and the snapshots follow. */
+const NIGHTLY_SCHEDULE: JobSchedule = { job: "prices", cron: DAILY_JOBS_CRON, graceMinutes: DAILY_GRACE_MINUTES };
+
+/**
+ * Whether data the nightly run brings up to the latest session (the stored
+ * closes, then the snapshots valued at them) is recent enough, given the
+ * newest session it is through. The last due run should have reached the
+ * session that had closed when its hour began (every close, early ones
+ * included, is before 22:00 UTC). One session behind is allowed: the day's
+ * file may not be out yet when the run starts, and the price catch-up then
+ * stops ("not-published") and stores it, and the snapshots value it, the
+ * next night. Anything older means two due runs got no further, whatever
+ * they reported, and so does having nothing at all.
+ */
+export function assessFreshness(latest: string | null, now: Date): FreshnessHealth {
+    const session = lastCompletedSession(lastDueSlot(NIGHTLY_SCHEDULE, now));
+    const oldestAllowed = previousTradingDay(session);
+    return { status: latest !== null && latest >= oldestAllowed ? "ok" : "stale", latest, oldestAllowed };
+}
+
 /** Each scheduled job's last success and latest run, in one small query. */
 export function buildJobHealthQuery(jobs: readonly string[], database: Pick<Database, "select"> = db) {
     return database
@@ -167,11 +225,51 @@ export function buildJobHealthQuery(jobs: readonly string[], database: Pick<Data
         .groupBy(jobRuns.job);
 }
 
+/** The snapshots job's name in job_runs. */
+const SNAPSHOTS_JOB = "snapshots" satisfies (typeof DAILY_JOB_NAMES)[number];
+/** Where a snapshots run that valued every portfolio it could records the close it valued them at. */
+const SNAPSHOTS_THROUGH = "latest" satisfies keyof Extract<SnapshotJobDetail, { latest: string }>;
+
+/**
+ * The newest close a successful snapshots run was brought up to: `latest` in
+ * its detail. A run that skipped (no closes, or held positions not yet
+ * checked against splits through the newest close) records `skipped`
+ * instead, so it doesn't count. Portfolios that changed after the close, or
+ * that wait for a re-import after a split, don't hold it back: those are the
+ * user's to change, and the run still records how far it got.
+ */
+export function buildSnapshotsThroughQuery(database: Pick<Database, "select"> = db) {
+    const through = sql`${jobRuns.detail} ->> ${SNAPSHOTS_THROUGH}`;
+    return database
+        .select({ date: sql<string | null>`max(${through})` })
+        .from(jobRuns)
+        .where(and(
+            eq(jobRuns.job, SNAPSHOTS_JOB),
+            eq(jobRuns.status, "succeeded"),
+            sql`${through} ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'`,
+        ));
+}
+
+/**
+ * What a check reads: the jobs' runs, the newest stored close
+ * (price_bars_date_idx serves it) and how far the snapshots got (the
+ * snapshots job's rows of job_runs_job_started_at_idx).
+ */
+export async function loadJobHealthData(
+    jobs: readonly string[],
+    database: Pick<Database, "select"> = db,
+): Promise<JobHealthData> {
+    const runs = await buildJobHealthQuery(jobs, database);
+    const [close] = await buildLatestBarDateQuery(database);
+    const [snapshots] = await buildSnapshotsThroughQuery(database);
+    return { runs, latestClose: close?.date ?? null, snapshotsThrough: snapshots?.date ?? null };
+}
+
 export interface JobHealthCheckOptions {
     /** Whether a database connection is configured at all. */
     isConfigured: () => boolean;
-    /** The summaries for these jobs; a job that never ran has none. */
-    load: (jobs: readonly string[]) => Promise<readonly JobRunSummary[]>;
+    /** What the check reads for these jobs ({@link loadJobHealthData}). */
+    load: (jobs: readonly string[]) => Promise<JobHealthData>;
     schedules?: readonly JobSchedule[];
     /** How long a load may take before the database counts as unavailable. */
     timeoutMs?: number;
@@ -202,7 +300,7 @@ export function createJobHealthCheck({
     let inFlight: Promise<JobHealthReport> | null = null;
     let outstandingLoad: Promise<unknown> | null = null;
 
-    async function loadOnce(): Promise<readonly JobRunSummary[] | null> {
+    async function loadOnce(): Promise<JobHealthData | null> {
         if (outstandingLoad) return null;
         const attempt = load(schedules.map((schedule) => schedule.job));
         outstandingLoad = attempt;
@@ -219,19 +317,26 @@ export function createJobHealthCheck({
             status: "degraded",
             database,
             jobs: [],
+            closes: null,
+            snapshots: null,
             checkedAt: checkedAt.toISOString(),
         });
         if (!isConfigured()) return degraded("not_configured");
 
-        const summaries = await loadOnce();
-        if (!summaries) return degraded("unavailable");
+        const data = await loadOnce();
+        if (!data) return degraded("unavailable");
 
-        const byJob = new Map(summaries.map((summary) => [summary.job, summary]));
+        const byJob = new Map(data.runs.map((summary) => [summary.job, summary]));
         const jobs = schedules.map((schedule) => assessJob(schedule, byJob.get(schedule.job), checkedAt));
+        const closes = assessFreshness(data.latestClose, checkedAt);
+        const snapshots = assessFreshness(data.snapshotsThrough, checkedAt);
+        const fresh = closes.status === "ok" && snapshots.status === "ok";
         return {
-            status: jobs.every((job) => job.status === "ok") ? "ok" : "degraded",
+            status: jobs.every((job) => job.status === "ok") && fresh ? "ok" : "degraded",
             database: "ok",
             jobs,
+            closes,
+            snapshots,
             checkedAt: checkedAt.toISOString(),
         };
     }

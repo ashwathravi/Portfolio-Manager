@@ -37,7 +37,12 @@ function fakeFetch(replies: Record<string, Reply[]>) {
 const ready = { status: 200, body: { status: 'ok', database: 'ok', checkedAt: DUE } };
 const job = (name: string, status: 'ok' | 'late' | 'failed', lastSucceededAt: string | null = '2026-10-27T22:31:00.000Z') =>
     ({ job: name, status, lastSucceededAt, dueSince: DUE });
-const jobsOk = { status: 200, body: { status: 'ok', database: 'ok', jobs: [job('prices', 'ok'), job('backup', 'ok')], checkedAt: DUE } };
+const closesOk = { status: 'ok', latest: '2026-10-28', oldestAllowed: '2026-10-27' };
+const snapshotsOk = closesOk;
+const jobsOk = {
+    status: 200,
+    body: { status: 'ok', database: 'ok', jobs: [job('prices', 'ok'), job('backup', 'ok')], closes: closesOk, snapshots: snapshotsOk, checkedAt: DUE },
+};
 
 async function check(replies: Record<string, Reply[]>) {
     const { fetchImpl, calls } = fakeFetch(replies);
@@ -104,6 +109,8 @@ describe('checkProduction', () => {
                     status: 'degraded',
                     database: 'ok',
                     jobs: [job('prices', 'failed'), job('plaid', 'ok'), job('snapshots', 'late'), job('backup', 'late', null)],
+                    closes: closesOk,
+                    snapshots: snapshotsOk,
                     checkedAt: DUE,
                 },
             }],
@@ -117,6 +124,63 @@ describe('checkProduction', () => {
         ]);
     });
 
+    test('regression: stale closes are a problem though every job succeeded, after any job\'s', async () => {
+        const stale = (latest: string | null, jobs = [job('prices', 'ok'), job('backup', 'ok')]) => ({
+            status: 503,
+            body: { ...jobsOk.body, status: 'degraded', jobs, closes: { status: 'stale', latest, oldestAllowed: '2026-10-27' } },
+        });
+
+        const { problems, calls } = await check({ '/api/health/ready': [ready], '/api/health/jobs': [stale('2026-10-23')] });
+        assert.equal(calls.length, 2);
+        assert.deepEqual(problems, [{
+            key: 'closes:stale',
+            short: 'prices are stale',
+            message: "The newest stored closing prices are from 2026-10-23; the nightly price job should have stored 2026-10-27's or a later session's by now.",
+        }]);
+
+        const none = await check({ '/api/health/ready': [ready], '/api/health/jobs': [stale(null, [job('prices', 'failed'), job('backup', 'ok')])] });
+        assert.deepEqual(none.problems.map((problem) => problem.key), ['job:prices:failed', 'closes:stale']);
+        assert.match(none.problems[1].message, /^No closing prices are stored; /);
+    });
+
+    test('regression: stale snapshots are a problem though every job succeeded and the closes are recent', async () => {
+        const stale = (latest: string | null) => ({
+            status: 503,
+            body: { ...jobsOk.body, status: 'degraded', snapshots: { status: 'stale', latest, oldestAllowed: '2026-10-27' } },
+        });
+
+        const { problems } = await check({ '/api/health/ready': [ready], '/api/health/jobs': [stale('2026-10-23')] });
+        assert.deepEqual(problems, [{
+            key: 'snapshots:stale',
+            short: 'snapshots are stale',
+            message: "The portfolio snapshots were last brought up to 2026-10-23's close; the nightly snapshots job should have valued them at 2026-10-27's or a later session's by now.",
+        }]);
+
+        const none = await check({ '/api/health/ready': [ready], '/api/health/jobs': [stale(null)] });
+        assert.match(none.problems[0].message, /^No snapshots run has valued the portfolios yet; /);
+
+        // With the closes stale as well, both are listed, closes first.
+        const both = await check({
+            '/api/health/ready': [ready],
+            '/api/health/jobs': [{ status: 503, body: { ...stale(null).body, closes: { status: 'stale', latest: null, oldestAllowed: '2026-10-27' } } }],
+        });
+        assert.deepEqual(both.problems.map((problem) => problem.key), ['closes:stale', 'snapshots:stale']);
+    });
+
+    test('an answer from a release without the closes or snapshots is read by its jobs alone', async () => {
+        const withoutCloses: Record<string, unknown> = { ...jobsOk.body };
+        delete withoutCloses.closes;
+        delete withoutCloses.snapshots;
+        const ok = await check({ '/api/health/ready': [ready], '/api/health/jobs': [{ status: 200, body: withoutCloses }] });
+        assert.deepEqual(ok.problems, []);
+
+        const late = await check({
+            '/api/health/ready': [ready],
+            '/api/health/jobs': [{ status: 503, body: { ...withoutCloses, status: 'degraded', jobs: [job('prices', 'late')] } }],
+        });
+        assert.deepEqual(late.problems.map((problem) => problem.key), ['job:prices:late']);
+    });
+
     test('a job check it can\'t read is a problem: missing, inconsistent, or with names it won\'t repeat', async () => {
         const cases: Array<[Reply, string]> = [
             [{ status: 404, body: { error: 'Not found' } }, 'answered HTTP 404'],
@@ -124,6 +188,17 @@ describe('checkProduction', () => {
             [{ status: 200, body: { status: 'ok', database: 'ok', jobs: [job('prices', 'late')] } }, 'answered HTTP 200'],
             [{ status: 503, body: { status: 'degraded', database: 'ok', jobs: [job('::error::x', 'late')] } }, 'answered HTTP 503'],
             [{ status: 503, body: { status: 'degraded', database: 'ok', jobs: [{ ...job('prices', 'late'), dueSince: 'soon' }] } }, 'answered HTTP 503'],
+            // Closes that don't agree with the status, or that it can't read.
+            [{ status: 200, body: { ...jobsOk.body, closes: { ...closesOk, status: 'stale' } } }, 'answered HTTP 200'],
+            [{ status: 503, body: { ...jobsOk.body, status: 'degraded' } }, 'answered HTTP 503'],
+            [{ status: 200, body: { ...jobsOk.body, closes: null } }, 'answered HTTP 200'],
+            [{ status: 200, body: { ...jobsOk.body, closes: { ...closesOk, status: 'fresh' } } }, 'answered HTTP 200'],
+            [{ status: 200, body: { ...jobsOk.body, closes: { ...closesOk, latest: 'yesterday' } } }, 'answered HTTP 200'],
+            [{ status: 200, body: { ...jobsOk.body, closes: { ...closesOk, oldestAllowed: '2026-10-27T00:00:00Z' } } }, 'answered HTTP 200'],
+            // The same for the snapshots.
+            [{ status: 200, body: { ...jobsOk.body, snapshots: { ...snapshotsOk, status: 'stale' } } }, 'answered HTTP 200'],
+            [{ status: 200, body: { ...jobsOk.body, snapshots: null } }, 'answered HTTP 200'],
+            [{ status: 200, body: { ...jobsOk.body, snapshots: { ...snapshotsOk, latest: 20261028 } } }, 'answered HTTP 200'],
             [new Error('socket hang up'), "didn't answer: socket hang up"],
         ];
         for (const [reply, what] of cases) {

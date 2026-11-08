@@ -62,6 +62,13 @@ test.describe('After a production deploy', () => {
         expect(body.status).toBe(response.status() === 200 ? 'ok' : 'degraded');
         expect(body.jobs.map((job: { job: string }) => job.job)).toEqual(SCHEDULED_JOBS);
         for (const job of body.jobs) expect(['ok', 'late', 'failed']).toContain(job.status);
+        // And whether the stored closes and the snapshots are recent enough
+        // (none at all is stale).
+        for (const freshness of [body.closes, body.snapshots]) {
+            expect(['ok', 'stale']).toContain(freshness.status);
+            expect(freshness.latest === null || /^\d{4}-\d{2}-\d{2}$/.test(freshness.latest)).toBe(true);
+            expect(freshness.oldestAllowed).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+        }
     });
 
     test('sends a signed-out visitor to sign in, with sign-in configured', async ({ page }) => {
