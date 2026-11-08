@@ -4,9 +4,10 @@
  * half hour with plain Node and no install, so this file uses only Node's
  * built-ins and TypeScript that Node can strip.
  *
- * It asks production two things through its public health endpoints: can the
- * app reach its database (/api/health/ready), and has every scheduled job,
- * the nightly backup included, succeeded on schedule (/api/health/jobs).
+ * It asks production three things through its public health endpoints: can
+ * the app reach its database (/api/health/ready), has every scheduled job,
+ * the nightly backup included, succeeded on schedule, and are the stored
+ * closing prices recent enough (both /api/health/jobs).
  * Then it keeps one GitHub issue in step with the answer: opened, mentioning
  * the repository's owner, when something fails; commented on when what fails
  * changes; closed once every check passes.
@@ -35,6 +36,7 @@ type Answer = { reached: true; status: number; body: Body | null } | { reached: 
 
 const JOB_NAME = /^[a-z][a-z0-9-]{0,40}$/;
 const ISO_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/;
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 /** Everything wrong with production right now; empty when every check passes. */
 export async function checkProduction(siteUrl: string, options: CheckOptions = {}): Promise<Problem[]> {
@@ -63,7 +65,9 @@ export async function checkProduction(siteUrl: string, options: CheckOptions = {
         const what = jobs.reached ? `answered HTTP ${jobs.status}${databaseNote}` : `didn't answer: ${jobs.error}`;
         return [{ key: "jobs-endpoint", short: "the job check failed", message: `${base}/api/health/jobs ${what}.` }];
     }
-    return report.filter((job) => job.status !== "ok").map(jobProblem);
+    const problems = report.jobs.filter((job) => job.status !== "ok").map(jobProblem);
+    if (report.closes?.status === "stale") problems.push(closesProblem(report.closes));
+    return problems;
 }
 
 interface JobReport {
@@ -73,8 +77,14 @@ interface JobReport {
     dueSince: string;
 }
 
-/** The jobs in a well-formed answer from a reachable database, or null. */
-function readJobs(answer: Answer): JobReport[] | null {
+interface ClosesReport {
+    status: "ok" | "stale";
+    latest: string | null;
+    oldestAllowed: string;
+}
+
+/** The jobs and closes in a well-formed answer from a reachable database, or null. */
+function readJobs(answer: Answer): { jobs: JobReport[]; closes: ClosesReport | undefined } | null {
     if (!answer.reached || ![200, 503].includes(answer.status) || answer.body?.database !== "ok") return null;
     const jobs = answer.body.jobs;
     if (!Array.isArray(jobs) || jobs.length === 0) return null;
@@ -87,9 +97,29 @@ function readJobs(answer: Answer): JobReport[] | null {
     });
     if (!valid) return null;
     const report = jobs as JobReport[];
-    // 200 means every job is ok, and 503 that one isn't.
-    const allOk = report.every((job) => job.status === "ok");
-    return (answer.status === 200) === allOk ? report : null;
+    // A release from before the closes were reported has none (the monitor
+    // runs from master, ahead of the deploy); otherwise they must be readable.
+    const closes = answer.body.closes;
+    if (closes !== undefined && !isClosesReport(closes)) return null;
+    // 200 means every job is ok and the closes are recent, and 503 that something isn't.
+    const allOk = report.every((job) => job.status === "ok") && (closes === undefined || closes.status === "ok");
+    return (answer.status === 200) === allOk ? { jobs: report, closes } : null;
+}
+
+function isClosesReport(value: unknown): value is ClosesReport {
+    return isRecord(value)
+        && (value.status === "ok" || value.status === "stale")
+        && (value.latest === null || (typeof value.latest === "string" && ISO_DATE.test(value.latest)))
+        && typeof value.oldestAllowed === "string" && ISO_DATE.test(value.oldestAllowed);
+}
+
+function closesProblem(closes: ClosesReport): Problem {
+    const stored = closes.latest ? `The newest stored closing prices are from ${closes.latest}` : "No closing prices are stored";
+    return {
+        key: "closes:stale",
+        short: "prices are stale",
+        message: `${stored}; the nightly price job should have stored ${closes.oldestAllowed}'s or a later session's by now.`,
+    };
 }
 
 function jobProblem(job: JobReport): Problem {

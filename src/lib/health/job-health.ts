@@ -10,12 +10,19 @@
  * The nightly jobs and the daily SEC job record their runs in job_runs (src/lib/jobs/runner.ts);
  * the nightly backup records one row per run from its workflow
  * (scripts/db/record-backup-run.ts).
+ *
+ * A run can succeed without storing the day's prices: rate-limited, out of
+ * its time budget, or the day's file not yet published. So the report also
+ * says whether the newest stored close is recent enough ({@link assessCloses}),
+ * and counts as degraded when it isn't, whatever the jobs say.
  */
 
 import { inArray, sql } from "drizzle-orm";
 
 import { db } from "@/db";
 import { jobRuns, type JobRunStatus } from "@/db/schema";
+import { lastCompletedSession, previousTradingDay } from "@/lib/markets/market-hours";
+import { buildLatestBarDateQuery } from "@/lib/markets/price-store";
 
 import type { DatabaseReadiness } from "./readiness";
 
@@ -50,9 +57,12 @@ export const ALPHA_RADAR_CRON = "15 11 * * *";
 /** The job /api/cron/alpha-radar runs (src/lib/alpha-radar/daily-refresh.ts). */
 export const ALPHA_RADAR_JOB_NAME = "alpha-radar";
 
+/** How long after its hour begins a nightly run must have succeeded. */
+const DAILY_GRACE_MINUTES = 120;
+
 export const JOB_SCHEDULES: readonly JobSchedule[] = [
     // The run takes at most five minutes (the route's maxDuration).
-    ...DAILY_JOB_NAMES.map((job) => ({ job, cron: DAILY_JOBS_CRON, graceMinutes: 120 })),
+    ...DAILY_JOB_NAMES.map((job) => ({ job, cron: DAILY_JOBS_CRON, graceMinutes: DAILY_GRACE_MINUTES })),
     { job: ALPHA_RADAR_JOB_NAME, cron: ALPHA_RADAR_CRON, graceMinutes: 120 },
     // About ten minutes, after a start GitHub may delay.
     { job: BACKUP_JOB, cron: BACKUP_CRON, graceMinutes: 240 },
@@ -72,11 +82,31 @@ export interface JobHealth {
     dueSince: string;
 }
 
+/** Whether the stored closing prices are as recent as the nightly price job should keep them. */
+export interface ClosesHealth {
+    /** "stale" when the newest close is older than `oldestAllowed`, or none is stored. */
+    status: "ok" | "stale";
+    /** The newest Eastern trading date with a stored close, or null when none is. */
+    latest: string | null;
+    /** The oldest the newest close may be: one session before the one the last due run was for. */
+    oldestAllowed: string;
+}
+
 export interface JobHealthReport {
     status: "ok" | "degraded";
     database: DatabaseReadiness;
     jobs: JobHealth[];
+    /** Null when the database couldn't be read. */
+    closes: ClosesHealth | null;
     checkedAt: string;
+}
+
+/** What one check reads from the database. */
+export interface JobHealthData {
+    /** Each job's runs; a job that never ran has none. */
+    runs: readonly JobRunSummary[];
+    /** The newest date in price_bars, or null when nothing is stored. */
+    latestClose: string | null;
 }
 
 /** One job's runs, summarised by {@link buildJobHealthQuery}. */
@@ -152,6 +182,24 @@ export function assessJob(schedule: JobSchedule, summary: JobRunSummary | undefi
     };
 }
 
+/** The price job's schedule, which the stored closes follow. */
+const PRICES_SCHEDULE: JobSchedule = { job: "prices", cron: DAILY_JOBS_CRON, graceMinutes: DAILY_GRACE_MINUTES };
+
+/**
+ * Whether the newest stored close is recent enough. The price job's last due
+ * run should have stored the session that had closed when its hour began
+ * (every close, early ones included, is before 22:00 UTC). One session
+ * behind is allowed: the day's file may not be out yet when the run starts,
+ * and the catch-up then stops ("not-published") and stores it the next
+ * night. Anything older means two due runs have stored no new day, whatever
+ * they reported, and so does having no close at all.
+ */
+export function assessCloses(latest: string | null, now: Date): ClosesHealth {
+    const session = lastCompletedSession(lastDueSlot(PRICES_SCHEDULE, now));
+    const oldestAllowed = previousTradingDay(session);
+    return { status: latest !== null && latest >= oldestAllowed ? "ok" : "stale", latest, oldestAllowed };
+}
+
 /** Each scheduled job's last success and latest run, in one small query. */
 export function buildJobHealthQuery(jobs: readonly string[], database: Pick<Database, "select"> = db) {
     return database
@@ -167,11 +215,21 @@ export function buildJobHealthQuery(jobs: readonly string[], database: Pick<Data
         .groupBy(jobRuns.job);
 }
 
+/** What a check reads: the jobs' runs and the newest stored close (price_bars_date_idx serves it). */
+export async function loadJobHealthData(
+    jobs: readonly string[],
+    database: Pick<Database, "select"> = db,
+): Promise<JobHealthData> {
+    const runs = await buildJobHealthQuery(jobs, database);
+    const [close] = await buildLatestBarDateQuery(database);
+    return { runs, latestClose: close?.date ?? null };
+}
+
 export interface JobHealthCheckOptions {
     /** Whether a database connection is configured at all. */
     isConfigured: () => boolean;
-    /** The summaries for these jobs; a job that never ran has none. */
-    load: (jobs: readonly string[]) => Promise<readonly JobRunSummary[]>;
+    /** What the check reads for these jobs ({@link loadJobHealthData}). */
+    load: (jobs: readonly string[]) => Promise<JobHealthData>;
     schedules?: readonly JobSchedule[];
     /** How long a load may take before the database counts as unavailable. */
     timeoutMs?: number;
@@ -202,7 +260,7 @@ export function createJobHealthCheck({
     let inFlight: Promise<JobHealthReport> | null = null;
     let outstandingLoad: Promise<unknown> | null = null;
 
-    async function loadOnce(): Promise<readonly JobRunSummary[] | null> {
+    async function loadOnce(): Promise<JobHealthData | null> {
         if (outstandingLoad) return null;
         const attempt = load(schedules.map((schedule) => schedule.job));
         outstandingLoad = attempt;
@@ -219,19 +277,22 @@ export function createJobHealthCheck({
             status: "degraded",
             database,
             jobs: [],
+            closes: null,
             checkedAt: checkedAt.toISOString(),
         });
         if (!isConfigured()) return degraded("not_configured");
 
-        const summaries = await loadOnce();
-        if (!summaries) return degraded("unavailable");
+        const data = await loadOnce();
+        if (!data) return degraded("unavailable");
 
-        const byJob = new Map(summaries.map((summary) => [summary.job, summary]));
+        const byJob = new Map(data.runs.map((summary) => [summary.job, summary]));
         const jobs = schedules.map((schedule) => assessJob(schedule, byJob.get(schedule.job), checkedAt));
+        const closes = assessCloses(data.latestClose, checkedAt);
         return {
-            status: jobs.every((job) => job.status === "ok") ? "ok" : "degraded",
+            status: jobs.every((job) => job.status === "ok") && closes.status === "ok" ? "ok" : "degraded",
             database: "ok",
             jobs,
+            closes,
             checkedAt: checkedAt.toISOString(),
         };
     }

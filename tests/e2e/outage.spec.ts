@@ -30,7 +30,7 @@ test.describe('Database outage', () => {
         const response = await request.get('/api/health/jobs');
         expect(response.status()).toBe(503);
         const body = await response.json();
-        expect(body).toMatchObject({ status: 'degraded', database: 'unavailable', jobs: [] });
+        expect(body).toMatchObject({ status: 'degraded', database: 'unavailable', jobs: [], closes: null });
         expect(JSON.stringify(body)).not.toMatch(/ECONNREFUSED|127\.0\.0\.1|password/i);
     });
 
@@ -99,7 +99,7 @@ test.describe('Unusable DATABASE_URL', () => {
 
         const jobs = await request.get('/api/health/jobs');
         expect(jobs.status()).toBe(503);
-        expect(await jobs.json()).toMatchObject({ status: 'degraded', database: 'not_configured', jobs: [] });
+        expect(await jobs.json()).toMatchObject({ status: 'degraded', database: 'not_configured', jobs: [], closes: null });
     });
 
     const pages = [

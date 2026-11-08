@@ -6,14 +6,14 @@ import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import postgres from 'postgres';
 
 import * as schema from '../../src/db/schema';
-import { buildJobHealthQuery, createJobHealthCheck, JOB_SCHEDULES } from '../../src/lib/health/job-health';
+import { buildJobHealthQuery, createJobHealthCheck, JOB_SCHEDULES, loadJobHealthData } from '../../src/lib/health/job-health';
 import { createJobRunStore } from '../../src/lib/jobs/runner';
 import { BACKUP_JOB, recordBackupRun } from './backups';
 
 // Launch item i71: /api/health/jobs reads the runs the nightly jobs and the
-// backup workflow record, against a scratch database with every migration
-// applied, on a session in another time zone (started_at holds UTC without
-// one). Needs a local Postgres it may create databases in; CI's e2e job sets
+// backup workflow record, and the newest stored close, against a scratch
+// database with every migration applied, on a session in another time zone
+// (started_at holds UTC without one; price_bars.date is an Eastern date). Needs a local Postgres it may create databases in; CI's e2e job sets
 // this.
 // Locally: SCRIPTS_TEST_DATABASE_URL=postgres://atlas:atlas-local-only@127.0.0.1:54329/atlas_wealth
 const DATABASE_URL = process.env.SCRIPTS_TEST_DATABASE_URL?.trim();
@@ -92,19 +92,37 @@ describe('job health', { skip: !DATABASE_URL && 'SCRIPTS_TEST_DATABASE_URL is no
         assert.deepEqual(failedBackup, { finished: '2026-10-27T06:52:00', error: 'The backup workflow failed.', detail: { runUrl: null } });
     });
 
-    test('the check reads them into each job\'s status', async () => {
+    test('the check reads them into each job\'s status, and the closes as stale before any is stored', async () => {
         const check = createJobHealthCheck({
             isConfigured: () => true,
-            load: (jobs) => buildJobHealthQuery(jobs, database),
+            load: (jobs) => loadJobHealthData(jobs, database),
             now: () => new Date('2026-10-28T12:00:00Z').getTime(),
         });
 
         const report = await check();
 
         assert.equal(report.status, 'degraded');
+        assert.deepEqual(report.closes, { status: 'stale', latest: null, oldestAllowed: '2026-10-26' });
         assert.deepEqual(
             Object.fromEntries(report.jobs.map((job) => [job.job, job.status])),
             Object.fromEntries(JOB_SCHEDULES.map(({ job }) => [job, ({ prices: 'failed', plaid: 'failed', backup: 'ok' } as Record<string, string>)[job] ?? 'late'])),
         );
+    });
+
+    test('the newest close across every symbol is the one checked, as its Eastern date', async () => {
+        await sql`INSERT INTO securities (symbol) VALUES ('SPY'), ('IBM')`;
+        await sql`
+            INSERT INTO price_bars (symbol, date, open, high, low, close, volume, source) VALUES
+                ('SPY', '2026-10-23', 1, 1, 1, 1, 1, 'test'),
+                ('IBM', '2026-10-26', 1, 1, 1, 1, 1, 'test')
+        `;
+        const checkAt = (iso: string) => createJobHealthCheck({
+            isConfigured: () => true,
+            load: (jobs) => loadJobHealthData(jobs, database),
+            now: () => new Date(iso).getTime(),
+        })();
+
+        assert.deepEqual((await checkAt('2026-10-28T12:00:00Z')).closes, { status: 'ok', latest: '2026-10-26', oldestAllowed: '2026-10-26' });
+        assert.deepEqual((await checkAt('2026-10-29T12:00:00Z')).closes, { status: 'stale', latest: '2026-10-26', oldestAllowed: '2026-10-27' });
     });
 });

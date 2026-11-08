@@ -8,6 +8,7 @@ import { DAILY_JOBS } from "@/lib/jobs/daily-jobs";
 import {
     ALPHA_RADAR_CRON,
     ALPHA_RADAR_JOB_NAME,
+    assessCloses,
     assessJob,
     BACKUP_CRON,
     BACKUP_JOB,
@@ -19,6 +20,7 @@ import {
     lastDueSlot,
     parseDailyCron,
     STUCK_AFTER_MS,
+    type JobHealthData,
     type JobRunSummary,
     type JobSchedule,
 } from "./job-health.ts";
@@ -138,6 +140,54 @@ describe("assessJob", () => {
     });
 });
 
+describe("assessCloses", () => {
+    // Wednesday morning: Tuesday's run is due, so Tuesday's close, or
+    // Monday's if Tuesday's file wasn't out yet when it ran.
+    const wednesday = at("2026-10-28T09:00:00Z");
+
+    test("ok with the session the last due run was for, or the one before", () => {
+        assert.deepEqual(assessCloses("2026-10-27", wednesday), { status: "ok", latest: "2026-10-27", oldestAllowed: "2026-10-26" });
+        assert.deepEqual(assessCloses("2026-10-26", wednesday), { status: "ok", latest: "2026-10-26", oldestAllowed: "2026-10-26" });
+        // A close from today (the E2E fixtures store one) is never stale.
+        assert.equal(assessCloses("2026-10-28", wednesday).status, "ok");
+    });
+
+    test("regression: stale once two due runs stored no new day, even if they succeeded", () => {
+        assert.deepEqual(assessCloses("2026-10-23", wednesday), { status: "stale", latest: "2026-10-23", oldestAllowed: "2026-10-26" });
+    });
+
+    test("stale with no close stored at all", () => {
+        assert.deepEqual(assessCloses(null, wednesday), { status: "stale", latest: null, oldestAllowed: "2026-10-26" });
+    });
+
+    test("follows the price job's schedule: a run counts once its grace has passed", () => {
+        // Tuesday's run may still be going until midnight UTC.
+        assert.equal(assessCloses("2026-10-23", at("2026-10-27T23:59:59.999Z")).oldestAllowed, "2026-10-23");
+        assert.equal(assessCloses("2026-10-23", at("2026-10-28T00:00:00Z")).oldestAllowed, "2026-10-26");
+        assert.deepEqual(
+            lastDueSlot(JOB_SCHEDULES.find((schedule) => schedule.job === "prices")!, at("2026-10-28T00:00:00Z")),
+            at("2026-10-27T22:00:00Z"),
+        );
+    });
+
+    test("over a weekend, Friday's run is the last due, through Monday's", () => {
+        for (const now of ["2026-11-07T12:00:00Z", "2026-11-08T12:00:00Z", "2026-11-09T23:00:00Z"]) {
+            assert.equal(assessCloses("2026-11-05", at(now)).status, "ok", now);
+            assert.deepEqual(assessCloses("2026-11-04", at(now)), { status: "stale", latest: "2026-11-04", oldestAllowed: "2026-11-05" }, now);
+        }
+    });
+
+    test("skips the days the market is closed", () => {
+        // Thanksgiving (Thursday 26 November 2026): its run has no new
+        // session, so Wednesday's close is the one due, or Tuesday's.
+        assert.equal(assessCloses("2026-11-24", at("2026-11-27T09:00:00Z")).status, "ok");
+        assert.equal(assessCloses("2026-11-23", at("2026-11-27T09:00:00Z")).status, "stale");
+        // Friday closes early; its run is due Friday's close, or Wednesday's.
+        assert.deepEqual(assessCloses("2026-11-25", at("2026-11-28T09:00:00Z")), { status: "ok", latest: "2026-11-25", oldestAllowed: "2026-11-25" });
+        assert.equal(assessCloses("2026-11-24", at("2026-11-28T09:00:00Z")).status, "stale");
+    });
+});
+
 describe("createJobHealthCheck", () => {
     const now = () => at("2026-10-28T09:00:00Z").getTime();
     const succeeded = (job: string): JobRunSummary => ({
@@ -148,6 +198,9 @@ describe("createJobHealthCheck", () => {
     });
     const backupSucceeded: JobRunSummary = { ...succeeded(BACKUP_JOB), lastSucceededAt: at("2026-10-28T06:50:00Z"), latestStartedAt: at("2026-10-28T06:50:00Z") };
     const secSucceeded: JobRunSummary = { ...succeeded(ALPHA_RADAR_JOB_NAME), lastSucceededAt: at("2026-10-27T11:20:00Z"), latestStartedAt: at("2026-10-27T11:20:00Z") };
+    const allSucceeded = [...DAILY_JOB_NAMES.map(succeeded), secSucceeded, backupSucceeded];
+    /** Tuesday's run stored Tuesday's closes. */
+    const data = (runs: readonly JobRunSummary[], latestClose: string | null = "2026-10-27"): JobHealthData => ({ runs, latestClose });
 
     test("ok when every job ran on time, asking for every scheduled job", async () => {
         let asked: readonly string[] = [];
@@ -155,7 +208,7 @@ describe("createJobHealthCheck", () => {
             isConfigured: () => true,
             load: async (jobs) => {
                 asked = jobs;
-                return [...DAILY_JOB_NAMES.map(succeeded), secSucceeded, backupSucceeded];
+                return data(allSucceeded);
             },
             now,
         });
@@ -166,13 +219,26 @@ describe("createJobHealthCheck", () => {
         assert.equal(report.status, "ok");
         assert.equal(report.database, "ok");
         assert.deepEqual(report.jobs.map((job) => [job.job, job.status]), JOB_SCHEDULES.map((schedule) => [schedule.job, "ok"]));
+        assert.deepEqual(report.closes, { status: "ok", latest: "2026-10-27", oldestAllowed: "2026-10-26" });
         assert.equal(report.checkedAt, "2026-10-28T09:00:00.000Z");
+    });
+
+    test("regression: degraded when the closes are stale, though every job succeeded", async () => {
+        for (const latestClose of ["2026-10-23", null]) {
+            const check = createJobHealthCheck({ isConfigured: () => true, load: async () => data(allSucceeded, latestClose), now });
+
+            const report = await check();
+
+            assert.equal(report.status, "degraded", String(latestClose));
+            assert.ok(report.jobs.every((job) => job.status === "ok"));
+            assert.deepEqual(report.closes, { status: "stale", latest: latestClose, oldestAllowed: "2026-10-26" });
+        }
     });
 
     test("degraded when any job is late or failed, listing every job", async () => {
         const check = createJobHealthCheck({
             isConfigured: () => true,
-            load: async () => [succeeded("prices"), { ...succeeded("plaid"), latestStartedAt: at("2026-10-28T08:00:00Z"), latestStatus: "failed", lastSucceededAt: at("2026-10-26T22:30:00Z") }],
+            load: async () => data([succeeded("prices"), { ...succeeded("plaid"), latestStartedAt: at("2026-10-28T08:00:00Z"), latestStatus: "failed", lastSucceededAt: at("2026-10-26T22:30:00Z") }]),
             now,
         });
 
@@ -186,9 +252,9 @@ describe("createJobHealthCheck", () => {
 
     test("not_configured without loading when no database is set", async () => {
         let loads = 0;
-        const check = createJobHealthCheck({ isConfigured: () => false, load: async () => { loads += 1; return []; }, now });
+        const check = createJobHealthCheck({ isConfigured: () => false, load: async () => { loads += 1; return data([]); }, now });
 
-        assert.deepEqual(await check(), { status: "degraded", database: "not_configured", jobs: [], checkedAt: "2026-10-28T09:00:00.000Z" });
+        assert.deepEqual(await check(), { status: "degraded", database: "not_configured", jobs: [], closes: null, checkedAt: "2026-10-28T09:00:00.000Z" });
         assert.equal(loads, 0);
     });
 
@@ -206,6 +272,7 @@ describe("createJobHealthCheck", () => {
         assert.equal(report.database, "unavailable");
         assert.equal(report.status, "degraded");
         assert.deepEqual(report.jobs, []);
+        assert.equal(report.closes, null);
         assert.doesNotMatch(JSON.stringify(report), /password|atlas_app/);
     });
 
@@ -218,12 +285,12 @@ describe("createJobHealthCheck", () => {
     test("a load that outlived its timeout blocks the next one until it settles", async () => {
         let clock = now();
         let loads = 0;
-        let release: (summaries: JobRunSummary[]) => void = () => {};
+        let release: (loaded: JobHealthData) => void = () => {};
         const check = createJobHealthCheck({
             isConfigured: () => true,
             load: () => {
                 loads += 1;
-                return loads === 1 ? new Promise((resolve) => { release = resolve; }) : Promise.resolve([succeeded("prices")]);
+                return loads === 1 ? new Promise((resolve) => { release = resolve; }) : Promise.resolve(data([succeeded("prices")]));
             },
             timeoutMs: 5,
             now: () => clock,
@@ -234,7 +301,7 @@ describe("createJobHealthCheck", () => {
         assert.equal((await check()).database, "unavailable");
         assert.equal(loads, 1);
 
-        release([]);
+        release(data([]));
         await new Promise((resolve) => setImmediate(resolve));
         clock += 10_000;
         assert.equal((await check()).database, "ok");
@@ -250,7 +317,7 @@ describe("createJobHealthCheck", () => {
             load: async () => {
                 loads += 1;
                 if (fail) throw new Error("down");
-                return [succeeded("prices")];
+                return data([succeeded("prices")]);
             },
             now: () => clock,
         });

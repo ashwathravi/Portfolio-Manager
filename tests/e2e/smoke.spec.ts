@@ -240,7 +240,7 @@ test.describe('Scheduled job health', () => {
     // service can read it, and coarse: each job's status and last success,
     // never an error. No job has run in the E2E database, so every one is
     // late; without a database it is not configured.
-    test('/api/health/jobs answers without a session and lists every scheduled job', async ({ playwright, baseURL }) => {
+    test('/api/health/jobs answers without a session, listing every scheduled job and the newest close', async ({ playwright, baseURL }) => {
         const dbMode = Boolean(process.env.CI || process.env.E2E_DATABASE_AUTH === '1');
         const sessionless = await playwright.request.newContext({ baseURL, storageState: { cookies: [], origins: [] } });
         try {
@@ -249,8 +249,12 @@ test.describe('Scheduled job health', () => {
             expect(response.headers()['cache-control']).toBe('no-store');
             const body = await response.json();
             expect(body.status).toBe('degraded');
+            expect(Object.keys(body).sort()).toEqual(['checkedAt', 'closes', 'database', 'jobs', 'status']);
             if (dbMode) {
                 expect(body.database).toBe('ok');
+                // The fixtures store a close for today, so the closes are
+                // recent though no job has run.
+                expect(body.closes).toEqual({ status: 'ok', latest: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/), oldestAllowed: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/) });
                 expect(body.jobs.map((job: { job: string }) => job.job)).toEqual(['expired-sessions', 'ask-history', 'plaid', 'prices', 'snapshots', 'alpha-radar', 'backup']);
                 for (const job of body.jobs) {
                     expect(Object.keys(job).sort()).toEqual(['dueSince', 'job', 'lastSucceededAt', 'status']);
@@ -261,6 +265,7 @@ test.describe('Scheduled job health', () => {
             } else {
                 expect(body.database).toBe('not_configured');
                 expect(body.jobs).toEqual([]);
+                expect(body.closes).toBeNull();
             }
         } finally {
             await sessionless.dispose();
