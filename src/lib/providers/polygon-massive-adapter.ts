@@ -20,6 +20,7 @@
 
 import {
   easternDateTime,
+  getEasternParts,
   getMarketDay,
   lastCompletedSession,
   previousTradingDay,
@@ -233,47 +234,77 @@ const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 // Range helpers
 // ---------------------------------------------------------------------------
 
+/** How far back Basic's daily history goes: two years. MAX asks for all of it. */
+const PLAN_HISTORY_DAYS = 730;
+
+/** Calendar days each range reaches back from today's Eastern date. */
+const RANGE_DAYS: Record<string, number> = {
+  '1W': 7,
+  '1M': 30,
+  '3M': 90,
+  '6M': 180,
+  '1Y': 365,
+  '2Y': 730,
+  '5Y': 1825,
+  MAX: PLAN_HISTORY_DAYS,
+};
+
 /**
- * Translate a human-readable range key into { from, to } date strings
- * (YYYY-MM-DD) suitable for the Polygon aggregates endpoint.
+ * Ranges counted in sessions. Basic has no intraday bars, so 1D and 5D are
+ * the last one and five sessions' daily bars.
  */
-function rangeToDates(range: string, now: Date): { from: string; to: string } {
-  const to = formatDate(now);
+const RANGE_SESSIONS: Record<string, number> = {
+  '1D': 1,
+  '5D': 5,
+};
 
-  const map: Record<string, number> = {
-    '1W': 7,
-    '1M': 30,
-    '3M': 90,
-    '6M': 180,
-    '1Y': 365,
-    '2Y': 730,
-    '5Y': 1825,
-    YTD: 0, // handled separately
-  };
+/**
+ * Extra sessions (a week's) a session range asks for, so it still has enough
+ * bars while the last session isn't published yet (Massive publishes after
+ * the close) or a symbol didn't trade on one.
+ */
+const SESSION_RANGE_SLACK = 5;
 
-  if (range.toUpperCase() === 'YTD') {
-    const jan1 = new Date(now.getFullYear(), 0, 1);
-    return { from: formatDate(jan1), to };
-  }
-
-  const days = map[range.toUpperCase()];
-  if (days === undefined) {
-    // Fallback: treat as 1Y
-    const from = new Date(now);
-    from.setDate(from.getDate() - 365);
-    return { from: formatDate(from), to };
-  }
-
-  const from = new Date(now);
-  from.setDate(from.getDate() - days);
-  return { from: formatDate(from), to };
+export interface HistoryWindow {
+  /** First and last Eastern dates to ask for, YYYY-MM-DD. */
+  from: string;
+  to: string;
+  /** For a session range, how many of the newest bars it keeps. */
+  sessions?: number;
 }
 
-function formatDate(d: Date): string {
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  return `${yyyy}-${mm}-${dd}`;
+/**
+ * The dates a history range covers (x22): the window asked of the aggregates
+ * endpoint, in Eastern dates from the market calendar. Every range the
+ * history routes accept has one; anything else is refused rather than
+ * answered with some other window.
+ */
+export function rangeToDates(range: string, now: Date): HistoryWindow {
+  const key = range.toUpperCase();
+  const today = getEasternParts(now).date;
+
+  const sessions = RANGE_SESSIONS[key];
+  if (sessions !== undefined) {
+    const through = lastCompletedSession(now);
+    let from = through;
+    for (let i = 0; i < sessions - 1 + SESSION_RANGE_SLACK; i++) from = previousTradingDay(from);
+    return { from, to: through, sessions };
+  }
+
+  if (key === 'YTD') return { from: `${today.slice(0, 4)}-01-01`, to: today };
+
+  const days = RANGE_DAYS[key];
+  if (days === undefined) {
+    throw new Error(`PolygonMassiveAdapter: Unknown history range "${range}".`);
+  }
+  return { from: minusDays(today, days), to: today };
+}
+
+/** A calendar date `days` before `date`, both YYYY-MM-DD. */
+function minusDays(date: string, days: number): string {
+  const day = new Date(`${date}T00:00:00Z`);
+  day.setUTCDate(day.getUTCDate() - days);
+  return day.toISOString().slice(0, 10);
 }
 
 // ---------------------------------------------------------------------------
@@ -420,7 +451,7 @@ export class PolygonMassiveAdapter implements MarketDataProvider {
   async getDailyHistory(symbol: string, range: string): Promise<{ bars: OHLC[]; unreadable: number }> {
     this.assertConfigured();
     const sym = validateSymbol(symbol);
-    const { from, to } = rangeToDates(range, this.now());
+    const { from, to, sessions } = rangeToDates(range, this.now());
     const url =
       `${this.baseUrl}/v2/aggs/ticker/` +
       `${encodeURIComponent(sym.toUpperCase())}/range/1/day/${from}/${to}` +
@@ -428,8 +459,10 @@ export class PolygonMassiveAdapter implements MarketDataProvider {
 
     const data = await this.fetchWithRetry<PolygonAggsResponse>(url);
 
+    // Oldest first: a session range (1D, 5D) keeps its newest sessions.
+    const allRows = data.results ?? [];
+    const rows = sessions === undefined ? allRows : allRows.slice(-sessions);
     // Filter out bars with missing essential OHLC fields
-    const rows = data.results ?? [];
     const validBars = rows.filter(
       (bar) =>
         bar &&

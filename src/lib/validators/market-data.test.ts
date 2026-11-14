@@ -101,7 +101,7 @@ describe('market-data validators', () => {
 
     describe('timeframeSchema', () => {
         test('should accept valid timeframes', () => {
-            const valid = ['1D', '1H', '1M'];
+            const valid = ['1D', '1M'];
             for (const tf of valid) {
                 const result = timeframeSchema.safeParse(tf);
                 assert.strictEqual(result.success, true);
@@ -109,7 +109,8 @@ describe('market-data validators', () => {
         });
 
         test('should reject invalid timeframes', () => {
-            const invalid = ['1S', '5M', 'DAILY', ''];
+            // No intraday bars on the free plan: 1H used to come back as a year (x22).
+            const invalid = ['1H', '1S', '5M', 'DAILY', ''];
             for (const tf of invalid) {
                 const result = timeframeSchema.safeParse(tf);
                 assert.strictEqual(result.success, false);
