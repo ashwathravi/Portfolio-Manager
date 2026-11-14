@@ -31,7 +31,7 @@ import {
     portfolios,
     userSettings,
 } from "@/db/schema";
-import { loadAlphaRadarUserOverlaps, type AlphaRadarUserOverlap } from "@/lib/alpha-radar/user-overlap";
+import { loadAlphaRadarUserOverlaps, loadDirectoryNames, type AlphaRadarUserOverlap } from "@/lib/alpha-radar/user-overlap";
 import { buildRecentClosesQuery, getLatestBarDate } from "@/lib/markets/price-store";
 import { awaitsSplit, buildLatestHoldingSplitsQuery, splitReadiness, type SplitReadiness } from "@/lib/portfolio/valuation-snapshots";
 import { storedAlertPreferences } from "@/lib/settings/alert-preferences";
@@ -321,9 +321,12 @@ export async function evaluateAlertRules({
         }, now);
         changes = await buildChangesSinceQuery(earliest, database);
     }
-    const [overlap, notified] = await Promise.all([
+    // Every ticker in an Alpha Radar ticker filter, to match by company name.
+    const filterTickers = uniq(alphaUsers.flatMap((userId) => preferences.get(userId)?.alphaRadar.tickerFilters ?? []));
+    const [overlap, notified, filterNames] = await Promise.all([
         changes.length > 0 ? loadAlphaRadarUserOverlaps(alphaUsers, database) : Promise.resolve(new Map<string, AlphaRadarUserOverlap>()),
         loadNotified(rules, session, database),
+        changes.length > 0 ? loadDirectoryNames(filterTickers, database) : Promise.resolve(new Map<string, string>()),
     ]);
 
     const firings = planAlertFirings({
@@ -332,6 +335,7 @@ export async function evaluateAlertRules({
         closes,
         accounts: valued.ready,
         overlap,
+        filterNames,
         changes,
         preferences,
         alphaRadarSince: since,

@@ -239,6 +239,41 @@ describe('planAlertFirings: Alpha Radar', () => {
         assert.deepEqual(delivered({ tickerFilters: ['AAPL'] }), ['037833100']);
     });
 
+    test('regression: a ticker filter matches by company name on its own, without the user holding or following it', () => {
+        // Codex's finding on PR #185: changes without a ticker only took the
+        // tickers of the user's own overlap, so a filter on AAPL dropped an
+        // Apple change unless the user also held, watched or had a thesis on it.
+        const changes = [
+            change({ cusip: '037833100', ticker: null, issuerName: 'APPLE INC', changeType: 'increased', materialityScore: 60 }),
+            change({ cusip: '03784Y200', ticker: null, issuerName: 'APPLE HOSPITALITY REIT INC', changeType: 'increased', materialityScore: 60 }),
+            change({ cusip: '594918104', ticker: null, issuerName: 'MICROSOFT CORP', changeType: 'increased', materialityScore: 60 }),
+        ];
+        const filtered = (filterNames?: Map<string, string>) => plan({
+            rules: [radar({ metric: 'alpha_radar_large_add' })],
+            changes,
+            overlap: new Map([['u-1', overlapOf({})]]),
+            filterNames,
+            preferences: new Map([['u-1', {
+                ...DEFAULT_ALERT_PREFERENCES,
+                alphaRadar: { ...DEFAULT_ALERT_PREFERENCES.alphaRadar, overlapOnly: false, tickerFilters: ['AAPL'] },
+            }]]),
+        });
+        // SEC's ticker file names AAPL "Apple Inc.": Apple's change passes, not Apple Hospitality's or Microsoft's.
+        const fired = filtered(new Map([['AAPL', 'Apple Inc.']]));
+        assert.deepEqual(fired.map((f) => [f.occurrence.split(':')[4], f.message]), [
+            ['037833100', 'Berkshire Hathaway added to APPLE INC (AAPL) in 2026-Q3. Materiality 60/100.'],
+        ]);
+        // A ticker the file doesn't list can't be told by name, so nothing passes it.
+        assert.deepEqual(filtered(new Map()), []);
+        // A change that has its own ticker is matched by it, as before.
+        const tickered = plan({
+            rules: [radar({ metric: 'alpha_radar_large_add' })],
+            changes: [change({ cusip: 'X2', ticker: 'AAPL', issuerName: 'Apple', changeType: 'increased', materialityScore: 60 })],
+            preferences: new Map([['u-1', { ...DEFAULT_ALERT_PREFERENCES, alphaRadar: { ...DEFAULT_ALERT_PREFERENCES.alphaRadar, tickerFilters: ['AAPL'] } }]]),
+        });
+        assert.deepEqual(tickered.map((f) => f.occurrence.split(':')[4]), ['X2']);
+    });
+
     test('"daily" raises the most material new change once a day, "once" the most material change', () => {
         const changes = [change({ materialityScore: 60 }), change({ cusip: 'X9', ticker: 'V', issuerName: 'Visa', materialityScore: 90 })];
         const [daily, ...noMore] = plan({ rules: [radar({ rearm: 'daily' })], changes });

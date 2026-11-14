@@ -27,7 +27,12 @@
  */
 
 import { alphaRadarRelevanceBoost } from "@/lib/alpha-radar/diff";
-import { buildAlphaRadarOverlapMatcher, NO_USER_OVERLAP, type AlphaRadarUserOverlap } from "@/lib/alpha-radar/user-overlap";
+import {
+    buildAlphaRadarOverlapMatcher,
+    buildAlphaRadarTickerMatcher,
+    NO_USER_OVERLAP,
+    type AlphaRadarUserOverlap,
+} from "@/lib/alpha-radar/user-overlap";
 
 import { compare } from "./evaluator";
 import { isAlphaRadarAlertMetric } from "./metrics";
@@ -103,6 +108,12 @@ export interface AlertPlanInput {
     accounts: ReadonlyMap<string, UserAccounts>;
     /** Per user with an Alpha Radar rule. */
     overlap: ReadonlyMap<string, AlphaRadarUserOverlap>;
+    /**
+     * The company name SEC's ticker file gives each ticker in a user's Alpha
+     * Radar ticker filter: a 13F change names its issuer, not a ticker, so a
+     * filter matches by company whether or not the user holds or follows it.
+     */
+    filterNames?: ReadonlyMap<string, string>;
     changes: readonly AlertableChange[];
     preferences: ReadonlyMap<string, AlertPreferences>;
     /** When the job last succeeded: Alpha Radar changes stored before it were seen then. */
@@ -251,9 +262,15 @@ function alphaRadarFirings(rule: PlannedRule, input: AlertPlanInput, preferences
     const match = buildAlphaRadarOverlapMatcher(input.overlap.get(rule.userId) ?? NO_USER_OVERLAP);
     const notified = input.notified.get(rule.id);
     const delivery = preferences.alphaRadar;
+    // The filter's own tickers, matched by ticker or company name on their
+    // own, so filtering never quietly requires the user to hold or follow it.
+    const filtered = buildAlphaRadarTickerMatcher(delivery.tickerFilters.map((ticker) => {
+        const name = input.filterNames?.get(ticker.trim().toUpperCase());
+        return { ticker, names: name ? [name] : [] };
+    }));
     const matching = input.changes
         .filter((change) => change.createdAt > since && !notified?.has(changeOccurrence(change)))
-        .map((change) => observe(change, match))
+        .map((change) => withFilterTickers(observe(change, match), filtered({ issuerName: change.issuerName, ticker: change.ticker ?? undefined })))
         .filter(({ change, score, reasons, tickers }) =>
             matchesMetric(rule.metric, change, reasons)
             && compare(score, rule.comparator, rule.threshold)
@@ -295,6 +312,12 @@ function observe(change: AlertableChange, match: ReturnType<typeof buildAlphaRad
     const own = change.ticker?.trim().toUpperCase();
     const tickers = own ? [own] : [...new Set([...matched.portfolio, ...matched.watchlist, ...matched.thesis])].sort();
     return { change, score: Math.min(100, change.materialityScore + alphaRadarRelevanceBoost(relevance)), reasons, tickers };
+}
+
+/** The change with the filter tickers its company matched among its tickers, for the filter and the message. */
+function withFilterTickers(observed: ObservedChange, filterTickers: readonly string[]): ObservedChange {
+    if (filterTickers.length === 0 || observed.change.ticker) return observed;
+    return { ...observed, tickers: [...new Set([...observed.tickers, ...filterTickers])].sort() };
 }
 
 function changeKey(change: AlertableChange): string {

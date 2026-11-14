@@ -149,6 +149,31 @@ export function buildAlphaRadarOverlapMatcher(overlap: AlphaRadarUserOverlap) {
     };
 }
 
+/**
+ * Which of `securities` a change meets, by its ticker or else by company name,
+ * as the overlap matcher does: for tickers the user named elsewhere, such as an
+ * alert's ticker filter.
+ */
+export function buildAlphaRadarTickerMatcher(securities: readonly AlphaRadarUserSecurity[]) {
+    const matcher = buildMatcher(securities);
+    return (change: Pick<AlphaRadarMemoChange, "issuerName" | "ticker">): string[] =>
+        matchTickers(matcher, change.ticker?.trim().toUpperCase(), normalizeIssuerName(change.issuerName));
+}
+
+/** Each ticker's company name in SEC's ticker file (the symbol directory), for those it lists. */
+export async function loadDirectoryNames(
+    tickers: readonly string[],
+    database: Pick<Database, "select"> = db,
+): Promise<Map<string, string>> {
+    const symbols = [...new Set(tickers.map((ticker) => ticker.trim().toUpperCase()).filter(Boolean))];
+    if (symbols.length === 0) return new Map();
+    const rows = await database
+        .select({ symbol: symbolDirectory.symbol, name: symbolDirectory.name })
+        .from(symbolDirectory)
+        .where(inArray(symbolDirectory.symbol, symbols));
+    return new Map(rows.map((row) => [row.symbol, row.name]));
+}
+
 interface Matcher {
     tickers: ReadonlySet<string>;
     /** Normalized company name → the user's tickers with that name. */
@@ -219,12 +244,7 @@ export async function loadAlphaRadarUserOverlaps(
         thesis: active.filter((row) => !isSeedThesis(row)),
     };
 
-    const tickers = [...new Set(KINDS.flatMap((kind) => rows[kind].map((row) => row.ticker.trim().toUpperCase())))].filter(Boolean);
-    const directory = tickers.length === 0 ? [] : await database
-        .select({ symbol: symbolDirectory.symbol, name: symbolDirectory.name })
-        .from(symbolDirectory)
-        .where(inArray(symbolDirectory.symbol, tickers));
-    const directoryName = new Map(directory.map((row) => [row.symbol, row.name]));
+    const directoryName = await loadDirectoryNames(KINDS.flatMap((kind) => rows[kind].map((row) => row.ticker)), database);
 
     const securities = (list: ReadonlyArray<{ ticker: string; name: string }>): AlphaRadarUserSecurity[] => {
         const names = new Map<string, Set<string>>();
