@@ -7,7 +7,7 @@ export const metadata: Metadata = {
     description: "What Atlas Wealth collects, why, who it is shared with, and how to have it deleted.",
 };
 
-const LAST_UPDATED = "November 3, 2026";
+const LAST_UPDATED = "November 14, 2026";
 const PLAID_PRIVACY_URL = "https://plaid.com/legal/#end-user-privacy-policy";
 
 export default function PrivacyPage({ searchParams }: { searchParams: LegalSearchParams }) {
