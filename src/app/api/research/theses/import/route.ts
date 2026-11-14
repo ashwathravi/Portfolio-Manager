@@ -7,7 +7,7 @@
  *
  * Body: { items: Thesis[], first?: number, startedAt?: number } (many theses
  * come in batches; see thesisImportSchema)
- * Responses: 204; 400 INVALID_THESIS_IMPORT; 413
+ * Responses: 204; 400 INVALID_THESIS_IMPORT; 409 THESIS_LIMIT (nothing imported); 413
  */
 
 import { NextResponse } from 'next/server';
@@ -15,6 +15,8 @@ import { NextResponse } from 'next/server';
 import { readJsonBody } from '@/lib/api/body';
 import { apiError, internalServerError } from '@/lib/api/security';
 import { requireSessionApiUserScope } from '@/lib/api/session-security';
+import { RecordLimitError } from '@/lib/limits/records';
+import { recordLimitResponse } from '@/lib/limits/records-server';
 import { importTheses } from '@/lib/research/server/theses';
 import { THESIS_PUT_MAX_BYTES, thesisImportSchema } from '@/lib/validators/thesis';
 
@@ -40,6 +42,7 @@ export async function POST(request: Request) {
         await importTheses(auth.context.userId, parsed.data);
         return new NextResponse(null, { status: 204 });
     } catch (err) {
+        if (err instanceof RecordLimitError) return recordLimitResponse(err);
         return internalServerError(err, 'Unable to import your theses.', 'THESIS_IMPORT_FAILED');
     }
 }

@@ -110,9 +110,13 @@ describe("loadWatchlist", () => {
 
 describe("saveWatchItem", () => {
     function failingDatabase(error: unknown) {
-        return {
+        const tx = {
+            // The record limit's lock and count (launch item i77; scripts/db/record-limits.test.ts checks them for real).
+            execute: async () => [],
+            select: () => ({ from: () => ({ where: async () => [{ n: 0 }] }) }),
             insert: () => ({ values: () => ({ onConflictDoUpdate: async () => { throw error; } }) }),
-        } as unknown as typeof db;
+        };
+        return { transaction: async (fn: (t: typeof tx) => Promise<unknown>) => fn(tx) } as unknown as typeof db;
     }
 
     test("reports a live row with the same ticker as a duplicate", async () => {

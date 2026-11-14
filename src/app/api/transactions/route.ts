@@ -6,7 +6,8 @@
  * aren't changed.
  *
  * Body:     { portfolioId, transaction: { type, date, symbol?, quantity?, price?, amount?, fees?, currency?, notes? } }
- * Response: 201 { data: { id } }; 400 INVALID_TRANSACTION; 404 PORTFOLIO_NOT_FOUND
+ * Response: 201 { data: { id } }; 400 INVALID_TRANSACTION; 404 PORTFOLIO_NOT_FOUND;
+ *           409 TRANSACTION_LIMIT (launch item i77)
  */
 
 import { NextResponse } from 'next/server';
@@ -14,6 +15,8 @@ import { NextResponse } from 'next/server';
 import { readJsonBody } from '@/lib/api/body';
 import { apiError, internalServerError } from '@/lib/api/security';
 import { requireSessionApiUserScope } from '@/lib/api/session-security';
+import { RecordLimitError } from '@/lib/limits/records';
+import { recordLimitResponse } from '@/lib/limits/records-server';
 import { AccountNotFoundError, addTransaction } from '@/lib/portfolio/transactionsWrite';
 import { transactionCreateSchema } from '@/lib/validators/transaction';
 
@@ -36,6 +39,7 @@ export async function POST(request: Request) {
         const id = await addTransaction(auth.context.userId, parsed.data.portfolioId, parsed.data.transaction);
         return NextResponse.json({ data: { id } }, { status: 201 });
     } catch (err) {
+        if (err instanceof RecordLimitError) return recordLimitResponse(err);
         if (err instanceof AccountNotFoundError) return apiError('Account not found', 'PORTFOLIO_NOT_FOUND', 404);
         return internalServerError(err, 'Unable to add the transaction.', 'TRANSACTION_CREATE_FAILED');
     }

@@ -104,6 +104,9 @@ function fakeDatabase({ saved = true, inserted = [] as string[] } = {}) {
             },
         }),
         delete: (table: unknown) => ({ where: async () => { calls.push({ op: "delete", table }); } }),
+        // The record limit's lock and counts (launch item i77; scripts/db/record-limits.test.ts checks them for real).
+        execute: async () => [],
+        select: () => ({ from: () => ({ where: async () => [{ n: 0 }] }) }),
     };
     const database = { transaction: async (fn: (t: typeof tx) => Promise<unknown>) => fn(tx) } as unknown as typeof db;
     return { database, calls };
