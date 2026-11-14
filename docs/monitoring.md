@@ -25,7 +25,7 @@ When a check fails, the monitor opens **one issue**, created by `github-actions`
 - When what fails changes, it comments on that issue.
 - Once every check passes again, it closes the issue.
 
-While the same things keep failing, it stays quiet. Make sure github.com › Settings › Notifications emails you about @mentions.
+The workflow passes the owner's login to the script as `MONITOR_MENTION`; without it the issue mentions nobody. While the same things keep failing, the monitor stays quiet. Make sure github.com › Settings › Notifications emails you about @mentions.
 
 The workflow run itself fails only when the monitor couldn't check, or couldn't open or update the issue. GitHub then emails whoever last changed the workflow's schedule.
 
@@ -140,3 +140,5 @@ node --input-type=module -e "import { checkProduction } from './scripts/monitor/
 ```
 
 An empty list means every check passes.
+
+`scripts/monitor/run.mts`, which the workflow runs, also needs what Actions sets: `GITHUB_TOKEN` and `GITHUB_REPOSITORY` to open and update the issue, and `GITHUB_RUN_ID`, `GITHUB_SERVER_URL` and `GITHUB_STEP_SUMMARY` for the link to the run and its summary.
