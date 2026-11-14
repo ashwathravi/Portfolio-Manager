@@ -13,3 +13,9 @@ export function isAlphaRadarAlertMetric(metric: AlertMetric): metric is AlphaRad
 export function isMarketAlertMetric(metric: AlertMetric): metric is MarketAlertMetric {
     return !isAlphaRadarAlertMetric(metric);
 }
+
+/** What the link to an alert's page says, in the bell and in the alerts email (launch item i58). */
+export function alertLinkLabel(metric: AlertMetric, symbol?: string | null): string {
+    if (isAlphaRadarAlertMetric(metric)) return 'Open Alpha Radar';
+    return symbol ? `Open ${symbol}` : 'Open holdings';
+}
