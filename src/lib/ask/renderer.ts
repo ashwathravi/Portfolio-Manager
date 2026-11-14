@@ -20,7 +20,7 @@ import type {
 import type { PlannerResult } from './planner';
 import { NO_EMPLOYER_LABEL } from './tools';
 
-function citationFor(run: AskToolRun, index: number): AskCitation {
+export function citationFor(run: AskToolRun, index: number): AskCitation {
     const marker = `tool:${run.name}#${index}`;
     const row = run.rows[index];
     // Prefer the row's explicit href, then a sensible default per tool.
@@ -52,8 +52,13 @@ const FROM_CLOSED_TRADES = new Set<PlannerResult['intent']>(['pnl_source', 'pnl_
 
 /** Says which tickers a closed-trade answer leaves out, and why. */
 function leftOutNote(intent: PlannerResult['intent'], source: AnswerSource): string {
-    const left = source.closedTradesLeftOut ?? [];
-    if (!FROM_CLOSED_TRADES.has(intent) || left.length === 0) return '';
+    if (!FROM_CLOSED_TRADES.has(intent)) return '';
+    return leftOutTradesNote(source.closedTradesLeftOut ?? []);
+}
+
+/** The note under an answer from closed trades that leaves tickers out. */
+export function leftOutTradesNote(left: readonly string[]): string {
+    if (left.length === 0) return '';
     const names = left.length <= 3 ? left.join(', ') : `${left.slice(0, 3).join(', ')} and ${left.length - 3} more`;
     return `\n\n_Left out: ${names}. ${left.length === 1 ? 'Its' : 'Their'} trade prices don't match ${left.length === 1 ? 'its' : 'their'} stored closes, as happens after a split, so ${left.length === 1 ? 'its' : 'their'} sales can't be matched to what ${left.length === 1 ? 'it' : 'they'} cost._`;
 }
@@ -73,7 +78,7 @@ const FROM_HOLDINGS = new Set<PlannerResult['intent']>([
 ]);
 
 /** What an empty answer means, where it isn't just "nothing matched". */
-function emptyLede(intent: PlannerResult['intent'], run: AskToolRun | undefined, source: AnswerSource): string {
+export function emptyLede(intent: PlannerResult['intent'], run: AskToolRun | undefined, source: AnswerSource): string {
     const symbol = (run?.args as { symbol?: string } | undefined)?.symbol;
     if (!source.hasHoldings && FROM_HOLDINGS.has(intent)) {
         return `There are no holdings to answer from yet. Add an account with positions and ask again.`;
@@ -164,10 +169,10 @@ function lede(intent: PlannerResult['intent'], run: AskToolRun | undefined, sour
 
 /** Build a compact Markdown "kv list" for a set of rows. The UI turns
  *  bullets with `•` markers into styled value pills. */
-function kvList(rows: AskRow[], run: AskToolRun): string {
+export function kvList(rows: AskRow[], run: AskToolRun, firstIndex = 0): string {
     return rows
         .map((row, i) => {
-            const marker = `[[tool:${run.name}#${i}]]`;
+            const marker = `[[tool:${run.name}#${firstIndex + i}]]`;
             const sub = row.sub ? ` _${row.sub}_` : '';
             return `- **${row.label}** — ${row.value}${marker}${sub}`;
         })
