@@ -155,8 +155,12 @@ jobs:
         run: bash ./scripts/db/install-backup-tools.sh
 
       # npm test skips the parts of these that need a database; this job has one.
+      # Node expands the quoted pattern itself, so every test in scripts/db runs
+      # without being named here. scripts/ci-database-tests.test.ts fails npm
+      # test if a test that reads SCRIPTS_TEST_DATABASE_URL is outside these
+      # patterns, or if this step moves before the backup tools are installed.
       - name: Test the scripts that need a database
-        run: node --import tsx --test scripts/e2e/run-lock.test.ts scripts/db/init-local.test.ts scripts/db/holdings-one-row-per-symbol.test.ts scripts/db/plaid-sync.test.ts scripts/db/account.test.ts scripts/db/order-plans.test.ts scripts/db/intraday-quotes.test.ts scripts/db/symbol-directory.test.ts scripts/db/strategies.test.ts scripts/db/alpha-radar-follows.test.ts scripts/db/ask-limit.test.ts scripts/db/alpha-radar-overlap.test.ts scripts/db/alpha-radar-refresh.test.ts scripts/db/alerts.test.ts scripts/db/email.test.ts scripts/db/job-health.test.ts scripts/db/backup-restore.test.ts
+        run: node --import tsx --test 'scripts/db/*.test.ts' scripts/e2e/run-lock.test.ts
         env:
           SCRIPTS_TEST_DATABASE_URL: ${{ env.ADMIN_DATABASE_URL }}
 
