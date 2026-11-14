@@ -12,8 +12,8 @@ import {
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { describeRule } from "@/lib/alerts/evaluator";
+import { alertLinkLabel } from "@/lib/alerts/metrics";
 import { useAlertFeed, useClearAlerts, useMarkAlertsRead } from "@/lib/alerts/queries";
-import type { AlertTrigger } from "@/lib/alerts/types";
 import { cn } from "@/lib/utils";
 
 function formatRelative(isoTime: string): string {
@@ -22,11 +22,6 @@ function formatRelative(isoTime: string): string {
     if (ms < 3_600_000) return `${Math.floor(ms / 60_000)}m ago`;
     if (ms < 86_400_000) return `${Math.floor(ms / 3_600_000)}h ago`;
     return `${Math.floor(ms / 86_400_000)}d ago`;
-}
-
-function linkLabel(trigger: AlertTrigger): string {
-    if (trigger.source === "alpha_radar") return "Open Alpha Radar";
-    return trigger.symbol ? `Open ${trigger.symbol}` : "Open holdings";
 }
 
 /**
@@ -141,7 +136,7 @@ export function NotificationBell() {
                                             }}
                                             className="mt-1 inline-flex text-[11px] font-medium text-primary hover:underline"
                                         >
-                                            {linkLabel(trigger)}
+                                            {alertLinkLabel(trigger.metric, trigger.symbol)}
                                         </Link>
                                     )}
                                 </div>
