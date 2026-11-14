@@ -368,9 +368,12 @@ export function optionNetValue(position: OptionRiskPosition): number {
 /**
  * Bought options as the bucket and theme checks hold them, on Today and
  * Trade alike: speculative, at their current value, under their underlying.
- * A written one is a liability, not a holding (optionNetValue).
+ * An option on one of the user's employer tickers is employer stock, as
+ * that stock is, so it counts in employer-linked wealth. A written one is a
+ * liability, not a holding (optionNetValue).
  */
-export function optionPolicyHoldings(positions: readonly OptionRiskPosition[]) {
+export function optionPolicyHoldings(positions: readonly OptionRiskPosition[], employerSymbols: Iterable<string> = []) {
+    const employer = new Set([...employerSymbols].map(normalizeSymbol).filter(Boolean));
     return positions
         .filter((position) => position.quantity > 0)
         .map((position) => {
@@ -382,6 +385,7 @@ export function optionPolicyHoldings(positions: readonly OptionRiskPosition[]) {
                 marketValue: optionCurrentValue(position),
                 policyBucket: "speculative" as const,
                 instrumentType: `${position.contractType} option`,
+                isEmployerStock: employer.has(underlying),
             };
         })
         .filter((holding) => holding.marketValue > 0);

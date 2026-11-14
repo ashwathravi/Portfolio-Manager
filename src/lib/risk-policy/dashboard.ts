@@ -178,7 +178,7 @@ export function computeRiskPolicyDashboard(
     const optionPositions = input.optionPositions ?? [];
     // Bought options are speculative holdings. A written one is a liability:
     // what buying it back would cost comes off the portfolio's worth.
-    const optionHoldings = optionPolicyHoldings(optionPositions);
+    const optionHoldings = optionPolicyHoldings(optionPositions, employerSymbols);
     const cashHolding = cashTotal > 0
         ? [{
             id: "cash-reserve",

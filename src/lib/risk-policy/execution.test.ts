@@ -379,4 +379,32 @@ describe("pre-trade risk policy evaluator", () => {
         assert.equal(written?.status, "pass");
         assert.equal(written?.currentPct, 0);
     });
+
+    test("regression: options on the employer's stock count as employer-linked wealth, as the stock does", () => {
+        // Codex's finding on PR #192: GOOG named as the employer, $50,000 of
+        // GOOG calls in a $100,000 portfolio, a 10% employer-linked cap, and
+        // a $1,000 GOOG stock buy. The calls were left out, so the check read
+        // 0.2% after the trade and passed; it is 10.2%, past the cap.
+        const calls = {
+            id: "goog-calls", underlying: "GOOG", contractType: "call" as const, strike: 180, expiry: "2027-01-15",
+            quantity: 10, premiumPaid: 40, currentPremium: 50,
+        };
+        const evaluate = (employerSymbols: string[]) => evaluatePreTradeRiskPolicy({
+            holdings: [],
+            portfolioValue: 100_000,
+            trade: { ticker: "GOOG", side: "buy", quantity: 10, price: 100, linkedThesisId: "seed-goog", thesisUpdatedAt: "2026-11-01" },
+            themeCaps: { employer_linked_wealth: 10 },
+            employerSymbols,
+            existingOptionPositions: [calls],
+            asOf: "2026-11-14",
+        });
+        const employer = evaluate(["GOOG"]).checks.find((check) => check.ruleType === "employer_stock_allocation");
+        assert.ok(employer);
+        assert.equal(employer.currentPct, 10);
+        assert.equal(employer.postPct, 10.2);
+        assert.equal(employer.status, "fail");
+        assert.equal(employer.decision, "override_required");
+        // Not the employer's: no employer-linked weighting for the calls or the buy.
+        assert.equal(evaluate([]).checks.some((check) => check.ruleType === "employer_stock_allocation"), false);
+    });
 });

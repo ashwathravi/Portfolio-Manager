@@ -169,7 +169,7 @@ export function evaluatePreTradeRiskPolicy(input: PreTradeRiskPolicyInput): PreT
     const bucketAssignment = resolvePolicyBucketAssignment(tradeHolding);
     // The options held count in the buckets and themes as Today counts them
     // (launch item i63); the trade changes only the stock holdings.
-    const optionHoldings = optionPolicyHoldings(input.existingOptionPositions ?? []);
+    const optionHoldings = optionPolicyHoldings(input.existingOptionPositions ?? [], employerSymbols);
     const currentHoldings = [...holdings, ...optionHoldings];
     const currentBucketAllocation = computeBucketAllocation(currentHoldings, input.bucketPolicies ?? DEFAULT_BUCKET_POLICIES);
     const postHoldings = [...buildPostTradeHoldings(holdings, tradeHolding, tradeValue, trade.side), ...optionHoldings];
