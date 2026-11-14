@@ -14,7 +14,7 @@ test.describe('Privacy policy', () => {
     await expect(page.getByRole('heading', { level: 1 })).toHaveCount(1);
     await expect(page.getByRole('heading', { level: 1, name: 'Privacy Policy' })).toBeVisible();
     // The page's LAST_UPDATED, which moves whenever its text changes.
-    await expect(page.getByText(/^Last updated /)).toHaveText('Last updated November 14, 2026');
+    await expect(page.getByText('Last updated November 14, 2026', { exact: true })).toBeVisible();
     await expect(page.getByRole('navigation', { name: 'Main navigation' })).toHaveCount(0);
   });
 
