@@ -234,6 +234,77 @@ describe('CachedMarketDataProvider', () => {
             await provider.getHistoricalPrices('AAPL', '3M'); // different range = different key
             assert.strictEqual(inner.getHistoricalCalls, 2);
         });
+
+        /** A daily bar as Massive stamps it: midnight New York time on its session. */
+        const bar = (session: string, close: number): OHLC => ({
+            timestamp: new Date(`${session}T05:00:00Z`).toISOString(), open: close, high: close, low: close, close, volume: 1,
+        });
+
+        /** History whose newest session is whatever `latest` says, and a clock the test moves. */
+        function sessionsSetup() {
+            const clock = { now: new Date('2026-11-16T15:00:00Z') }; // Mon 10:00 AM EST
+            const latest = { session: '2026-11-13' };
+            inner.getHistoricalPrices = async () => {
+                inner.getHistoricalCalls++;
+                return [bar(latest.session, inner.getHistoricalCalls)];
+            };
+            const ttls = new Map<string, number>();
+            const recording = new InMemoryCache();
+            const set = recording.set.bind(recording);
+            recording.set = <T>(key: string, value: T, ttlSeconds: number) => {
+                ttls.set(key, ttlSeconds);
+                set(key, value, ttlSeconds);
+            };
+            const cached = new CachedMarketDataProvider(inner, recording, { now: () => clock.now });
+            return { clock, latest, ttls, recording, cached };
+        }
+
+        it('regression (x22): the last session\'s bars are asked for again once a newer session closes', async () => {
+            const { clock, latest, cached } = sessionsSetup();
+            // Monday morning: Friday is the last session, and it is cached.
+            assert.deepStrictEqual((await cached.getHistoricalPrices('AAPL', '1D')).map((b) => b.close), [1]);
+            assert.deepStrictEqual((await cached.getHistoricalPrices('AAPL', '1D')).map((b) => b.close), [1]);
+            assert.strictEqual(inner.getHistoricalCalls, 1);
+
+            // Monday 7:00 PM EST, Monday's bar published: Monday's answer, not Friday's for another 15 hours.
+            clock.now = new Date('2026-11-17T00:00:00Z');
+            latest.session = '2026-11-16';
+            const evening = await cached.getHistoricalPrices('AAPL', '1D');
+            assert.strictEqual(inner.getHistoricalCalls, 2);
+            assert.strictEqual(evening[0].timestamp, bar('2026-11-16', 2).timestamp);
+            // Day ranges end at the latest session too.
+            await cached.getHistoricalPrices('AAPL', '1M');
+            clock.now = new Date('2026-11-17T15:00:00Z'); // Tue 10:00 AM: still Monday's session
+            await cached.getHistoricalPrices('AAPL', '1M');
+            await cached.getHistoricalPrices('AAPL', '1D');
+            assert.strictEqual(inner.getHistoricalCalls, 3);
+        });
+
+        it('regression (x22): an answer without the last session\'s bar yet is kept for minutes, not a day', async () => {
+            const { clock, latest, ttls, recording, cached } = sessionsSetup();
+            // Mon 4:30 PM EST: Monday's session has closed, but Massive still has Friday as its newest.
+            clock.now = new Date('2026-11-16T21:30:00Z');
+            await cached.getHistoricalPrices('AAPL', '5D');
+            assert.deepStrictEqual([...ttls.values()], [10 * 60]);
+
+            // Ten minutes on (the entry expired) it is asked for again, and once
+            // Monday is there it is kept for the day.
+            await cached.getHistoricalPrices('AAPL', '5D');
+            assert.strictEqual(inner.getHistoricalCalls, 1);
+            ttls.clear();
+            recording.clear();
+            latest.session = '2026-11-16';
+            await cached.getHistoricalPrices('AAPL', '5D');
+            assert.strictEqual(inner.getHistoricalCalls, 2);
+            assert.deepStrictEqual([...ttls.values()], [24 * 60 * 60]);
+        });
+
+        it('an empty answer is kept for minutes too', async () => {
+            const { ttls, cached } = sessionsSetup();
+            inner.getHistoricalPrices = async () => [];
+            await cached.getHistoricalPrices('NOPE', '1M');
+            assert.deepStrictEqual([...ttls.values()], [10 * 60]);
+        });
     });
 
     describe('getFundamentals', () => {

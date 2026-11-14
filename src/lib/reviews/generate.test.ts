@@ -5,12 +5,14 @@ import { generateReview } from './generate';
 import type { WeekBounds } from './types';
 import type { JournalEntry } from '@/types/trade';
 
+// The week of Mon 2026-05-04 in New York (EDT): src/lib/reviews/weeks.ts.
 const BOUNDS: WeekBounds = {
     id: 'wk:2026-05-04',
-    weekStart: '2026-05-04T07:00:00.000Z',
-    weekEnd: '2026-05-08T23:00:00.000Z',
+    weekStart: '2026-05-04T04:00:00.000Z',
+    weekEnd: '2026-05-11T04:00:00.000Z',
+    closesAt: '2026-05-08T20:00:00.000Z',
     firstDay: '2026-05-04',
-    lastDay: '2026-05-08',
+    lastDay: '2026-05-10',
 };
 
 function entry(patch: Partial<JournalEntry> = {}): JournalEntry {
@@ -169,15 +171,14 @@ describe('generateReview', () => {
         );
     });
 
-    test('counts a trade with only a date on that date, wherever the week ends (launch item i51)', () => {
-        // Tokyo: Monday 00:00 to Friday 16:00 is Sunday 15:00Z to Friday 07:00Z,
-        // and a trade dated Friday is stored at noon UTC, after that close.
-        const tokyo: WeekBounds = {
+    test('counts a trade with only a date on that date, Monday to Sunday (launch item i51)', () => {
+        const week: WeekBounds = {
             id: 'wk:2026-10-19',
-            weekStart: '2026-10-18T15:00:00.000Z',
-            weekEnd: '2026-10-23T07:00:00.000Z',
+            weekStart: '2026-10-19T04:00:00.000Z',
+            weekEnd: '2026-10-26T04:00:00.000Z',
+            closesAt: '2026-10-23T20:00:00.000Z',
             firstDay: '2026-10-19',
-            lastDay: '2026-10-23',
+            lastDay: '2026-10-25',
         };
         const dated = (id: string, opened: string, closed: string, pnl: number) => entry({
             id,
@@ -188,19 +189,41 @@ describe('generateReview', () => {
             realizedPnlUsd: pnl,
         });
         const friday = dated('fri', '2026-10-22', '2026-10-23', -100);
-        const sunday = dated('sun', '2026-10-16', '2026-10-18', 40);
+        // Entered by hand with a weekend date: still that week's, not lost between two.
+        const saturday = dated('sat', '2026-10-22', '2026-10-24', 15);
+        const sundayBefore = dated('sun', '2026-10-16', '2026-10-18', 40);
         const nextMonday = dated('mon', '2026-10-23', '2026-10-26', 25);
-        const review = generateReview([friday, sunday, nextMonday], tokyo);
-        assert.equal(review.stats.tradeCount.total, 1);
-        assert.equal(review.stats.realizedPnlUsd, -100);
+        const review = generateReview([friday, saturday, sundayBefore, nextMonday], week);
+        assert.equal(review.stats.tradeCount.total, 2);
+        assert.equal(review.stats.realizedPnlUsd, -85);
 
         // Sold and bought back the same Friday: churn sees the trades the week counted.
-        const churn = generateReview([friday, dated('fri-2', '2026-10-23', '2026-10-23', -20)], tokyo);
+        const churn = generateReview([friday, dated('fri-2', '2026-10-23', '2026-10-23', -20)], week);
         assert.equal(churn.stats.tradeCount.total, 2);
         assert.deepEqual(churn.stats.churnSymbols, ['NVDA']);
 
-        // A trade with a time of day still ends at the local Friday close.
-        assert.equal(generateReview([{ ...friday, dateOnly: undefined }], tokyo).stats.tradeCount.total, 0);
+        // A trade with a time of day counts by that time: the next Monday 00:00 ET is the next week's.
+        const timed = (closedAt: string) => ({ ...friday, dateOnly: undefined, closedAt });
+        assert.equal(generateReview([timed('2026-10-26T03:59:59.000Z')], week).stats.tradeCount.total, 1);
+        assert.equal(generateReview([timed('2026-10-26T04:00:00.000Z')], week).stats.tradeCount.total, 0);
+        assert.equal(generateReview([timed('2026-10-19T03:59:59.000Z')], week).stats.tradeCount.total, 0);
+    });
+
+    test('churn reaches every trade of a week an hour longer than seven days', () => {
+        // Clocks fall back Sun 2026-11-01: Mon Oct 26 00:00 EDT to Mon Nov 2 00:00 EST is 169 hours.
+        const week: WeekBounds = {
+            id: 'wk:2026-10-26',
+            weekStart: '2026-10-26T04:00:00.000Z',
+            weekEnd: '2026-11-02T05:00:00.000Z',
+            closesAt: '2026-10-30T20:00:00.000Z',
+            firstDay: '2026-10-26',
+            lastDay: '2026-11-01',
+        };
+        const first = entry({ id: 'j-first', closedAt: '2026-10-26T04:30:00.000Z', holdingPeriodDays: 1 });
+        const last = entry({ id: 'j-last', side: 'sell', closedAt: '2026-11-02T04:30:00.000Z', holdingPeriodDays: 1 });
+        const review = generateReview([first, last], week);
+        assert.equal(review.stats.tradeCount.total, 2);
+        assert.deepEqual(review.stats.churnSymbols, ['NVDA']);
     });
 
     test('a week with no closed trades still scores 100 and says so', () => {

@@ -123,12 +123,29 @@ async function readApiError(response: Response, fallback: string): Promise<strin
     }
 }
 
+interface ConnectionsState {
+    connections: PlaidConnection[];
+    /**
+     * Why bank linking can't happen here, when the server says it isn't set up
+     * (503 PLAID_NOT_CONFIGURED: no Plaid keys, x30); null when it can.
+     */
+    notSetUp: string | null;
+}
+
+const BANK_LINKING_NOT_SET_UP = "Bank linking isn't set up yet.";
+
 /** The user's connections; none when linked accounts aren't set up here. */
-async function fetchConnections(): Promise<PlaidConnection[]> {
+async function fetchConnections(): Promise<ConnectionsState> {
     const response = await fetch("/api/plaid/connections", { credentials: "same-origin" });
-    if (response.status === 503) return [];
+    if (response.status === 503) {
+        const payload = (await response.json().catch(() => null)) as { error?: unknown; code?: unknown } | null;
+        const notSetUp = payload?.code === "PLAID_NOT_CONFIGURED"
+            ? (typeof payload.error === "string" && payload.error.trim() ? payload.error : BANK_LINKING_NOT_SET_UP)
+            : null;
+        return { connections: [], notSetUp };
+    }
     if (!response.ok) throw new Error(await readApiError(response, "Couldn't load the connected accounts."));
-    return ((await response.json()) as { data: PlaidConnection[] }).data;
+    return { connections: ((await response.json()) as { data: PlaidConnection[] }).data, notSetUp: null };
 }
 
 /**
@@ -173,7 +190,12 @@ export function IntegrationsCard() {
     const queryClient = useQueryClient();
     // No retries: a failed load shows its own state, with Try again.
     const connectionsQuery = useQuery({ queryKey: CONNECTIONS_KEY, queryFn: fetchConnections, staleTime: 30_000, retry: false });
-    const connections = connectionsQuery.data ?? [];
+    const connections = connectionsQuery.data?.connections ?? [];
+    // Without Plaid's keys there is nothing to connect with: the card says so
+    // instead of offering a Connect button that fails (x30). Connect waits for
+    // the answer, so it never shows and then disappears.
+    const notSetUp = connectionsQuery.data?.notSetUp ?? null;
+    const canConnect = !connectionsQuery.isPending && notSetUp === null;
 
     // The connection an action is running on, against double clicks.
     const [busyItem, setBusyItem] = useState<string | null>(null);
@@ -422,15 +444,17 @@ export function IntegrationsCard() {
                         Connected accounts
                     </h2>
                 </div>
-                <button
-                    type="button"
-                    className="pm-settings-card-cta"
-                    onClick={startPlaidLink}
-                    disabled={plaidStatus === "loading" || plaidStatus === "saving"}
-                >
-                    <Plus className="h-3.5 w-3.5" aria-hidden="true" />
-                    {plaidStatus === "loading" ? "Opening..." : "Connect"}
-                </button>
+                {canConnect && (
+                    <button
+                        type="button"
+                        className="pm-settings-card-cta"
+                        onClick={startPlaidLink}
+                        disabled={plaidStatus === "loading" || plaidStatus === "saving"}
+                    >
+                        <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+                        {plaidStatus === "loading" ? "Opening..." : "Connect"}
+                    </button>
+                )}
             </header>
 
             <PlaidReviewPanel
@@ -459,6 +483,14 @@ export function IntegrationsCard() {
                         <button type="button" className="pm-integration-action" onClick={() => void connectionsQuery.refetch()} disabled={connectionsQuery.isFetching}>
                             {connectionsQuery.isFetching ? "Trying…" : "Try again"}
                         </button>
+                    </div>
+                ) : notSetUp !== null ? (
+                    <div className="pm-integrations-empty" data-testid="plaid-not-set-up">
+                        <p>{notSetUp}</p>
+                        <p>
+                            In the meantime, add your accounts and import their positions on{" "}
+                            <Link href="/portfolios/accounts">Accounts</Link>.
+                        </p>
                     </div>
                 ) : connections.length === 0 ? (
                     <div className="pm-integrations-empty">
