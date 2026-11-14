@@ -1,7 +1,14 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 
-import { RECORD_LIMITS, recordLimitCode, RecordLimitError, recordLimitMessage, recordLimitMessageFor } from "./records";
+import {
+    browserImportLimitMessageFor,
+    RECORD_LIMITS,
+    recordLimitCode,
+    RecordLimitError,
+    recordLimitMessage,
+    recordLimitMessageFor,
+} from "./records";
 import { buildCountRecordsQuery, buildLockUserRecordsQuery } from "./records-server";
 
 // Launch item i77: how many watchlist items, journal entries, theses and
@@ -30,6 +37,25 @@ describe("record limits (launch item i77)", () => {
         assert.equal(recordLimitMessageFor("theses", refused(null)), null);
         assert.equal(recordLimitMessageFor("theses", new Error("offline")), null);
         assert.equal(recordLimitMessageFor("theses", null), null);
+    });
+
+    test("regression: a browser's records refused by a limit on their way to the account are explained, not dropped from view in silence", () => {
+        const refused = (code: string) => Object.assign(new Error("Request failed (409)"), { status: 409, code });
+        assert.equal(
+            browserImportLimitMessageFor("watchlist", refused("WATCHLIST_LIMIT")),
+            "Some tickers saved in this browser weren't added to your account: your watchlist holds at most 500. They stay in this browser and move over on a later visit once there's room.",
+        );
+        assert.equal(
+            browserImportLimitMessageFor("journal", refused("JOURNAL_LIMIT")),
+            "Some journal entries saved in this browser weren't added to your account: your journal holds at most 2,000. They stay in this browser and move over on a later visit once there's room.",
+        );
+        assert.equal(
+            browserImportLimitMessageFor("theses", refused("THESIS_LIMIT")),
+            "Some theses saved in this browser weren't added to your account: you can keep at most 200. They stay in this browser and move over on a later visit once there's room.",
+        );
+        // Any other failure is left to the console, and tried again later as before.
+        assert.equal(browserImportLimitMessageFor("watchlist", refused("JOURNAL_LIMIT")), null);
+        assert.equal(browserImportLimitMessageFor("journal", new Error("offline")), null);
     });
 
     test("only live rows count: a removed item, entry or thesis kept as dismissed doesn't", () => {

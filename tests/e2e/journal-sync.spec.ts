@@ -1,5 +1,6 @@
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { gotoAppPage } from './helpers/app';
+import { researchLoaded } from './helpers/research';
 import { userKey } from './helpers/storage';
 import { signInAsFreshUser } from './helpers/users';
 
@@ -20,6 +21,13 @@ async function anotherBrowser(browser: Browser, context: BrowserContext): Promis
     return other.newPage();
 }
 
+/** Opens the journal and waits for the account's entries: a change made before they load is refused. */
+async function openJournal(page: Page) {
+    const loaded = researchLoaded(page, 'journal');
+    await gotoAppPage(page, '/research?tab=journal');
+    await loaded;
+}
+
 async function addEntry(page: Page, ticker: string, decision: string) {
     await page.getByRole('button', { name: 'New entry' }).click();
     const dialog = page.getByRole('dialog');
@@ -37,7 +45,7 @@ test.describe('Journal in the account', () => {
 
     test('an entry you add follows you to another browser', async ({ browser, context, page }) => {
         await signInAsFreshUser(context);
-        await gotoAppPage(page, '/research?tab=journal');
+        await openJournal(page);
         await addEntry(page, 'AMD', 'Opened a starter position');
 
         const elsewhere = await anotherBrowser(browser, context);
@@ -84,7 +92,7 @@ test.describe('Journal in the account', () => {
 
     test("one account's journal doesn't reach another", async ({ browser, context, page }) => {
         await signInAsFreshUser(context);
-        await gotoAppPage(page, '/research?tab=journal');
+        await openJournal(page);
         await addEntry(page, 'TSLA', 'Sold covered calls');
 
         const other = await browser.newContext();

@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 import { useAccountStorage, useViewerIdentity } from '@/components/providers/IdentityProvider';
 import { useRequestTime } from '@/components/providers/RequestTimeProvider';
 import { alphaRadarQueryKeys } from '@/lib/api/alpha-radar/queries';
-import { recordLimitMessageFor } from '@/lib/limits/records';
+import { browserImportLimitMessageFor, recordLimitMessageFor } from '@/lib/limits/records';
 import { storageScopeFor } from '@/lib/storage/user-scope';
 import {
     addCatalyst,
@@ -222,7 +222,9 @@ function useAccountTheses(enabled: boolean, scope: string, examples: Thesis[]): 
                 });
             } catch (error) {
                 // Kept in this browser and sent again next time.
-                console.warn('[theses] import from this browser failed', error);
+                const limit = browserImportLimitMessageFor('theses', error);
+                if (limit) toast(limit, { id: 'theses-import-limit', duration: 15_000 });
+                else console.warn('[theses] import from this browser failed', error);
             }
             return fetchAccountTheses();
         },

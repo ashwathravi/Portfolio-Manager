@@ -64,6 +64,25 @@ export function recordLimitMessageFor(kind: RecordKind, error: unknown): string 
     return code === recordLimitCode(kind) ? recordLimitMessage(kind) : null;
 }
 
+const BROWSER_RECORDS: Record<Exclude<RecordKind, "transactions">, { what: string; cap: (limit: string) => string }> = {
+    watchlist: { what: "tickers", cap: (limit) => `your watchlist holds at most ${limit}` },
+    journal: { what: "journal entries", cap: (limit) => `your journal holds at most ${limit}` },
+    theses: { what: "theses", cap: (limit) => `you can keep at most ${limit}` },
+};
+
+/**
+ * What to tell the user when the one-time move of what this browser kept
+ * (launch item i38) was refused by `kind`'s limit, or null when it failed for
+ * another reason. The browser keeps its copy until the account takes it, and
+ * the move is tried again on a later visit, so nothing is lost.
+ */
+export function browserImportLimitMessageFor(kind: Exclude<RecordKind, "transactions">, error: unknown): string | null {
+    if (recordLimitMessageFor(kind, error) === null) return null;
+    const { what, cap } = BROWSER_RECORDS[kind];
+    return `Some ${what} saved in this browser weren't added to your account: ${cap(COUNT.format(RECORD_LIMITS[kind]))}. `
+        + "They stay in this browser and move over on a later visit once there's room.";
+}
+
 /** Thrown inside a write's transaction, which it rolls back, when the write would take the user past `kind`'s limit. */
 export class RecordLimitError extends Error {
     constructor(readonly kind: RecordKind) {

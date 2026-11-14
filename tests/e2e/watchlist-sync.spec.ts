@@ -285,4 +285,36 @@ test.describe('Watchlist in the account', () => {
         await expect(page.getByText('Your watchlist holds at most 500 tickers. Remove one to add another.')).toBeVisible();
         await expect(list(page).getByRole('button', { name: /NVDA/ })).toHaveCount(0);
     });
+
+    test("regression: a browser's list the account has no room for is explained and kept in the browser (launch item i77)", async ({ context, page }) => {
+        const scope = await signInAsFreshUser(context);
+        const filled = await page.request.post('/api/research/watchlist/import', {
+            data: {
+                items: Array.from({ length: 500 }, (_, i) => ({
+                    id: `w-full-${i}`, ticker: `F${i}`, companyName: '', reason: '', notes: '', targetEntry: null, addedAt: '2026-11-14', dismissed: false,
+                })),
+            },
+        });
+        expect(filled.status()).toBe(204);
+        // As the browser-only version saved it: one ticker the account doesn't have.
+        const browserList = JSON.stringify({
+            version: 1,
+            items: [{ id: 'w-amzn-full', ticker: 'AMZN', companyName: 'Amazon.com, Inc.', reason: 'AWS margins', notes: '', targetEntry: 150, addedAt: '2026-10-01' }],
+        });
+        await page.addInitScript(({ key, value }) => {
+            if (window.sessionStorage.getItem('__pm_test_full_watchlist')) return;
+            window.sessionStorage.setItem('__pm_test_full_watchlist', '1');
+            window.localStorage.setItem(key, value);
+        }, { key: userKey(WATCHLIST_KEY, scope), value: browserList });
+
+        const refused = page.waitForResponse((response) =>
+            response.url().endsWith('/api/research/watchlist/import') && response.status() === 409);
+        await gotoAppPage(page, '/research?tab=watchlist');
+        await refused;
+
+        await expect(page.getByText("Some tickers saved in this browser weren't added to your account: your watchlist holds at most 500. They stay in this browser and move over on a later visit once there's room.")).toBeVisible();
+        // The account's list still loads, and the browser keeps its copy for a later visit.
+        await expect(list(page).getByRole('button', { name: /F0\b/ }).first()).toBeAttached();
+        expect(await page.evaluate((key) => window.localStorage.getItem(key), userKey(WATCHLIST_KEY, scope))).toContain('w-amzn-full');
+    });
 });

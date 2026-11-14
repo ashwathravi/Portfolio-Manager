@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { useAccountStorage, useViewerIdentity } from '@/components/providers/IdentityProvider';
-import { recordLimitMessageFor } from '@/lib/limits/records';
+import { browserImportLimitMessageFor, recordLimitMessageFor } from '@/lib/limits/records';
 import { storageScopeFor } from '@/lib/storage/user-scope';
 import {
     createJournalEntry,
@@ -157,7 +157,9 @@ function useAccountJournal(enabled: boolean, scope: string): JournalSource {
                 });
             } catch (error) {
                 // Kept in this browser and sent again next time.
-                console.warn('[journal] import from this browser failed', error);
+                const limit = browserImportLimitMessageFor('journal', error);
+                if (limit) toast(limit, { id: 'journal-import-limit', duration: 15_000 });
+                else console.warn('[journal] import from this browser failed', error);
             }
             return fetchAccountJournal();
         },

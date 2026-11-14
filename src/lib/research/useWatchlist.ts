@@ -20,7 +20,7 @@ import {
     type AddWatchError,
     type WatchItem,
 } from './watchlist';
-import { recordLimitMessageFor } from '@/lib/limits/records';
+import { browserImportLimitMessageFor, recordLimitMessageFor } from '@/lib/limits/records';
 
 import { AccountRequestError } from './accountWrites';
 import { useAccountRecords } from './useAccountRecords';
@@ -206,7 +206,9 @@ function useAccountWatchlist(enabled: boolean, key: string, examples: WatchItem[
                 });
             } catch (error) {
                 // Kept in this browser and sent again next time.
-                console.warn('[watchlist] import from this browser failed', error);
+                const limit = browserImportLimitMessageFor('watchlist', error);
+                if (limit) toast(limit, { id: 'watchlist-import-limit', duration: 15_000 });
+                else console.warn('[watchlist] import from this browser failed', error);
             }
             return fetchAccountWatchlist();
         },
