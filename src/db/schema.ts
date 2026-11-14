@@ -295,6 +295,94 @@ export const transactions = pgTable("transactions", {
 })).enableRLS();
 
 // ---------------------------------------------------------------------------
+// Option positions (launch item i63)
+// ---------------------------------------------------------------------------
+
+/**
+ * Option contracts the user holds, entered by hand or imported from a
+ * broker's positions CSV, for the LEAPS ledger and the options checks of
+ * the risk policy. Kept apart from holdings: they aren't in net worth,
+ * returns or the nightly valuations. One row per contract an account
+ * holds; it goes with its account.
+ */
+export const optionPositions = pgTable("option_positions", {
+    id: uuid("id").default(sql`gen_random_uuid()`).primaryKey(),
+    userId: text("user_id")
+        .notNull()
+        .references(() => authUsers.id, { onDelete: "cascade" }),
+    // Its account, which must be the same user's (option_positions_portfolio_owner_fk).
+    portfolioId: uuid("portfolio_id").notNull(),
+    // Massive's ticker for the contract (O:AAPL270115C00250000): its closes
+    // are kept under it in option_marks.
+    contract: text("contract").notNull(),
+    underlying: text("underlying").notNull(),
+    contractType: text("contract_type").notNull(),
+    strike: numeric("strike").notNull(),
+    expiry: date("expiry", { mode: "string" }).notNull(),
+    // Contracts; negative for a written (short) position.
+    quantity: numeric("quantity").notNull(),
+    // Per share, as brokers quote it: paid, or received for a short.
+    premium: numeric("premium").notNull(),
+    multiplier: integer("multiplier").notNull().default(100),
+    openedAt: date("opened_at", { mode: "string" }),
+    // The user's own price per share and the day it's from, used while no
+    // newer close is stored.
+    userMark: numeric("user_mark"),
+    userMarkDate: date("user_mark_date", { mode: "string" }),
+    // One of the user's theses (theses.id); a deleted one reads as none.
+    thesisId: text("thesis_id"),
+    // What must be true by expiry, and the exit, roll or expire rule.
+    expiryTest: text("expiry_test").notNull().default(""),
+    exitRule: text("exit_rule").notNull().default(""),
+    // "manual" or "csv".
+    source: text("source").notNull().default("manual"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => ({
+    userIdIdx: index("option_positions_user_id_idx").on(table.userId),
+    contractIdx: index("option_positions_contract_idx").on(table.contract),
+    portfolioContractIdx: uniqueIndex("option_positions_portfolio_contract_idx").on(table.portfolioId, table.contract),
+    portfolioOwner: foreignKey({
+        name: "option_positions_portfolio_owner_fk",
+        columns: [table.portfolioId, table.userId],
+        foreignColumns: [portfolios.id, portfolios.userId],
+    }).onDelete("cascade"),
+    contractTypeCheck: check("option_positions_contract_type_check", sql`${table.contractType} in ('call', 'put')`),
+    strikeCheck: check("option_positions_strike_check", sql`${table.strike} > 0`),
+    quantityCheck: check("option_positions_quantity_check", sql`${table.quantity} <> 0`),
+    premiumCheck: check("option_positions_premium_check", sql`${table.premium} >= 0`),
+    multiplierCheck: check("option_positions_multiplier_check", sql`${table.multiplier} > 0`),
+    userMarkCheck: check(
+        "option_positions_user_mark_check",
+        sql`(${table.userMark} is null) = (${table.userMarkDate} is null) and (${table.userMark} is null or ${table.userMark} >= 0)`,
+    ),
+    sourceCheck: check("option_positions_source_check", sql`${table.source} in ('manual', 'csv')`),
+    serverOnlyNoClientAccess: serverOnlyNoClientAccessPolicy(),
+    appRuntimeAccess: appRuntimeAccessPolicy(),
+})).enableRLS();
+
+/**
+ * The newest end-of-day close of each contract anyone holds (launch item
+ * i63), from Massive where its plan includes options. Shared, like
+ * price_bars: a contract costs one call a night however many hold it, and
+ * a row says nothing about who does.
+ */
+export const optionMarks = pgTable("option_marks", {
+    contract: text("contract").primaryKey(),
+    // Null until a close is found: a contract that hasn't traded has none.
+    close: doublePrecision("close"),
+    closeDate: date("close_date", { mode: "string" }),
+    // The session the nightly job last asked about, so it asks once a session.
+    checkedSession: date("checked_session", { mode: "string" }).notNull(),
+    checkedAt: timestamp("checked_at").notNull(),
+    // Which provider answered, e.g. "massive".
+    source: text("source").notNull(),
+}, () => ({
+    serverOnlyNoClientAccess: serverOnlyNoClientAccessPolicy(),
+    appRuntimeAccess: appRuntimeAccessPolicy(),
+})).enableRLS();
+
+// ---------------------------------------------------------------------------
 // Alpha Radar — 13F research domain
 // ---------------------------------------------------------------------------
 export const alphaRadarTrackedFilers = pgTable("alpha_radar_tracked_filers", {

@@ -27,6 +27,8 @@ const PORTFOLIO: PolicyPortfolio = {
     cashTotal: 500,
     trades: [],
     theses: [],
+    // The user's option positions (launch item i63): none here.
+    options: [],
 };
 
 function context(overrides: Partial<AskContext> = {}): AskContext {
