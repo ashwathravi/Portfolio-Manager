@@ -9,6 +9,8 @@ import * as schema from '../../src/db/schema';
 import { ALERTS_JOB, evaluateAlertRules, recordFirings } from '../../src/lib/alerts/nightly';
 import { clearAlertNotifications, loadAlertFeed, markAlertNotificationsRead } from '../../src/lib/alerts/server/notifications';
 import { AlertRuleLimitError, createAlertRule, deleteAlertRule, listAlertRules, updateAlertRule } from '../../src/lib/alerts/server/rules';
+import { SETTINGS_VERSION } from '../../src/lib/settings/document';
+import { defaultPersistedSettings } from '../../src/lib/stores/settingsStore';
 import { ALERT_RULES_PER_USER, alertRuleInputSchema } from '../../src/lib/validators/alerts';
 
 // Launch item i57: alert rules and their notifications kept with the
@@ -276,6 +278,28 @@ describe('alerts kept with the account', { skip: !DATABASE_URL && 'SCRIPTS_TEST_
             'Berkshire Hathaway added to APPLE INC (AAPL) in 2026-Q3. Materiality 82/100. You hold it.',
         ]);
         assert.deepEqual([...await notifications('u-2')], []);
+    });
+
+    test('regression: an Alpha Radar ticker filter matches a change SEC stored without a ticker by company name, for a user who doesn\'t hold or follow it', async () => {
+        // Codex's finding on PR #185: the filter took tickers only from the
+        // user's own overlap, so this user (holding nothing) got nothing.
+        const [filer] = await sql<{ id: string }[]>`INSERT INTO alpha_radar_tracked_filers (name, slug, cik) VALUES ('Berkshire Hathaway', 'berkshire', '0001067983') RETURNING id`;
+        await sql`DELETE FROM symbol_directory`;
+        await sql`INSERT INTO symbol_directory (symbol, name, cik, position) VALUES ('AAPL', 'Apple Inc.', '0000320193', 1), ('APLE', 'Apple Hospitality REIT, Inc.', '0001418121', 2)`;
+        const delivery = { ...defaultPersistedSettings().alphaRadarDelivery, overlapOnly: false, minMaterialityScore: 0, tickerFilters: ['aapl'] };
+        await sql`INSERT INTO user_settings (user_id, version, settings) VALUES ('u-1', ${SETTINGS_VERSION}, ${JSON.stringify({ alphaRadarDelivery: delivery })}::jsonb)`;
+        await createAlertRule('u-1', rule({ name: 'Adds', metric: 'alpha_radar_large_add', threshold: 50, rearm: 'always' }), { database, now: new Date('2026-10-01T00:00:00Z') });
+        for (const [cusip, issuer] of [['037833100', 'APPLE INC'], ['03784Y200', 'APPLE HOSPITALITY REIT INC']]) {
+            await sql`
+                INSERT INTO alpha_radar_holding_changes (tracked_filer_id, report_period, change_type, issuer_name, cusip, ticker, materiality_score, created_at)
+                VALUES (${filer.id}, '2026-Q3', 'increased', ${issuer}, ${cusip}, NULL, 70, '2026-11-02 15:00')`;
+        }
+
+        await evaluateAlertRules({ database, now: EVENING });
+        assert.deepEqual((await notifications('u-1')).map((n) => n.message), [
+            'Berkshire Hathaway added to APPLE INC (AAPL) in 2026-Q3. Materiality 70/100.',
+        ]);
+        await sql`DELETE FROM symbol_directory`;
     });
 
     test('the feed: newest first, read one or all, others\' IDs ignored, cleared; old alerts pruned', async () => {
