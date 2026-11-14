@@ -24,7 +24,8 @@ import { ImportTransactionsDialog } from "./ImportTransactionsDialog";
  * hardcoded list. Rows come from the transactions table; the churn and
  * tax-friction callout (kept from the trade log) runs on the same rows.
  * Transactions are added by hand or from a broker's CSV, and deleted here
- * (launch item i40).
+ * (launch item i40). A withdrawal and deposit that moved money between two
+ * of the user's accounts show as a transfer (launch item i80).
  */
 
 const SIDES: ReadonlyArray<{ key: "ALL" | ActivitySide; label: string }> = [
@@ -34,9 +35,9 @@ const SIDES: ReadonlyArray<{ key: "ALL" | ActivitySide; label: string }> = [
 ];
 
 /** A total per currency, "$1,200 + 300 CAD"; nothing is $0. */
-function formatTotals(totals: readonly MoneyAmount[]): string {
+function formatTotals(totals: readonly MoneyAmount[], { signed = false } = {}): string {
     if (totals.length === 0) return formatUsd(0, { decimals: 0 });
-    return totals.map((t) => formatMoney(t.amount, t.currency, { decimals: 0 })).join(" + ");
+    return totals.map((t) => formatMoney(t.amount, t.currency, { decimals: 0, signed })).join(" + ");
 }
 
 /** Adding and importing need an account to put the transactions in. */
@@ -152,6 +153,10 @@ export function ActivityPageClient({
                     <div><dt>Transactions</dt><dd>{summary.count}</dd></div>
                     <div><dt>Bought</dt><dd data-testid="activity-bought">{formatTotals(summary.bought)}</dd></div>
                     <div><dt>Sold</dt><dd data-testid="activity-sold">{formatTotals(summary.sold)}</dd></div>
+                    <div>
+                        <dt title="Deposits less withdrawals. Money moved between two of the accounts shown isn't counted.">Net deposits</dt>
+                        <dd data-testid="activity-net-deposits">{formatTotals(summary.netDeposits, { signed: true })}</dd>
+                    </div>
                     <div><dt>Accounts</dt><dd>{summary.accounts}</dd></div>
                 </dl>
 
@@ -253,12 +258,19 @@ export function ActivityPageClient({
                                                 "—"
                                             )}
                                         </td>
-                                        <td><span className="pm-side" data-side={r.side}>{r.side}</span></td>
+                                        <td><span className="pm-side" data-side={r.transfer ? "TRANSFER" : r.side}>{r.transfer ? "TRANSFER" : r.side}</span></td>
                                         <td className="num">{formatQty(r.quantity)}</td>
                                         <td className="num">{r.price === null ? "—" : formatMoney(r.price, r.currency)}</td>
                                         <td className="num">{formatMoney(r.value, r.currency)}</td>
                                         <td className="num">{r.fees == null ? "—" : formatMoney(r.fees, r.currency)}</td>
-                                        <td>{r.account}</td>
+                                        <td>
+                                            {r.account}
+                                            {r.transfer && (
+                                                <span className="pm-card-subtitle">
+                                                    {" "}{r.transfer.direction === "out" ? "to" : "from"} {r.transfer.otherAccount}
+                                                </span>
+                                            )}
+                                        </td>
                                         <td className="pm-card-subtitle">{r.notes ?? ""}</td>
                                         <td><DeleteTransactionButton row={r} /></td>
                                     </tr>

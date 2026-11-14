@@ -21,7 +21,7 @@ function holding(id: string, symbol: string, quantity: number, avgCost: number, 
 }
 
 function row(id: string, date: string, side: ActivityRow['side'], symbol: string, quantity: number, price: number): ActivityRow {
-    return { id, date: `${date}T15:00:00.000Z`, symbol, side, quantity, price, value: quantity * price, account: 'Brokerage', notes: null, fees: null, currency: 'USD' };
+    return { id, date: `${date}T15:00:00.000Z`, symbol, side, quantity, price, value: quantity * price, accountId: 'p1', account: 'Brokerage', notes: null, fees: null, currency: 'USD', transfer: null };
 }
 
 /** `count` weekday closes ending on 2026-10-23, moving as `move(i)`. */

@@ -51,7 +51,7 @@ function watchForProblems(page: Page, origin: string): string[] {
     page.on('console', (message) => {
         if (message.type() !== 'error') return;
         if (upgradedOrigin && isFailedUpgrade(message, upgradedOrigin)) return;
-        problems.push(`console: ${message.text()}`);
+        problems.push(`console: ${message.text()} (${message.location().url})`);
     });
     page.on('pageerror', (error) => problems.push(`page error: ${String(error)}`));
     page.on('response', (response) => {
