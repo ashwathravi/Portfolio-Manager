@@ -1,13 +1,16 @@
 import { expect, type Page } from '@playwright/test';
 
+import { currentWeekBounds } from '../../../src/lib/reviews/weeks';
+
 /**
  * Closed trades for a user with no other history (launch item i51), made
  * through the APIs the app itself uses. In a new "Trading" account:
  *
  * - DIS: 10 bought on the Monday of the latest review week that has ended
- *   (Monday to Friday 4 pm, as the browser counts it: src/lib/reviews/weeks.ts)
- *   at $100 and sold that Wednesday at $90, a $100 loss. Its reason is an
- *   entry decision in Research › Journal the day before the buy.
+ *   (a New York calendar week, ready at its last session's close:
+ *   src/lib/reviews/weeks.ts) at $100 and sold that Wednesday at $90, a $100
+ *   loss. Its reason is an entry decision in Research › Journal the day
+ *   before the buy.
  * - ABNB: 5 bought today (Eastern) at $100 and sold today at $110, a $50
  *   gain, opened by a buy drafted on Trade today with a calm mood and its
  *   rationale, then marked placed.
@@ -29,30 +32,20 @@ export interface SeededTrades {
 }
 
 export async function seedClosedTrades(page: Page): Promise<SeededTrades> {
-    const dates = await page.evaluate(() => {
-        const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-        const now = new Date();
-        const day = now.getDay();
-        const ended = day === 0 || day === 6 || (day === 5 && now.getHours() >= 16);
-        const base = ended ? new Date(now) : new Date(now.getTime() - 7 * 86_400_000);
-        const monday = new Date(base);
-        monday.setDate(base.getDate() - (base.getDay() === 0 ? 6 : base.getDay() - 1));
-        monday.setHours(0, 0, 0, 0);
-        const wednesday = new Date(monday);
-        wednesday.setDate(monday.getDate() + 2);
-        const friday = new Date(monday);
-        friday.setDate(monday.getDate() + 4);
-        const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(now);
-        return {
-            weekBuy: iso(monday),
-            weekSell: iso(wednesday),
-            weekId: `wk:${iso(monday)}`,
-            today,
-            // Trades have dates, not times: a week counts them Monday to Friday by date.
-            todayInWeek: today >= iso(monday) && today <= iso(friday),
-            dayBefore: iso(new Date(monday.getTime() - 86_400_000)),
-        };
-    });
+    // The week is New York's wherever the browser is, so it can be worked out here.
+    const now = new Date();
+    const week = currentWeekBounds(now);
+    const shift = (date: string, days: number) => new Date(Date.parse(`${date}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(now);
+    const dates = {
+        weekBuy: week.firstDay,
+        weekSell: shift(week.firstDay, 2),
+        weekId: week.id,
+        today,
+        // Trades have dates, not times: a week counts them Monday to Sunday by date.
+        todayInWeek: today >= week.firstDay && today <= week.lastDay,
+        dayBefore: shift(week.firstDay, -1),
+    };
 
     const created = await page.request.post('/api/portfolios', { data: { name: 'Trading', cashBalance: 1000 } });
     expect(created.status()).toBe(201);
