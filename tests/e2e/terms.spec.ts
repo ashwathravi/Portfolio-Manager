@@ -18,7 +18,8 @@ test.describe('Terms of Service', () => {
     await expect(page).toHaveTitle('Terms of Service | Atlas Wealth');
     await expect(page.getByRole('heading', { level: 1 })).toHaveCount(1);
     await expect(page.getByRole('heading', { level: 1, name: 'Terms of Service' })).toBeVisible();
-    await expect(page.getByText(/^Last updated /)).toBeVisible();
+    // The page's LAST_UPDATED, which moves whenever its text changes.
+    await expect(page.getByText(/^Last updated /)).toHaveText('Last updated November 14, 2026');
     await expect(page.getByRole('navigation', { name: 'Main navigation' })).toHaveCount(0);
     await expect(page.getByTestId('app-footer')).toHaveCount(0);
   });
