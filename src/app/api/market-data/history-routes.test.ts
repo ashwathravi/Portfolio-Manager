@@ -69,6 +69,10 @@ describe('GET /api/market-data/history and /historical from the price store (x09
             symbol: 'AAPL', date, open: 250 + i, high: 251 + i, low: 249 + i, close: 250.5 + i, volume: 1_000, source: 'massive',
         })),
     };
+    // AAPL is backfilled (its history starts with the first bar above);
+    // SHOP is tracked with one day's bar and its backfill still pending.
+    stored.SHOP = [{ symbol: 'SHOP', date: '2026-11-13', open: 119, high: 121, low: 118, close: 120, volume: 1_000, source: 'massive' }];
+    const historyStart: Record<string, string | null> = { AAPL: '2026-11-09', SHOP: null };
     let massiveCalls: Array<[string, string]>;
     let massive: (symbol: string) => Promise<OHLC[]>;
 
@@ -77,7 +81,11 @@ describe('GET /api/market-data/history and /historical from the price store (x09
             configured: () => true,
             recentCloses: async () => new Map(),
             track: async () => ({ refused: [] }),
-            bars: async (symbol, from, to) => (stored[symbol] ?? []).filter((bar) => bar.date >= from && bar.date <= to),
+            history: async (symbol, from, to) => ({
+                tracked: symbol in historyStart,
+                historyStart: historyStart[symbol] ?? null,
+                bars: (stored[symbol] ?? []).filter((bar) => bar.date >= from && bar.date <= to),
+            }),
         };
         const reference: MarketDataProvider = {
             getQuote: async () => { throw new Error('not used'); },
@@ -127,6 +135,17 @@ describe('GET /api/market-data/history and /historical from the price store (x09
         assert.equal(response.status, 200);
         assert.equal((await response.json()).data[0].close, 9.5);
         assert.deepEqual(massiveCalls, [['THSS', '1M']]);
+    });
+
+    test('regression: a symbol whose backfill is pending isn\'t charted from the one day stored; Massive answers', async () => {
+        massive = async () => [
+            { timestamp: '2026-10-14T04:00:00.000Z', open: 100, high: 101, low: 99, close: 100, volume: 5 },
+            { timestamp: '2026-11-13T05:00:00.000Z', open: 119, high: 121, low: 118, close: 120, volume: 5 },
+        ];
+        const response = await getHistorical(new NextRequest('https://atlas.test/api/market-data/historical?symbol=SHOP&timeframe=1M'));
+        assert.equal(response.status, 200);
+        assert.deepEqual(((await response.json()).data as OHLC[]).map((bar) => bar.close), [100, 120]);
+        assert.deepEqual(massiveCalls, [['SHOP', '1M']]);
     });
 
     test('the fallback stays rate-limited: a spent budget is a 429 with Retry-After', async () => {

@@ -10,8 +10,9 @@
  * spends the free plan's five Massive calls a minute; during the session a
  * delayed Finnhub quote, shared in Postgres, takes a close's place
  * (DelayedQuoteProvider, launch item i33). History reads the same store's
- * daily bars (x09), asking the PolygonMassiveAdapter only for a symbol with
- * none stored in the range; fundamentals and search go to the adapter.
+ * daily bars (x09), asking the PolygonMassiveAdapter only for a symbol whose
+ * history isn't stored yet (storedHistoryAnswer); fundamentals and search go
+ * to the adapter.
  * Construction never throws: without a database (quotes) or POLYGON_API_KEY
  * (the rest) requests reject with MarketDataNotConfiguredError, which pages
  * answer with stored prices ({@link loadQuotes}) and routes with a 503.

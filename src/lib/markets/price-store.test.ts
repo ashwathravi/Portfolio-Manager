@@ -6,6 +6,7 @@ import {
     buildDeleteBarsQuery,
     buildDeleteHistoryQuery,
     buildHasBarsQuery,
+    buildHistoryStartQuery,
     buildLatestBarDateQuery,
     buildLatestClosesQuery,
     buildMarkHistoryAttemptedQuery,
@@ -150,6 +151,12 @@ describe("price store queries", () => {
         assert.match(sql, /"price_bars"\."date" >= \$\d+ and "price_bars"\."date" <= \$\d+/i);
         assert.match(sql, /order by "price_bars"\."date" asc/i);
         assert.deepEqual(params, ["AAPL", "2026-01-01", "2026-06-30"]);
+    });
+
+    test("a chart reads the security's history start with its bars: one row, by symbol (x09)", () => {
+        const { sql, params } = buildHistoryStartQuery("SHOP").toSQL();
+        assert.match(sql, /^select "history_start_date" from "securities" where "securities"\."symbol" = \$1 limit \$2$/i);
+        assert.deepEqual(params, ["SHOP", 1]);
     });
 
     test("the backfill queue takes active symbols without history that a daily file priced, oldest first", () => {

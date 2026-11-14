@@ -6,7 +6,7 @@ import { PolygonRateLimitError } from "@/lib/providers/polygon-massive-adapter";
 import type { MarketDataProvider, OHLC } from "@/types/market-data";
 
 import type { LatestClose, PriceBarInput } from "./price-store";
-import { quoteFromCloses, sessionCloseTime, StoredQuoteProvider, TRACKING_RETRY_MS, type QuoteStore } from "./stored-quote-provider";
+import { quoteFromCloses, sessionCloseTime, storedHistoryAnswer, StoredQuoteProvider, TRACKING_RETRY_MS, type QuoteStore } from "./stored-quote-provider";
 
 function fakeStore(
     closes: Record<string, LatestClose[]>,
@@ -16,6 +16,12 @@ function fakeStore(
         refuse?: (symbol: string) => boolean;
         /** Stored daily bars by symbol, oldest first. */
         bars?: Record<string, PriceBarInput[]>;
+        /**
+         * Tracked securities and their history_start_date: null while the
+         * two-year backfill is pending. A symbol with stored bars is tracked
+         * (price_bars has a foreign key to securities), pending unless listed.
+         */
+        securities?: Record<string, string | null>;
         barsFail?: boolean;
     } = {},
 ) {
@@ -33,10 +39,15 @@ function fakeStore(
             if (options.trackFails) throw new Error("database down");
             return { refused: symbols.filter((symbol) => options.refuse?.(symbol) ?? false) };
         },
-        bars: async (symbol, from, to) => {
+        history: async (symbol, from, to) => {
             barReads.push({ symbol, from, to });
             if (options.barsFail) throw new Error("database down");
-            return (options.bars?.[symbol] ?? []).filter((bar) => bar.date >= from && bar.date <= to);
+            const tracked = symbol in (options.securities ?? {}) || symbol in (options.bars ?? {});
+            return {
+                tracked,
+                historyStart: options.securities?.[symbol] ?? null,
+                bars: (options.bars?.[symbol] ?? []).filter((bar) => bar.date >= from && bar.date <= to),
+            };
         },
     };
     return { store, tracked, reads, barReads };
@@ -189,8 +200,10 @@ describe("StoredQuoteProvider", () => {
 describe("StoredQuoteProvider history (x09)", () => {
     test("regression: stored bars answer the range, and Massive is never asked", async () => {
         const massive = countingReference(async () => { throw new Error("Massive must not be called"); });
+        // Backfilled: its history starts on the 12th (a recent listing).
         const { store, barReads } = fakeStore({}, {
             bars: { AAPL: [storedBar("AAPL", "2026-11-12", 250), storedBar("AAPL", "2026-11-13", 252)] },
+            securities: { AAPL: "2026-11-12" },
         });
         const bars = await new StoredQuoteProvider(massive.provider, store, () => AFTER_FRIDAY_CLOSE).getHistoricalPrices(" aapl", "1M");
 
@@ -205,7 +218,10 @@ describe("StoredQuoteProvider history (x09)", () => {
     });
 
     test("each range reads its own window: calendar days back from today, MAX two years", async () => {
-        const { store, barReads } = fakeStore({}, { bars: { AAPL: weekdayBars("AAPL", "2024-11-01", "2026-11-13") } });
+        const { store, barReads } = fakeStore({}, {
+            bars: { AAPL: weekdayBars("AAPL", "2024-11-01", "2026-11-13") },
+            securities: { AAPL: "2024-11-01" },
+        });
         const provider = new StoredQuoteProvider(countingReference().provider, store, () => AFTER_FRIDAY_CLOSE);
         for (const range of ["1M", "3M", "6M", "1Y", "MAX"]) await provider.getHistoricalPrices("AAPL", range);
         assert.deepEqual(barReads.map(({ from, to }) => [from, to]), [
@@ -221,7 +237,7 @@ describe("StoredQuoteProvider history (x09)", () => {
     });
 
     test("1D and 5D are the newest one and five stored sessions, through the last completed one", async () => {
-        const { store } = fakeStore({}, { bars: { AAPL: weekdayBars("AAPL", "2026-10-01", "2026-11-13") } });
+        const { store } = fakeStore({}, { bars: { AAPL: weekdayBars("AAPL", "2026-10-01", "2026-11-13") }, securities: { AAPL: "2024-11-01" } });
         const dates = (bars: OHLC[]) => bars.map((bar) => bar.timestamp.slice(0, 10));
 
         const afterClose = new StoredQuoteProvider(countingReference().provider, store, () => AFTER_FRIDAY_CLOSE);
@@ -237,17 +253,17 @@ describe("StoredQuoteProvider history (x09)", () => {
     test("a session range keeps what is stored while the newest session isn't in yet", async () => {
         // The nightly ingest stores a session after its close: until then the
         // newest stored bar is the session before, as Massive's answer was.
-        const { store } = fakeStore({}, { bars: { AAPL: weekdayBars("AAPL", "2026-10-01", "2026-11-12") } });
+        const { store } = fakeStore({}, { bars: { AAPL: weekdayBars("AAPL", "2026-10-01", "2026-11-12") }, securities: { AAPL: "2024-11-01" } });
         const massive = countingReference();
         const bars = await new StoredQuoteProvider(massive.provider, store, () => AFTER_FRIDAY_CLOSE).getHistoricalPrices("AAPL", "1D");
         assert.deepEqual(bars.map((bar) => bar.timestamp), ["2026-11-12T05:00:00.000Z"]);
         assert.deepEqual(massive.asked, []);
     });
 
-    test("no stored bar in the window: Massive answers, once, for that symbol and range", async () => {
+    test("backfill pending and no stored bar in the window: Massive answers, once, for that symbol and range", async () => {
         const massive = countingReference();
         // Bars from before the window don't count.
-        const { store } = fakeStore({}, { bars: { THSS: [storedBar("THSS", "2026-01-05", 10)] } });
+        const { store } = fakeStore({}, { bars: { THSS: [storedBar("THSS", "2026-01-05", 10)] }, securities: { THSS: null } });
         const bars = await new StoredQuoteProvider(massive.provider, store, () => AFTER_FRIDAY_CLOSE).getHistoricalPrices("THSS", "1M");
         assert.deepEqual(bars, [REFERENCE_BAR]);
         assert.deepEqual(massive.asked, [["THSS", "1M"]]);
@@ -279,5 +295,89 @@ describe("StoredQuoteProvider history (x09)", () => {
         assert.deepEqual(bars, [REFERENCE_BAR]);
         assert.deepEqual(massive.asked, [["AAPL", "1M"]]);
         assert.deepEqual(barReads, []);
+    });
+});
+
+// Review of x09: a bar in the window isn't a history. Until the backfill has
+// run (history_start_date null) a tracked symbol has only what the daily
+// files stored since it was tracked, or since a split cleared its bars; once
+// it has run, the store holds all Massive had, even when that was nothing.
+describe("StoredQuoteProvider history while the backfill is pending, and after it", () => {
+    test("regression: a pending symbol with a day's bar doesn't chart that day as its month; Massive answers", async () => {
+        const massive = countingReference();
+        // SHOP, tracked from a thesis, priced by one daily file, not yet backfilled.
+        const { store } = fakeStore({}, { bars: { SHOP: [storedBar("SHOP", "2026-11-13", 120)] }, securities: { SHOP: null } });
+        const bars = await new StoredQuoteProvider(massive.provider, store, () => AFTER_FRIDAY_CLOSE).getHistoricalPrices("SHOP", "1M");
+        assert.deepEqual(bars, [REFERENCE_BAR]);
+        assert.deepEqual(massive.asked, [["SHOP", "1M"]]);
+    });
+
+    test("pending after a split cleared the old-scale bars: the post-split days alone go to Massive too", async () => {
+        const massive = countingReference();
+        const { store } = fakeStore({}, {
+            bars: { NVDA: weekdayBars("NVDA", "2026-11-09", "2026-11-13") },
+            securities: { NVDA: null },
+        });
+        const provider = new StoredQuoteProvider(massive.provider, store, () => AFTER_FRIDAY_CLOSE);
+        await provider.getHistoricalPrices("NVDA", "3M");
+        // Five sessions are enough for 5D, though.
+        const fiveDays = await provider.getHistoricalPrices("NVDA", "5D");
+        assert.deepEqual(massive.asked, [["NVDA", "3M"]]);
+        assert.equal(fiveDays.length, 5);
+    });
+
+    test("pending, but the daily files already cover the window from its first session: the store answers", async () => {
+        const massive = countingReference(async () => { throw new Error("Massive must not be called"); });
+        // 3M reaches back to Saturday 15 August: its first session is Monday the 17th.
+        const { store } = fakeStore({}, {
+            bars: { AMD: weekdayBars("AMD", "2026-08-17", "2026-11-13") },
+            securities: { AMD: null },
+        });
+        const bars = await new StoredQuoteProvider(massive.provider, store, () => AFTER_FRIDAY_CLOSE).getHistoricalPrices("AMD", "3M");
+        assert.equal(bars[0].timestamp, "2026-08-17T04:00:00.000Z");
+        assert.deepEqual(massive.asked, []);
+    });
+
+    test("pending session ranges need their sessions stored: 5D with three bars asks Massive, 1D doesn't", async () => {
+        const massive = countingReference();
+        const { store } = fakeStore({}, { bars: { ARM: weekdayBars("ARM", "2026-11-11", "2026-11-13") }, securities: { ARM: null } });
+        const provider = new StoredQuoteProvider(massive.provider, store, () => AFTER_FRIDAY_CLOSE);
+        assert.deepEqual(await provider.getHistoricalPrices("ARM", "5D"), [REFERENCE_BAR]);
+        assert.equal((await provider.getHistoricalPrices("ARM", "1D"))[0].timestamp, "2026-11-13T05:00:00.000Z");
+        assert.deepEqual(massive.asked, [["ARM", "5D"]]);
+    });
+
+    test("loaded history shorter than the window (a recent listing) is the whole answer", async () => {
+        const massive = countingReference(async () => { throw new Error("Massive must not be called"); });
+        const { store } = fakeStore({}, {
+            bars: { NEWCO: weekdayBars("NEWCO", "2026-11-02", "2026-11-13") },
+            securities: { NEWCO: "2026-11-02" },
+        });
+        const bars = await new StoredQuoteProvider(massive.provider, store, () => AFTER_FRIDAY_CLOSE).getHistoricalPrices("NEWCO", "1M");
+        assert.equal(bars.length, 10);
+        assert.deepEqual(massive.asked, []);
+    });
+
+    test("regression: loaded with no bars (a mutual fund Massive doesn't price) answers empty without a Massive call", async () => {
+        const massive = countingReference(async () => { throw new Error("Massive must not be called"); });
+        // The backfill asked Massive, got nothing, and marked it loaded at the day it covered.
+        const { store } = fakeStore({}, { securities: { FXAIX: "2026-11-12" } });
+        const provider = new StoredQuoteProvider(massive.provider, store, () => AFTER_FRIDAY_CLOSE);
+        for (const range of ["1M", "5D", "MAX"]) assert.deepEqual(await provider.getHistoricalPrices("FXAIX", range), [], range);
+        assert.deepEqual(massive.asked, []);
+    });
+
+    test("a symbol the store doesn't track (a thesis ticker past the tracking limit) asks Massive", async () => {
+        const massive = countingReference();
+        const { store } = fakeStore({});
+        assert.deepEqual(await new StoredQuoteProvider(massive.provider, store, () => AFTER_FRIDAY_CLOSE).getHistoricalPrices("ZZZZ", "1M"), [REFERENCE_BAR]);
+        assert.deepEqual(massive.asked, [["ZZZZ", "1M"]]);
+    });
+
+    test("a pending window the market calendar can't place isn't taken as covered", () => {
+        const bars = [storedBar("OLD", "2017-06-01", 10)];
+        assert.equal(storedHistoryAnswer({ tracked: true, historyStart: null, bars }, { from: "2017-06-01", to: "2017-06-30" }), undefined);
+        // Backfilled, the store answers whatever the calendar says.
+        assert.deepEqual(storedHistoryAnswer({ tracked: true, historyStart: "2017-06-01", bars }, { from: "2017-06-01", to: "2017-06-30" }), bars);
     });
 });

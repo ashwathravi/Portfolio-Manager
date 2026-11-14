@@ -569,6 +569,46 @@ export async function getBars(
     return buildBarsQuery(symbol, from, to, database);
 }
 
+/** A tracked security's history_start_date; no row when it isn't tracked. */
+export function buildHistoryStartQuery(symbol: string, database: Pick<Database, "select"> = db) {
+    return database
+        .select({ historyStart: securities.historyStartDate })
+        .from(securities)
+        .where(eq(securities.symbol, symbol))
+        .limit(1);
+}
+
+/**
+ * What the store holds of a symbol's history (x09): whether it is tracked,
+ * whether its two-year backfill has run, and its bars in a window. Bars
+ * alone can't say whether they are the history: until the backfill runs
+ * (or after a split cleared them) they are only what the daily files
+ * stored since.
+ */
+export interface StoredHistory {
+    /** In `securities`: the nightly ingest prices it. */
+    tracked: boolean;
+    /**
+     * The first day of the backfilled history, or null while the backfill is
+     * pending (never run, or requeued after a split). A backfill that got
+     * nothing from Massive (a fund, a delisted ticker) sets it too, to the
+     * last day it covered, so the store's answer is complete even with no bars.
+     */
+    historyStart: string | null;
+    /** Stored bars from `from` through `to`, oldest first. */
+    bars: PriceBarInput[];
+}
+
+export async function getStoredHistory(
+    symbol: string,
+    from: string,
+    to: string,
+    database: Database = db,
+): Promise<StoredHistory> {
+    const [security, bars] = await Promise.all([buildHistoryStartQuery(symbol, database), buildBarsQuery(symbol, from, to, database)]);
+    return { tracked: security.length > 0, historyStart: security[0]?.historyStart ?? null, bars };
+}
+
 // ---------------------------------------------------------------------------
 // Securities master (launch item i34): each tracked symbol's reference data
 // ---------------------------------------------------------------------------
