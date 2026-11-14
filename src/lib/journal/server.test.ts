@@ -14,10 +14,12 @@ function row(patch: Partial<ActivityRow> & Pick<ActivityRow, 'id' | 'date' | 'si
         quantity: 10,
         price: 150,
         value: 1500,
+        accountId: 'p-main',
         account: 'Main',
         notes: null,
         fees: null,
         currency: 'USD',
+        transfer: null,
         ...patch,
     };
 }
