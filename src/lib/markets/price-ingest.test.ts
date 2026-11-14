@@ -312,6 +312,10 @@ describe("tradingDaysToIngest", () => {
     test("lists the trading days after the stored date, skipping weekends and holidays", () => {
         // Thanksgiving (26 November 2026) is closed; the 27th is an early close but trades.
         assert.deepEqual(tradingDaysToIngest("2026-11-24", "2026-11-30"), ["2026-11-25", "2026-11-27", "2026-11-30"]);
+        // The audit's dates (x23): Good Friday, and Christmas 2027 observed on
+        // Friday Dec 24 with the Saturday New Year's Day not observed at all.
+        assert.deepEqual(tradingDaysToIngest("2026-04-01", "2026-04-06"), ["2026-04-02", "2026-04-06"]);
+        assert.deepEqual(tradingDaysToIngest("2027-12-22", "2028-01-03"), ["2027-12-23", "2027-12-27", "2027-12-28", "2027-12-29", "2027-12-30", "2027-12-31", "2028-01-03"]);
     });
 
     test("is empty when the store is up to date", () => {
