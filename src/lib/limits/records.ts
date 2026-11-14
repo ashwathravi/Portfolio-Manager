@@ -1,0 +1,73 @@
+/**
+ * How many of each kind of record one user keeps (launch item i77), so that
+ * once sign-up is open no account can fill the database. Only live records
+ * count: a watchlist item, journal entry or thesis the user removed is kept
+ * as a dismissed row with its text cleared (so a late save can't bring it
+ * back) and doesn't. Editing or removing a record is never refused, even
+ * past a limit; only a write that adds one is.
+ *
+ * Transactions count across all the user's accounts. Those a linked
+ * account syncs count too but are never refused: Plaid brings only what the
+ * user's own institutions report, at most 10 of them (MAX_PLAID_CONNECTIONS_PER_USER).
+ *
+ * The checks run on the server (records-server.ts); this file is shared with
+ * the pages, which say why a save was refused.
+ */
+
+export const RECORD_LIMITS = {
+    watchlist: 500,
+    journal: 2_000,
+    theses: 200,
+    transactions: 50_000,
+} as const;
+
+export type RecordKind = keyof typeof RECORD_LIMITS;
+
+const COUNT = new Intl.NumberFormat("en-US");
+
+const DETAILS: Record<RecordKind, { code: string; message: (limit: string) => string }> = {
+    watchlist: {
+        code: "WATCHLIST_LIMIT",
+        message: (limit) => `Your watchlist holds at most ${limit} tickers. Remove one to add another.`,
+    },
+    journal: {
+        code: "JOURNAL_LIMIT",
+        message: (limit) => `Your journal holds at most ${limit} entries. Delete one to add another.`,
+    },
+    theses: {
+        code: "THESIS_LIMIT",
+        message: (limit) => `You can keep at most ${limit} theses. Delete one to add another.`,
+    },
+    transactions: {
+        code: "TRANSACTION_LIMIT",
+        message: (limit) => `Your accounts hold at most ${limit} transactions. Delete some to add more; nothing was added.`,
+    },
+};
+
+/** The API error code a route answers with (HTTP 409) when `kind`'s limit refuses a write. */
+export function recordLimitCode(kind: RecordKind): string {
+    return DETAILS[kind].code;
+}
+
+/** What the user is told when `kind`'s limit refuses a write. */
+export function recordLimitMessage(kind: RecordKind): string {
+    return DETAILS[kind].message(COUNT.format(RECORD_LIMITS[kind]));
+}
+
+/**
+ * What to tell the user when a save failed because of `kind`'s limit: the
+ * API's error code says so (AccountRequestError's `code`). Null when it
+ * failed for another reason.
+ */
+export function recordLimitMessageFor(kind: RecordKind, error: unknown): string | null {
+    const code = typeof error === "object" && error !== null ? (error as { code?: unknown }).code : undefined;
+    return code === recordLimitCode(kind) ? recordLimitMessage(kind) : null;
+}
+
+/** Thrown inside a write's transaction, which it rolls back, when the write would take the user past `kind`'s limit. */
+export class RecordLimitError extends Error {
+    constructor(readonly kind: RecordKind) {
+        super(recordLimitMessage(kind));
+        this.name = "RecordLimitError";
+    }
+}

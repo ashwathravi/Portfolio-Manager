@@ -247,4 +247,42 @@ test.describe('Watchlist in the account', () => {
             await expect(list(page).getByRole('button', { name: /AMD/ })).toBeVisible({ timeout: 1_000 });
         }).toPass({ timeout: 10_000 });
     });
+
+    test('a list at its limit refuses a new ticker and says why; an edit still saves (launch item i77)', async ({ context, page }) => {
+        await signInAsFreshUser(context);
+        await openWatchlist(page);
+        const item = (i: number) => ({
+            id: `w-cap-${i}`, ticker: `C${i}`, companyName: '', reason: '', notes: '', targetEntry: null, addedAt: '2026-11-14', dismissed: false,
+        });
+        const filled = await page.request.post('/api/research/watchlist/import', { data: { items: Array.from({ length: 500 }, (_, i) => item(i)) } });
+        expect(filled.status()).toBe(204);
+
+        const order = { session: 'e2e-limit-test', seq: 1 };
+        const another = await page.request.put('/api/research/watchlist/w-cap-new', { data: { item: { ...item(500), id: 'w-cap-new' }, order } });
+        expect(another.status()).toBe(409);
+        expect(await another.json()).toMatchObject({
+            code: 'WATCHLIST_LIMIT',
+            error: 'Your watchlist holds at most 500 tickers. Remove one to add another.',
+        });
+        const edited = await page.request.put('/api/research/watchlist/w-cap-0', { data: { item: { ...item(0), reason: 'Still editable' }, order: { ...order, seq: 2 } } });
+        expect(edited.status()).toBe(204);
+        // An import of one more is refused whole.
+        const imported = await page.request.post('/api/research/watchlist/import', { data: { items: [{ ...item(500), id: 'w-cap-import' }] } });
+        expect(imported.status()).toBe(409);
+        expect((await imported.json()).code).toBe('WATCHLIST_LIMIT');
+
+        // On the page: the add is undone and the message says why.
+        await openWatchlist(page);
+        const add = page.getByLabel('Add ticker to watchlist');
+        await expect(async () => {
+            await add.fill('nvda');
+            await expect(add).toHaveValue('NVDA', { timeout: 1_000 });
+        }).toPass({ timeout: 10_000 });
+        const refused = page.waitForResponse((response) =>
+            response.url().includes('/api/research/watchlist/') && response.request().method() === 'PUT' && response.status() === 409);
+        await page.getByRole('button', { name: 'Add', exact: true }).click();
+        await refused;
+        await expect(page.getByText('Your watchlist holds at most 500 tickers. Remove one to add another.')).toBeVisible();
+        await expect(list(page).getByRole('button', { name: /NVDA/ })).toHaveCount(0);
+    });
 });

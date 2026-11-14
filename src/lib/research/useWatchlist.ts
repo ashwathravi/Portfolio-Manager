@@ -20,6 +20,8 @@ import {
     type AddWatchError,
     type WatchItem,
 } from './watchlist';
+import { recordLimitMessageFor } from '@/lib/limits/records';
+
 import { AccountRequestError } from './accountWrites';
 import { useAccountRecords } from './useAccountRecords';
 import {
@@ -177,6 +179,8 @@ function saveFailedMessage(write: WatchWrite, error: unknown): string {
     if (error instanceof AccountRequestError && error.code === 'DUPLICATE_TICKER') {
         return `${ticker} is already on your watchlist.`;
     }
+    const limit = recordLimitMessageFor('watchlist', error);
+    if (limit) return limit;
     const action = write.item.dismissed ? 'remove' : 'save';
     return `Couldn't ${action} ${ticker} on your watchlist. Try again.`;
 }

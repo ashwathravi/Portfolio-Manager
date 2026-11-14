@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import { useAccountStorage, useViewerIdentity } from '@/components/providers/IdentityProvider';
 import { useRequestTime } from '@/components/providers/RequestTimeProvider';
 import { alphaRadarQueryKeys } from '@/lib/api/alpha-radar/queries';
+import { recordLimitMessageFor } from '@/lib/limits/records';
 import { storageScopeFor } from '@/lib/storage/user-scope';
 import {
     addCatalyst,
@@ -193,7 +194,9 @@ function useBrowserTheses(enabled: boolean, examples: Thesis[]): ThesisSource {
     return { all: theses, hydrated, failed: false, save, remove };
 }
 
-function saveFailedMessage(write: ThesisWrite): string {
+function saveFailedMessage(write: ThesisWrite, error: unknown): string {
+    const limit = recordLimitMessageFor('theses', error);
+    if (limit) return limit;
     const action = write.thesis.dismissed ? 'delete' : 'save';
     return `Couldn't ${action} your ${write.thesis.ticker} thesis. Try again.`;
 }

@@ -168,4 +168,29 @@ test.describe('Journal in the account', () => {
         expect(data.entries).toEqual([]);
         expect(data.dismissed).toEqual([entry.id]);
     });
+
+    test('a journal at its limit refuses a new entry; an edit still saves (launch item i77)', async ({ context, page }) => {
+        await signInAsFreshUser(context);
+        await gotoAppPage(page, '/research?tab=journal');
+        const entry = (i: number) => ({
+            id: `j-cap-${i}`, date: '2026-11-14', type: 'entry', ticker: 'NVDA',
+            decision: 'Opened', rationale: 'Demand', outcome: 'pending', thesisId: null, dismissed: false,
+        });
+        for (let first = 0; first < 2_000; first += 500) {
+            const batch = await page.request.post('/api/research/journal/import', {
+                data: { items: Array.from({ length: 500 }, (_, i) => entry(first + i)), first },
+            });
+            expect(batch.status()).toBe(204);
+        }
+
+        const order = { session: 'e2e-limit-test', seq: 1 };
+        const another = await page.request.put('/api/research/journal/j-cap-new', { data: { entry: { ...entry(0), id: 'j-cap-new' }, order } });
+        expect(another.status()).toBe(409);
+        expect(await another.json()).toMatchObject({
+            code: 'JOURNAL_LIMIT',
+            error: 'Your journal holds at most 2,000 entries. Delete one to add another.',
+        });
+        const edited = await page.request.put('/api/research/journal/j-cap-0', { data: { entry: { ...entry(0), rationale: 'Edited' }, order: { ...order, seq: 2 } } });
+        expect(edited.status()).toBe(204);
+    });
 });

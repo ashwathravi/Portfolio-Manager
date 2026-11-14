@@ -1,13 +1,16 @@
 /**
  * Writing transactions (launch item i40): one entered by hand, a CSV's
  * worth, or deleting one. Every write checks that the account belongs to
- * the user, whose ID the API routes take from the session.
+ * the user, whose ID the API routes take from the session. One entered by
+ * hand or imported is refused (RecordLimitError) when it would take the
+ * user's accounts past RECORD_LIMITS.transactions (launch item i77).
  */
 
 import { and, eq, inArray } from "drizzle-orm";
 
 import { db } from "@/db";
 import { portfolios, transactions } from "@/db/schema";
+import { withinRecordLimit } from "@/lib/limits/records-server";
 import type { TransactionRow } from "@/lib/validators/transaction";
 
 import { contentExternalId, transactionAmount, transactionTimestamp } from "./transactions";
@@ -56,11 +59,13 @@ async function ownedAccount(tx: Executor, userId: string, portfolioId: string): 
 export async function addTransaction(userId: string, portfolioId: string, row: TransactionRow, database: Database = db): Promise<string> {
     return database.transaction(async (tx) => {
         await ownedAccount(tx, userId, portfolioId);
-        const [inserted] = await tx
-            .insert(transactions)
-            .values(transactionValues(portfolioId, row, "manual", row.externalId ?? null))
-            .returning({ id: transactions.id });
-        return inserted.id;
+        return withinRecordLimit(tx, "transactions", userId, async () => {
+            const [inserted] = await tx
+                .insert(transactions)
+                .values(transactionValues(portfolioId, row, "manual", row.externalId ?? null))
+                .returning({ id: transactions.id });
+            return inserted.id;
+        });
     });
 }
 
@@ -92,6 +97,7 @@ export interface TransactionImportResult {
  * Imports a CSV's transactions into one of the user's accounts. A row the
  * account already has (same external ID) is skipped, so importing a file
  * again, or an export that overlaps an earlier one, adds only what's new.
+ * An import that would take the user past the limit adds nothing.
  */
 export async function importTransactions(
     userId: string,
@@ -102,13 +108,15 @@ export async function importTransactions(
     const ids = importExternalIds(rows);
     return database.transaction(async (tx) => {
         await ownedAccount(tx, userId, portfolioId);
-        let inserted = 0;
-        for (let start = 0; start < rows.length; start += ROWS_PER_INSERT) {
-            const values = rows.slice(start, start + ROWS_PER_INSERT).map((row, i) => transactionValues(portfolioId, row, "csv", ids[start + i]));
-            const added = await tx.insert(transactions).values(values).onConflictDoNothing().returning({ id: transactions.id });
-            inserted += added.length;
-        }
-        return { inserted, duplicates: rows.length - inserted };
+        return withinRecordLimit(tx, "transactions", userId, async () => {
+            let inserted = 0;
+            for (let start = 0; start < rows.length; start += ROWS_PER_INSERT) {
+                const values = rows.slice(start, start + ROWS_PER_INSERT).map((row, i) => transactionValues(portfolioId, row, "csv", ids[start + i]));
+                const added = await tx.insert(transactions).values(values).onConflictDoNothing().returning({ id: transactions.id });
+                inserted += added.length;
+            }
+            return { inserted, duplicates: rows.length - inserted };
+        });
     });
 }
 

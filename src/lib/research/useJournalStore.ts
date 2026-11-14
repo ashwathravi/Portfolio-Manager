@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { useAccountStorage, useViewerIdentity } from '@/components/providers/IdentityProvider';
+import { recordLimitMessageFor } from '@/lib/limits/records';
 import { storageScopeFor } from '@/lib/storage/user-scope';
 import {
     createJournalEntry,
@@ -127,7 +128,9 @@ function useBrowserJournal(enabled: boolean): JournalSource {
     return { all: entries, hydrated, failed: false, save, remove };
 }
 
-function saveFailedMessage(write: JournalWrite): string {
+function saveFailedMessage(write: JournalWrite, error: unknown): string {
+    const limit = recordLimitMessageFor('journal', error);
+    if (limit) return limit;
     const ticker = write.entry.ticker;
     const action = write.entry.dismissed ? 'delete' : 'save';
     return `Couldn't ${action} the journal entry for ${ticker}. Try again.`;
