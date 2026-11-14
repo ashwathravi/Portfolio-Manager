@@ -55,7 +55,8 @@ test.describe('Database outage', () => {
             await expect(page.locator(`${container} [data-testid="data-unavailable"]`)).toHaveCount(1);
 
             // None of the empty states that would claim there is no data.
-            await expect(page.getByText('Connect an account', { exact: false })).toHaveCount(0);
+            // Without bank linking (x30) they offer "Add an account" instead.
+            await expect(page.getByText(/Connect an account|Add an account/)).toHaveCount(0);
             await expect(page.getByTestId('accounts-empty')).toHaveCount(0);
         });
     }

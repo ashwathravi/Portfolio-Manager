@@ -38,9 +38,10 @@ import type { CacheProvider } from './cache-provider';
 const TTL_QUOTE = 30;
 const TTL_HISTORICAL = 24 * 60 * 60; // 24 hours
 /**
- * History whose newest bar is older than the last completed session: Massive
- * publishes a session's bars some time after the close, so it is asked for
- * again soon (the adapter's quotes wait as long for an unpublished day).
+ * History whose newest bar is older than the last completed session: the
+ * nightly ingest stores a session's bars after the close (x09), as Massive
+ * publishes them some time after it, so it is asked for again soon (the
+ * adapter's quotes wait as long for an unpublished day).
  */
 const TTL_HISTORICAL_PENDING = 10 * 60; // 10 minutes
 const TTL_FUNDAMENTALS = 24 * 60 * 60; // 24 hours

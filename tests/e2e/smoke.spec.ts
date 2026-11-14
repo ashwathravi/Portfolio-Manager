@@ -144,7 +144,8 @@ test.describe('Market data without a provider key', () => {
     // Not configured is now its own answer, and pages keep stored prices.
     // Quotes come from the price store, so with a database they answer from
     // it (the fixtures store closes only for IBM); without one they are not
-    // configured.
+    // configured. History too (x09): AAPL's history isn't stored (tracked,
+    // its backfill never run), so it still asks Massive, which has no key.
     const notConfigured = { error: 'Market data is not configured.', code: 'MARKET_DATA_NOT_CONFIGURED' };
     const dbMode = Boolean(process.env.CI || process.env.E2E_DATABASE_AUTH === '1');
 
@@ -179,6 +180,47 @@ test.describe('Market data without a provider key', () => {
                 expect(await response.json()).toEqual(notConfigured);
             }
         }
+    });
+
+    test('history answers from the stored daily bars without a provider key, or 503 without a database (x09)', async ({ page }) => {
+        // Sparklines and thesis charts read these routes, one symbol each:
+        // with a database they answer from price_bars, not a Massive call.
+        // The fixtures store IBM's closes for yesterday and today (Eastern).
+        const paths = ['/api/market-data/history?symbol=IBM&range=1M', '/api/market-data/historical?symbol=IBM&timeframe=1M'];
+        for (const path of paths) {
+            const response = await page.request.get(path);
+            if (!dbMode) {
+                expect(response.status(), path).toBe(503);
+                expect(await response.json()).toEqual(notConfigured);
+                continue;
+            }
+            expect(response.status(), path).toBe(200);
+            const { data } = await response.json();
+            expect(data.map((bar: { close: number }) => bar.close), path).toEqual([200, 205]);
+            // Stamped like Massive's bars: midnight New York on the trading date.
+            for (const bar of data) expect(bar.timestamp, path).toMatch(/^\d{4}-\d{2}-\d{2}T0[45]:00:00\.000Z$/);
+        }
+    });
+
+    test('history the store has only begun asks Massive, and history Massive had nothing for doesn\'t (x09)', async ({ page }) => {
+        // Regression: CRWV's backfill is pending and one daily file stored a
+        // bar, which a chart drew as the month. The store can't answer the
+        // range, so Massive is asked, and it has no key here.
+        const pending = await page.request.get('/api/market-data/history?symbol=CRWV&range=1M');
+        expect(pending.status()).toBe(503);
+        expect(await pending.json()).toEqual(notConfigured);
+
+        // Regression: FSKAX was backfilled and Massive had nothing for it, yet
+        // every chart asked Massive again. With a database the store answers
+        // empty without asking (so no key is needed).
+        const empty = await page.request.get('/api/market-data/history?symbol=FSKAX&range=1M');
+        if (!dbMode) {
+            expect(empty.status()).toBe(503);
+            expect(await empty.json()).toEqual(notConfigured);
+            return;
+        }
+        expect(empty.status()).toBe(200);
+        expect(await empty.json()).toEqual({ data: [] });
     });
 
     test('ticker search answers from the symbol directory, or 503 without a database (i35)', async ({ page }) => {

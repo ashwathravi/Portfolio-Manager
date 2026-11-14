@@ -67,7 +67,7 @@ export function BehaviourPageClient({ journal }: { journal: TradeJournal | null 
                 fallback={
                     <SampleEmptyState
                         title={leftOut ? "No closed trades to show" : "No closed trades yet"}
-                        body="The trading calendar, mood breakdown and weekly reviews are built from your closed trades: each sale matched against the buys before it. Add your trades on Activity, import them, or link an account to start."
+                        body="The trading calendar, mood breakdown and weekly reviews are built from your closed trades: each sale matched against the buys before it. Add your trades on Activity, or import your broker's activity CSV there, to start."
                     />
                 }
             >
