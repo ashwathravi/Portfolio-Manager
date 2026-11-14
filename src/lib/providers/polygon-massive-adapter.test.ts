@@ -1,12 +1,16 @@
 import { afterEach, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 
+import { historyRangeSchema, timeframeSchema } from '@/lib/validators/market-data';
+
 import { MarketDataNotConfiguredError } from './errors';
 import {
   PolygonApiError,
   PolygonMassiveAdapter,
   PolygonRateLimitError,
   PolygonTimeoutError,
+  PLAN_HISTORY_DAYS,
+  rangeToDates,
   type PolygonAdapterConfig,
 } from './polygon-massive-adapter';
 
@@ -523,6 +527,30 @@ describe('PolygonMassiveAdapter', () => {
       assert.deepEqual(await provider.getHistoricalPrices('AAPL', '1M'), bars);
     });
 
+    test('regression (x22): 1D and 5D are the last one and five sessions of daily bars, not a year', async () => {
+      // Eight sessions, oldest first; the request window has room to spare.
+      const days = ['2026-06-23', '2026-06-24', '2026-06-25', '2026-06-26', '2026-06-29', '2026-06-30', '2026-07-01', '2026-07-02'];
+      const { fetch, calls } = fakeFetch(() => ({
+        body: { status: 'OK', results: days.map((day, i) => ({ t: Date.parse(`${day}T04:00:00Z`), o: i, h: i, l: i, c: 100 + i, v: 10 })) },
+      }));
+      const provider = adapter(fetch);
+
+      const oneDay = await provider.getHistoricalPrices('AAPL', '1D');
+      assert.deepEqual(oneDay.map((bar) => bar.close), [107]);
+      assert.match(calls[0], /\/range\/1\/day\/2026-06-25\/2026-07-02\?/);
+
+      const fiveDays = await provider.getDailyHistory('AAPL', '5D');
+      assert.deepEqual(fiveDays.bars.map((bar) => bar.close), [103, 104, 105, 106, 107]);
+      assert.equal(fiveDays.unreadable, 0);
+      assert.match(calls[1], /\/range\/1\/day\/2026-06-18\/2026-07-02\?/);
+    });
+
+    test('regression (x22): MAX asks for the whole of the plan\'s history', async () => {
+      const { fetch, calls } = fakeFetch(() => ({ body: { status: 'OK', results: [] } }));
+      await adapter(fetch).getHistoricalPrices('AAPL', 'MAX');
+      assert.match(calls[0], /\/range\/1\/day\/2024-07-02\/2026-07-02\?/);
+    });
+
     test('splits: one call for the date range, unreadable rows dropped', async () => {
       const { fetch, calls } = fakeFetch(() => ({
         body: {
@@ -572,5 +600,66 @@ describe('PolygonMassiveAdapter', () => {
         return true;
       });
     });
+  });
+});
+
+describe('rangeToDates (x22)', () => {
+  // Thu 2026-07-02, 5:00 PM EDT: that day's session has closed.
+  const now = AFTER_CLOSE;
+
+  test('day ranges reach back that many calendar days from the Eastern date', () => {
+    assert.deepEqual(rangeToDates('1W', now), { from: '2026-06-25', to: '2026-07-02' });
+    assert.deepEqual(rangeToDates('1M', now), { from: '2026-06-02', to: '2026-07-02' });
+    assert.deepEqual(rangeToDates('3M', now), { from: '2026-04-03', to: '2026-07-02' });
+    assert.deepEqual(rangeToDates('6M', now), { from: '2026-01-03', to: '2026-07-02' });
+    assert.deepEqual(rangeToDates('1Y', now), { from: '2025-07-02', to: '2026-07-02' });
+    assert.deepEqual(rangeToDates('2Y', now), { from: '2024-07-02', to: '2026-07-02' });
+    assert.deepEqual(rangeToDates('YTD', now), { from: '2026-01-01', to: '2026-07-02' });
+  });
+
+  test('MAX is the plan\'s two years of history', () => {
+    assert.deepEqual(rangeToDates('MAX', now), { from: '2024-07-02', to: '2026-07-02' });
+  });
+
+  test('1D and 5D count sessions through the last completed one, with room for one not published yet', () => {
+    // Five sessions before Jul 2 for 1D; nine for 5D, skipping Juneteenth (Fri Jun 19).
+    assert.deepEqual(rangeToDates('1D', now), { from: '2026-06-25', to: '2026-07-02', sessions: 1 });
+    assert.deepEqual(rangeToDates('5D', now), { from: '2026-06-18', to: '2026-07-02', sessions: 5 });
+  });
+
+  test('1D before the close and on a holiday ends at the session before', () => {
+    // Thu 2026-07-02 11:00 AM EDT: Jul 2's session is still open.
+    assert.equal(rangeToDates('1D', new Date('2026-07-02T15:00:00Z')).to, '2026-07-01');
+    // Good Friday 2026-04-03, closed: Thursday's session is the last.
+    assert.equal(rangeToDates('1D', new Date('2026-04-03T15:00:00Z')).to, '2026-04-02');
+  });
+
+  test('uses the Eastern date, not the host\'s or UTC\'s, late in the evening', () => {
+    // 2026-07-03 01:00 UTC is still 9:00 PM on Jul 2 in New York.
+    assert.equal(rangeToDates('1M', new Date('2026-07-03T01:00:00Z')).to, '2026-07-02');
+    assert.equal(rangeToDates('YTD', new Date('2027-01-01T03:00:00Z')).from, '2026-01-01');
+  });
+
+  test('every range the history and legacy historical routes accept has a window', () => {
+    for (const range of [...historyRangeSchema.options, ...timeframeSchema.options]) {
+      const window = rangeToDates(range, now);
+      assert.ok(window.from <= window.to, range);
+    }
+  });
+
+  test('an unknown range is refused instead of silently becoming a year', () => {
+    assert.throws(() => rangeToDates('1H', now), /Unknown history range "1H"/);
+    assert.throws(() => rangeToDates('ALL', now), /Unknown history range "ALL"/);
+  });
+
+  test('regression (x22): no range asks for more history than the plan keeps', () => {
+    // Basic keeps two years; 5Y asked Massive for five, which it can't serve.
+    assert.throws(() => rangeToDates('5Y', now), /Unknown history range "5Y"/);
+    const earliest = new Date(Date.parse(`${now.toISOString().slice(0, 10)}T00:00:00Z`) - PLAN_HISTORY_DAYS * 86_400_000)
+      .toISOString().slice(0, 10);
+    // The routes' ranges, and the nightly backfill's (price-ingest's HISTORY_RANGE).
+    for (const range of [...historyRangeSchema.options, ...timeframeSchema.options, '2Y', '1W', 'YTD']) {
+      assert.ok(rangeToDates(range, now).from >= earliest, range);
+    }
   });
 });

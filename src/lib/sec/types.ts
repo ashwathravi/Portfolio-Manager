@@ -62,6 +62,8 @@ export interface StoredSecFiling {
     filingType: SecFilingType;
     primaryDocumentUrl?: string | null;
     informationTableUrl?: string | null;
+    /** discovered until it is parsed (or fails to parse); discovered again when SEC lists another filing or table for it. */
+    status?: 'discovered' | 'parsed' | 'failed';
     created: boolean;
 }
 

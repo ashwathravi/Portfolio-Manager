@@ -629,6 +629,11 @@ test.describe('Today › Net worth hero', () => {
         await page.route('**/api/market-data/quotes**', (route) => route.fulfill({ status: 200, json: { data: HELD.map(quote) } }));
         const netWorth = async () => {
             await gotoAppPage(page, '/');
+            // The page arrives valued at the prices stored with the holdings
+            // (E2E has no market data), and the hero swaps in the quotes above
+            // when they land. Read the total once the line under it describes
+            // them: a load read before they landed was off by the difference.
+            await expect(page.getByTestId('price-freshness')).toContainText('Closing prices');
             const text = await page.getByTestId('today-networth').textContent();
             return Number((text ?? '').replace(/[$,]/g, ''));
         };

@@ -1,12 +1,7 @@
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, asc, eq, inArray, or, sql } from 'drizzle-orm';
 import { db } from '@/db';
 import { alphaRadarSemanticChunks } from '@/db/schema';
-import {
-    searchAlphaRadarSemanticChunks,
-    searchAlphaRadarVectorChunks,
-    type AlphaRadarSemanticChunk,
-    type AlphaRadarSemanticSearchOptions,
-} from './memory';
+import { searchAlphaRadarMemoryChunks, type AlphaRadarSemanticChunk } from './memory';
 import type { AlphaRadarSemanticSearchResult, AlphaRadarSemanticSourceKind } from './agent-contracts';
 
 type AlphaRadarDb = typeof db;
@@ -22,8 +17,20 @@ export interface AlphaRadarSemanticMemorySearchInput {
     limit?: number;
     includeRawText?: boolean;
     filters?: AlphaRadarSemanticMemoryFilters;
+    /** The query embedded by `embeddingModel`; chunks embedded by it are ranked by similarity too. */
     queryEmbedding?: readonly number[];
+    embeddingModel?: string;
 }
+
+/** A parsed filing's memory: its holdings' chunks and its report's. */
+export interface AlphaRadarFilingMemoryInput {
+    filingId: string;
+    reportId?: string;
+    chunks: readonly AlphaRadarSemanticChunk[];
+}
+
+/** The most chunks a read returns, newest report period first. */
+export const ALPHA_RADAR_MEMORY_READ_LIMIT = 500;
 
 export interface AlphaRadarSemanticMemoryRepository {
     replaceSourceChunks(input: {
@@ -31,6 +38,8 @@ export interface AlphaRadarSemanticMemoryRepository {
         sourceId: string;
         chunks: readonly AlphaRadarSemanticChunk[];
     }): Promise<{ inserted: number }>;
+    /** Replaces everything stored for the filing and its report (launch item i62). */
+    replaceFilingMemory(input: AlphaRadarFilingMemoryInput): Promise<{ inserted: number }>;
     listChunks(filters?: AlphaRadarSemanticMemoryFilters): Promise<AlphaRadarSemanticChunk[]>;
     search(input: AlphaRadarSemanticMemorySearchInput): Promise<AlphaRadarSemanticSearchResult>;
 }
@@ -54,26 +63,27 @@ export class InMemoryAlphaRadarSemanticMemoryRepository implements AlphaRadarSem
         return { inserted: input.chunks.length };
     }
 
+    async replaceFilingMemory(input: AlphaRadarFilingMemoryInput): Promise<{ inserted: number }> {
+        for (const [id, chunk] of this.chunks.entries()) {
+            if (chunk.filingId === input.filingId || (input.reportId && chunk.reportId === input.reportId)) {
+                this.chunks.delete(id);
+            }
+        }
+        for (const chunk of input.chunks) {
+            this.chunks.set(chunk.id, chunk);
+        }
+        return { inserted: input.chunks.length };
+    }
+
     async listChunks(filters: AlphaRadarSemanticMemoryFilters = {}): Promise<AlphaRadarSemanticChunk[]> {
-        return [...this.chunks.values()].filter((chunk) => matchesFilters(chunk, filters));
+        return [...this.chunks.values()]
+            .filter((chunk) => matchesFilters(chunk, filters))
+            .sort((a, b) => (b.reportPeriod ?? '').localeCompare(a.reportPeriod ?? ''))
+            .slice(0, ALPHA_RADAR_MEMORY_READ_LIMIT);
     }
 
     async search(input: AlphaRadarSemanticMemorySearchInput): Promise<AlphaRadarSemanticSearchResult> {
-        const chunks = await this.listChunks(input.filters);
-        if (input.queryEmbedding?.length) {
-            return searchAlphaRadarVectorChunks({
-                queryEmbedding: input.queryEmbedding,
-                chunks,
-                limit: input.limit,
-                includeRawText: input.includeRawText,
-            });
-        }
-        return searchAlphaRadarSemanticChunks({
-            query: input.query,
-            chunks,
-            limit: input.limit,
-            includeRawText: input.includeRawText,
-        });
+        return searchStoredChunks(await this.listChunks(input.filters), input);
     }
 }
 
@@ -93,29 +103,23 @@ export class DrizzleAlphaRadarSemanticMemoryRepository implements AlphaRadarSema
             ));
 
         if (input.chunks.length > 0) {
-            await this.database.insert(alphaRadarSemanticChunks).values(input.chunks.map((chunk) => ({
-                id: chunk.id,
-                sourceKind: chunk.sourceKind,
-                sourceId: chunk.sourceId,
-                trackedFilerId: chunk.trackedFilerId ?? null,
-                filingId: chunk.filingId ?? null,
-                reportId: chunk.reportId ?? null,
-                reportPeriod: chunk.reportPeriod ?? null,
-                title: chunk.title,
-                body: chunk.text,
-                chunkIndex: chunk.chunkIndex,
-                citation: chunk.citation,
-                metadata: chunk.metadata ?? {},
-                keywords: chunk.keywords,
-                embedding: chunk.embedding ?? null,
-                embeddingProvider: chunk.embeddingProvider ?? null,
-                embeddingModel: chunk.embeddingModel ?? null,
-                embeddingDimensions: chunk.embeddingDimensions ?? null,
-                contentHash: chunk.contentHash,
-                updatedAt: new Date(),
-            })));
+            await this.database.insert(alphaRadarSemanticChunks).values(input.chunks.map(toChunkRow));
         }
 
+        return { inserted: input.chunks.length };
+    }
+
+    async replaceFilingMemory(input: AlphaRadarFilingMemoryInput): Promise<{ inserted: number }> {
+        await this.database.transaction(async (tx) => {
+            await tx
+                .delete(alphaRadarSemanticChunks)
+                .where(input.reportId
+                    ? or(eq(alphaRadarSemanticChunks.filingId, input.filingId), eq(alphaRadarSemanticChunks.reportId, input.reportId))
+                    : eq(alphaRadarSemanticChunks.filingId, input.filingId));
+            if (input.chunks.length > 0) {
+                await tx.insert(alphaRadarSemanticChunks).values(input.chunks.map(toChunkRow));
+            }
+        });
         return { inserted: input.chunks.length };
     }
 
@@ -130,22 +134,59 @@ export class DrizzleAlphaRadarSemanticMemoryRepository implements AlphaRadarSema
             .select()
             .from(alphaRadarSemanticChunks)
             .where(conditions.length > 0 ? and(...conditions) : undefined)
-            .orderBy(alphaRadarSemanticChunks.reportPeriod, alphaRadarSemanticChunks.chunkIndex)
-            .limit(500);
+            // The newest quarters first, so a long history leaves out the oldest.
+            .orderBy(
+                sql`${alphaRadarSemanticChunks.reportPeriod} desc nulls last`,
+                asc(alphaRadarSemanticChunks.sourceKind),
+                asc(alphaRadarSemanticChunks.sourceId),
+                asc(alphaRadarSemanticChunks.chunkIndex),
+            )
+            .limit(ALPHA_RADAR_MEMORY_READ_LIMIT);
 
         return rows.map(toSemanticChunk);
     }
 
     async search(input: AlphaRadarSemanticMemorySearchInput): Promise<AlphaRadarSemanticSearchResult> {
-        const chunks = await this.listChunks(input.filters);
-        const options: AlphaRadarSemanticSearchOptions = {
-            query: input.query,
-            chunks,
-            limit: input.limit,
-            includeRawText: input.includeRawText,
-        };
-        return searchAlphaRadarSemanticChunks(options);
+        return searchStoredChunks(await this.listChunks(input.filters), input);
     }
+}
+
+function searchStoredChunks(
+    chunks: readonly AlphaRadarSemanticChunk[],
+    input: AlphaRadarSemanticMemorySearchInput,
+): AlphaRadarSemanticSearchResult {
+    return searchAlphaRadarMemoryChunks({
+        query: input.query,
+        chunks,
+        limit: input.limit,
+        includeRawText: input.includeRawText,
+        queryEmbedding: input.queryEmbedding,
+        embeddingModel: input.embeddingModel,
+    });
+}
+
+function toChunkRow(chunk: AlphaRadarSemanticChunk): typeof alphaRadarSemanticChunks.$inferInsert {
+    return {
+        id: chunk.id,
+        sourceKind: chunk.sourceKind,
+        sourceId: chunk.sourceId,
+        trackedFilerId: chunk.trackedFilerId ?? null,
+        filingId: chunk.filingId ?? null,
+        reportId: chunk.reportId ?? null,
+        reportPeriod: chunk.reportPeriod ?? null,
+        title: chunk.title,
+        body: chunk.text,
+        chunkIndex: chunk.chunkIndex,
+        citation: chunk.citation,
+        metadata: chunk.metadata ?? {},
+        keywords: chunk.keywords,
+        embedding: chunk.embedding ?? null,
+        embeddingProvider: chunk.embeddingProvider ?? null,
+        embeddingModel: chunk.embeddingModel ?? null,
+        embeddingDimensions: chunk.embeddingDimensions ?? null,
+        contentHash: chunk.contentHash,
+        updatedAt: new Date(),
+    };
 }
 
 function toSemanticChunk(row: typeof alphaRadarSemanticChunks.$inferSelect): AlphaRadarSemanticChunk {

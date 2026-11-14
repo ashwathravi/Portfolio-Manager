@@ -6731,6 +6731,9 @@
   font-size: 12.5px;
 }
 
+.pm-integrations-empty p + p { margin-top: 6px; }
+.pm-integrations-empty a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
+
 .pm-integration-row {
   display: grid;
   grid-template-columns: auto 1fr auto;

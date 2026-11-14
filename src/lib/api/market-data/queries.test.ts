@@ -60,7 +60,7 @@ describe('historicalQueryKey', () => {
     test('treats different timeframes as different keys', () => {
         assert.notDeepStrictEqual(
             historicalQueryKey('AAPL', '1D'),
-            historicalQueryKey('AAPL', '1H'),
+            historicalQueryKey('AAPL', '1M'),
         );
     });
 });
