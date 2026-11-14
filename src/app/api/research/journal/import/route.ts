@@ -7,7 +7,7 @@
  *
  * Body: { items: JournalEntry[], first?: number, startedAt?: number } (a big
  * journal comes in batches; see journalImportSchema)
- * Responses: 204; 400 INVALID_JOURNAL_IMPORT; 413
+ * Responses: 204; 400 INVALID_JOURNAL_IMPORT; 409 JOURNAL_LIMIT (nothing imported); 413
  */
 
 import { NextResponse } from 'next/server';
@@ -15,6 +15,8 @@ import { NextResponse } from 'next/server';
 import { readJsonBody } from '@/lib/api/body';
 import { apiError, internalServerError } from '@/lib/api/security';
 import { requireSessionApiUserScope } from '@/lib/api/session-security';
+import { RecordLimitError } from '@/lib/limits/records';
+import { recordLimitResponse } from '@/lib/limits/records-server';
 import { importJournal } from '@/lib/research/server/journal';
 import { journalImportSchema } from '@/lib/validators/journal';
 
@@ -41,6 +43,7 @@ export async function POST(request: Request) {
         await importJournal(auth.context.userId, parsed.data);
         return new NextResponse(null, { status: 204 });
     } catch (err) {
+        if (err instanceof RecordLimitError) return recordLimitResponse(err);
         return internalServerError(err, 'Unable to import the journal.', 'JOURNAL_IMPORT_FAILED');
     }
 }

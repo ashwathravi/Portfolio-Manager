@@ -10,7 +10,7 @@
  * As for the watchlist, a write older than one the entry already has from
  * the same page is ignored.
  *
- * Responses: 204; 400 INVALID_JOURNAL_ENTRY; 413
+ * Responses: 204; 400 INVALID_JOURNAL_ENTRY; 409 JOURNAL_LIMIT; 413
  */
 
 import { NextResponse } from 'next/server';
@@ -18,6 +18,8 @@ import { NextResponse } from 'next/server';
 import { readJsonBody } from '@/lib/api/body';
 import { apiError, internalServerError } from '@/lib/api/security';
 import { requireSessionApiUserScope } from '@/lib/api/session-security';
+import { RecordLimitError } from '@/lib/limits/records';
+import { recordLimitResponse } from '@/lib/limits/records-server';
 import { saveJournalEntry } from '@/lib/research/server/journal';
 import { JOURNAL_ENTRY_PUT_MAX_BYTES, journalEntryPutSchema } from '@/lib/validators/journal';
 
@@ -46,6 +48,7 @@ export async function PUT(request: Request, { params }: Params) {
         await saveJournalEntry(auth.context.userId, parsed.data.entry, parsed.data.order);
         return new NextResponse(null, { status: 204 });
     } catch (err) {
+        if (err instanceof RecordLimitError) return recordLimitResponse(err);
         return internalServerError(err, 'Unable to save the journal entry.', 'JOURNAL_ENTRY_SAVE_FAILED');
     }
 }

@@ -54,7 +54,6 @@ Retired routes redirect (307): `/portfolios`, `/portfolios/trade-log`,
   Plaid syncs.
 - **Public launch (phase 5):** invite the first users (i75), upgrade plans
   (i76), then open sign-up: `AUTH_OPEN_SIGNUP`, with the per-user daily
-  quotas, the caps on what each user keeps (alert rules, and with #203 the
-  watchlist, journal, theses and transactions), the limit on new accounts a
-  day and the block list already in place (i77, `docs/deployment.md` ›
-  Opening sign-up).
+  quotas, the caps on what each user keeps (watchlist, journal, theses,
+  transactions and alert rules), the limit on new accounts a day and the
+  block list already in place (i77, `docs/deployment.md` › Opening sign-up).

@@ -7,7 +7,7 @@
  *
  * Body: { items: WatchItem[], first?: number, startedAt?: number } (a big list
  * comes in batches; see watchlistImportSchema)
- * Responses: 204; 400 INVALID_WATCHLIST_IMPORT
+ * Responses: 204; 400 INVALID_WATCHLIST_IMPORT; 409 WATCHLIST_LIMIT (nothing imported)
  */
 
 import { NextResponse } from 'next/server';
@@ -15,6 +15,8 @@ import { NextResponse } from 'next/server';
 import { readJsonBody } from '@/lib/api/body';
 import { apiError, internalServerError } from '@/lib/api/security';
 import { requireSessionApiUserScope } from '@/lib/api/session-security';
+import { RecordLimitError } from '@/lib/limits/records';
+import { recordLimitResponse } from '@/lib/limits/records-server';
 import { importWatchlist } from '@/lib/research/server/watchlist';
 import { watchlistImportSchema } from '@/lib/validators/watchlist';
 
@@ -41,6 +43,7 @@ export async function POST(request: Request) {
         await importWatchlist(auth.context.userId, parsed.data);
         return new NextResponse(null, { status: 204 });
     } catch (err) {
+        if (err instanceof RecordLimitError) return recordLimitResponse(err);
         return internalServerError(err, 'Unable to import the watchlist.', 'WATCHLIST_IMPORT_FAILED');
     }
 }
