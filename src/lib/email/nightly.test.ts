@@ -5,10 +5,14 @@ import type { db } from "@/db";
 
 import {
     ALERT_EMAIL_MAX_AGE_DAYS,
+    alertBatches,
     alertsByUser,
     buildAlertsSentQuery,
     buildAlertsToEmailQuery,
+    buildClaimAlertBatchQuery,
     buildClaimAlertsQuery,
+    buildDropAlertBatchQuery,
+    buildPendingAlertBatchesQuery,
     buildClaimWeeklyReviewQuery,
     buildReleaseAlertsQuery,
     buildReleaseWeeklyReviewQuery,
@@ -23,27 +27,47 @@ const LAPSED = new Date(NOW.getTime() - EMAIL_CLAIM_TTL_MS).toISOString();
 const CLAIMABLE = /\("([a-z_]+)"\."(email_claimed_at|weekly_review_claimed_at)" is null or "\1"\."\2" < \$(\d+)\)/;
 
 describe("email job queries (launch item i58)", () => {
-    test("alerts to email: not read, cleared, sent or claimed by a live run, raised since alert emails went on and in the last four days", () => {
+    test("alerts to email: not read, cleared, sent, in an email already or claimed by a live run, raised since alert emails went on and in the last four days", () => {
         const { sql, params } = buildAlertsToEmailQuery(NOW).toSQL();
         assert.match(sql, /inner join "email_preferences" on "email_preferences"\."user_id" = "alert_notifications"\."user_id" inner join "auth_users" on "auth_users"\."id" = "alert_notifications"\."user_id"/);
-        assert.match(sql, /where \("email_preferences"\."alerts" = \$1 and "auth_users"\."email" is not null and "alert_notifications"\."cleared" = \$2 and "alert_notifications"\."read_at" is null and "alert_notifications"\."emailed_at" is null and \("alert_notifications"\."email_claimed_at" is null or "alert_notifications"\."email_claimed_at" < \$3\) and "alert_notifications"\."triggered_at" >= "email_preferences"\."alerts_since" and "alert_notifications"\."triggered_at" > \$4\)/);
+        assert.match(sql, /where \("email_preferences"\."alerts" = \$1 and "auth_users"\."email" is not null and "alert_notifications"\."cleared" = \$2 and "alert_notifications"\."read_at" is null and "alert_notifications"\."emailed_at" is null and "alert_notifications"\."email_batch" is null and \("alert_notifications"\."email_claimed_at" is null or "alert_notifications"\."email_claimed_at" < \$3\) and "alert_notifications"\."triggered_at" >= "email_preferences"\."alerts_since" and "alert_notifications"\."triggered_at" > \$4\)/);
         assert.deepEqual(params, [true, false, LAPSED, new Date(NOW.getTime() - ALERT_EMAIL_MAX_AGE_DAYS * 86_400_000).toISOString()]);
     });
 
-    test("a claim takes alerts no live run has; sending marks them sent, failing gives back only this run's claim", () => {
-        const claim = buildClaimAlertsQuery(["n-1", "n-2"], NOW).toSQL();
-        assert.match(claim.sql, /^update "alert_notifications" set "email_claimed_at" = \$1 where \("alert_notifications"\."id" in \(\$2, \$3\) and "alert_notifications"\."emailed_at" is null and "alert_notifications"\."cleared" = \$4 and /);
+    test("a claim puts alerts no live run has, and in no email yet, in a new email; that email is then marked sent, given back or broken up", () => {
+        const claim = buildClaimAlertsQuery(["n-1", "n-2"], "alerts/b-1", NOW).toSQL();
+        assert.match(claim.sql, /^update "alert_notifications" set "email_claimed_at" = \$1, "email_batch" = \$2 where \("alert_notifications"\."id" in \(\$3, \$4\) and "alert_notifications"\."emailed_at" is null and "alert_notifications"\."email_batch" is null and "alert_notifications"\."cleared" = \$5 and /);
         assert.match(claim.sql, CLAIMABLE);
         assert.match(claim.sql, /\) returning "id"$/);
-        assert.deepEqual(claim.params, [NOW.toISOString(), "n-1", "n-2", false, LAPSED]);
+        assert.deepEqual(claim.params, [NOW.toISOString(), "alerts/b-1", "n-1", "n-2", false, LAPSED]);
 
-        const sent = buildAlertsSentQuery(["n-1"], NOW).toSQL();
-        assert.match(sent.sql, /^update "alert_notifications" set "emailed_at" = \$1, "email_claimed_at" = \$2 where \("alert_notifications"\."id" in \(\$3\) and "alert_notifications"\."email_claimed_at" = \$4\)$/);
-        assert.deepEqual(sent.params, [NOW.toISOString(), null, "n-1", NOW.toISOString()]);
+        const sent = buildAlertsSentQuery("alerts/b-1", NOW).toSQL();
+        assert.match(sent.sql, /^update "alert_notifications" set "emailed_at" = \$1, "email_claimed_at" = \$2 where \("alert_notifications"\."email_batch" = \$3 and "alert_notifications"\."email_claimed_at" = \$4\)$/);
+        assert.deepEqual(sent.params, [NOW.toISOString(), null, "alerts/b-1", NOW.toISOString()]);
 
-        const release = buildReleaseAlertsQuery(["n-1"], NOW).toSQL();
-        assert.match(release.sql, /^update "alert_notifications" set "email_claimed_at" = \$1 where \("alert_notifications"\."id" in \(\$2\) and "alert_notifications"\."email_claimed_at" = \$3\)$/);
-        assert.deepEqual(release.params, [null, "n-1", NOW.toISOString()]);
+        // An unknown outcome keeps the email for a later run.
+        const release = buildReleaseAlertsQuery("alerts/b-1", NOW).toSQL();
+        assert.match(release.sql, /^update "alert_notifications" set "email_claimed_at" = \$1 where \("alert_notifications"\."email_batch" = \$2 and "alert_notifications"\."email_claimed_at" = \$3\)$/);
+        assert.deepEqual(release.params, [null, "alerts/b-1", NOW.toISOString()]);
+
+        // A refused one frees its alerts.
+        const drop = buildDropAlertBatchQuery("alerts/b-1", NOW).toSQL();
+        assert.match(drop.sql, /^update "alert_notifications" set "email_claimed_at" = \$1, "email_batch" = \$2 where \("alert_notifications"\."email_batch" = \$3 and "alert_notifications"\."email_claimed_at" = \$4\)$/);
+        assert.deepEqual(drop.params, [null, null, "alerts/b-1", NOW.toISOString()]);
+    });
+
+    test("emails an earlier run may have sent: every alert in them, cleared ones too, unless a live run has them", () => {
+        const pending = buildPendingAlertBatchesQuery(NOW).toSQL();
+        assert.match(pending.sql, /"alert_notifications"\."email_batch", "alert_notifications"\."cleared", "email_preferences"\."alerts" from "alert_notifications"/);
+        assert.match(pending.sql, /where \("alert_notifications"\."email_batch" is not null and "alert_notifications"\."emailed_at" is null and /);
+        assert.match(pending.sql, CLAIMABLE);
+        assert.doesNotMatch(pending.sql, /"read_at" is null|"cleared" = /);
+        assert.deepEqual(pending.params, [LAPSED]);
+
+        const claim = buildClaimAlertBatchQuery("alerts/b-1", NOW).toSQL();
+        assert.match(claim.sql, /^update "alert_notifications" set "email_claimed_at" = \$1 where \("alert_notifications"\."email_batch" = \$2 and "alert_notifications"\."emailed_at" is null and /);
+        assert.match(claim.sql, CLAIMABLE);
+        assert.deepEqual(claim.params, [NOW.toISOString(), "alerts/b-1", LAPSED]);
     });
 
     test("the review goes to whoever wants it, hasn't had this week's and isn't being sent it", () => {
@@ -82,6 +106,16 @@ describe("alertsByUser", () => {
             row("c-1", "u-c", "2026-11-02T22:35:00Z"),
         ]);
         assert.deepEqual(groups.map((alerts) => alerts.map((alert) => alert.id)), [["b-new", "b-old"], ["a-new"], ["c-1"]]);
+    });
+
+    test("alertBatches groups an earlier run's emails the same way, by email rather than user", () => {
+        const pending = (id: string, batch: string, triggeredAt: string) => ({ ...row(id, "u-a", triggeredAt), batch, cleared: false, alertsOn: true });
+        const groups = alertBatches([
+            pending("x-1", "alerts/x", "2026-11-02T22:35:00Z"),
+            pending("y-1", "alerts/y", "2026-11-02T22:35:00Z"),
+            pending("y-0", "alerts/y", "2026-10-30T22:35:00Z"),
+        ]);
+        assert.deepEqual(groups.map((alerts) => alerts.map((alert) => alert.id)), [["y-1", "y-0"], ["x-1"]]);
     });
 });
 

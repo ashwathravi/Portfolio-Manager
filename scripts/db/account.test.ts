@@ -76,8 +76,8 @@ describe('account deletion and export', { skip: !DATABASE_URL && 'SCRIPTS_TEST_D
             INSERT INTO alert_rules (user_id, name, metric, symbol, comparator, threshold, rearm, note, created_at)
             VALUES (${user}, 'AAPL above $95', 'price', 'AAPL', 'gte', 95, 'daily', 'trim', '2026-10-20 12:00') RETURNING id`;
         await sql`
-            INSERT INTO alert_notifications (user_id, rule_id, occurrence, rule_name, metric, symbol, comparator, threshold, observed_value, message, href, triggered_at)
-            VALUES (${user}, ${rule.id}, 'session:2026-10-23', 'AAPL above $95', 'price', 'AAPL', 'gte', 95, 100, 'AAPL closed at $100.00 on Oct 23, at or above $95.00.', '/portfolios/detail/AAPL', '2026-10-23 22:31')`;
+            INSERT INTO alert_notifications (user_id, rule_id, occurrence, rule_name, metric, symbol, comparator, threshold, observed_value, message, href, triggered_at, email_batch)
+            VALUES (${user}, ${rule.id}, 'session:2026-10-23', 'AAPL above $95', 'price', 'AAPL', 'gte', 95, 100, 'AAPL closed at $100.00 on Oct 23, at or above $95.00.', '/portfolios/detail/AAPL', '2026-10-23 22:31', ${`alerts/batch-${user}`})`;
         await sql`INSERT INTO email_preferences (user_id, alerts, weekly_review, alerts_since, unsubscribe_token, updated_at) VALUES (${user}, true, false, '2026-10-21 12:00', ${`unsubscribe-secret-${user}`}, '2026-10-21 12:00')`;
         const [item] = await sql<{ id: string }[]>`
             INSERT INTO plaid_items (user_id, plaid_item_id, institution_id, institution_name, access_token_ciphertext, access_token_iv, access_token_auth_tag)
@@ -177,7 +177,7 @@ describe('account deletion and export', { skip: !DATABASE_URL && 'SCRIPTS_TEST_D
         assert.deepEqual(data.emailPreferences, { alerts: true, weeklyReview: false, updatedAt: '2026-10-21T12:00:00.000Z' });
 
         const text = JSON.stringify(data);
-        for (const leak of ['userId', 'writeSession', 'writeSeq', 'dismissed', 'cleared', 'occurrence', 'An earlier question', 'secret-cipher', 'item-u-export', 'acc-u-export', 'u-other', 'unsubscribe-secret', 'alertsSince', 'emailClaimedAt']) {
+        for (const leak of ['userId', 'writeSession', 'writeSeq', 'dismissed', 'cleared', 'occurrence', 'An earlier question', 'secret-cipher', 'item-u-export', 'acc-u-export', 'u-other', 'unsubscribe-secret', 'alertsSince', 'emailClaimedAt', 'emailBatch', 'alerts/batch-']) {
             assert.ok(!text.includes(leak), leak);
         }
     });

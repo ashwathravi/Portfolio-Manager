@@ -13,11 +13,21 @@
  *
  * Every email is claimed before it's sent (its alerts' email_claimed_at, the
  * user's weekly_review_claimed_at) and marked sent once Resend accepts it
- * (emailed_at, weekly_review_week). A refused one is released at once; a
- * claim never marked sent, because the run was cut off, lapses after
- * {@link EMAIL_CLAIM_TTL_MS} and a later run takes it again, under the same
- * idempotency key while it holds the same alerts. So two runs never send an
- * email twice, and none is lost.
+ * (emailed_at, weekly_review_week). A claim never marked sent, because the
+ * run was cut off, lapses after {@link EMAIL_CLAIM_TTL_MS} and a later run
+ * takes it again. So two runs never send an email at once, and none is lost.
+ *
+ * Each email has an idempotency key, and Resend sends a key's email once in
+ * 24 hours. A review's key is its user and week. An alert email's key is
+ * stored on its alerts when they're claimed (email_batch), because what
+ * decides the email, which alerts are waiting, changes: when a send's
+ * outcome is unknown (no answer, a server error, the run cut off), the email
+ * may have gone, so a later run sends those same alerts under that key, and
+ * alerts raised since, or read, don't change it. Those raised since go in an
+ * email of their own. An unknown outcome is tried again once straight away,
+ * well within Resend's 24 hours; a batch a later run sends again after
+ * that, and that had in fact gone, could arrive twice. A send Resend refused
+ * didn't go: its alerts are free again, for a new email with a new key.
  *
  * Sends are spaced to keep within Resend's rate limit and stop when the
  * job's budget is spent; the rest go the next evening. Users whose alerts
@@ -27,7 +37,7 @@
  * health shows it.
  */
 
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import { and, asc, desc, eq, gt, gte, inArray, isNotNull, isNull, lt, or, sql, type SQL } from "drizzle-orm";
 import type { PgColumn } from "drizzle-orm/pg-core";
@@ -41,7 +51,7 @@ import { generateReview } from "@/lib/reviews/generate";
 import { easternWeekBounds } from "@/lib/reviews/weeks";
 
 import { emailSetup, type EmailConfig } from "./config";
-import { resendSender, type OutgoingEmail, type SendEmail } from "./resend";
+import { classifySendFailure, resendSender, type OutgoingEmail, type SendEmail, type SendFailure } from "./resend";
 import { alertsEmail, unsubscribeHeaders, unsubscribeUrls, weeklyReviewEmail, type RenderedEmail } from "./templates";
 
 type Database = typeof db;
@@ -93,20 +103,23 @@ function claimable(claimedAt: PgColumn, now: Date): SQL {
     return or(isNull(claimedAt), lt(claimedAt, new Date(now.getTime() - EMAIL_CLAIM_TTL_MS)))!;
 }
 
-/** The alerts waiting to be emailed, each user's newest first, with where they go. */
+/** What an alert email shows of each alert, and where it goes. */
+const ALERT_EMAIL_FIELDS = {
+    id: alertNotifications.id,
+    userId: alertNotifications.userId,
+    message: alertNotifications.message,
+    metric: alertNotifications.metric,
+    symbol: alertNotifications.symbol,
+    href: alertNotifications.href,
+    triggeredAt: alertNotifications.triggeredAt,
+    address: authUsers.email,
+    token: emailPreferences.unsubscribeToken,
+};
+
+/** The alerts waiting to be emailed, not yet in an email, each user's newest first, with where they go. */
 export function buildAlertsToEmailQuery(now: Date, database: Database = db) {
     return database
-        .select({
-            id: alertNotifications.id,
-            userId: alertNotifications.userId,
-            message: alertNotifications.message,
-            metric: alertNotifications.metric,
-            symbol: alertNotifications.symbol,
-            href: alertNotifications.href,
-            triggeredAt: alertNotifications.triggeredAt,
-            address: authUsers.email,
-            token: emailPreferences.unsubscribeToken,
-        })
+        .select(ALERT_EMAIL_FIELDS)
         .from(alertNotifications)
         .innerJoin(emailPreferences, eq(emailPreferences.userId, alertNotifications.userId))
         .innerJoin(authUsers, eq(authUsers.id, alertNotifications.userId))
@@ -116,6 +129,7 @@ export function buildAlertsToEmailQuery(now: Date, database: Database = db) {
             eq(alertNotifications.cleared, false),
             isNull(alertNotifications.readAt),
             isNull(alertNotifications.emailedAt),
+            isNull(alertNotifications.emailBatch),
             claimable(alertNotifications.emailClaimedAt, now),
             gte(alertNotifications.triggeredAt, emailPreferences.alertsSince),
             gt(alertNotifications.triggeredAt, new Date(now.getTime() - ALERT_EMAIL_MAX_AGE_DAYS * DAY_MS)),
@@ -123,34 +137,83 @@ export function buildAlertsToEmailQuery(now: Date, database: Database = db) {
         .orderBy(asc(alertNotifications.userId), desc(alertNotifications.triggeredAt), asc(alertNotifications.id));
 }
 
-/** Claims alerts for an email: those no other run has claimed, sent or seen cleared. */
-export function buildClaimAlertsQuery(ids: string[], now: Date, database: Database = db) {
+/**
+ * Claims alerts for a new email, `batch`: those not in an email already, and
+ * that no other run has claimed, sent or seen cleared.
+ */
+export function buildClaimAlertsQuery(ids: string[], batch: string, now: Date, database: Database = db) {
     return database
         .update(alertNotifications)
-        .set({ emailClaimedAt: now })
+        .set({ emailClaimedAt: now, emailBatch: batch })
         .where(and(
             inArray(alertNotifications.id, ids),
             isNull(alertNotifications.emailedAt),
+            isNull(alertNotifications.emailBatch),
             eq(alertNotifications.cleared, false),
             claimable(alertNotifications.emailClaimedAt, now),
         ))
         .returning({ id: alertNotifications.id });
 }
 
-/** Marks this run's claimed alerts sent. */
-export function buildAlertsSentQuery(ids: string[], claimedAt: Date, database: Database = db) {
+/**
+ * Emails an earlier run may have sent without hearing so (`email_batch` kept,
+ * never marked sent), not claimed by a live run: every alert in each, cleared
+ * ones included, with whether the user still wants alert emails.
+ */
+export function buildPendingAlertBatchesQuery(now: Date, database: Database = db) {
+    return database
+        .select({
+            ...ALERT_EMAIL_FIELDS,
+            batch: alertNotifications.emailBatch,
+            cleared: alertNotifications.cleared,
+            alertsOn: emailPreferences.alerts,
+        })
+        .from(alertNotifications)
+        .innerJoin(emailPreferences, eq(emailPreferences.userId, alertNotifications.userId))
+        .innerJoin(authUsers, eq(authUsers.id, alertNotifications.userId))
+        .where(and(
+            isNotNull(alertNotifications.emailBatch),
+            isNull(alertNotifications.emailedAt),
+            claimable(alertNotifications.emailClaimedAt, now),
+        ))
+        .orderBy(asc(alertNotifications.emailBatch), desc(alertNotifications.triggeredAt), asc(alertNotifications.id));
+}
+
+/** Claims an earlier email's alerts to send it again, if no live run has them. */
+export function buildClaimAlertBatchQuery(batch: string, now: Date, database: Database = db) {
+    return database
+        .update(alertNotifications)
+        .set({ emailClaimedAt: now })
+        .where(and(
+            eq(alertNotifications.emailBatch, batch),
+            isNull(alertNotifications.emailedAt),
+            claimable(alertNotifications.emailClaimedAt, now),
+        ))
+        .returning({ id: alertNotifications.id });
+}
+
+/** Marks this run's claimed email sent. */
+export function buildAlertsSentQuery(batch: string, claimedAt: Date, database: Database = db) {
     return database
         .update(alertNotifications)
         .set({ emailedAt: claimedAt, emailClaimedAt: null })
-        .where(and(inArray(alertNotifications.id, ids), eq(alertNotifications.emailClaimedAt, claimedAt)));
+        .where(and(eq(alertNotifications.emailBatch, batch), eq(alertNotifications.emailClaimedAt, claimedAt)));
 }
 
-/** Gives back a claim whose email didn't go. */
-export function buildReleaseAlertsQuery(ids: string[], claimedAt: Date, database: Database = db) {
+/** Gives back the claim on an email that may have gone: a later run sends the same alerts under the same key. */
+export function buildReleaseAlertsQuery(batch: string, claimedAt: Date, database: Database = db) {
     return database
         .update(alertNotifications)
         .set({ emailClaimedAt: null })
-        .where(and(inArray(alertNotifications.id, ids), eq(alertNotifications.emailClaimedAt, claimedAt)));
+        .where(and(eq(alertNotifications.emailBatch, batch), eq(alertNotifications.emailClaimedAt, claimedAt)));
+}
+
+/** Breaks up an email that didn't go, or won't: its alerts are free for a new one. */
+export function buildDropAlertBatchQuery(batch: string, claimedAt: Date, database: Database = db) {
+    return database
+        .update(alertNotifications)
+        .set({ emailBatch: null, emailClaimedAt: null })
+        .where(and(eq(alertNotifications.emailBatch, batch), eq(alertNotifications.emailClaimedAt, claimedAt)));
 }
 
 /** Who wants the review of `week`, hasn't had it, and isn't being sent it by another run. */
@@ -201,6 +264,9 @@ export function buildReleaseWeeklyReviewQuery(userId: string, claimedAt: Date, d
 // Sending
 // ---------------------------------------------------------------------------
 
+/** What became of an email: it went (now or earlier), Resend refused it, or nobody knows. */
+export type SendOutcome = "sent" | Exclude<SendFailure, "already-sent">;
+
 /** Sends spaced out and within the budget; counts what went and failed. */
 class Outbox {
     sent = 0;
@@ -218,8 +284,22 @@ class Outbox {
         return this.deps.clock() - this.startedAt < Math.min(limitMs, this.deps.budgetMs);
     }
 
-    /** True when the email went. */
-    async send(email: OutgoingEmail): Promise<boolean> {
+    /**
+     * Sends the email, and once more under the same key when the outcome is
+     * unknown: Resend sends a key's email once, so it can't go twice.
+     */
+    async send(email: OutgoingEmail): Promise<SendOutcome> {
+        let attempt = await this.attempt(email);
+        if (attempt.outcome === "unknown" && this.hasTime()) attempt = await this.attempt(email);
+        if (attempt.outcome === "sent") {
+            this.sent += 1;
+            return "sent";
+        }
+        this.fail(attempt.error);
+        return attempt.outcome;
+    }
+
+    private async attempt(email: OutgoingEmail): Promise<{ outcome: SendOutcome; error?: unknown }> {
         if (this.lastSendAt !== null) {
             const wait = SEND_SPACING_MS - (this.deps.clock() - this.lastSendAt);
             if (wait > 0) await this.deps.pause(wait);
@@ -227,11 +307,10 @@ class Outbox {
         this.lastSendAt = this.deps.clock();
         try {
             await this.deps.send(email);
-            this.sent += 1;
-            return true;
+            return { outcome: "sent" };
         } catch (error) {
-            this.fail(error);
-            return false;
+            const failure = classifySendFailure(error);
+            return failure === "already-sent" ? { outcome: "sent" } : { outcome: failure, error };
         }
     }
 
@@ -251,15 +330,26 @@ function keyFor(...parts: string[]): string {
 }
 
 type AlertRow = Awaited<ReturnType<typeof buildAlertsToEmailQuery>>[number];
+type PendingAlertRow = Awaited<ReturnType<typeof buildPendingAlertBatchesQuery>>[number];
+
+/** Rows grouped by `key`, each group newest first, the group whose oldest has waited longest first. */
+function groupOldestFirst<Row extends AlertRow>(rows: readonly Row[], key: (row: Row) => string): Row[][] {
+    const groups = new Map<string, Row[]>();
+    for (const row of rows) groups.set(key(row), [...(groups.get(key(row)) ?? []), row]);
+    const oldest = (alerts: Row[]) => Math.min(...alerts.map((alert) => alert.triggeredAt.getTime()));
+    return [...groups.values()]
+        .map((alerts) => [...alerts].sort((a, b) => b.triggeredAt.getTime() - a.triggeredAt.getTime() || a.id.localeCompare(b.id)))
+        .sort((a, b) => oldest(a) - oldest(b) || key(a[0]).localeCompare(key(b[0])));
+}
 
 /** Each user's alerts, newest first, the user whose oldest has waited longest first. */
 export function alertsByUser(rows: readonly AlertRow[]): AlertRow[][] {
-    const byUser = new Map<string, AlertRow[]>();
-    for (const row of rows) byUser.set(row.userId, [...(byUser.get(row.userId) ?? []), row]);
-    const oldest = (alerts: AlertRow[]) => Math.min(...alerts.map((alert) => alert.triggeredAt.getTime()));
-    return [...byUser.values()]
-        .map((alerts) => [...alerts].sort((a, b) => b.triggeredAt.getTime() - a.triggeredAt.getTime() || a.id.localeCompare(b.id)))
-        .sort((a, b) => oldest(a) - oldest(b) || a[0].userId.localeCompare(b[0].userId));
+    return groupOldestFirst(rows, (row) => row.userId);
+}
+
+/** Each earlier email's alerts, newest first, the one waiting longest first. */
+export function alertBatches(rows: readonly PendingAlertRow[]): PendingAlertRow[][] {
+    return groupOldestFirst(rows, (row) => row.batch!);
 }
 
 async function emailAlerts(
@@ -272,26 +362,53 @@ async function emailAlerts(
     const sentBefore = outbox.sent;
     const failedBefore = outbox.failed;
     let deferred = 0;
+
+    /** Sends the claimed email `batch` of these alerts, and records what became of it. */
+    const sendBatch = async (batch: string, alerts: readonly AlertRow[]) => {
+        const { address, token } = alerts[0];
+        const links = { siteUrl: config.siteUrl, token };
+        const outcome = await outbox.send(outgoing(
+            address!,
+            alertsEmail(alerts.map((alert) => ({ ...alert, metric: alert.metric as AlertMetric })), links),
+            unsubscribeHeaders(unsubscribeUrls(links, "alerts")),
+            "alerts",
+            batch,
+        ));
+        if (outcome === "sent") await buildAlertsSentQuery(batch, now, database);
+        else if (outcome === "refused") await buildDropAlertBatchQuery(batch, now, database);
+        else await buildReleaseAlertsQuery(batch, now, database);
+    };
+
+    // First the emails earlier runs may have sent: the same alerts, under the same key.
+    const oldestAllowed = now.getTime() - ALERT_EMAIL_MAX_AGE_DAYS * DAY_MS;
+    for (const batch of alertBatches(await buildPendingAlertBatchesQuery(now, database))) {
+        if (!outbox.hasTime(limitMs)) {
+            deferred += 1;
+            continue;
+        }
+        const key = batch[0].batch!;
+        const claimed = new Set((await buildClaimAlertBatchQuery(key, now, database)).map((row) => row.id));
+        if (claimed.size === 0) continue;
+        // A cleared alert's text is gone; Resend sent the email if it knows the key, whatever is left out.
+        const alerts = batch.filter((alert) => claimed.has(alert.id) && !alert.cleared);
+        const wanted = batch[0].alertsOn && batch[0].address !== null;
+        if (!wanted || alerts.length === 0 || alerts.every((alert) => alert.triggeredAt.getTime() <= oldestAllowed)) {
+            await buildDropAlertBatchQuery(key, now, database);
+            continue;
+        }
+        await sendBatch(key, alerts);
+    }
+
     for (const alerts of alertsByUser(await buildAlertsToEmailQuery(now, database))) {
         if (!outbox.hasTime(limitMs)) {
             deferred += 1;
             continue;
         }
-        const claimed = new Set((await buildClaimAlertsQuery(alerts.map((a) => a.id), now, database)).map((row) => row.id));
+        const batch = `alerts/${randomUUID()}`;
+        const claimed = new Set((await buildClaimAlertsQuery(alerts.map((a) => a.id), batch, now, database)).map((row) => row.id));
         const mine = alerts.filter((alert) => claimed.has(alert.id));
         if (mine.length === 0) continue;
-        const { userId, address, token } = mine[0];
-        const links = { siteUrl: config.siteUrl, token };
-        const rendered = alertsEmail(mine.map((alert) => ({ ...alert, metric: alert.metric as AlertMetric })), links);
-        const ids = mine.map((alert) => alert.id).sort();
-        const sent = await outbox.send(outgoing(
-            address!,
-            rendered,
-            unsubscribeHeaders(unsubscribeUrls(links, "alerts")),
-            "alerts",
-            `alerts/${keyFor(userId, ...ids)}`,
-        ));
-        await (sent ? buildAlertsSentQuery(ids, now, database) : buildReleaseAlertsQuery(ids, now, database));
+        await sendBatch(batch, mine);
     }
     return { sent: outbox.sent - sentBefore, failed: outbox.failed - failedBefore, deferred };
 }
@@ -337,14 +454,15 @@ async function emailWeeklyReviews(
             continue;
         }
         const links = { siteUrl: config.siteUrl, token: recipient.token };
-        const sent = await outbox.send(outgoing(
+        // The key is the user and week, so a later run's retry keeps it.
+        const outcome = await outbox.send(outgoing(
             recipient.address!,
             weeklyReviewEmail(review, journal.leftOut, links),
             unsubscribeHeaders(unsubscribeUrls(links, "weekly_review")),
             "weekly_review",
             `weekly-review/${keyFor(recipient.userId, week.id)}`,
         ));
-        await (sent ? done() : release());
+        await (outcome === "sent" ? done() : release());
     }
     return { week: week.id, sent: outbox.sent - sentBefore, noTrades, failed: outbox.failed - failedBefore, deferred };
 }

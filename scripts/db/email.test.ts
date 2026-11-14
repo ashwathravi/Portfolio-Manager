@@ -8,7 +8,7 @@ import postgres from 'postgres';
 import * as schema from '../../src/db/schema';
 import { EmailJobError, sendScheduledEmails, type EmailJobDeps } from '../../src/lib/email/nightly';
 import { loadEmailPreferences, saveEmailPreferences, unsubscribe } from '../../src/lib/email/preferences';
-import type { OutgoingEmail } from '../../src/lib/email/resend';
+import { EmailSendError, type OutgoingEmail } from '../../src/lib/email/resend';
 import type { TradeJournal } from '../../src/lib/journal/trades';
 import type { JournalEntry } from '../../src/types/trade';
 
@@ -110,6 +110,46 @@ describe('email kept with the account, and the nightly email job', { skip: !DATA
         return { sent, send };
     }
 
+    type Answer = 'ok' | 'lost' | 'down' | 'refused';
+    /**
+     * Resend as its docs describe idempotency keys: a key's email is sent once
+     * (the same key and content again answers the first email's ID, sending
+     * nothing), and the same key with other content is refused with 409
+     * invalid_idempotent_request. Each call takes the next scripted answer:
+     * "lost" sends the email but the answer never arrives, "down" sends
+     * nothing and answers nothing, "refused" is a 422.
+     */
+    function resend(...script: Answer[]) {
+        const delivered: OutgoingEmail[] = [];
+        const keys = new Map<string, { id: string; content: string }>();
+        const send = async (email: OutgoingEmail) => {
+            const answer = script.shift() ?? 'ok';
+            if (answer === 'down') throw new EmailSendError('Resend timed out.', null);
+            if (answer === 'refused') throw new EmailSendError('Resend refused the email (HTTP 422, validation_error).', 422, 'validation_error');
+            const content = JSON.stringify([email.to, email.subject, email.text]);
+            const known = keys.get(email.idempotencyKey);
+            if (known && known.content !== content) {
+                throw new EmailSendError('Resend refused the email (HTTP 409, invalid_idempotent_request).', 409, 'invalid_idempotent_request');
+            }
+            if (!known) {
+                delivered.push(email);
+                keys.set(email.idempotencyKey, { id: `email-${delivered.length}`, content });
+            }
+            if (answer === 'lost') throw new EmailSendError('Resend timed out.', null);
+            return { id: keys.get(email.idempotencyKey)!.id };
+        };
+        return { delivered, send };
+    }
+
+    /** Which delivered emails mention the alert's message. */
+    const deliveriesOf = (delivered: OutgoingEmail[], message: string) => delivered.filter((email) => email.text.includes(message)).length;
+
+    /** The email an alert is kept in for a later run, or null. */
+    async function batchOf(id: string): Promise<string | null> {
+        const [row] = await sql<{ email_batch: string | null }[]>`SELECT email_batch FROM alert_notifications WHERE id = ${id}`;
+        return row.email_batch;
+    }
+
     const run = (now: Date, deps: Partial<EmailJobDeps> = {}) => sendScheduledEmails({
         now, database, env: ENV, pause: async () => {}, loadJournal: async () => ({ entries: [], leftOut: [], netWorth: 0 }), ...deps,
     });
@@ -194,7 +234,7 @@ describe('email kept with the account, and the nightly email job', { skip: !DATA
             assert.equal(again.sent.length, 0);
         });
 
-        test('a failed email gives its alerts back and fails the run after the others have gone; a later run sends them', async () => {
+        test('a failed email fails the run after the others have gone, and a later run sends the same alerts', async () => {
             await saveEmailPreferences('u-1', { alerts: true }, { database, now: new Date('2026-10-29T12:00:00Z') });
             await saveEmailPreferences('u-2', { alerts: true }, { database, now: new Date('2026-10-29T12:00:00Z') });
             const failing = await raise('u-1', '2026-11-02 22:35');
@@ -211,12 +251,109 @@ describe('email kept with the account, and the nightly email job', { skip: !DATA
             assert.equal(await emailedAt(failing), null);
             assert.notEqual(await emailedAt(going), null);
             assert.equal((await sql`SELECT 1 FROM alert_notifications WHERE email_claimed_at IS NOT NULL`).length, 0, 'no claim is left behind');
+            assert.ok((await batchOf(failing))?.startsWith('alerts/'), 'kept in its email: it may have gone');
 
             const retry = outbox();
             const later = new Date(MONDAY.getTime() + 86_400_000);
             assert.deepEqual((await run(later, { send: retry.send })).alerts, { sent: 1, failed: 0, deferred: 0 });
             assert.deepEqual(retry.sent.map((email) => email.to), ['u-1@example.test']);
             assert.equal(retry.sent[0].subject, 'Your AAPL alert');
+            assert.equal(retry.sent[0].idempotencyKey, await batchOf(failing), 'under the same key');
+        });
+
+        test('regression: an email Resend took without the run hearing so is sent again with the same alerts and key, though one was read and another raised since', async () => {
+            await saveEmailPreferences('u-1', { alerts: true }, { database, now: new Date('2026-10-29T12:00:00Z') });
+            const first = await raise('u-1', '2026-11-02 22:30', { message: 'First alert.' });
+            const second = await raise('u-1', '2026-11-02 22:31', { message: 'Second alert.' });
+
+            // Resend sends Monday's email, but its answer is lost, and the retry a moment later gets none.
+            const fake = resend('lost', 'down');
+            await assert.rejects(run(MONDAY, { send: fake.send }), EmailJobError);
+            assert.equal(fake.delivered.length, 1);
+            const batch = await batchOf(first);
+            assert.ok(batch);
+            assert.equal(await batchOf(second), batch);
+            assert.equal(await emailedAt(first), null);
+
+            // Before Tuesday's run the user reads one alert, and another is raised.
+            await sql`UPDATE alert_notifications SET read_at = '2026-11-03 09:00' WHERE id = ${first}`;
+            const third = await raise('u-1', '2026-11-03 22:30', { message: 'Third alert.' });
+
+            const tuesday = new Date('2026-11-03T22:35:00.000Z');
+            assert.deepEqual((await run(tuesday, { send: fake.send })).alerts, { sent: 2, failed: 0, deferred: 0 });
+            // Monday's email isn't sent twice; Tuesday's alert goes in an email of its own.
+            assert.equal(fake.delivered.length, 2);
+            for (const message of ['First alert.', 'Second alert.', 'Third alert.']) assert.equal(deliveriesOf(fake.delivered, message), 1, message);
+            assert.notEqual(fake.delivered[1].idempotencyKey, batch);
+            for (const id of [first, second, third]) assert.equal(await emailedAt(id), '2026-11-03T22:35');
+        });
+
+        test('an unknown outcome is tried again straight away under the same key, and a lost answer isn\'t sent twice', async () => {
+            await saveEmailPreferences('u-1', { alerts: true }, { database, now: new Date('2026-10-29T12:00:00Z') });
+            await saveEmailPreferences('u-2', { alerts: true }, { database, now: new Date('2026-10-29T12:00:00Z') });
+            const down = await raise('u-1', '2026-11-02 22:30');
+            const lost = await raise('u-2', '2026-11-02 22:30');
+
+            // u-1's first try gets no answer and sends nothing; u-2's is sent but its answer lost.
+            const fake = resend('down', 'ok', 'lost', 'ok');
+            assert.deepEqual((await run(MONDAY, { send: fake.send })).alerts, { sent: 2, failed: 0, deferred: 0 });
+            assert.deepEqual(fake.delivered.map((email) => email.to), ['u-1@example.test', 'u-2@example.test']);
+            for (const id of [down, lost]) assert.equal(await emailedAt(id), '2026-11-02T22:35');
+        });
+
+        test('an email Resend sent, then sent again without an alert cleared since, is marked sent rather than sent twice', async () => {
+            await saveEmailPreferences('u-1', { alerts: true }, { database, now: new Date('2026-10-29T12:00:00Z') });
+            const cleared = await raise('u-1', '2026-11-02 22:30', { message: 'Cleared later.' });
+            const kept = await raise('u-1', '2026-11-02 22:31', { message: 'Still there.' });
+
+            const fake = resend('lost', 'down');
+            await assert.rejects(run(MONDAY, { send: fake.send }), EmailJobError);
+            await sql`UPDATE alert_notifications SET cleared = true, message = '', href = NULL WHERE id = ${cleared}`;
+
+            // Without the cleared alert the content differs, so Resend answers that the key's email went.
+            assert.deepEqual((await run(new Date('2026-11-03T22:35:00.000Z'), { send: fake.send })).alerts, { sent: 1, failed: 0, deferred: 0 });
+            assert.equal(fake.delivered.length, 1);
+            assert.equal(await emailedAt(kept), '2026-11-03T22:35');
+        });
+
+        test('an email Resend refused frees its alerts for a new email, with a new key', async () => {
+            await saveEmailPreferences('u-1', { alerts: true }, { database, now: new Date('2026-10-29T12:00:00Z') });
+            const alert = await raise('u-1', '2026-11-02 22:30');
+
+            const fake = resend('refused');
+            await assert.rejects(run(MONDAY, { send: fake.send }), /HTTP 422, validation_error/);
+            assert.equal(fake.delivered.length, 0);
+            assert.equal(await batchOf(alert), null);
+            assert.equal((await sql`SELECT 1 FROM alert_notifications WHERE email_claimed_at IS NOT NULL`).length, 0);
+
+            assert.equal((await run(new Date('2026-11-03T22:35:00.000Z'), { send: fake.send })).alerts?.sent, 1);
+            assert.equal(fake.delivered.length, 1);
+            assert.notEqual(await batchOf(alert), null);
+            assert.equal(await emailedAt(alert), '2026-11-03T22:35');
+        });
+
+        test('an earlier email isn\'t sent again once alert emails are off, or its alerts are all cleared or old', async () => {
+            await saveEmailPreferences('u-1', { alerts: true }, { database, now: new Date('2026-10-29T12:00:00Z') });
+            await saveEmailPreferences('u-2', { alerts: true }, { database, now: new Date('2026-10-29T12:00:00Z') });
+            await saveEmailPreferences('u-3', { alerts: true }, { database, now: new Date('2026-10-29T12:00:00Z') });
+            const off = await raise('u-1', '2026-11-02 22:30');
+            const cleared = await raise('u-2', '2026-11-02 22:30');
+            const old = await raise('u-3', '2026-11-02 22:30');
+
+            const fake = resend('lost', 'down', 'lost', 'down', 'lost', 'down');
+            await assert.rejects(run(MONDAY, { send: fake.send }), EmailJobError);
+            assert.equal(fake.delivered.length, 3);
+            await saveEmailPreferences('u-1', { alerts: false }, { database });
+            await sql`UPDATE alert_notifications SET cleared = true, message = '', href = NULL WHERE id = ${cleared}`;
+
+            // A week later, u-3's alert is past the four days.
+            const later = resend();
+            assert.deepEqual((await run(new Date('2026-11-09T22:35:00.000Z'), { send: later.send })).alerts, { sent: 0, failed: 0, deferred: 0 });
+            assert.equal(later.delivered.length, 0);
+            for (const id of [off, cleared, old]) {
+                assert.equal(await batchOf(id), null);
+                assert.equal(await emailedAt(id), null);
+            }
         });
 
         test('two runs at once send each alert once', async () => {
@@ -257,12 +394,12 @@ describe('email kept with the account, and the nightly email job', { skip: !DATA
             const abandoned = await raise('u-1', '2026-11-02 22:35');
             const inFlight = await raise('u-2', '2026-11-02 22:35');
             // The function was stopped twenty minutes ago between claiming and sending; another run claimed a minute ago.
-            await sql`UPDATE alert_notifications SET email_claimed_at = '2026-11-02 22:15' WHERE id = ${abandoned}`;
-            await sql`UPDATE alert_notifications SET email_claimed_at = '2026-11-02 22:34' WHERE id = ${inFlight}`;
+            await sql`UPDATE alert_notifications SET email_claimed_at = '2026-11-02 22:15', email_batch = 'alerts/cut-off' WHERE id = ${abandoned}`;
+            await sql`UPDATE alert_notifications SET email_claimed_at = '2026-11-02 22:34', email_batch = 'alerts/in-flight' WHERE id = ${inFlight}`;
 
             const fake = outbox();
             assert.deepEqual((await run(MONDAY, { send: fake.send })).alerts, { sent: 1, failed: 0, deferred: 0 });
-            assert.deepEqual(fake.sent.map((email) => email.to), ['u-1@example.test']);
+            assert.deepEqual(fake.sent.map((email) => [email.to, email.idempotencyKey]), [['u-1@example.test', 'alerts/cut-off']], 'under the key it was claimed with');
             assert.equal(await emailedAt(abandoned), '2026-11-02T22:35');
             assert.equal(await emailedAt(inFlight), null);
         });

@@ -1057,8 +1057,16 @@ export const alertNotifications = pgTable("alert_notifications", {
     // When a run took it to email; a claim this old that never became
     // emailed_at was cut off, and a later run takes it again.
     emailClaimedAt: timestamp("email_claimed_at"),
+    // The email it was put in: the idempotency key Resend sends it under.
+    // Kept while that email may have gone without the job hearing so, so a
+    // later run sends the same alerts under the same key, and alerts raised
+    // since go in an email of their own.
+    emailBatch: text("email_batch"),
 }, (table) => ({
     userTriggeredIdx: index("alert_notifications_user_triggered_idx").on(table.userId, table.triggeredAt),
+    pendingEmailBatchIdx: index("alert_notifications_pending_email_batch_idx")
+        .on(table.emailBatch)
+        .where(sql`${table.emailBatch} is not null and ${table.emailedAt} is null`),
     ruleOccurrence: uniqueIndex("alert_notifications_rule_occurrence_idx").on(table.ruleId, table.occurrence),
     ruleOwner: foreignKey({
         name: "alert_notifications_rule_owner_fk",

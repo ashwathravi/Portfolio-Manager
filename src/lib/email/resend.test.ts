@@ -1,7 +1,7 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 
-import { EmailSendError, RESEND_EMAILS_URL, resendSender, type OutgoingEmail } from "./resend";
+import { classifySendFailure, EmailSendError, RESEND_EMAILS_URL, resendSender, type OutgoingEmail } from "./resend";
 
 const EMAIL: OutgoingEmail = {
     to: "user@example.test",
@@ -54,7 +54,19 @@ describe("resendSender (launch item i58)", () => {
         await assert.rejects(send(EMAIL), (error: unknown) => {
             assert.ok(error instanceof EmailSendError);
             assert.equal(error.status, 422);
+            assert.equal(error.code, "validation_error");
             assert.equal(error.message, "Resend refused the email (HTTP 422, validation_error).");
+            return true;
+        });
+    });
+
+    test("a key used for another email is reported with Resend's error name", async () => {
+        const { fetchImpl } = fetchAnswering(409, { statusCode: 409, name: "invalid_idempotent_request", message: "Same idempotency key used with a different request payload." });
+        const send = resendSender({ apiKey: "k", from: "f" }, fetchImpl);
+        await assert.rejects(send(EMAIL), (error: unknown) => {
+            assert.ok(error instanceof EmailSendError);
+            assert.equal(error.code, "invalid_idempotent_request");
+            assert.equal(classifySendFailure(error), "already-sent");
             return true;
         });
     });
@@ -79,5 +91,27 @@ describe("resendSender (launch item i58)", () => {
             error instanceof EmailSendError && error.status === null && error.message === "Resend timed out.");
         const offline = (async () => { throw new TypeError("fetch failed"); }) as typeof fetch;
         await assert.rejects(resendSender({ apiKey: "k", from: "f" }, offline)(EMAIL), { message: "Resend couldn't be reached." });
+    });
+});
+
+describe("classifySendFailure (launch item i58)", () => {
+    const refusal = (status: number, code: string | null = null) => new EmailSendError("Resend refused the email.", status, code);
+
+    test("refused: Resend answered that it won't send it, so it didn't go", () => {
+        for (const status of [400, 401, 403, 422, 429]) assert.equal(classifySendFailure(refusal(status, "validation_error")), "refused", String(status));
+    });
+
+    test("already sent: the key was used for an email Resend sent, with other content", () => {
+        assert.equal(classifySendFailure(refusal(409, "invalid_idempotent_request")), "already-sent");
+    });
+
+    test("unknown: it may have gone, so only the same key may send it again", () => {
+        assert.equal(classifySendFailure(new EmailSendError("Resend timed out.", null)), "unknown");
+        assert.equal(classifySendFailure(refusal(500)), "unknown");
+        assert.equal(classifySendFailure(refusal(503)), "unknown");
+        assert.equal(classifySendFailure(refusal(409, "concurrent_idempotent_requests")), "unknown");
+        assert.equal(classifySendFailure(refusal(409)), "unknown");
+        assert.equal(classifySendFailure(new EmailSendError("Resend's answer had no email ID.", 200)), "unknown");
+        assert.equal(classifySendFailure(new Error("socket hang up")), "unknown");
     });
 });
