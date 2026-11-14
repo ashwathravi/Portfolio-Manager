@@ -39,6 +39,8 @@ test.describe('Privacy policy', () => {
     await expect(added).toContainText('your watchlist');
     await expect(added).toContainText('your decision journal');
     await expect(added).toContainText('your research theses');
+    // Launch item i63: option positions for the LEAPS ledger.
+    await expect(added).toContainText('the option positions you add or import (with the thesis, exit rule and price you give them)');
     // Launch item i53: orders drafted on Trade are kept with the account too.
     await expect(added).toContainText('orders you draft on Trade');
     // Launch item i56.
@@ -59,7 +61,7 @@ test.describe('Privacy policy', () => {
 
   test('says what stays when you remove a watchlist ticker, journal entry or thesis', async ({ page }) => {
     const retention = page.getByRole('region', { name: 'Keeping and deleting your data' });
-    await expect(retention).toContainText('drafted orders, value history, watchlist, journal, theses, strategies, alert rules and alerts, email choices, the filers you follow, Ask questions and settings');
+    await expect(retention).toContainText('portfolios, holdings, option positions, transactions, drafted orders, value history, watchlist, journal, theses, strategies, alert rules and alerts, email choices, the filers you follow, Ask questions and settings');
     await expect(retention).toContainText('Your alert rules are checked each weekday evening, on our servers');
     await expect(retention).toContainText('Clearing your alerts removes them and erases their text straight away; a short record of which rule fired, for what and when stays');
     await expect(retention).toContainText('alerts are otherwise deleted once they’re 180 days old');
@@ -96,7 +98,7 @@ test.describe('Privacy policy', () => {
     await expect(sharing.getByText(/Sentry sees your IP address/)).toBeVisible();
     // Both price providers are named (launch item i33), and get ticker symbols only.
     await expect(sharing.getByText('Market data providers (Massive and Finnhub) and SEC EDGAR')).toBeVisible();
-    await expect(sharing).toContainText('We send them ticker symbols, filer IDs and the words you type into ticker search, never your name, email or account details.');
+    await expect(sharing).toContainText('We send them ticker symbols, the option contracts held, filer IDs and the words you type into ticker search, never your name, email or account details.');
     // Launch item i58: the emails the user turns on.
     await expect(sharing).toContainText('Resend sends the emails you turn on. It receives your email address and what each email says');
     // Launch item i62: Alpha Radar's evidence search by meaning.

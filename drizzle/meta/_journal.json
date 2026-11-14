@@ -232,6 +232,13 @@
       "when": 1794685177188,
       "tag": "0032_alert_email_batch",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1794696292308,
+      "tag": "0033_option_positions",
+      "breakpoints": true
     }
   ]
 }

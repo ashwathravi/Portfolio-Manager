@@ -4,7 +4,6 @@ import { ImportHoldingsDialog, type ImportAccountOption } from "./ImportHoldings
 import { NewAccountButton } from "@/components/portfolio/AccountControls";
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { SampleGate } from "@/components/data-display/SampleGate";
 import { useAutoRefreshQuotes } from "@/lib/hooks/useAutoRefreshQuotes";
 import { describeQuotes } from "@/lib/markets/quote-label";
 import { sectorFor, type Sector } from "@/lib/holdings/sector";
@@ -12,11 +11,10 @@ import {
     computeBucketAllocation,
     computeThemeExposure,
     employerSymbols,
-    optionCurrentValue,
+    optionNetValue,
     policyBucketLabel,
     resolvePolicyBucketAssignment,
     themeLabel,
-    type OptionRiskPosition,
     themeWeightsForSymbol,
     type PolicyBucketId,
     type PolicyBucketStatus,
@@ -31,6 +29,8 @@ import { useSettingsStore } from "@/lib/stores/settingsStore";
 import { HoldingsFullTable, type HoldingsTableRow } from "./HoldingsFullTable";
 import { HoldingsSummaryStrip } from "./HoldingsSummaryStrip";
 import { OptionsRiskLedgerCard } from "./OptionsRiskLedgerCard";
+import type { OptionThesisOption } from "./OptionPositionDialog";
+import { toOptionRiskPosition, type LoadedOptionPosition } from "@/lib/portfolio/option-positions";
 import { isTodaysQuote } from "@/lib/markets/quote-session";
 import { useEasternDate } from "@/lib/hooks/useEasternDate";
 import { combineBySymbol, hasSymbolInSeveralAccounts, type HoldingsRowView } from "@/lib/holdings/combine";
@@ -73,11 +73,14 @@ export interface HoldingsPageClientProps {
     holdings: HoldingsSeed[];
     /** From `?view=`: one row per account position (the default) or per symbol. */
     initialRowView?: HoldingsRowView;
-    optionPositions?: readonly OptionRiskPosition[];
-    /** True while option positions come from example data (no options feed yet). */
-    optionPositionsAreSample?: boolean;
-    /** Accounts offered as the CSV import target. */
+    /** The user's option positions, for the LEAPS ledger (launch item i63). */
+    optionPositions?: readonly LoadedOptionPosition[];
+    /** The user's theses, to link an option position to. */
+    optionTheses?: readonly OptionThesisOption[];
+    /** Accounts offered as the CSV import target, and for option positions. */
     importAccounts?: readonly ImportAccountOption[];
+    /** Cash across the accounts: part of what the LEAPS ledger measures against. */
+    cashTotal?: number;
     /**
      * Whether Settings can connect a bank (bankLinkingAvailable, x30). Without
      * it the empty state offers to add an account by hand instead of a
@@ -90,8 +93,9 @@ export function HoldingsPageClient({
     holdings,
     initialRowView = "account",
     optionPositions = [],
-    optionPositionsAreSample = false,
+    optionTheses = [],
     importAccounts = [],
+    cashTotal = 0,
     bankLinking,
 }: HoldingsPageClientProps) {
     const [sectorFilter, setSectorFilter] = useState<Sector | "All">("All");
@@ -219,11 +223,14 @@ export function HoldingsPageClient({
         () => computeThemeExposure(rows, riskPolicy.themeCaps),
         [rows, riskPolicy.themeCaps],
     );
-    const optionsCurrentValue = useMemo(
-        () => optionPositions.reduce((sum, position) => sum + optionCurrentValue(position), 0),
+    const optionsNetValue = useMemo(
+        // A written option's cost to buy back counts against the portfolio.
+        () => optionPositions.reduce((sum, position) => sum + optionNetValue(toOptionRiskPosition(position)), 0),
         [optionPositions],
     );
-    const totalPolicyValue = summary.marketValue + optionsCurrentValue;
+    // As policyPortfolioValue measures it for Today and Trade: holdings, cash
+    // and options together.
+    const totalPolicyValue = summary.marketValue + cashTotal + optionsNetValue;
 
     // ---- Filter + sort for the table ----
     const tableRows = useMemo<HoldingsTableRow[]>(() => {
@@ -275,6 +282,16 @@ export function HoldingsPageClient({
         }));
     }, [rows, bySymbol, sectorFilter, bucketFilter, themeFilter, sortKey, policySummary]);
 
+    const ledger = (
+        <OptionsRiskLedgerCard
+            positions={optionPositions}
+            totalPortfolioValue={totalPolicyValue}
+            liquidNetWorth={totalPolicyValue}
+            accounts={importAccounts}
+            theses={optionTheses}
+        />
+    );
+
     if (rows.length === 0) {
         // With an account already, importing its positions is the next step,
         // so Import CSV leads, as on Today's first-run steps; before one,
@@ -302,6 +319,9 @@ export function HoldingsPageClient({
                         <Link href="/portfolios/accounts" className="pm-btn pm-btn-ghost">View accounts</Link>
                     </div>
                 </section>
+                {/* With an account, the ledger is where option positions are
+                    added, stock or no stock. */}
+                {(optionPositions.length > 0 || importAccounts.length > 0) && ledger}
             </div>
         );
     }
@@ -326,16 +346,7 @@ export function HoldingsPageClient({
                 themeSummary={themeSummary}
             />
 
-            {optionPositions.length > 0 && (
-                <SampleGate>
-                    <OptionsRiskLedgerCard
-                        positions={optionPositions}
-                        totalPortfolioValue={totalPolicyValue}
-                        liquidNetWorth={totalPolicyValue}
-                        isSample={optionPositionsAreSample}
-                    />
-                </SampleGate>
-            )}
+            {ledger}
 
             <HoldingsFilterRow
                 sectors={sectorChips}

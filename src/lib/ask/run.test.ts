@@ -63,6 +63,7 @@ function context(overrides: Partial<AskContext> = {}, policy: Partial<RiskPolicy
             cashTotal: 10_000,
             trades: activity.map((r) => ({ id: r.id, date: r.date, type: r.side.toLowerCase(), ticker: r.symbol, amount: r.value })),
             theses: [{ id: 'u1', ticker: 'NVDA', status: 'active' }, { id: 'u2', ticker: 'TSLA', status: 'archived' }],
+            options: [],
         },
         activity,
         closedTrades: closedTrades(activity),
@@ -107,7 +108,7 @@ describe('Ask Ledger planner', () => {
 
 describe('Ask Ledger answers from the user\'s data', () => {
     test('regression: an empty portfolio is an empty answer, never example data', () => {
-        const empty = context({ portfolio: { holdings: [], cashTotal: 0, trades: [], theses: [] }, activity: [], closedTrades: [] });
+        const empty = context({ portfolio: { holdings: [], cashTotal: 0, trades: [], theses: [], options: [] }, activity: [], closedTrades: [] });
         for (const question of ['Am I overexposed to AI?', 'Which holdings have hurt my alpha this year?', 'Which risk policy guardrails are breached?']) {
             const answer = runAsk(question, empty);
             assert.match(answer.text, /no holdings to answer from yet/, question);
@@ -123,6 +124,7 @@ describe('Ask Ledger answers from the user\'s data', () => {
                 cashTotal: 0,
                 trades: [],
                 theses: [{ id: 'u1', ticker: 'NVDA', status: 'active' }, { id: 'u2', ticker: 'VTI', status: 'active' }],
+                options: [],
             },
         });
         assert.match(runAsk('What are my best performing holdings?', allDown).text, /^None of your positions is up on what it cost right now\./);

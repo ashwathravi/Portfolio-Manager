@@ -103,4 +103,10 @@ describe("risk policy / bucket model", () => {
         assert.equal(policyBucketLabel("active"), "Active idea / satellite");
         assert.equal(policyBucketLabel("special_situation"), "Special situation");
     });
+
+    test("percentages of a total given, such as the portfolio net of written options", () => {
+        const allocation = computeBucketAllocation([{ id: "spin", symbol: "SPIN", marketValue: 4_000, policyBucket: "special_situation" }], undefined, { totalMarketValue: 5_000 });
+        assert.strictEqual(allocation.totalMarketValue, 5_000);
+        assert.strictEqual(allocation.rows.find((row) => row.bucket === "special_situation")?.percentOfPortfolio, 80);
+    });
 });

@@ -2,10 +2,12 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
 import {
-    DEFAULT_OPTIONS_RISK_POLICY,
     computeOptionRiskLedger,
+    DEFAULT_OPTIONS_RISK_POLICY,
     evaluateOptionOrderPolicy,
     optionCurrentValue,
+    optionNetValue,
+    optionPolicyHoldings,
     optionPremiumAtRisk,
     type OptionRiskPosition,
 } from "./options";
@@ -29,6 +31,14 @@ describe("option value helpers", () => {
     test("calculates premium at risk and current value using contract multiplier", () => {
         assert.equal(optionPremiumAtRisk(AAPL_CALL), 5_460);
         assert.equal(optionCurrentValue(AAPL_CALL), 4_350);
+    });
+
+    test("a written option counts against the portfolio's worth; a bought one for it", () => {
+        assert.equal(optionNetValue(AAPL_CALL), 4_350);
+        const written = { ...AAPL_CALL, quantity: -3 };
+        // Gross value is the same; what it adds to the portfolio is the cost of buying it back, negative.
+        assert.equal(optionCurrentValue(written), 4_350);
+        assert.equal(optionNetValue(written), -4_350);
     });
 });
 
@@ -178,5 +188,24 @@ describe("evaluateOptionOrderPolicy", () => {
         assert.equal(result.blocksSubmit, true);
         assert.equal(result.premiumAtRisk, 25_000);
         assert.ok(result.checks.some((check) => check.code === "position_size_cap"));
+    });
+});
+
+describe("optionPolicyHoldings", () => {
+    const call = (underlying: string, quantity = 10) => ({
+        id: `${underlying}-call`, underlying, contractType: "call" as const, strike: 180, expiry: "2027-01-15",
+        quantity, premiumPaid: 40, currentPremium: 50,
+    });
+
+    test("regression: an option on one of the employer's tickers is employer stock, as on Today and Trade (Codex, PR #192)", () => {
+        const holdings = optionPolicyHoldings([call("goog"), call("NVDA")], ["GOOG", "GOOGL"]);
+        assert.deepEqual(holdings.map((h) => [h.symbol, h.marketValue, h.isEmployerStock]), [
+            ["GOOG", 50_000, true],
+            ["NVDA", 50_000, false],
+        ]);
+        // No employer named: none is.
+        assert.deepEqual(optionPolicyHoldings([call("GOOG")]).map((h) => h.isEmployerStock), [false]);
+        // A written option is a liability, not a holding, employer's or not.
+        assert.deepEqual(optionPolicyHoldings([call("GOOG", -10)], ["GOOG"]), []);
     });
 });
