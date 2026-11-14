@@ -169,7 +169,7 @@ export function buildRecentClosesQuery(symbols: string[], perSymbol: number, dat
         .orderBy(asc(ranked.symbol), desc(ranked.date));
 }
 
-export function buildBarsQuery(symbol: string, from: string, to: string, database: Database = db) {
+export function buildBarsQuery(symbol: string, from: string, to: string, database: Pick<Database, "select"> = db) {
     return database
         .select({
             symbol: priceBars.symbol,
@@ -599,13 +599,22 @@ export interface StoredHistory {
     bars: PriceBarInput[];
 }
 
+/**
+ * Reads the marker and the bars in one repeatable-read snapshot, so a
+ * backfill (replaceHistory) landing between them can't pair its new
+ * history_start_date with the bars from before it: that would pass a day's
+ * bar off as the whole range.
+ */
 export async function getStoredHistory(
     symbol: string,
     from: string,
     to: string,
     database: Database = db,
 ): Promise<StoredHistory> {
-    const [security, bars] = await Promise.all([buildHistoryStartQuery(symbol, database), buildBarsQuery(symbol, from, to, database)]);
+    const [security, bars] = await database.transaction(async (tx) => [
+        await buildHistoryStartQuery(symbol, tx),
+        await buildBarsQuery(symbol, from, to, tx),
+    ] as const, { isolationLevel: "repeatable read", accessMode: "read only" });
     return { tracked: security.length > 0, historyStart: security[0]?.historyStart ?? null, bars };
 }
 

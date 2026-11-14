@@ -27,6 +27,7 @@ import {
     dedupeBars,
     isValidBar,
     normalizeSymbols,
+    getStoredHistory,
     replaceHistory,
     selectTrackedBars,
     trackRequestedSecurities,
@@ -407,5 +408,37 @@ describe("securities master queries", () => {
         const { sql, params } = buildSecurityProfilesQuery(["AAPL", "MSFT"]).toSQL();
         assert.match(sql, /where \("securities"\."symbol" in \(\$1, \$2\) and "securities"\."reference_updated_at" is not null\)/);
         assert.deepEqual(params, ["AAPL", "MSFT"]);
+    });
+});
+
+describe("getStoredHistory", () => {
+    test("regression (x09): reads the backfill marker and the bars in one repeatable-read snapshot", async () => {
+        // Two separate reads could see opposite sides of a backfill: the new
+        // history_start_date with the single bar stored before it, passing a
+        // day off as the month.
+        const configs: unknown[] = [];
+        const reads: string[] = [];
+        const rows = (name: string, value: unknown[]) => {
+            const chain: Record<string, unknown> = {};
+            for (const step of ["from", "where", "orderBy"]) chain[step] = () => chain;
+            chain.limit = async () => { reads.push(name); return value; };
+            chain.then = (resolve: (v: unknown[]) => unknown) => { reads.push(name); return Promise.resolve(value).then(resolve); };
+            return chain;
+        };
+        const tx = {
+            select: (fields: Record<string, unknown>) => ("historyStart" in fields
+                ? rows("marker", [{ historyStart: "2024-11-13" }])
+                : rows("bars", [{ ...BAR, symbol: "AAPL", date: "2026-11-13" }])),
+        };
+        const database = {
+            transaction: async (run: (t: typeof tx) => Promise<unknown>, config: unknown) => { configs.push(config); return run(tx); },
+        } as unknown as Parameters<typeof getStoredHistory>[3];
+
+        const history = await getStoredHistory("AAPL", "2026-10-14", "2026-11-13", database);
+        assert.deepEqual(configs, [{ isolationLevel: "repeatable read", accessMode: "read only" }]);
+        assert.deepEqual(reads, ["marker", "bars"]);
+        assert.equal(history.tracked, true);
+        assert.equal(history.historyStart, "2024-11-13");
+        assert.equal(history.bars.length, 1);
     });
 });
