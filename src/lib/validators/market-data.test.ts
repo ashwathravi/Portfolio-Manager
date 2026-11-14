@@ -120,13 +120,14 @@ describe('market-data validators', () => {
 
     describe('historyRangeSchema', () => {
         test('should accept supported chart ranges', () => {
-            for (const range of ['1D', '5D', '1M', '3M', '6M', '1Y', '5Y', 'MAX']) {
+            for (const range of ['1D', '5D', '1M', '3M', '6M', '1Y', 'MAX']) {
                 assert.strictEqual(historyRangeSchema.safeParse(range).success, true, `${range} should be valid`);
             }
         });
 
         test('should reject unsupported chart ranges', () => {
-            for (const range of ['2D', '10Y', 'ALL', '']) {
+            // 5Y: the free plan keeps two years, all of which MAX already is (x22).
+            for (const range of ['2D', '5Y', '10Y', 'ALL', '']) {
                 assert.strictEqual(historyRangeSchema.safeParse(range).success, false, `${range} should be invalid`);
             }
         });

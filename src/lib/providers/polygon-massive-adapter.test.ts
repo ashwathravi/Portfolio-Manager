@@ -9,6 +9,7 @@ import {
   PolygonMassiveAdapter,
   PolygonRateLimitError,
   PolygonTimeoutError,
+  PLAN_HISTORY_DAYS,
   rangeToDates,
   type PolygonAdapterConfig,
 } from './polygon-massive-adapter';
@@ -576,7 +577,6 @@ describe('rangeToDates (x22)', () => {
     assert.deepEqual(rangeToDates('6M', now), { from: '2026-01-03', to: '2026-07-02' });
     assert.deepEqual(rangeToDates('1Y', now), { from: '2025-07-02', to: '2026-07-02' });
     assert.deepEqual(rangeToDates('2Y', now), { from: '2024-07-02', to: '2026-07-02' });
-    assert.deepEqual(rangeToDates('5Y', now), { from: '2021-07-03', to: '2026-07-02' });
     assert.deepEqual(rangeToDates('YTD', now), { from: '2026-01-01', to: '2026-07-02' });
   });
 
@@ -613,5 +613,16 @@ describe('rangeToDates (x22)', () => {
   test('an unknown range is refused instead of silently becoming a year', () => {
     assert.throws(() => rangeToDates('1H', now), /Unknown history range "1H"/);
     assert.throws(() => rangeToDates('ALL', now), /Unknown history range "ALL"/);
+  });
+
+  test('regression (x22): no range asks for more history than the plan keeps', () => {
+    // Basic keeps two years; 5Y asked Massive for five, which it can't serve.
+    assert.throws(() => rangeToDates('5Y', now), /Unknown history range "5Y"/);
+    const earliest = new Date(Date.parse(`${now.toISOString().slice(0, 10)}T00:00:00Z`) - PLAN_HISTORY_DAYS * 86_400_000)
+      .toISOString().slice(0, 10);
+    // The routes' ranges, and the nightly backfill's (price-ingest's HISTORY_RANGE).
+    for (const range of [...historyRangeSchema.options, ...timeframeSchema.options, '2Y', '1W', 'YTD']) {
+      assert.ok(rangeToDates(range, now).from >= earliest, range);
+    }
   });
 });

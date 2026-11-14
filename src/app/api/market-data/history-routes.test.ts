@@ -41,4 +41,10 @@ describe('GET /api/market-data/history and /historical (x22)', () => {
         assert.equal(response.status, 400);
         assert.equal((await response.json()).code, 'INVALID_RANGE');
     });
+
+    test('regression: five years, more than the free plan keeps, is refused with the ranges there are', async () => {
+        const response = await getHistory(new NextRequest('https://atlas.test/api/market-data/history?symbol=AAPL&range=5Y'));
+        assert.equal(response.status, 400);
+        assert.deepEqual(await response.json(), { error: 'Invalid range. Valid values: 1D, 5D, 1M, 3M, 6M, 1Y, MAX', code: 'INVALID_RANGE' });
+    });
 });

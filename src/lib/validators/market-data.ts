@@ -25,10 +25,11 @@ export const symbolsSchema = z.string()
 export const timeframeSchema = z.enum(['1D', '1M']);
 /**
  * History ranges (/api/market-data/history), each a window of daily bars:
- * 1D and 5D the last one and five sessions, MAX the plan's whole history
- * (PolygonMassiveAdapter's rangeToDates).
+ * 1D and 5D the last one and five sessions, MAX the plan's whole history,
+ * two years (PolygonMassiveAdapter's rangeToDates). Nothing longer: the free
+ * plan has no more to give (x22).
  */
-export const historyRangeSchema = z.enum(['1D', '5D', '1M', '3M', '6M', '1Y', '5Y', 'MAX']);
+export const historyRangeSchema = z.enum(['1D', '5D', '1M', '3M', '6M', '1Y', 'MAX']);
 export const marketSearchQuerySchema = z.string()
     .trim()
     .min(1, "Search query is required")

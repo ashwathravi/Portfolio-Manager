@@ -234,8 +234,12 @@ const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 // Range helpers
 // ---------------------------------------------------------------------------
 
-/** How far back Basic's daily history goes: two years. MAX asks for all of it. */
-const PLAN_HISTORY_DAYS = 730;
+/**
+ * How far back Basic's daily history goes: two years. MAX asks for all of
+ * it, and no range asks for more (x22): there is no 5Y, since Massive can't
+ * serve one on this plan and its two years would only repeat MAX.
+ */
+export const PLAN_HISTORY_DAYS = 730;
 
 /** Calendar days each range reaches back from today's Eastern date. */
 const RANGE_DAYS: Record<string, number> = {
@@ -244,8 +248,7 @@ const RANGE_DAYS: Record<string, number> = {
   '3M': 90,
   '6M': 180,
   '1Y': 365,
-  '2Y': 730,
-  '5Y': 1825,
+  '2Y': PLAN_HISTORY_DAYS,
   MAX: PLAN_HISTORY_DAYS,
 };
 
