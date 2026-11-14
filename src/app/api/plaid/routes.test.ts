@@ -153,6 +153,56 @@ describe("Plaid API routes", () => {
         assert.ok(!JSON.stringify(body).includes("provider secret diagnostic"));
     });
 
+    test("regression (x30): without Plaid's keys, bank linking says it isn't set up (503), not a server error", async (t) => {
+        // Production had no PLAID_CLIENT_ID or PLAID_SECRET: both routes threw
+        // on the missing variable and answered 500.
+        const logged = t.mock.method(console, "error", () => {});
+        process.env.AUTH_LOCAL_DEV_BYPASS = "1";
+        process.env.AUTH_LOCAL_DEV_USER_ID = USER_ID;
+        let called = false;
+        globalThis.fetch = (async () => {
+            called = true;
+            return Response.json({});
+        }) as typeof fetch;
+        const notSetUp = { error: "Bank linking isn't set up yet.", code: "PLAID_NOT_CONFIGURED" };
+
+        for (const keys of [{}, { PLAID_CLIENT_ID: "client-id" }, { PLAID_SECRET: "sandbox-secret" }, { PLAID_CLIENT_ID: " ", PLAID_SECRET: " " }]) {
+            delete process.env.PLAID_CLIENT_ID;
+            delete process.env.PLAID_SECRET;
+            Object.assign(process.env, keys);
+
+            const linkToken = await createLinkToken(authorizedRequest("/api/plaid/link-token"));
+            assert.equal(linkToken.status, 503, JSON.stringify(keys));
+            assert.deepEqual(await linkToken.json(), notSetUp);
+
+            const reconnect = await createLinkToken(authorizedRequest("/api/plaid/link-token", { itemId: "item-route" }));
+            assert.equal(reconnect.status, 503);
+            assert.deepEqual(await reconnect.json(), notSetUp);
+
+            const exchange = await exchangePublicToken(authorizedRequest("/api/plaid/exchange-public-token", { publicToken: "public-route-token" }));
+            assert.equal(exchange.status, 503);
+            assert.deepEqual(await exchange.json(), notSetUp);
+        }
+        assert.equal(called, false);
+        assert.equal(logged.mock.callCount(), 0);
+    });
+
+    test("regression (x30): a bank link that can't happen here doesn't spend the day's", async () => {
+        let spent = 0;
+        const memory = createMemoryRateLimitStore();
+        setRateLimitStoreForTests({
+            kind: "memory",
+            consume: (key, rule) => {
+                if (key.startsWith("quota:")) spent += 1;
+                return memory.consume(key, rule);
+            },
+        });
+        process.env.AUTH_LOCAL_DEV_BYPASS = "1";
+        process.env.AUTH_LOCAL_DEV_USER_ID = USER_ID;
+        assert.equal((await createLinkToken(authorizedRequest("/api/plaid/link-token"))).status, 503);
+        assert.equal(spent, 0);
+    });
+
     test("sync fails closed when sign-in is not configured", async () => {
         const response = await syncPlaid(authorizedRequest("/api/plaid/sync", { itemId: "item-route" }));
         assert.equal(response.status, 503);
@@ -203,7 +253,8 @@ describe("Plaid API routes", () => {
         delete process.env.DATABASE_URL;
         const list = await listConnections(new Request("https://atlas.test/api/plaid/connections"));
         assert.equal(list.status, 503);
-        assert.equal((await list.json()).code, "PLAID_NOT_CONFIGURED");
+        // What Settings shows in place of the Connect button (x30).
+        assert.deepEqual(await list.json(), { error: "Bank linking isn't set up yet.", code: "PLAID_NOT_CONFIGURED" });
 
         configureStoredPlaid();
         const bad = await disconnect(new Request("https://atlas.test/api/plaid/connections/x", { method: "DELETE" }), { params: Promise.resolve({ itemId: "not an id" }) });

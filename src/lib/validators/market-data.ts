@@ -17,8 +17,19 @@ export const symbolsSchema = z.string()
         .nonempty("At least one valid symbol is required")
         .max(MAX_MARKET_DATA_SYMBOLS, `At most ${MAX_MARKET_DATA_SYMBOLS} symbols are allowed`));
 
-export const timeframeSchema = z.enum(['1D', '1H', '1M']);
-export const historyRangeSchema = z.enum(['1D', '5D', '1M', '3M', '6M', '1Y', '5Y', 'MAX']);
+/**
+ * The legacy /historical route's `timeframe`, a range by another name: the
+ * last session (1D) or 30 days (1M) of daily bars. The free plan has no
+ * intraday bars, so there is no 1H (x22).
+ */
+export const timeframeSchema = z.enum(['1D', '1M']);
+/**
+ * History ranges (/api/market-data/history), each a window of daily bars:
+ * 1D and 5D the last one and five sessions, MAX the plan's whole history,
+ * two years (PolygonMassiveAdapter's rangeToDates). Nothing longer: the free
+ * plan has no more to give (x22).
+ */
+export const historyRangeSchema = z.enum(['1D', '5D', '1M', '3M', '6M', '1Y', 'MAX']);
 export const marketSearchQuerySchema = z.string()
     .trim()
     .min(1, "Search query is required")
