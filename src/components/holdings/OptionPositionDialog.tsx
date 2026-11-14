@@ -66,8 +66,13 @@ export function OptionPositionDialog({
     const [error, setError] = useState<string | null>(null);
     const [saving, setSaving] = useState(false);
 
+    // Reset only when the dialog opens, or opens on another position. A save
+    // refreshes the page, which hands back the same accounts and position as
+    // new objects; resetting on those wiped the form while it was being
+    // filled in again.
+    const resetKey = open ? (editing?.id ?? "new") : null;
     useEffect(() => {
-        if (!open) return;
+        if (resetKey === null) return;
         // The position as saved, or a fresh form, each time it opens.
         // eslint-disable-next-line react-hooks/set-state-in-effect
         setAccount(editing?.portfolioId ?? accounts[0]?.id ?? "");
@@ -84,7 +89,9 @@ export function OptionPositionDialog({
         setExpiryTest(editing?.expiryTest ?? "");
         setExitRule(editing?.exitRule ?? "");
         setError(null);
-    }, [open, editing, accounts]);
+        // Read when the key changes, not a reason to reset (see above).
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [resetKey]);
 
     const submit = async (event: React.FormEvent) => {
         event.preventDefault();
