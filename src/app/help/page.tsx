@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { ArrowRight, BookOpen, BrainCircuit, CalendarClock, LineChart, Radar, ShieldCheck } from "lucide-react";
 import { PageHeaderSync } from "@/components/layout/TopBar";
-import { GETTING_STARTED, GLOSSARY } from "@/lib/help/content";
+import { GLOSSARY, gettingStarted } from "@/lib/help/content";
+import { bankLinkingAvailable } from "@/lib/plaid/availability";
 
 const SURFACE_LINKS = [
     { href: "/research?tab=alpha-radar", label: "Open Alpha Radar in Research" },
@@ -99,6 +100,9 @@ const LIMITATIONS = [
 ];
 
 export default function HelpPage() {
+    // Decided here, on the server: step one connects a brokerage only where
+    // Settings can, and otherwise adds an account by hand (x30).
+    const steps = gettingStarted(bankLinkingAvailable());
     return (
         <>
             <PageHeaderSync
@@ -117,7 +121,7 @@ export default function HelpPage() {
                 <section id="getting-started" className="pm-help-section" aria-labelledby="getting-started-heading" data-testid="help-getting-started">
                     <h2 id="getting-started-heading">Getting started</h2>
                     <ol className="pm-help-steps">
-                        {GETTING_STARTED.map((step) => (
+                        {steps.map((step) => (
                             <li key={step.title}>
                                 <h3>{step.title}</h3>
                                 <p>{step.body}</p>

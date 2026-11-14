@@ -6,10 +6,11 @@
  * Basic has no snapshot (live quote) endpoints, so a quote here is the latest
  * session's closing price from the market-wide grouped daily bars, with the
  * change measured against the session before (two calls price every symbol;
- * bars are cached per date in this process). The app itself reads quotes
- * from the Postgres price store (StoredQuoteProvider) so request paths never
- * spend the shared rate limit; the nightly ingest (i32) fills that store
- * through getDailyBars.
+ * bars are cached per date in this process). The app itself reads quotes,
+ * and the history it has stored (x09), from the Postgres price store
+ * (StoredQuoteProvider) so request paths don't spend the shared rate limit
+ * on them; the nightly ingest (i32) fills that store through getDailyBars
+ * and getDailyHistory.
  *
  * Environment variables:
  *   POLYGON_API_KEY  — API key appended to every request. Without one the

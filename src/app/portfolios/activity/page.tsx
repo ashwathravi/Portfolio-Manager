@@ -3,6 +3,7 @@ import { buildUserPortfolioOptionsQuery, buildUserTransactionsQuery } from "@/li
 import { toActivityRows, type TransactionRowInput } from "@/lib/portfolio/activity";
 import { ActivityPageClient } from "@/components/portfolio/ActivityPageClient";
 import { PageHeaderSync } from "@/components/layout/TopBar";
+import { bankLinkingAvailable } from "@/lib/plaid/availability";
 
 /** Portfolio › Activity — every transaction across the user's accounts. */
 
@@ -24,7 +25,9 @@ export default async function ActivityPage() {
                 subtitle="Every buy, sell, dividend, and transfer"
                 crumbs={["Portfolio", "Activity"]}
             />
-            <ActivityPageClient rows={toActivityRows(rows)} accountOptions={accounts} />
+            {/* Decided here, on the server: the empty state offers to connect
+                a bank only where Settings can (x30). */}
+            <ActivityPageClient rows={toActivityRows(rows)} accountOptions={accounts} bankLinking={bankLinkingAvailable()} />
         </>
     );
 }

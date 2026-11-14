@@ -1,8 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { gotoAppPage, reloadAppPage } from './helpers/app';
-import { signInAsFreshUser } from './helpers/users';
-
-const databaseAuthEnabled = Boolean(process.env.CI || process.env.E2E_DATABASE_AUTH === '1');
+import { databaseAuthEnabled, signInAsFreshUser, signInAsNewUser } from './helpers/users';
 // User B's account and transaction, which no one else may touch.
 const OTHER_USERS_ACCOUNT = '00000000-0000-4000-8000-000000000009';
 const OTHER_USERS_TRANSACTION = '00000000-0000-4000-8000-000000000209';
@@ -30,13 +28,35 @@ test.describe('Portfolio › Activity', () => {
         await expect(page.getByText('Fidelity Individual')).toHaveCount(0);
     });
 
-    test('without an account, adding transactions points at adding one first', async ({ page }) => {
+    test('regression (x30): without an account, adding transactions starts with adding one by hand, not a Connect link that loops', async ({ context, page }) => {
+        // E2E runs without Plaid's keys, as production does until they're
+        // set: Settings says bank linking isn't set up and points back at
+        // Accounts, so "Connect an account" went round in a circle. With a
+        // database, a user with no accounts yet (fixture user A has some).
+        if (await signInAsNewUser(context)) await gotoAppPage(page, '/portfolios/activity');
         const empty = page.getByTestId('activity-empty');
-        test.skip(!(await empty.isVisible()), 'this database has transactions');
-        const addFirst = empty.getByRole('link', { name: 'Add an account first' });
-        const add = empty.getByRole('button', { name: 'Add transaction' });
-        await expect(addFirst.or(add)).toBeVisible();
-        if (await addFirst.isVisible()) await expect(addFirst).toHaveAttribute('href', '/portfolios/accounts');
+        await expect(empty).toContainText('They go in an account, so add one first.');
+        await expect(empty).not.toContainText('connected accounts');
+        await expect(empty.getByRole('link', { name: 'Connect an account' })).toHaveCount(0);
+        await expect(empty.locator('a[href^="/settings"]')).toHaveCount(0);
+        await expect(empty.getByRole('button', { name: 'New account' })).toHaveClass(/pm-btn-primary/);
+    });
+
+    test('x30: a new user adds an account from the empty state, then adding transactions leads', async ({ context, page }) => {
+        test.skip(!databaseAuthEnabled, 'requires the database-auth E2E mode');
+        await signInAsNewUser(context);
+        await gotoAppPage(page, '/portfolios/activity');
+        const empty = page.getByTestId('activity-empty');
+        await empty.getByRole('button', { name: 'New account' }).click();
+        const dialog = page.getByRole('dialog');
+        await dialog.getByLabel('Name').fill('Brokerage');
+        await dialog.getByRole('button', { name: 'Add account' }).click();
+        await expect(dialog).toBeHidden();
+        // No transactions yet: the empty state stays, now with an account to add them to.
+        await expect(empty.getByRole('button', { name: 'Add transaction' })).toHaveClass(/pm-btn-primary/);
+        await expect(empty.getByRole('button', { name: 'Import CSV' })).toBeEnabled();
+        await expect(empty.getByRole('button', { name: 'New account' })).toHaveCount(0);
+        await expect(empty).not.toContainText('add one first');
     });
 
     test('when transactions exist, side filters narrow the table', async ({ page }) => {

@@ -33,6 +33,7 @@ import { isDatabaseConfigured } from '@/db/connection-options';
 import { loadTradeJournalForPage } from '@/lib/journal/server';
 import { inPatternWindow } from '@/lib/patterns/generate';
 import { hasTrackedFilers } from '@/lib/alpha-radar/follows';
+import { bankLinkingAvailable } from '@/lib/plaid/availability';
 
 /**
  * Today (/).
@@ -169,6 +170,9 @@ export default async function Today() {
           holdings={heroHoldings}
           cashTotal={cashTotal}
           accounts={allPortfolios.map((p) => ({ id: p.id, name: p.name }))}
+          // Decided here, on the server: the first-run steps offer to connect
+          // a bank only where Settings can (x30).
+          bankLinking={bankLinkingAvailable()}
         />
         {/* Policy checks only mean something once there are positions to check. */}
         <TodayTriage

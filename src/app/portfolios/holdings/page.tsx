@@ -13,6 +13,7 @@ import { holdingName, loadSecurityProfiles } from "@/lib/markets/security-profil
 import { defaultPolicyBucket } from "@/lib/risk-policy/buckets";
 import type { LoadedOptionPosition } from "@/lib/portfolio/option-positions";
 import { loadOptionPositions, loadThesisChoices } from "@/lib/portfolio/option-positions-store";
+import { bankLinkingAvailable } from "@/lib/plaid/availability";
 import { parseHoldingsRowView, type HoldingsRowView } from "@/lib/holdings/combine";
 
 /**
@@ -138,6 +139,9 @@ async function HoldingsContent({ rowView }: { rowView: HoldingsRowView }) {
                 cashTotal={accounts.reduce((sum, account) => sum + (account.cashBalance || 0), 0)}
                 optionPositions={optionPositions}
                 optionTheses={optionTheses}
+                // Decided here, on the server: the empty state offers to
+                // connect a bank only where Settings can (x30).
+                bankLinking={bankLinkingAvailable()}
             />
         </>
     );
