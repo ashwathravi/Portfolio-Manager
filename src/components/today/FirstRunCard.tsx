@@ -11,17 +11,25 @@ import { useSettingsStore } from "@/lib/stores/settingsStore";
 /**
  * Today before there are any positions (launch item i43): in place of the
  * net worth, the two steps that get a new user to it. Add an account (or
- * connect a brokerage), then add positions from a broker's CSV. Each step
- * shows as done from the user's own data, so the card moves on by itself,
- * and it goes once there are positions. New users start with example data
- * off; the card says how to turn it on to look around first.
+ * connect a brokerage, where bank linking is set up), then add positions
+ * from a broker's CSV. Each step shows as done from the user's own data, so
+ * the card moves on by itself, and it goes once there are positions. New
+ * users start with example data off; the card says how to turn it on to
+ * look around first.
  */
 export function FirstRunCard({
     accounts,
     cashTotal,
+    bankLinking,
 }: {
     accounts: readonly ImportAccountOption[];
     cashTotal: number;
+    /**
+     * Whether Settings can connect a bank (bankLinkingAvailable, x30). Without
+     * it Settings says bank linking isn't set up and points back at Accounts,
+     * so no step offers "Connect an account": the account is added by hand.
+     */
+    bankLinking: boolean;
 }) {
     const showSampleData = useShowSampleData();
     const setShowSampleData = useSettingsStore((s) => s.setShowSampleData);
@@ -53,7 +61,7 @@ export function FirstRunCard({
                                 <p>One for each brokerage or retirement account, with the cash it holds.</p>
                                 <div className="pm-empty-actions">
                                     <NewAccountButton />
-                                    <Link href="/settings#accounts" className="pm-btn pm-btn-ghost">Connect an account</Link>
+                                    {bankLinking && <Link href="/settings#accounts" className="pm-btn pm-btn-ghost">Connect an account</Link>}
                                 </div>
                             </>
                         )}
@@ -72,7 +80,7 @@ export function FirstRunCard({
                                 accounts={accounts}
                                 triggerClassName={`pm-btn ${hasAccount ? "pm-btn-primary" : "pm-btn-ghost"}`}
                             />
-                            {hasAccount && <Link href="/settings#accounts" className="pm-btn pm-btn-ghost">Connect an account</Link>}
+                            {hasAccount && bankLinking && <Link href="/settings#accounts" className="pm-btn pm-btn-ghost">Connect an account</Link>}
                         </div>
                     </div>
                 </li>

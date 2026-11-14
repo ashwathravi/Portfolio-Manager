@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { gotoAppPage } from './helpers/app';
-import { signInAsFreshUser } from './helpers/users';
+import { databaseAuthEnabled, signInAsFreshUser, signInAsNewUser } from './helpers/users';
 
 /**
  * Portfolio › Holdings (/portfolios/holdings).
@@ -43,8 +43,36 @@ test.describe('Portfolio › Holdings', () => {
         test.skip(await hasHoldings(page), 'database has holdings');
         await expect(page.getByTestId('options-risk-ledger')).toHaveCount(0);
         await expect(page.getByText('185.7%')).toHaveCount(0);
+    });
+
+    test('regression (x30): without bank linking, the empty state adds an account by hand instead of a Connect link that loops', async ({ context, page }) => {
+        // E2E runs without Plaid's keys, as production does until they're
+        // set: Settings says bank linking isn't set up and points back at
+        // Accounts, so "Connect an account" went round in a circle. With a
+        // database, a user with no positions yet (fixture user A has some).
+        if (await signInAsNewUser(context)) await gotoAppPage(page, '/portfolios/holdings');
         const empty = page.getByTestId('holdings-empty');
-        await expect(empty.getByRole('link', { name: 'Connect an account' })).toHaveAttribute('href', '/settings#accounts');
+        await expect(empty).toContainText('Add an account, or import a positions export from your broker.');
+        await expect(empty.getByRole('link', { name: 'Connect an account' })).toHaveCount(0);
+        await expect(empty.locator('a[href^="/settings"]')).toHaveCount(0);
+        await expect(empty.getByRole('button', { name: 'New account' })).toHaveClass(/pm-btn-primary/);
+        await expect(empty.getByRole('button', { name: 'Import CSV' })).toBeVisible();
+        await expect(empty.getByRole('link', { name: 'View accounts' })).toHaveAttribute('href', '/portfolios/accounts');
+    });
+
+    test('x30: a new user adds an account by hand from the empty state', async ({ context, page }) => {
+        test.skip(!databaseAuthEnabled, 'requires the database-auth E2E mode');
+        await signInAsNewUser(context);
+        await gotoAppPage(page, '/portfolios/holdings');
+        const empty = page.getByTestId('holdings-empty');
+        await empty.getByRole('button', { name: 'New account' }).click();
+        const dialog = page.getByRole('dialog');
+        await dialog.getByLabel('Name').fill('Brokerage');
+        await dialog.getByRole('button', { name: 'Add account' }).click();
+        await expect(dialog).toBeHidden();
+        expect((await (await page.request.get('/api/portfolios/count')).json()).count).toBe(1);
+        // Still no positions: the empty state stays, now with an account to import into.
+        await expect(empty).toBeVisible();
     });
 
     test('regression: no dead links to retired routes', async ({ page }) => {

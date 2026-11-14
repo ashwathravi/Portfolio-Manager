@@ -1,6 +1,7 @@
 "use client";
 
 import { ImportHoldingsDialog, type ImportAccountOption } from "./ImportHoldingsDialog";
+import { NewAccountButton } from "@/components/portfolio/AccountControls";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { SampleGate } from "@/components/data-display/SampleGate";
@@ -72,6 +73,12 @@ export interface HoldingsPageClientProps {
     optionPositionsAreSample?: boolean;
     /** Accounts offered as the CSV import target. */
     importAccounts?: readonly ImportAccountOption[];
+    /**
+     * Whether Settings can connect a bank (bankLinkingAvailable, x30). Without
+     * it the empty state offers to add an account by hand instead of a
+     * Connect link to a Settings card that says bank linking isn't set up.
+     */
+    bankLinking: boolean;
 }
 
 export function HoldingsPageClient({
@@ -79,6 +86,7 @@ export function HoldingsPageClient({
     optionPositions = [],
     optionPositionsAreSample = false,
     importAccounts = [],
+    bankLinking,
 }: HoldingsPageClientProps) {
     const [sectorFilter, setSectorFilter] = useState<Sector | "All">("All");
     const [bucketFilter, setBucketFilter] = useState<PolicyBucketId | "All">("All");
@@ -246,12 +254,14 @@ export function HoldingsPageClient({
                 <section className="pm-card pm-empty-card" data-testid="holdings-empty">
                     <h2>No holdings yet</h2>
                     <p>
-                        Connect an account, or import a positions export from your broker. Market value,
-                        unrealized gain, policy buckets, and theme exposure are all calculated from your own
-                        positions.
+                        {bankLinking ? "Connect an account" : "Add an account"}, or import a positions export
+                        from your broker. Market value, unrealized gain, policy buckets, and theme exposure are
+                        all calculated from your own positions.
                     </p>
                     <div className="pm-empty-actions">
-                        <Link href="/settings#accounts" className="pm-btn pm-btn-primary">Connect an account</Link>
+                        {bankLinking
+                            ? <Link href="/settings#accounts" className="pm-btn pm-btn-primary">Connect an account</Link>
+                            : <NewAccountButton />}
                         <ImportHoldingsDialog accounts={importAccounts} />
                         <Link href="/portfolios/accounts" className="pm-btn pm-btn-ghost">View accounts</Link>
                     </div>

@@ -178,7 +178,7 @@ Use Dashboard first each day.
 
 Before you have any positions, Today shows two steps in place of your net worth:
 
-1. **Add an account**: **New account** (a name and the cash it holds), or **Connect an account** for a brokerage. Once done, the step shows how many accounts and how much cash.
+1. **Add an account**: **New account** (a name and the cash it holds), or **Connect an account** for a brokerage where bank linking is set up (Plaid's keys and a database; without them the link isn't offered, here or on Holdings and Accounts, since Settings would only say bank linking isn't set up). Once done, the step shows how many accounts and how much cash.
 2. **Add your positions**: **Import CSV** with your broker's positions export (symbol, quantity, and average cost or cost basis). You see what was read before anything is saved, and it goes into your account (or a new one).
 
 When the first positions are in, the steps give way to your net worth. A new sign-in starts with example data off, so every number is your own; **Show example data** on the card (or Settings) turns the labelled examples on to look around first.
@@ -549,7 +549,7 @@ Prices are split-adjusted. When a stock you hold splits, the nightly price job m
 
 ### Plaid Link Fails
 
-Settings › Connected accounts saying "Bank linking isn't set up yet." (with no Connect button) means the server has no `PLAID_CLIENT_ID` or `PLAID_SECRET`, or no database: the Plaid routes answer 503 `PLAID_NOT_CONFIGURED`. Otherwise, check:
+Settings › Connected accounts saying "Bank linking isn't set up yet." (with no Connect button) means the server has no `PLAID_CLIENT_ID` or `PLAID_SECRET`, or no database: the Plaid routes answer 503 `PLAID_NOT_CONFIGURED`, and the empty states on Today, Holdings and Accounts offer **New account** instead of **Connect an account**. Otherwise, check:
 
 - `PLAID_ENV=sandbox`.
 - `PLAID_CLIENT_ID` is set.
