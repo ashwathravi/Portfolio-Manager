@@ -1,0 +1,109 @@
+/**
+ * The alert_notifications table (launch item i57): what the user's rules
+ * found, newest first. Every query is scoped to one user's ID, which the API
+ * routes take from the session. The nightly job writes the rows
+ * (src/lib/alerts/nightly.ts); the user reads, marks read and clears them.
+ * A cleared row stays, its text erased, as the record that its rule fired
+ * for that occurrence, so the job never raises it again.
+ */
+
+import { and, count, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+
+import { db } from "@/db";
+import { alertNotifications } from "@/db/schema";
+
+import { isAlphaRadarAlertMetric } from "../metrics";
+import type { AlertTrigger } from "../types";
+
+type Database = typeof db;
+
+/** How many the feed shows. */
+export const ALERT_FEED_LIMIT = 50;
+
+export interface AlertFeed {
+    notifications: AlertTrigger[];
+    /** Unread, the ones past the feed's limit included. */
+    unread: number;
+}
+
+function toTrigger(row: typeof alertNotifications.$inferSelect): AlertTrigger {
+    const metric = row.metric as AlertTrigger["metric"];
+    return {
+        id: row.id,
+        ruleId: row.ruleId,
+        ruleName: row.ruleName,
+        metric,
+        ...(row.symbol ? { symbol: row.symbol } : {}),
+        comparator: row.comparator as AlertTrigger["comparator"],
+        threshold: row.threshold,
+        observedValue: row.observedValue,
+        triggeredAt: row.triggeredAt.toISOString(),
+        acknowledged: row.readAt !== null,
+        source: isAlphaRadarAlertMetric(metric) ? "alpha_radar" : "market",
+        message: row.message,
+        ...(row.href ? { href: row.href } : {}),
+    };
+}
+
+export function buildAlertFeedQuery(userId: string, limit: number = ALERT_FEED_LIMIT, database: Database = db) {
+    return database
+        .select()
+        .from(alertNotifications)
+        .where(and(eq(alertNotifications.userId, userId), eq(alertNotifications.cleared, false)))
+        .orderBy(desc(alertNotifications.triggeredAt), desc(alertNotifications.id))
+        .limit(limit);
+}
+
+export function buildUnreadCountQuery(userId: string, database: Database = db) {
+    return database
+        .select({ value: count() })
+        .from(alertNotifications)
+        .where(and(eq(alertNotifications.userId, userId), eq(alertNotifications.cleared, false), isNull(alertNotifications.readAt)));
+}
+
+export async function loadAlertFeed(userId: string, database: Database = db): Promise<AlertFeed> {
+    const [rows, [{ value: unread }]] = await Promise.all([
+        buildAlertFeedQuery(userId, ALERT_FEED_LIMIT, database),
+        buildUnreadCountQuery(userId, database),
+    ]);
+    return { notifications: rows.map(toTrigger), unread };
+}
+
+export function buildMarkReadQuery(userId: string, which: { ids: readonly string[] } | { all: true }, now: Date, database: Database = db) {
+    return database
+        .update(alertNotifications)
+        .set({ readAt: now })
+        .where(and(
+            eq(alertNotifications.userId, userId),
+            isNull(alertNotifications.readAt),
+            "ids" in which ? inArray(alertNotifications.id, [...which.ids]) : undefined,
+        ));
+}
+
+/** Marks the user's notifications read: the ones named, or all of them. Others' IDs are ignored. */
+export async function markAlertNotificationsRead(
+    userId: string,
+    which: { ids: readonly string[] } | { all: true },
+    { now = new Date(), database = db }: { now?: Date; database?: Database } = {},
+): Promise<void> {
+    await buildMarkReadQuery(userId, which, now, database);
+}
+
+/**
+ * Clears the user's feed; their rules stay. Each notification keeps only
+ * which rule fired for what, so the nightly job doesn't raise it again (on
+ * a market holiday the newest session is the one already evaluated).
+ */
+export function buildClearAlertsQuery(userId: string, now: Date, database: Database = db) {
+    return database
+        .update(alertNotifications)
+        .set({ cleared: true, message: "", href: null, readAt: sql`coalesce(${alertNotifications.readAt}, ${now.toISOString()}::timestamp)` })
+        .where(and(eq(alertNotifications.userId, userId), eq(alertNotifications.cleared, false)));
+}
+
+export async function clearAlertNotifications(
+    userId: string,
+    { now = new Date(), database = db }: { now?: Date; database?: Database } = {},
+): Promise<void> {
+    await buildClearAlertsQuery(userId, now, database);
+}

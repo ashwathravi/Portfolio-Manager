@@ -62,6 +62,13 @@ const noMarketData = {
     SEC_EDGAR_USER_AGENT: '',
 };
 
+// No Resend key or sender, so a test run never sends email (launch item
+// i58) and Settings always says this server doesn't send yet.
+const noEmail = {
+    RESEND_API_KEY: '',
+    EMAIL_FROM: '',
+};
+
 // No cron secret, so /api/cron/* always refuses (503) and a test run never
 // runs the scheduled jobs, whatever .env.local holds.
 const noCronSecret = {
@@ -184,6 +191,7 @@ export default defineConfig({
                 ...noSharedRedis,
                 ...noMarketData,
                 ...noCronSecret,
+                ...noEmail,
                 ...noPlaid,
                 ...noSentry,
                 ...noAskModel,
@@ -213,6 +221,7 @@ export default defineConfig({
                 ...noSharedRedis,
                 ...noMarketData,
                 ...noCronSecret,
+                ...noEmail,
                 ...noPlaid,
                 ...noSentry,
                 ...noAskModel,
@@ -248,6 +257,7 @@ export default defineConfig({
                 ...noSharedRedis,
                 ...noMarketData,
                 ...noCronSecret,
+                ...noEmail,
                 ...noPlaid,
                 ...noSentry,
                 ...noAskModel,

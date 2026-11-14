@@ -3,16 +3,21 @@
  * for the user, as they'd recognize it, read in one snapshot. Left out:
  * internal fields (user IDs, write order), removal markers kept only so
  * other devices learn of a deletion, Ask messages already cleared (kept
- * only so they count towards the day's question limit), and anything
- * secret (Plaid tokens, and Plaid's own IDs for connections and accounts).
+ * only so they count towards the day's question limit), alerts already
+ * cleared (kept only so they aren't raised again), and anything
+ * secret (Plaid tokens, Plaid's own IDs for connections and accounts, and
+ * the token in email unsubscribe links).
  */
 
-import { and, asc, eq, inArray, isNull, ne } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, ne } from "drizzle-orm";
 
 import { db } from "@/db";
 import {
+    alertNotifications,
+    alertRules,
     askMessages,
     authUsers,
+    emailPreferences,
     holdings,
     journalEntries,
     optionPositions,
@@ -109,6 +114,11 @@ export async function buildAccountExport(userId: string, database: Database = db
         const followed = await buildListFollowedFilersQuery(userId, tx);
         const asked = await tx.select().from(askMessages)
             .where(and(eq(askMessages.userId, userId), eq(askMessages.cleared, false))).orderBy(asc(askMessages.createdAt), asc(askMessages.id));
+        const rules = await tx.select().from(alertRules).where(eq(alertRules.userId, userId)).orderBy(asc(alertRules.createdAt), asc(alertRules.id));
+        const raised = await tx.select().from(alertNotifications)
+            .where(and(eq(alertNotifications.userId, userId), eq(alertNotifications.cleared, false)))
+            .orderBy(desc(alertNotifications.triggeredAt), asc(alertNotifications.id));
+        const [emails] = await tx.select().from(emailPreferences).where(eq(emailPreferences.userId, userId)).limit(1);
 
         return {
             format: ACCOUNT_EXPORT_FORMAT,
@@ -197,6 +207,15 @@ export async function buildAccountExport(userId: string, database: Database = db
                 name: follow.name,
                 followedAt: follow.followedAt.toISOString(),
             })),
+            alertRules: rules.map(plain),
+            // `occurrence` is how the nightly job records an alert once, and
+            // `emailClaimedAt` and `emailBatch` how the email job takes one to
+            // send and which email it went in: internal.
+            alerts: raised.map((alert) => plain({ ...alert, occurrence: undefined, emailClaimedAt: undefined, emailBatch: undefined })),
+            // The unsubscribe token and the job's bookkeeping are internal.
+            emailPreferences: emails
+                ? { alerts: emails.alerts, weeklyReview: emails.weeklyReview, updatedAt: emails.updatedAt.toISOString() }
+                : null,
         };
     }, { isolationLevel: "repeatable read", accessMode: "read only" });
 }

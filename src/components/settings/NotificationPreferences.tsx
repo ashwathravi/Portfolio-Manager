@@ -34,11 +34,6 @@ const notificationItems = [
         label: "Account Sync",
         description: "Notifications about account synchronization status",
     },
-    {
-        key: "weeklySummary" as const,
-        label: "Weekly Summary",
-        description: "Receive a weekly performance summary email",
-    },
 ];
 
 export function NotificationPreferences() {
@@ -113,9 +108,9 @@ export function NotificationPreferences() {
                     </div>
 
                     <div className="grid gap-3 sm:grid-cols-2">
+                        {/* Email is the Email card's Alerts switch (launch item i58), for every alert alike. */}
                         {[
                             ["inApp", "In-app"],
-                            ["email", "Email"],
                             ["slack", "Slack"],
                             ["telegram", "Telegram"],
                         ].map(([key, label]) => (
@@ -134,6 +129,10 @@ export function NotificationPreferences() {
                             </div>
                         ))}
                     </div>
+
+                    <p className="text-xs text-muted-foreground" data-testid="alpha-radar-delivery-email-note">
+                        Alpha Radar alerts are emailed with your other alerts when the Email card&rsquo;s Alerts switch is on.
+                    </p>
 
                     <div className="flex items-center justify-between space-x-2">
                         <Label htmlFor="alpha-radar-failure-summaries" className="flex flex-col space-y-1">
