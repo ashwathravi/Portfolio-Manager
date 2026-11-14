@@ -1,12 +1,14 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 
+import { MockLanguageModelV4 } from 'ai/test';
+
 import { EMPTY_POLICY_PORTFOLIO, type PolicyPortfolio } from '@/lib/risk-policy';
 import type { PolicyData } from '@/lib/risk-policy/server';
 import { storedRiskPolicy } from '@/lib/settings/risk-policy';
 
 import { plan } from '../planner';
-import { answerQuestion, loadAskContext, type AskSources } from './answer';
+import { answerQuestion, answerQuestionWith, askContextLoader, loadAskContext, type AskSources } from './answer';
 
 const NOW = new Date('2026-10-26T16:00:00.000Z');
 const PORTFOLIO: PolicyPortfolio = {
@@ -90,5 +92,55 @@ describe('loadAskContext', () => {
         const { fake } = sources();
         const failing = { ...fake, loadData: async () => { throw new Error('connect ECONNREFUSED'); } };
         await assert.rejects(answerQuestion('user-a', 'Am I overexposed to AI?', { now: NOW, databaseConfigured: true, sources: failing }), /ECONNREFUSED/);
+    });
+});
+
+describe('askContextLoader', () => {
+    test('each part of the user\'s data is loaded once, however many tools read it', async () => {
+        const { calls, fake } = sources();
+        const load = askContextLoader('user-a', { now: NOW, databaseConfigured: true, sources: fake });
+        await load([{ name: 'sector_exposure', args: {} }]);
+        await load([{ name: 'policy_breaches', args: {} }]);
+        await load([{ name: 'alpha_radar_evidence_search', args: { query: 'NVDA' } }]);
+        await load([{ name: 'alpha_radar_evidence_search', args: { query: 'Berkshire' } }]);
+        await load([{ name: 'correlation_with', args: { symbol: 'SPY' } }]);
+        await load([{ name: 'correlation_with', args: { symbol: 'spy' } }]);
+        assert.deepEqual(calls, ['data:user-a', 'policy', 'evidence', 'closes:SPY,NVDA,VTI:2026-06-04:2026-10-26']);
+    });
+});
+
+describe('answerQuestionWith (launch item i59)', () => {
+    const USAGE = {
+        inputTokens: { total: 1, noCache: 1, cacheRead: undefined, cacheWrite: undefined },
+        outputTokens: { total: 1, text: 1, reasoning: undefined },
+    };
+    const writes = (text: string) => new MockLanguageModelV4({
+        doGenerate: async () => ({ content: [{ type: 'text', text }], finishReason: { unified: 'stop', raw: undefined }, usage: USAGE, warnings: [] }),
+    });
+
+    test('without ASK_MODEL the rules answer', async () => {
+        const { fake } = sources();
+        const { answer, writer } = await answerQuestionWith('user-a', 'Am I overexposed to AI?', { now: NOW, databaseConfigured: true, sources: fake });
+        assert.equal(writer, 'rules');
+        assert.match(answer.text, /Current sector exposure is led by/);
+    });
+
+    test('Claude writes the answer when it can', async () => {
+        const { fake } = sources();
+        const { answer, writer } = await answerQuestionWith('user-a', 'Hello', {
+            now: NOW, databaseConfigured: true, sources: fake, claude: { model: writes('I answer questions about your portfolio.'), userId: 'user-a' },
+        });
+        assert.equal(writer, 'claude');
+        assert.equal(answer.text, 'I answer questions about your portfolio.');
+    });
+
+    test('and the rules answer when it can\'t, from the same data', async () => {
+        const { calls, fake } = sources();
+        const { answer, writer } = await answerQuestionWith('user-a', 'Am I overexposed to AI?', {
+            now: NOW, databaseConfigured: true, sources: fake, claude: { model: writes('You hold $9,999 of AI.'), userId: 'user-a' },
+        });
+        assert.equal(writer, 'rules');
+        assert.match(answer.text, /Current sector exposure is led by/);
+        assert.deepEqual(calls, ['data:user-a', 'policy']);
     });
 });

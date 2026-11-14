@@ -45,6 +45,7 @@
     "@tanstack/react-table": "^8.21.3",
     "@upstash/ratelimit": "^2.2.0",
     "@upstash/redis": "^1.39.0",
+    "ai": "^7.0.163",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "date-fns": "^4.1.0",
