@@ -96,8 +96,10 @@ export default function PrivacyPage({ searchParams }: { searchParams: LegalSearc
                 </ul>
                 <p>
                     We do not sell your data, use it for advertising, or use it to make credit decisions.
-                    Atlas Wealth does not place trades or move money. Ask answers questions inside Atlas
-                    Wealth itself; your questions are not sent to an outside AI service.
+                    Atlas Wealth does not place trades or move money. When Ask says under its question box
+                    that its answers are written by Claude, your question goes to Anthropic to answer, as
+                    described below; otherwise Ask answers inside Atlas Wealth itself and your questions
+                    aren&rsquo;t sent to an outside AI service.
                 </p>
             </section>
 
@@ -132,6 +134,15 @@ export default function PrivacyPage({ searchParams }: { searchParams: LegalSearc
                         <strong>Resend</strong> sends the emails you turn on. It receives your email address
                         and what each email says: your alerts, or your week&rsquo;s closed trades and realized
                         profit or loss.
+                    </li>
+                    <li>
+                        <strong>Anthropic</strong>, through Vercel&rsquo;s AI Gateway, writes Ask&rsquo;s answers
+                        when Ask says they&rsquo;re written by Claude. For each question it receives the question,
+                        your last few questions and answers, and what Ask looks up in your data to answer it:
+                        figures from your holdings, trades, theses, risk policy or Alpha Radar, with the ticker,
+                        holding and account names they come with, never your name or email. The gateway sends
+                        it only to providers that keep none of it once they&rsquo;ve answered and don&rsquo;t
+                        train AI models on it.
                     </li>
                     <li>
                         <strong>Market data providers (Massive and Finnhub) and SEC EDGAR</strong> supply prices
