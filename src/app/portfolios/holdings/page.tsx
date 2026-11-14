@@ -12,6 +12,7 @@ import { DEFAULT_OPTION_RISK_POSITIONS } from "@/lib/risk-policy";
 import { getSecurityProfiles } from "@/lib/markets/price-store";
 import { holdingName, loadSecurityProfiles } from "@/lib/markets/security-profile";
 import { defaultPolicyBucket } from "@/lib/risk-policy/buckets";
+import { bankLinkingAvailable } from "@/lib/plaid/availability";
 import { parseHoldingsRowView, type HoldingsRowView } from "@/lib/holdings/combine";
 
 /**
@@ -131,6 +132,9 @@ async function HoldingsContent({ rowView }: { rowView: HoldingsRowView }) {
                 importAccounts={accounts}
                 optionPositions={DEFAULT_OPTION_RISK_POSITIONS}
                 optionPositionsAreSample
+                // Decided here, on the server: the empty state offers to
+                // connect a bank only where Settings can (x30).
+                bankLinking={bankLinkingAvailable()}
             />
         </>
     );

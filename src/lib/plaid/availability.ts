@@ -34,6 +34,20 @@ export function plaidLinking(): PlaidLinking {
     return config ? { ok: true, config } : { ok: false, code: "PLAID_NOT_CONFIGURED", message: BANK_LINKING_NOT_SET_UP };
 }
 
+/**
+ * Whether Settings offers to connect a bank (x30): Plaid's keys
+ * (plaidLinking) and a database, the answer /api/plaid/connections gives
+ * the Settings card, which shows "Bank linking isn't set up yet." and points
+ * back at Accounts otherwise. Today, Holdings and Accounts ask this on the
+ * server before offering "Connect an account", so that link never leads to
+ * a card that sends people straight back; without it they offer to add an
+ * account by hand.
+ */
+export function bankLinkingAvailable(): boolean {
+    const availability = plaidAvailability();
+    return availability.ok || availability.code !== "PLAID_NOT_CONFIGURED";
+}
+
 export function plaidAvailability(): PlaidAvailability {
     const config = plaidConfigFromEnv();
     if (!config || !isDatabaseConfigured()) {

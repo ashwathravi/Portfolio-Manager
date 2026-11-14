@@ -212,6 +212,27 @@ test.describe('Performance › Returns from your history', () => {
     });
 });
 
+// x30: an empty Performance tab, or the notice over its examples, sent
+// everyone to Settings to connect an account. E2E runs without Plaid's keys,
+// as production does until they're set: Settings then says bank linking
+// isn't set up and points back at Accounts, a circle.
+test.describe('Performance — the way to your own data without bank linking (x30)', () => {
+    test('regression: Returns, Attribution and Behaviour lead to adding an account, not to Settings', async ({ context, page }) => {
+        // A new user starts with example data off, so each tab shows its
+        // empty state. Without a database examples are on, and the notice
+        // over them is the way in.
+        const signedIn = await signInAsNewUser(context, { firstSignIn: true });
+        for (const path of ['/performance', '/performance/attribution', '/performance/behaviour']) {
+            await gotoAppPage(page, path);
+            const way = page.getByTestId(signedIn ? 'sample-empty-state' : 'sample-data-notice').first();
+            await expect(way.getByRole('link', { name: 'Add an account' }), path).toHaveAttribute('href', '/portfolios/accounts');
+            await expect(way.getByRole('link', { name: 'Connect an account' }), path).toHaveCount(0);
+            await expect(page.locator('a[href="/settings#accounts"]'), path).toHaveCount(0);
+            if (signedIn) await expect(way, path).not.toContainText(/connect|link an account/i);
+        }
+    });
+});
+
 test.describe('Performance › Attribution', () => {
     // A fresh copy of user A has none of A's history, so it sees the example breakdown.
     test.beforeEach(async ({ context, page }) => {
