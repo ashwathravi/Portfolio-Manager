@@ -15,10 +15,12 @@ function trade(date: string, side: 'BUY' | 'SELL', symbol: string, quantity: num
         quantity,
         price,
         value: Math.abs(quantity * price),
+        accountId: 'p1',
         account: 'Brokerage',
         notes: null,
         fees: null,
         currency: 'USD',
+        transfer: null,
         ...extra,
     };
 }

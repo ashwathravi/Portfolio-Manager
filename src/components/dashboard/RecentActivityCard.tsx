@@ -1,7 +1,7 @@
 "use client";
 
 import { type ReactNode } from "react";
-import { ArrowDownLeft, ArrowUpRight, Coins, Banknote } from "lucide-react";
+import { ArrowDownLeft, ArrowLeftRight, ArrowUpRight, Coins, Banknote } from "lucide-react";
 
 /**
  * Phase 3 (AR-72) Activity feed card.
@@ -9,7 +9,9 @@ import { ArrowDownLeft, ArrowUpRight, Coins, Banknote } from "lucide-react";
  * Typed rows for the four transaction kinds we render on the Dashboard:
  * buy, sell, dividend, deposit. Each row is an icon tile (color-coded per
  * type), a headline + meta stack in the middle, and a mono amount on the
- * right. Withdrawal is handled as a red deposit for signage.
+ * right. Withdrawal is handled as a red deposit for signage. A transfer
+ * between two of the user's accounts has no sign: it moved no money in or
+ * out.
  *
  * The spec asks for "last 30 days" — the caller does that filter, we just
  * render what's passed in.
@@ -20,7 +22,8 @@ export type ActivityType =
     | "sell"
     | "dividend"
     | "deposit"
-    | "withdrawal";
+    | "withdrawal"
+    | "transfer";
 
 export interface ActivityRow {
     id: string;
@@ -152,6 +155,12 @@ const SPECS: Record<ActivityType, TypeSpec> = {
         headlineVerb: "Withdrawal",
         amountSign: "−",
         amountColor: "pm-activity-amount-neg",
+    },
+    transfer: {
+        icon: <ArrowLeftRight size={14} aria-hidden="true" />,
+        iconClass: "pm-activity-icon-deposit",
+        headlineVerb: "Transfer",
+        amountSign: "",
     },
 };
 
