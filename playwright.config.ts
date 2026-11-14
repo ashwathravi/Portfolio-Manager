@@ -68,6 +68,14 @@ const noCronSecret = {
     CRON_SECRET: '',
 };
 
+// No Plaid keys, so nothing reaches Plaid and Settings always shows bank
+// linking as not set up, as production does until its keys are added (x30).
+// Tests that exercise Link stub the /api/plaid routes and the Link SDK.
+const noPlaid = {
+    PLAID_CLIENT_ID: '',
+    PLAID_SECRET: '',
+};
+
 // No Sentry DSN, so the SDK never starts and a test run's errors never reach
 // the production project (and no build uploads source maps).
 const noSentry = {
@@ -176,6 +184,7 @@ export default defineConfig({
                 ...noSharedRedis,
                 ...noMarketData,
                 ...noCronSecret,
+                ...noPlaid,
                 ...noSentry,
                 ...noAskModel,
             },
@@ -204,6 +213,7 @@ export default defineConfig({
                 ...noSharedRedis,
                 ...noMarketData,
                 ...noCronSecret,
+                ...noPlaid,
                 ...noSentry,
                 ...noAskModel,
             },
@@ -238,6 +248,7 @@ export default defineConfig({
                 ...noSharedRedis,
                 ...noMarketData,
                 ...noCronSecret,
+                ...noPlaid,
                 ...noSentry,
                 ...noAskModel,
             },

@@ -101,7 +101,7 @@ describe('market-data validators', () => {
 
     describe('timeframeSchema', () => {
         test('should accept valid timeframes', () => {
-            const valid = ['1D', '1H', '1M'];
+            const valid = ['1D', '1M'];
             for (const tf of valid) {
                 const result = timeframeSchema.safeParse(tf);
                 assert.strictEqual(result.success, true);
@@ -109,7 +109,8 @@ describe('market-data validators', () => {
         });
 
         test('should reject invalid timeframes', () => {
-            const invalid = ['1S', '5M', 'DAILY', ''];
+            // No intraday bars on the free plan: 1H used to come back as a year (x22).
+            const invalid = ['1H', '1S', '5M', 'DAILY', ''];
             for (const tf of invalid) {
                 const result = timeframeSchema.safeParse(tf);
                 assert.strictEqual(result.success, false);
@@ -119,13 +120,14 @@ describe('market-data validators', () => {
 
     describe('historyRangeSchema', () => {
         test('should accept supported chart ranges', () => {
-            for (const range of ['1D', '5D', '1M', '3M', '6M', '1Y', '5Y', 'MAX']) {
+            for (const range of ['1D', '5D', '1M', '3M', '6M', '1Y', 'MAX']) {
                 assert.strictEqual(historyRangeSchema.safeParse(range).success, true, `${range} should be valid`);
             }
         });
 
         test('should reject unsupported chart ranges', () => {
-            for (const range of ['2D', '10Y', 'ALL', '']) {
+            // 5Y: the free plan keeps two years, all of which MAX already is (x22).
+            for (const range of ['2D', '5Y', '10Y', 'ALL', '']) {
                 assert.strictEqual(historyRangeSchema.safeParse(range).success, false, `${range} should be invalid`);
             }
         });
