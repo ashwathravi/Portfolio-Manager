@@ -53,7 +53,7 @@ export interface SymbolPosition {
     todayPct: number | null;
     todayChangeAbs: number;
     allocationPct: number;
-    /** The names of the accounts holding it, one per account, in the order first seen. */
+    /** The names of the accounts holding it, one per account, in name order. */
     accounts: string[];
 }
 
@@ -121,10 +121,14 @@ function combineGroup<T extends AccountPosition>(key: string, group: readonly T[
     };
 }
 
+/**
+ * One name per account, in name order: the order holdings arrive in isn't
+ * fixed between accounts, and the list should read the same every time.
+ */
 function accountNames(group: readonly AccountPosition[]): string[] {
     const names = new Map<string, string>();
     for (const p of group) if (!names.has(p.accountId)) names.set(p.accountId, p.account);
-    return [...names.values()];
+    return [...names.values()].sort((a, b) => a.localeCompare(b, "en-US", { sensitivity: "base" }));
 }
 
 function sum<T>(rows: readonly T[], value: (row: T) => number): number {

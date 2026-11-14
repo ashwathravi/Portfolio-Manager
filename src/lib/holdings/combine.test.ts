@@ -106,6 +106,17 @@ describe("holdings / combineBySymbol", () => {
         assert.deepEqual(row.accounts, ["Main", "Roth"]);
     });
 
+    it("regression: names the accounts in name order, whatever order their holdings arrive in", () => {
+        // The holdings query doesn't order one symbol's rows by account, so
+        // "Roth IRA, Main Portfolio" and the reverse both came back (the
+        // By symbol E2E test failed about one run in four).
+        for (const order of [["Roth IRA", "Main Portfolio", "brokerage"], ["Main Portfolio", "brokerage", "Roth IRA"]]) {
+            const [row] = combineBySymbol(order.map((account, i) =>
+                position({ id: `h${i}`, symbol: "AAPL", accountId: account, account, quantity: 1 }, 1)));
+            assert.deepEqual(row.accounts, ["brokerage", "Main Portfolio", "Roth IRA"], order.join(", "));
+        }
+    });
+
     it("regression: two accounts with the same name are two accounts", () => {
         const [row] = combineBySymbol([
             position({ id: "h1", symbol: "AAPL", accountId: "p1", account: "Brokerage", quantity: 1 }, 1),
