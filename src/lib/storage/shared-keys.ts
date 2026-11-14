@@ -9,7 +9,7 @@ import { JOURNAL_STORAGE_KEY } from "@/lib/research/journalStorage";
 import { THESIS_STORAGE_KEY } from "@/lib/research/storage";
 import { REVIEWS_STORAGE_KEY } from "@/lib/reviews/storage";
 import { SETTINGS_STORAGE_KEY } from "@/lib/settings/sync";
-import { ALERTS_STORAGE_KEY } from "@/lib/stores/alertsStore";
+import { ALERTS_STORAGE_KEY } from "@/lib/alerts/legacy-storage";
 
 import { adoptSharedValues, browserLocalStorage, currentStorageScope } from "./user-scope";
 

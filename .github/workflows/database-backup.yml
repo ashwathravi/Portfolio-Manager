@@ -36,7 +36,10 @@ permissions:
 jobs:
   backup:
     if: github.event_name != 'pull_request'
-    runs-on: ubuntu-latest
+    # Pinned: ubuntu-latest is moving to Ubuntu 26, and install-backup-tools.sh
+    # relies on the image's apt sources for the PostgreSQL 17 client. Move
+    # both jobs together, after a rehearsal passes on the new image.
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     # The owner connection lives in production, whose branch policy lets only
     # master use it. (Not `deployment: false`: GitHub doesn't say that policy
@@ -142,7 +145,7 @@ jobs:
 
   rehearse:
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     services:
       postgres:
