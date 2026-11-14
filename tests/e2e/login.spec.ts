@@ -55,6 +55,30 @@ test.describe('Login', () => {
   });
 });
 
+test.describe('Login — refused sign-ins', () => {
+  test('a sign-in Google or the invite list refused says so', async ({ context, page }) => {
+    await context.clearCookies();
+    await page.goto('/login?error=AccessDenied');
+    await expect(page.getByTestId('login-error')).toHaveText('Google sign-in was not approved for this workspace.');
+  });
+
+  test('a new account past open sign-up\'s daily limit is told to come back tomorrow (launch item i77)', async ({ context, page }) => {
+    await context.clearCookies();
+    await page.goto('/login?error=SignupLimit');
+    await expect(page.getByTestId('login-error')).toHaveText('Atlas has opened all the new accounts it can for today. Try again tomorrow.');
+    await expect(page.getByRole('button', { name: /Continue with Google/ })).toBeVisible();
+  });
+
+  test('the terms and privacy policy call the beta invite-only while sign-up is by invitation', async ({ context, page }) => {
+    await context.clearCookies();
+    await page.goto('/terms');
+    await expect(page.getByText('a personal investment tracking app currently in an invite-only beta.', { exact: false })).toBeVisible();
+    await expect(page.getByText('During the beta you need an invitation and a Google account to sign in.')).toBeVisible();
+    await page.goto('/privacy');
+    await expect(page.getByText('currently in an invite-only beta.', { exact: false })).toBeVisible();
+  });
+});
+
 test.describe('Login — design review fixes', () => {
   test('uses the app brand mark and shows no raw backtick setup text', async ({ context, page }) => {
     await context.clearCookies();

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { ContactLink, LegalDocument, type LegalSearchParams } from "@/components/legal/LegalDocument";
+import { isOpenSignup } from "@/lib/auth/access";
 
 export const metadata: Metadata = {
     title: "Privacy Policy | Atlas Wealth",
@@ -18,7 +19,7 @@ export default function PrivacyPage({ searchParams }: { searchParams: LegalSearc
             searchParams={searchParams}
             intro={
                 <p>
-                    Atlas Wealth is a personal investment tracking app, currently in an invite-only beta.
+                    Atlas Wealth is a personal investment tracking app, currently in {isOpenSignup() ? "a public" : "an invite-only"} beta.
                     This policy explains what it collects, why, who it is shared with, and how to have it
                     deleted. Questions go to <ContactLink />.
                 </p>

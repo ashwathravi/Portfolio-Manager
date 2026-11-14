@@ -101,7 +101,10 @@ Set these for **Production only**, never Preview: a preview runs branch code, an
 |---|---|
 | `AUTH_SECRET` | Set. |
 | `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET` | From the Google OAuth client (redirect URI `https://atlas-wealth-lovat.vercel.app/api/auth/callback/google`). |
-| `AUTH_ALLOWED_EMAILS` | Comma-separated invite list. Required: without it production refuses sign-in. |
+| `AUTH_ALLOWED_EMAILS` | Comma-separated invite list. Required while sign-up is by invitation: without it (or `AUTH_OPEN_SIGNUP`) production refuses sign-in. |
+| `AUTH_OPEN_SIGNUP` | Unset during the private beta. `1` opens sign-up to any verified Google account and ignores the invite list (launch item i77): see Opening sign-up below. |
+| `AUTH_SIGNUP_DAILY_LIMIT` | Optional, with open sign-up: the most new accounts made in a UTC day, 50 unless set. Someone who already has an account always signs in; a new one past the limit is asked to come back tomorrow. |
+| `AUTH_BLOCKED_EMAILS`, `AUTH_BLOCKED_DOMAINS` | Optional. Comma-separated emails or domains never let in, whether sign-up is open or not. A domain is matched against the email's domain and the Google Workspace the user signs in with, which can differ. Adding someone ends their sessions on their next request; their data stays until it's deleted. While a domain is blocked, each session read also reads the user's Workspace from the Google ID token stored when they first signed in. |
 | `AUTH_ADMIN_EMAILS` | Who may change Alpha Radar's tracked filers and refresh them from SEC EDGAR (shared by every user). Usually just you. Nobody when unset: the Refresh buttons don't show and those routes answer 403. |
 | `DATABASE_URL` | Supabase **transaction** pooler (port 6543) as `atlas_app.<project-ref>`, the least-privilege login (see `docs/local-database-secrets.md`). |
 | `CRON_SECRET` | A generated value (`openssl rand -hex 32`). Vercel sends it to the cron route; without it no scheduled job runs. Never print or paste it. |
@@ -122,6 +125,28 @@ vercel env add AUTH_ADMIN_EMAILS production
 openssl rand -hex 32 | tr -d '\n' | vercel env add CRON_SECRET production
 ```
 
+### Opening sign-up (phase 5)
+
+Sign-up stays by invitation until the plans allow public use (launch item i76): Vercel Pro, Supabase Pro, a market-data plan whose terms allow it, and Plaid Production's pricing. Then:
+
+1. Check `KV_REST_API_URL` and `KV_REST_API_TOKEN` are set. The daily quotas and the limit on new accounts are counted in the shared Upstash store; without it each instance counts on its own.
+2. `vercel env add AUTH_OPEN_SIGNUP production` with the value `1`, and `AUTH_SIGNUP_DAILY_LIMIT` if 50 new accounts a day is the wrong ceiling. Environment changes reach the next deployment, so redeploy. The terms and the privacy policy then say the beta is public, and the terms no longer ask for an invitation.
+3. Watch Sentry and the AI Gateway and Plaid dashboards for the first days, and block an abuser with `AUTH_BLOCKED_EMAILS` (or a throwaway domain with `AUTH_BLOCKED_DOMAINS`), then redeploy.
+
+What each user can do in a day, besides the per-minute rate limits (`src/lib/api/daily-quota.ts`, counted in UTC days):
+
+| | A day | Refused with |
+|---|---|---|
+| CSV imports, holdings and transactions together | 20 | 429 `DAILY_QUOTA_REACHED` |
+| Opening bank linking (a new connection or a reconnect) | 10 | 429 `DAILY_QUOTA_REACHED` |
+| Syncing linked accounts on request (the nightly sync isn't counted) | 20 | 429 `DAILY_QUOTA_REACHED` |
+| Backtests | 100 | 429 `DAILY_QUOTA_REACHED` |
+| Ask questions | 30 in any 24 hours | 429 `ASK_DAILY_LIMIT` |
+
+A user keeps at most 10 linked institutions at once (409 `PLAID_CONNECTION_LIMIT`; Plaid charges for each; counted as each is saved, one at a time per user, so links finishing together can't pass it), 50 accounts, 20 strategies and 5,000 order plans.
+
+Closing sign-up again means unsetting `AUTH_OPEN_SIGNUP` with an invite list in place: everyone not on it is signed out on their next request, so add the people who should stay first.
+
 ## Post-deploy smoke test
 
 After every production deploy (launch item i72), `deploy-production` waits until `/api/health` reports the commit it just deployed, up to three minutes, then runs a short Playwright suite against `PRODUCTION_URL`: `tests/production/post-deploy.spec.ts`, with `playwright.production.config.ts`. It checks, signed out:
@@ -129,7 +154,7 @@ After every production deploy (launch item i72), `deploy-production` waits until
 - the site can reach its database, and `/api/health/jobs` reads every scheduled job (whether they ran on time is the production monitor's alert, not the deploy's);
 - a signed-out visit to an app page goes to sign in, and the sign-in button is on;
 - **Continue with Google** sends the browser to Google with a real client ID and this site's callback. The test answers that request itself, so Google's page never loads;
-- the sign-in page, the privacy policy and the terms answer 200 with their security headers (a nonce-based Content-Security-Policy, HSTS, `X-Frame-Options`), and load without console errors, policy violations or failed requests to the site;
+- the sign-in page, the privacy policy and the terms answer 200 with their security headers (a nonce-based Content-Security-Policy with `upgrade-insecure-requests`, HSTS, `X-Frame-Options`), and load without console errors, policy violations or failed requests to the site. Against a local build served over plain http (E2E), that directive makes Chrome ask for a redirect's target over https, where nothing answers, as when a signed-out prefetch of `/` is sent to `/login`; the test lets through only the error Chrome logs for that, and only for the same host and port over https;
 - those pages ask search engines to leave them out of their results (`noindex, nofollow` as a header and a meta tag, launch item i74), and `robots.txt` lets crawlers in to read that;
 - the sign-in page fits a phone;
 - the API refuses signed-out callers, and `/api/cron/daily` and `/api/cron/alpha-radar` refuse a call without the cron secret.
