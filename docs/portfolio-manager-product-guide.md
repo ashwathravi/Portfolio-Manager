@@ -548,7 +548,7 @@ Prices are split-adjusted. When a stock you hold splits, the nightly price job m
 
 ### Plaid Link Fails
 
-Check:
+Settings › Connected accounts saying "Bank linking isn't set up yet." (with no Connect button) means the server has no `PLAID_CLIENT_ID` or `PLAID_SECRET`, or no database: the Plaid routes answer 503 `PLAID_NOT_CONFIGURED`. Otherwise, check:
 
 - `PLAID_ENV=sandbox`.
 - `PLAID_CLIENT_ID` is set.
