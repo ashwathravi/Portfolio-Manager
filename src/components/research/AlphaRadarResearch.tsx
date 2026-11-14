@@ -1060,6 +1060,11 @@ function AlphaRadarMemorySearch({
                     )}
                 </div>
             )}
+            {hasQuery && search.provider === "embeddings" && (
+                <p className="pm-card-subtitle" data-testid="alpha-radar-memory-by-meaning">
+                    Ranked by meaning as well as by the words you typed.
+                </p>
+            )}
             {hasQuery && isFallback && (
                 <p className="pm-card-subtitle" data-testid="alpha-radar-memory-fallback">
                     Using local keyword fallback until semantic memory is populated in Postgres.

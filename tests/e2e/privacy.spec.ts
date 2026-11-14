@@ -98,6 +98,9 @@ test.describe('Privacy policy', () => {
     await expect(sharing).toContainText('We send them ticker symbols, filer IDs and the words you type into ticker search, never your name, email or account details.');
     // Launch item i58: the emails the user turns on.
     await expect(sharing).toContainText('Resend sends the emails you turn on. It receives your email address and what each email says');
+    // Launch item i62: Alpha Radar's evidence search by meaning.
+    await expect(sharing.getByText('An embedding model provider', { exact: true })).toBeVisible();
+    await expect(sharing).toContainText('It receives the words you type into that search, and the text of SEC filings and Alpha Radar reports, never your name, email or account details.');
   });
 
   test('says what Anthropic receives when Claude writes Ask\'s answers, and that it keeps none of it', async ({ page }) => {
