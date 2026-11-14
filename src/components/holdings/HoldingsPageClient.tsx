@@ -32,13 +32,14 @@ import { HoldingsSummaryStrip } from "./HoldingsSummaryStrip";
 import { OptionsRiskLedgerCard } from "./OptionsRiskLedgerCard";
 import { isTodaysQuote } from "@/lib/markets/quote-session";
 import { useEasternDate } from "@/lib/hooks/useEasternDate";
+import { combineBySymbol, hasSymbolInSeveralAccounts, type HoldingsRowView } from "@/lib/holdings/combine";
 
 /**
  * Phase 4 (AR-74) Holdings page wrapper.
  *
  * This component owns:
  *   - quote polling via `useAutoRefreshQuotes`, labelled delayed or close
- *   - the filter + sort state
+ *   - the filter + sort state, and one row per account position or per symbol
  *   - the derived summary metrics
  *
  * The server page just fetches the seed + hands it here. Everything
@@ -54,6 +55,8 @@ export interface HoldingsSeed {
     /** Null when there is no price for it yet (no quote, nothing stored). */
     currentPrice: number | null;
     marketValue: number;
+    /** The account's ID; names can repeat. */
+    accountId: string;
     account: string;
     /** Approx days since the position was opened, for the "Avg holding period" cell. */
     holdingDays?: number;
@@ -67,6 +70,8 @@ export interface HoldingsSeed {
 
 export interface HoldingsPageClientProps {
     holdings: HoldingsSeed[];
+    /** From `?view=`: one row per account position (the default) or per symbol. */
+    initialRowView?: HoldingsRowView;
     optionPositions?: readonly OptionRiskPosition[];
     /** True while option positions come from example data (no options feed yet). */
     optionPositionsAreSample?: boolean;
@@ -76,6 +81,7 @@ export interface HoldingsPageClientProps {
 
 export function HoldingsPageClient({
     holdings,
+    initialRowView = "account",
     optionPositions = [],
     optionPositionsAreSample = false,
     importAccounts = [],
@@ -84,6 +90,7 @@ export function HoldingsPageClient({
     const [bucketFilter, setBucketFilter] = useState<PolicyBucketId | "All">("All");
     const [themeFilter, setThemeFilter] = useState<ThemeId | "All">("All");
     const [sortKey, setSortKey] = useState<HoldingsSortKey>("marketValue");
+    const [rowView, setRowView] = useState<HoldingsRowView>(initialRowView);
 
     const symbols = useMemo(
         () => holdings.map((h) => h.symbol).filter(Boolean),
@@ -143,6 +150,19 @@ export function HoldingsPageClient({
     }, [holdings, quotes, todayEt, riskPolicy]);
 
     const { rows, totalMV } = enriched;
+
+    // The choice of rows only matters when some symbol is in more than one account.
+    const hasSharedSymbols = useMemo(() => hasSymbolInSeveralAccounts(rows), [rows]);
+    const bySymbol = hasSharedSymbols && rowView === "symbol";
+
+    const changeRowView = (next: HoldingsRowView) => {
+        setRowView(next);
+        // Kept in the address so a reload or a shared link opens the same view.
+        const url = new URL(window.location.href);
+        if (next === "symbol") url.searchParams.set("view", "symbol");
+        else url.searchParams.delete("view");
+        window.history.replaceState(null, "", url);
+    };
 
     // The sector chips: the sectors held, largest first.
     const sectorChips = useMemo<Array<Sector | "All">>(() => {
@@ -207,7 +227,12 @@ export function HoldingsPageClient({
             }
             return true;
         });
-        const sorted = [...filtered].sort((a, b) => {
+        // Sector, bucket and themes belong to the symbol, so filtering before
+        // combining keeps or drops every account's position in it together.
+        const shown = bySymbol
+            ? combineBySymbol(filtered)
+            : filtered.map((r) => ({ ...r, accounts: [r.account], partlyAtCost: false }));
+        const sorted = [...shown].sort((a, b) => {
             switch (sortKey) {
                 case "marketValue":
                     return b.marketValue - a.marketValue;
@@ -237,8 +262,10 @@ export function HoldingsPageClient({
             totalReturnPct: r.totalReturnPct,
             allocationPct: r.allocationPct,
             account: r.account,
+            accounts: r.accounts,
+            partlyAtCost: r.partlyAtCost,
         }));
-    }, [rows, sectorFilter, bucketFilter, themeFilter, sortKey, policySummary]);
+    }, [rows, bySymbol, sectorFilter, bucketFilter, themeFilter, sortKey, policySummary]);
 
     if (rows.length === 0) {
         return (
@@ -301,6 +328,8 @@ export function HoldingsPageClient({
                 onThemeChange={setThemeFilter}
                 sortKey={sortKey}
                 onSortChange={setSortKey}
+                rowView={bySymbol ? "symbol" : "account"}
+                onRowViewChange={hasSharedSymbols ? changeRowView : undefined}
             />
 
             <HoldingsFullTable rows={tableRows} />
