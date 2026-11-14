@@ -70,10 +70,12 @@ export const SEND_SPACING_MS = 500;
 /** No email is started after this; the nightly run's five minutes are mostly the price job's. */
 export const EMAIL_JOB_BUDGET_MS = 15_000;
 /**
- * The longest the job's sends can take: the last one (or its one retry) is
- * started within the budget, waits at most the half second between sends,
- * and is given up at Resend's timeout. Its database reads and writes come on
- * top. The nightly route's time limit has to hold it (route.test.ts).
+ * The longest the job's sends can take: the budget is checked right before
+ * each send, after the email is claimed and what goes in it is read, so the
+ * last one (or its one retry) is started within the budget, waits at most
+ * the half second between sends, and is given up at Resend's timeout. The
+ * few queries recording what became of it come on top. The nightly route's
+ * time limit has to hold it (route.test.ts).
  */
 export const EMAIL_JOB_MAX_MS = EMAIL_JOB_BUDGET_MS + SEND_SPACING_MS + RESEND_TIMEOUT_MS;
 /**
@@ -274,8 +276,8 @@ export function buildReleaseWeeklyReviewQuery(userId: string, claimedAt: Date, d
 // Sending
 // ---------------------------------------------------------------------------
 
-/** What became of an email: it went (now or earlier), Resend refused it, or nobody knows. */
-export type SendOutcome = "sent" | Exclude<SendFailure, "already-sent">;
+/** What became of an email: it went (now or earlier), Resend refused it, nobody knows, or the budget ran out before it was started. */
+export type SendOutcome = "sent" | "deferred" | Exclude<SendFailure, "already-sent">;
 
 /** Sends spaced out and within the budget; counts what went and failed. */
 class Outbox {
@@ -296,9 +298,12 @@ class Outbox {
 
     /**
      * Sends the email, and once more under the same key when the outcome is
-     * unknown: Resend sends a key's email once, so it can't go twice.
+     * unknown: Resend sends a key's email once, so it can't go twice. Not
+     * started once the budget (or `limitMs`) is spent: claiming the email and
+     * reading what goes in it take time after the caller's own check.
      */
-    async send(email: OutgoingEmail): Promise<SendOutcome> {
+    async send(email: OutgoingEmail, limitMs?: number): Promise<SendOutcome> {
+        if (!this.hasTime(limitMs)) return "deferred";
         let attempt = await this.attempt(email);
         if (attempt.outcome === "unknown" && this.hasTime()) attempt = await this.attempt(email);
         if (attempt.outcome === "sent") {
@@ -373,8 +378,11 @@ async function emailAlerts(
     const failedBefore = outbox.failed;
     let deferred = 0;
 
-    /** Sends the claimed email `batch` of these alerts, and records what became of it. */
-    const sendBatch = async (batch: string, alerts: readonly AlertRow[]) => {
+    /**
+     * Sends the claimed email `batch` of these alerts, and records what became
+     * of it. `earlier`: an earlier run may have sent it.
+     */
+    const sendBatch = async (batch: string, alerts: readonly AlertRow[], earlier: boolean) => {
         const { address, token } = alerts[0];
         const links = { siteUrl: config.siteUrl, token };
         const outcome = await outbox.send(outgoing(
@@ -383,10 +391,13 @@ async function emailAlerts(
             unsubscribeHeaders(unsubscribeUrls(links, "alerts")),
             "alerts",
             batch,
-        ));
+        ), limitMs);
         if (outcome === "sent") await buildAlertsSentQuery(batch, now, database);
-        else if (outcome === "refused") await buildDropAlertBatchQuery(batch, now, database);
+        // Refused, or never tried: it didn't go, so its alerts are free for a new email. An
+        // earlier run's email put off may have gone, and keeps its key like an unknown outcome.
+        else if (outcome === "refused" || (outcome === "deferred" && !earlier)) await buildDropAlertBatchQuery(batch, now, database);
         else await buildReleaseAlertsQuery(batch, now, database);
+        if (outcome === "deferred") deferred += 1;
     };
 
     // First the emails earlier runs may have sent: the same alerts, under the same key.
@@ -406,7 +417,7 @@ async function emailAlerts(
             await buildDropAlertBatchQuery(key, now, database);
             continue;
         }
-        await sendBatch(key, alerts);
+        await sendBatch(key, alerts, true);
     }
 
     for (const alerts of alertsByUser(await buildAlertsToEmailQuery(now, database))) {
@@ -418,7 +429,7 @@ async function emailAlerts(
         const claimed = new Set((await buildClaimAlertsQuery(alerts.map((a) => a.id), batch, now, database)).map((row) => row.id));
         const mine = alerts.filter((alert) => claimed.has(alert.id));
         if (mine.length === 0) continue;
-        await sendBatch(batch, mine);
+        await sendBatch(batch, mine, false);
     }
     return { sent: outbox.sent - sentBefore, failed: outbox.failed - failedBefore, deferred };
 }
@@ -473,6 +484,7 @@ async function emailWeeklyReviews(
             `weekly-review/${keyFor(recipient.userId, week.id)}`,
         ));
         await (outcome === "sent" ? done() : release());
+        if (outcome === "deferred") deferred += 1;
     }
     return { week: week.id, sent: outbox.sent - sentBefore, noTrades, failed: outbox.failed - failedBefore, deferred };
 }

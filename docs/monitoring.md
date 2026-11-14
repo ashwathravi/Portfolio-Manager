@@ -141,4 +141,4 @@ node --input-type=module -e "import { checkProduction } from './scripts/monitor/
 
 An empty list means every check passes.
 
-`scripts/monitor/run.mts`, which the workflow runs, also needs what Actions sets: `GITHUB_TOKEN` and `GITHUB_REPOSITORY` to open and update the issue, and `GITHUB_RUN_ID`, `GITHUB_SERVER_URL` and `GITHUB_STEP_SUMMARY` for the link to the run and its summary.
+`scripts/monitor/run.mts`, which the workflow runs, also needs `GITHUB_TOKEN` and `GITHUB_REPOSITORY` to open and update the issue, and `GITHUB_RUN_ID`, `GITHUB_SERVER_URL` and `GITHUB_STEP_SUMMARY` for the link to the run and its summary. The workflow passes `GITHUB_TOKEN` (from `github.token`; Actions doesn't put the token in the environment itself), and Actions sets the others.
