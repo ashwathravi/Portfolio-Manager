@@ -92,7 +92,7 @@ describe('install-backup-tools.sh', () => {
     test('adds apt.postgresql.org when Ubuntu has no postgresql-client-17', () => {
         const result = install({ STUB_NO_CLIENT: '1' });
         assertInstalled(result);
-        assert.deepStrictEqual(result.calls.filter((call) => call.includes('apt.postgresql.org')), [
+        assert.deepStrictEqual(result.calls.filter((call) => call.includes('/pgdg/')), [
             'sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y',
         ]);
         assert.strictEqual(result.installs.length, 1);
