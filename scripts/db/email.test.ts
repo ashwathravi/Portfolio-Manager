@@ -518,6 +518,25 @@ describe('email kept with the account, and the nightly email job', { skip: !DATA
             assert.deepEqual(rows.map((r) => [r.user_id, r.weekly_review_week]), [['u-1', 'wk:2026-10-26'], ['u-2', null]]);
         });
 
+        test('regression: a week whose Friday is a holiday goes out after Thursday\'s close, on the NYSE calendar (#202)', async () => {
+            await saveEmailPreferences('u-1', { weeklyReview: true }, { database });
+            // Christmas 2026 is a Friday; Thursday Dec 24 closes at 1 PM EST.
+            const christmasWeek: TradeJournal = {
+                entries: [entry('t-x1', '2026-12-22T15:00:00.000Z', 250), entry('t-x2', '2026-12-24T17:30:00.000Z', 50)],
+                leftOut: [],
+                netWorth: 100_000,
+            };
+            const thursdayEvening = outbox();
+            assert.deepEqual((await run(new Date('2026-12-24T22:35:00.000Z'), { send: thursdayEvening.send, loadJournal: async () => christmasWeek })).weeklyReview,
+                { week: 'wk:2026-12-21', sent: 1, noTrades: 0, failed: 0, deferred: 0 });
+            assert.equal(thursdayEvening.sent[0].subject, 'Your weekly review: Dec 21–25');
+            assert.ok(thursdayEvening.sent[0].text.includes('Realized P&L: +$300'));
+            // Monday's run, past four days after Thursday's close, sends nothing more.
+            const monday = outbox();
+            assert.deepEqual((await run(new Date('2026-12-28T22:35:00.000Z'), { send: monday.send, loadJournal: async () => christmasWeek })).weeklyReview, { week: null });
+            assert.equal(monday.sent.length, 0);
+        });
+
         test('before Friday\'s close nothing is sent for the week', async () => {
             await saveEmailPreferences('u-1', { weeklyReview: true }, { database });
             const thursday = outbox();

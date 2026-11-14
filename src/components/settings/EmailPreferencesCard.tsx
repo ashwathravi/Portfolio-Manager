@@ -15,7 +15,7 @@ const EMAILS = [
     {
         key: "weeklyReview" as const,
         label: "Weekly review",
-        description: "Friday evening, the week’s review of the trades you closed. None in a week without closed trades.",
+        description: "After the week’s last market close (usually Friday evening), the week’s review of the trades you closed. None in a week without closed trades.",
     },
 ];
 

@@ -6,10 +6,12 @@
  *     ones read or cleared in the app, those from before alert emails were
  *     turned on, and any over four days old (so Friday's still go on
  *     Monday);
- *   - after Friday's close, the week's review of the trades they closed
+ *   - once the week's last session has closed (the NYSE calendar: Friday's
+ *     4 PM close most weeks, Thursday's when Friday is a holiday, 1 PM on an
+ *     early close), the week's review of the trades they closed
  *     (src/lib/reviews), as Today shows it. Not sent for a week without
- *     closed trades. A run up to Tuesday's close can still send it when
- *     Friday's couldn't.
+ *     closed trades. A run within four days of that close (up to Tuesday's,
+ *     after a Friday close) can still send it when the first couldn't.
  *
  * Every email is claimed before it's sent (its alerts' email_claimed_at, the
  * user's weekly_review_claimed_at) and marked sent once Resend accepts it
@@ -48,7 +50,8 @@ import type { AlertMetric } from "@/lib/alerts/types";
 import { loadTradeJournal } from "@/lib/journal/server";
 import type { TradeJournal } from "@/lib/journal/trades";
 import { generateReview } from "@/lib/reviews/generate";
-import { easternWeekBounds } from "@/lib/reviews/weeks";
+import type { WeekBounds } from "@/lib/reviews/types";
+import { currentWeekBounds } from "@/lib/reviews/weeks";
 
 import { emailSetup, type EmailConfig } from "./config";
 import { classifySendFailure, resendSender, type OutgoingEmail, type SendEmail, type SendFailure } from "./resend";
@@ -60,7 +63,7 @@ type Env = Readonly<Record<string, string | undefined>>;
 export const EMAIL_JOB = "email";
 /** Alerts older than this aren't emailed: they'd be news no longer. Covers a weekend without runs. */
 export const ALERT_EMAIL_MAX_AGE_DAYS = 4;
-/** A week's review goes on a run from Friday's 4 PM close until this long after it (Tuesday's). */
+/** A week's review goes on a run from its last close (`WeekBounds.closesAt`) until this long after it: Tuesday's, after a Friday close. */
 export const WEEKLY_REVIEW_SEND_DAYS = 4;
 /** Between sends: Resend allows two requests a second by default. */
 export const SEND_SPACING_MS = 500;
@@ -419,7 +422,7 @@ async function emailWeeklyReviews(
     outbox: Outbox,
     config: EmailConfig,
     now: Date,
-    week: ReturnType<typeof easternWeekBounds>,
+    week: WeekBounds,
     recipients: readonly Recipient[],
     database: Database,
     loadJournal: NonNullable<EmailJobDeps["loadJournal"]>,
@@ -467,6 +470,17 @@ async function emailWeeklyReviews(
     return { week: week.id, sent: outbox.sent - sentBefore, noTrades, failed: outbox.failed - failedBefore, deferred };
 }
 
+/**
+ * The week whose review a run at `now` sends, or null: the newest week whose
+ * last session has closed in New York (currentWeekBounds, the NYSE calendar),
+ * until WEEKLY_REVIEW_SEND_DAYS after that close. The same wherever it runs.
+ */
+export function weeklyReviewDue(now: Date): WeekBounds | null {
+    const week = currentWeekBounds(now);
+    const closedAt = Date.parse(week.closesAt);
+    return now.getTime() >= closedAt && now.getTime() < closedAt + WEEKLY_REVIEW_SEND_DAYS * DAY_MS ? week : null;
+}
+
 export class EmailJobError extends Error {
     constructor(readonly detail: EmailJobDetail, failed: number, firstError: string | null) {
         super(`${failed} ${failed === 1 ? "email" : "emails"} couldn't be sent and will go on a later run. First: ${firstError ?? "unknown"}`);
@@ -488,10 +502,9 @@ export async function sendScheduledEmails({
     if (!setup.ok) return { skipped: setup.reason };
 
     const outbox = new Outbox({ send: send ?? resendSender(setup.config), pause, clock, budgetMs });
-    const week = easternWeekBounds(now);
-    const closedAt = Date.parse(week.weekEnd);
-    const reviewsDue = now.getTime() >= closedAt && now.getTime() < closedAt + WEEKLY_REVIEW_SEND_DAYS * DAY_MS;
-    const recipients = reviewsDue ? await buildWeeklyReviewRecipientsQuery(week.id, now, database) : [];
+    const week = weeklyReviewDue(now);
+    const reviewsDue = week !== null;
+    const recipients = week ? await buildWeeklyReviewRecipientsQuery(week.id, now, database) : [];
 
     // Reviews waiting get at least half the budget: alerts come every evening, a review's chance only until Tuesday.
     const alerts = await emailAlerts(outbox, setup.config, now, database, recipients.length > 0 ? budgetMs / 2 : budgetMs);

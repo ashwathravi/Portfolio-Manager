@@ -32,15 +32,15 @@ export interface GenerateReviewOptions {
 }
 
 /** A trade with only a date (launch item i51) counts on that date: its
- *  stored time, noon UTC, isn't when it happened, and east of UTC+4 it
- *  falls after the local Friday close. */
+ *  stored time, noon UTC, isn't when it happened. One with a time counts
+ *  from the week's start up to, not including, the next week's. */
 function inWindow(entry: JournalEntry, bounds: WeekBounds, startMs: number, endMs: number): boolean {
     if (entry.dateOnly) {
         const day = entry.closedAt.slice(0, 10);
         return day >= bounds.firstDay && day <= bounds.lastDay;
     }
     const t = Date.parse(entry.closedAt);
-    return Number.isFinite(t) && t >= startMs && t <= endMs;
+    return Number.isFinite(t) && t >= startMs && t < endMs;
 }
 
 function hygieneScore(entry: JournalEntry): number {
@@ -105,7 +105,7 @@ function countSellDisciplineEvents(entries: JournalEntry[], startMs: number, end
         const events = entry.sellDisciplineEvents ?? [];
         return sum + events.filter((event) => {
             const createdAt = Date.parse(event.createdAt);
-            return Number.isFinite(createdAt) && createdAt >= startMs && createdAt <= endMs;
+            return Number.isFinite(createdAt) && createdAt >= startMs && createdAt < endMs;
         }).length;
     }, 0);
 }
@@ -130,14 +130,14 @@ function computeChurnWarnings(entries: JournalEntry[], bounds: WeekBounds): {
         holdingPeriodDays: entry.holdingPeriodDays,
         policyExceptions: entry.policyExceptions,
     }));
-    // A date-only Friday sale can be stored after the local close; the
-    // week's trades are already chosen, so the window must reach them all.
-    const asOf = entries.reduce(
-        (latest, entry) => Math.max(latest, Date.parse(entry.closedAt) || 0),
-        Date.parse(bounds.weekEnd),
-    );
+    // The week's trades are already chosen, so the window only has to reach
+    // them all: the whole week (7 days give or take a daylight-saving hour),
+    // and a date-only trade's stored time wherever it falls.
+    const times = entries.map((entry) => Date.parse(entry.closedAt)).filter(Number.isFinite);
+    const from = Math.min(Date.parse(bounds.weekStart), ...times);
+    const asOf = Math.max(Date.parse(bounds.weekEnd), ...times);
     const analysis = computeChurnAnalysis(trades, {
-        windowDays: 7,
+        windowDays: (asOf - from) / 86_400_000,
         asOf: new Date(asOf),
         watchRepeatSymbols: 1,
         breachRepeatSymbols: 2,

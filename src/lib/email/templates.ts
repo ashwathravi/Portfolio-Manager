@@ -14,6 +14,7 @@ import { alertLinkLabel, isAlphaRadarAlertMetric } from "@/lib/alerts/metrics";
 import type { AlertMetric } from "@/lib/alerts/types";
 import { formatPct, formatUsd } from "@/lib/format";
 import type { WeeklyReview } from "@/lib/reviews/types";
+import { formatWeekRange } from "@/lib/reviews/weeks";
 import type { EmailList } from "@/lib/validators/email";
 
 /** Alerts listed in one email; the rest are counted, and are in the app. */
@@ -197,15 +198,6 @@ export function alertsEmail(alerts: readonly EmailedAlert[], links: EmailLinks):
 // Weekly review
 // ---------------------------------------------------------------------------
 
-/** "Oct 27–31" or "Sep 29 – Oct 3", from the week's Monday and Friday, as Today's card writes it. */
-export function formatDayRange(firstDay: string, lastDay: string): string {
-    const month = (day: string) => new Date(`${day}T12:00:00Z`).toLocaleDateString("en-US", { month: "short", timeZone: "UTC" });
-    const date = (day: string) => Number(day.slice(8, 10));
-    return month(firstDay) === month(lastDay)
-        ? `${month(firstDay)} ${date(firstDay)}–${date(lastDay)}`
-        : `${month(firstDay)} ${date(firstDay)} – ${month(lastDay)} ${date(lastDay)}`;
-}
-
 function wholeDollars(value: number): string {
     return formatUsd(Math.round(value), { signed: true, decimals: 0 });
 }
@@ -217,7 +209,8 @@ function wholeDollars(value: number): string {
  */
 export function weeklyReviewEmail(review: WeeklyReview, leftOut: readonly string[], links: EmailLinks): RenderedEmail {
     const { stats } = review;
-    const range = formatDayRange(review.firstDay, review.lastDay);
+    // Monday to Friday, as Today's card names the week.
+    const range = formatWeekRange(review);
     const subject = `Your weekly review: ${range}`;
     const trades = `${stats.tradeCount.total} closed ${stats.tradeCount.total === 1 ? "trade" : "trades"}`;
     const rows: Array<[string, string, string]> = [

@@ -20,6 +20,7 @@ import {
     buildWeeklyReviewRecipientsQuery,
     EMAIL_CLAIM_TTL_MS,
     sendScheduledEmails,
+    weeklyReviewDue,
 } from "./nightly";
 
 const NOW = new Date("2026-10-30T22:40:00.000Z");
@@ -126,4 +127,48 @@ describe("sendScheduledEmails", () => {
             skipped: "Email is not configured: RESEND_API_KEY and EMAIL_FROM are not set.",
         });
     });
+});
+
+describe("weeklyReviewDue: which week's review a run sends, on the NYSE calendar (#202)", () => {
+    /** Runs `fn` with the process in another time zone. */
+    function inZone<T>(zone: string, fn: () => T): T {
+        const previous = process.env.TZ;
+        process.env.TZ = zone;
+        try {
+            return fn();
+        } finally {
+            if (previous === undefined) delete process.env.TZ;
+            else process.env.TZ = previous;
+        }
+    }
+    // The zones #202's week tests cover.
+    const ZONES = ["America/New_York", "America/Los_Angeles", "Europe/London", "Asia/Tokyo", "Pacific/Auckland"];
+    const due = (iso: string) => weeklyReviewDue(new Date(iso))?.id ?? null;
+    const everywhere = (check: () => void) => { for (const zone of ZONES) inZone(zone, check); };
+
+    test("from the week's Friday close until four days later, the same in every time zone", () => everywhere(() => {
+        // Friday Oct 30, 2026: the close is 4 PM EDT, 20:00 UTC.
+        assert.equal(due("2026-10-30T19:59:00Z"), null);
+        assert.equal(due("2026-10-30T20:00:00Z"), "wk:2026-10-26");
+        assert.equal(due("2026-10-30T22:35:00Z"), "wk:2026-10-26");
+        assert.equal(due("2026-11-02T22:35:00Z"), "wk:2026-10-26", "Monday's run can still send it");
+        assert.equal(due("2026-11-03T22:35:00Z"), null, "Tuesday's run is too late");
+    }));
+
+    test("regression: a week whose Friday is a holiday is due from Thursday's close, a 1 PM close included", () => everywhere(() => {
+        // Christmas 2026 is a Friday; Thursday Dec 24 closes at 1 PM EST, 18:00 UTC.
+        assert.equal(due("2026-12-24T17:59:00Z"), null);
+        assert.equal(due("2026-12-24T18:00:00Z"), "wk:2026-12-21");
+        assert.equal(due("2026-12-24T22:35:00Z"), "wk:2026-12-21", "Thursday evening's run sends it");
+        assert.equal(due("2026-12-25T22:35:00Z"), "wk:2026-12-21");
+        // Four days after Thursday's close.
+        assert.equal(due("2026-12-28T17:59:00Z"), "wk:2026-12-21");
+        assert.equal(due("2026-12-28T18:00:00Z"), null);
+    }));
+
+    test("regression: the day after Thanksgiving it is due from the 1 PM close", () => everywhere(() => {
+        // Friday Nov 27, 2026 closes at 1 PM EST, 18:00 UTC.
+        assert.equal(due("2026-11-27T17:59:00Z"), null);
+        assert.equal(due("2026-11-27T18:00:00Z"), "wk:2026-11-23");
+    }));
 });

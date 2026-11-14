@@ -207,6 +207,23 @@ test.describe('Settings page', () => {
         expect(syncRequests[1]).toEqual({ itemId: 'item-plaid-sandbox-investments' });
     });
 
+    test('regression (x30): without Plaid\'s keys the card says bank linking isn\'t set up, with no Connect button that fails', async ({ page }) => {
+        // E2E servers run without Plaid's keys (playwright.config.ts), as
+        // production did: Link's routes threw on the missing variable (500).
+        const card = page.getByTestId('integrations-card');
+        const notSetUp = card.getByTestId('plaid-not-set-up');
+        await expect(notSetUp).toContainText("Bank linking isn't set up yet.");
+        await expect(notSetUp.getByRole('link', { name: 'Accounts' })).toHaveAttribute('href', '/portfolios/accounts');
+        await expect(card.getByRole('button', { name: /^Connect$/ })).toHaveCount(0);
+        await expect(card).not.toContainText('No accounts connected yet');
+
+        for (const [path, data] of [['/api/plaid/link-token', {}], ['/api/plaid/exchange-public-token', { publicToken: 'public-sandbox-e2e' }]] as const) {
+            const response = await page.request.post(path, { data });
+            expect(response.status(), path).toBe(503);
+            expect(await response.json()).toEqual({ error: "Bank linking isn't set up yet.", code: 'PLAID_NOT_CONFIGURED' });
+        }
+    });
+
     test('the Plaid token exchange reads at most 64 KB (i69)', async ({ page }) => {
         // Refused before anything reaches Plaid, which E2E never calls anyway.
         const response = await page.request.post('/api/plaid/exchange-public-token', {

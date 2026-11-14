@@ -2,79 +2,72 @@
  * AR-114 — week-boundary math for the weekly review.
  *
  * Pure functions. Callers pass `now` so tests stay deterministic.
- * Everything is in local timezone; once live brokerage data carries
- * tz info we'll switch to US-Eastern. For the seed era the journal
- * records local timestamps so local is correct.
+ *
+ * A review week is a calendar week in New York, Monday 00:00 ET up to the
+ * next Monday 00:00 ET, whatever the browser's time zone: weeks meet, so
+ * every trade (a Friday evening's or a weekend's included) is in exactly
+ * one. Its review is ready once the week's last session has closed, from
+ * the NYSE calendar (src/lib/markets/market-hours.ts): Friday 4:00 PM ET
+ * most weeks, Thursday's close when Friday is a holiday, 1:00 PM on the day
+ * after Thanksgiving (x23).
  */
-import { easternDateTime, getEasternParts } from '@/lib/markets/market-hours';
+import { easternDateTime, getEasternParts, getMarketDay } from '@/lib/markets/market-hours';
 import type { WeekBounds } from './types';
 
+const DAY_MS = 86_400_000;
+
+/** A `YYYY-MM-DD` date as midnight UTC, so no time zone can shift it. */
+function utcDay(date: string): Date {
+    return new Date(`${date}T00:00:00Z`);
+}
+
+/** The calendar date `days` after `date` (before, when negative). */
+function shiftDate(date: string, days: number): string {
+    return new Date(utcDay(date).getTime() + days * DAY_MS).toISOString().slice(0, 10);
+}
+
+/** The Monday of the Monday–Sunday week containing `date`. */
+function mondayOf(date: string): string {
+    const weekday = utcDay(date).getUTCDay(); // 0 = Sun … 6 = Sat
+    return shiftDate(date, -(weekday === 0 ? 6 : weekday - 1));
+}
+
 /**
- * Cutoff hour-of-day used to decide whether "this week" counts as
- * the still-live trading week or the most recent completed one. If
- * the current local time is past Friday 16:00, the review for this
- * week is ready. Before that, we show last week's review.
+ * When the last session of the week starting `monday` closes. A week
+ * without one (NYSE has had none since the calendar starts) has nothing to
+ * wait for: it is ready from its Monday.
  */
-const FRIDAY_CLOSE_HOUR = 16;
-
-/** Monday of the week containing `date`, at 00:00 local. */
-function mondayOf(date: Date): Date {
-    const d = new Date(date);
-    const js = d.getDay(); // 0=Sun..6=Sat
-    // JS week starts Sunday; shift so Monday is index 0. Sunday
-    // rolls back 6 days; Mon rolls back 0; Fri rolls back 4, etc.
-    const offsetToMon = js === 0 ? 6 : js - 1;
-    d.setDate(d.getDate() - offsetToMon);
-    d.setHours(0, 0, 0, 0);
-    return d;
+function weekCloses(monday: string): Date {
+    for (let day = 4; day >= 0; day--) {
+        const date = shiftDate(monday, day);
+        const { closeMinutes } = getMarketDay(date);
+        if (closeMinutes !== null) return easternDateTime(date, closeMinutes);
+    }
+    return easternDateTime(monday, 0);
 }
 
-/** `YYYY-MM-DD` for a local date. Stable regardless of timezone
- *  because we only format the local Y/M/D — no tz conversion. */
-function toLocalDateId(date: Date): string {
-    const y = date.getFullYear();
-    const m = String(date.getMonth() + 1).padStart(2, '0');
-    const d = String(date.getDate()).padStart(2, '0');
-    return `${y}-${m}-${d}`;
-}
-
-/** True if `date` is after the Friday 16:00 close of the week that
- *  contains it. Weekends always count as "past Friday close". */
-function isPastFridayClose(date: Date): boolean {
-    const js = date.getDay();
-    if (js === 0 || js === 6) return true; // Sun/Sat
-    if (js < 5) return false; // Mon..Thu
-    // Friday: compare against 16:00 local.
-    return date.getHours() >= FRIDAY_CLOSE_HOUR;
+/** The week starting on `monday`, an Eastern date. */
+function boundsFrom(monday: string): WeekBounds {
+    return {
+        id: `wk:${monday}`,
+        weekStart: easternDateTime(monday, 0).toISOString(),
+        weekEnd: easternDateTime(shiftDate(monday, 7), 0).toISOString(),
+        closesAt: weekCloses(monday).toISOString(),
+        firstDay: monday,
+        lastDay: shiftDate(monday, 6),
+    };
 }
 
 /**
- * Return the bounds of the most recently completed trading week —
- * i.e. the Monday/Friday pair whose Friday-close precedes `now`.
- * If the current local time is during an in-progress Mon-Fri
- * before Friday close, the returned bounds describe *last* week.
+ * The most recent week whose last session has closed by `now`: this week
+ * from its last close on (the weekend included), the week before until
+ * then.
  */
 export function currentWeekBounds(now: Date = new Date()): WeekBounds {
-    const base = isPastFridayClose(now)
-        ? new Date(now)
-        : // Jump back 7 days to land in last week's Mon..Fri range.
-          new Date(now.getTime() - 7 * 86_400_000);
-
-    return boundsFrom(mondayOf(base));
-}
-
-/** Monday 00:00 to Friday 16:00 local of the week starting `mon`. */
-function boundsFrom(mon: Date): WeekBounds {
-    const fri = new Date(mon);
-    fri.setDate(mon.getDate() + 4);
-    fri.setHours(FRIDAY_CLOSE_HOUR, 0, 0, 0);
-    return {
-        id: `wk:${toLocalDateId(mon)}`,
-        weekStart: mon.toISOString(),
-        weekEnd: fri.toISOString(),
-        firstDay: toLocalDateId(mon),
-        lastDay: toLocalDateId(fri),
-    };
+    const thisWeek = boundsFrom(mondayOf(getEasternParts(now).date));
+    return now.getTime() >= Date.parse(thisWeek.closesAt)
+        ? thisWeek
+        : boundsFrom(shiftDate(thisWeek.firstDay, -7));
 }
 
 /**
@@ -82,11 +75,7 @@ function boundsFrom(mon: Date): WeekBounds {
  * `n = 0` is the same as `currentWeekBounds`. Handy for the archive.
  */
 export function pastWeekBounds(n: number, now: Date = new Date()): WeekBounds {
-    const cur = currentWeekBounds(now);
-    const curMon = new Date(cur.weekStart);
-    const mon = new Date(curMon);
-    mon.setDate(curMon.getDate() - n * 7);
-    return boundsFrom(mon);
+    return boundsFrom(shiftDate(currentWeekBounds(now).firstDay, -7 * n));
 }
 
 /**
@@ -101,42 +90,15 @@ export function listRecentWeeks(count: number = 8, now: Date = new Date()): Week
     return out;
 }
 
-/** `Apr 14 – Apr 18` — abbreviated range suitable for card titles. */
-export function formatWeekRange(bounds: WeekBounds): string {
-    const start = new Date(bounds.weekStart);
-    const end = new Date(bounds.weekEnd);
-    const sameMonth = start.getMonth() === end.getMonth();
-    const fmtMonth = (d: Date) =>
-        d.toLocaleDateString('en-US', { month: 'short' });
-    const fmtDay = (d: Date) => d.getDate();
-    return sameMonth
-        ? `${fmtMonth(start)} ${fmtDay(start)}–${fmtDay(end)}`
-        : `${fmtMonth(start)} ${fmtDay(start)} – ${fmtMonth(end)} ${fmtDay(end)}`;
-}
-
-/** `YYYY-MM-DD` `days` after (or before) another. */
-function shiftDay(day: string, days: number): string {
-    const d = new Date(`${day}T12:00:00Z`);
-    d.setUTCDate(d.getUTCDate() + days);
-    return d.toISOString().slice(0, 10);
-}
-
 /**
- * {@link currentWeekBounds} in New York time wherever it runs: Monday 00:00
- * to Friday 16:00 Eastern of the most recently completed week. For the
- * weekly review email (launch item i58), which a server on UTC sends; the
- * card on Today uses the browser's own time.
+ * `Apr 14–18`, or `Mar 30 – Apr 3` across a month: the week's Monday to
+ * Friday, for card titles. The same in every time zone.
  */
-export function easternWeekBounds(now: Date = new Date()): WeekBounds {
-    const { date, weekday, hour } = getEasternParts(now);
-    const pastClose = weekday === 0 || weekday === 6 || (weekday === 5 && hour >= FRIDAY_CLOSE_HOUR);
-    const monday = shiftDay(date, -((weekday + 6) % 7) - (pastClose ? 0 : 7));
-    const friday = shiftDay(monday, 4);
-    return {
-        id: `wk:${monday}`,
-        weekStart: easternDateTime(monday, 0).toISOString(),
-        weekEnd: easternDateTime(friday, FRIDAY_CLOSE_HOUR * 60).toISOString(),
-        firstDay: monday,
-        lastDay: friday,
-    };
+export function formatWeekRange(bounds: WeekBounds): string {
+    const start = utcDay(bounds.firstDay);
+    const end = utcDay(shiftDate(bounds.firstDay, 4));
+    const fmtMonth = (d: Date) => d.toLocaleDateString('en-US', { month: 'short', timeZone: 'UTC' });
+    return start.getUTCMonth() === end.getUTCMonth()
+        ? `${fmtMonth(start)} ${start.getUTCDate()}–${end.getUTCDate()}`
+        : `${fmtMonth(start)} ${start.getUTCDate()} – ${fmtMonth(end)} ${end.getUTCDate()}`;
 }

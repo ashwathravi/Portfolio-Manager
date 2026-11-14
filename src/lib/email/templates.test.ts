@@ -7,7 +7,6 @@ import {
     ALERTS_LISTED,
     alertsEmail,
     escapeHtml,
-    formatDayRange,
     siteLink,
     unsubscribeHeaders,
     unsubscribeUrls,
@@ -27,9 +26,10 @@ const AAPL: EmailedAlert = {
 const REVIEW: WeeklyReview = {
     id: "wk:2026-10-26",
     weekStart: "2026-10-26T04:00:00.000Z",
-    weekEnd: "2026-10-30T20:00:00.000Z",
+    weekEnd: "2026-11-02T05:00:00.000Z",
+    closesAt: "2026-10-30T20:00:00.000Z",
     firstDay: "2026-10-26",
-    lastDay: "2026-10-30",
+    lastDay: "2026-11-01",
     narrative: "You closed 2 trades for +$1,234 realized.",
     stats: {
         realizedPnlUsd: 1234.4,
@@ -152,9 +152,10 @@ describe("weeklyReviewEmail", () => {
     });
 });
 
-describe("formatDayRange", () => {
-    test("writes a week as Today's card does", () => {
-        assert.equal(formatDayRange("2026-10-26", "2026-10-30"), "Oct 26–30");
-        assert.equal(formatDayRange("2026-09-28", "2026-10-02"), "Sep 28 – Oct 2");
+describe("the weekly review's week", () => {
+    test("is named Monday to Friday, as Today's card names it, though the week runs to Sunday", () => {
+        assert.equal(weeklyReviewEmail(REVIEW, [], LINKS).subject, "Your weekly review: Oct 26–30");
+        const acrossMonths = { ...REVIEW, id: "wk:2026-09-28", firstDay: "2026-09-28", lastDay: "2026-10-04" };
+        assert.equal(weeklyReviewEmail(acrossMonths, [], LINKS).subject, "Your weekly review: Sep 28 – Oct 2");
     });
 });
