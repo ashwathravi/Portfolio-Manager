@@ -97,6 +97,8 @@ const DEFAULT_EXCHANGE_TICKERS_URL = 'https://www.sec.gov/files/company_tickers_
 const EXCHANGE_TICKER_FIELDS = ['cik', 'name', 'ticker', 'exchange'];
 const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
 const DEFAULT_MAX_JSON_RESPONSE_BYTES = 10 * 1024 * 1024;
+// A filing's header index is a few KB: its SEC header and a line per document.
+const MAX_HEADERS_RESPONSE_BYTES = 1024 * 1024;
 // SEC's rate-limit block lasts minutes; a Retry-After that long fails now.
 const DEFAULT_MAX_RETRY_DELAY_MS = 10_000;
 
@@ -275,6 +277,15 @@ export class SecEdgarClient {
         return this.requestJson<SecSubmissionsResponse>(`${this.dataBaseUrl}/submissions/CIK${cik}.json`);
     }
 
+    /**
+     * Where the filing's information table is (launch item i62). A 13F-HR's
+     * primary document is its cover page (primary_doc.xml); the table is an
+     * attachment, usually named by number ("56757.xml"). The filing's header
+     * index names each document's type, so the table is the one of type
+     * INFORMATION TABLE. Without that index, the archive's file list is read:
+     * an XML file named as the table, or else the one XML file that isn't
+     * the cover page. Undefined when neither finds it; a stopped run throws.
+     */
     private async resolveInformationTableUrl(input: {
         cik: string;
         accessionNumber: string;
@@ -282,28 +293,40 @@ export class SecEdgarClient {
         primaryDocument: string | undefined;
         primaryDocDescription: string | undefined;
     }): Promise<string | undefined> {
-        const inferredUrl = inferInformationTableUrl(
-            input.primaryDocumentUrl,
-            input.primaryDocument,
-            input.primaryDocDescription,
-        );
-        if (inferredUrl) return inferredUrl;
+        if (input.primaryDocumentUrl && input.primaryDocDescription?.toLowerCase().includes('information table')) {
+            return input.primaryDocumentUrl;
+        }
 
-        try {
-            const index = await this.requestJson<SecArchiveIndexResponse>(
+        const found = await this.findAttachment(() => this.requestText(
+            this.buildArchiveHeadersUrl(input.cik, input.accessionNumber),
+        ).then(findInformationTableDocument))
+            ?? await this.findAttachment(() => this.requestJson<SecArchiveIndexResponse>(
                 this.buildArchiveIndexUrl(input.cik, input.accessionNumber),
-            );
-            const attachment = findInformationTableAttachment(index, input.primaryDocument);
-            return attachment
-                ? this.buildArchiveDocumentUrl(input.cik, input.accessionNumber, attachment.name)
-                : undefined;
-        } catch {
+            ).then((index) => findInformationTableAttachment(index, input.primaryDocument)));
+        return found ? this.buildArchiveDocumentUrl(input.cik, input.accessionNumber, found) : undefined;
+    }
+
+    /** The attachment's name, or undefined when SEC can't say: discovery goes on without it. */
+    private async findAttachment(find: () => Promise<string | undefined>): Promise<string | undefined> {
+        try {
+            return await find();
+        } catch (error) {
+            if (this.signal?.aborted) throw error;
             return undefined;
         }
     }
 
+    private async requestText(url: string): Promise<string> {
+        const response = await this.request(url, 'text/html,text/plain');
+        try {
+            return await readResponseTextWithLimit(response, { url, maxBytes: MAX_HEADERS_RESPONSE_BYTES, label: 'SEC filing index' });
+        } catch (error) {
+            throw new SecEdgarError('malformed_response', `SEC filing index at ${url} exceeded configured safety limits.`, { cause: error });
+        }
+    }
+
     private async requestJson<T>(url: string): Promise<T> {
-        const response = await this.request(url);
+        const response = await this.request(url, 'application/json');
         const text = await this.readJsonResponseText(response, url);
         try {
             return JSON.parse(text) as T;
@@ -326,7 +349,7 @@ export class SecEdgarClient {
         }
     }
 
-    private async request(url: string): Promise<Response> {
+    private async request(url: string, accept: string): Promise<Response> {
         let lastError: SecEdgarError | null = null;
 
         for (let attempt = 0; attempt <= this.maxRetries; attempt += 1) {
@@ -346,7 +369,7 @@ export class SecEdgarClient {
                     headers: {
                         'User-Agent': this.userAgent,
                         'Accept-Encoding': 'gzip, deflate',
-                        Accept: 'application/json',
+                        Accept: accept,
                     },
                     signal: timeout.signal,
                 });
@@ -410,6 +433,10 @@ export class SecEdgarClient {
 
     private buildArchiveIndexUrl(cik: string, accessionNumber: string): string {
         return `${this.archivesBaseUrl}/edgar/data/${Number(cik)}/${accessionNumber.replaceAll('-', '')}/index.json`;
+    }
+
+    private buildArchiveHeadersUrl(cik: string, accessionNumber: string): string {
+        return `${this.archivesBaseUrl}/edgar/data/${Number(cik)}/${accessionNumber.replaceAll('-', '')}/${accessionNumber}-index-headers.html`;
     }
 }
 
@@ -502,36 +529,53 @@ function acceptanceDateToIso(value: string | undefined): string | undefined {
     return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : undefined;
 }
 
-function inferInformationTableUrl(
-    primaryDocumentUrl: string | undefined,
-    primaryDocument: string | undefined,
-    description: string | undefined,
-): string | undefined {
-    if (!primaryDocumentUrl || !primaryDocument) return undefined;
-
-    const lowerName = primaryDocument.toLowerCase();
-    const lowerDescription = description?.toLowerCase() ?? '';
-    if (lowerName.endsWith('.xml') || lowerDescription.includes('information table')) {
-        return primaryDocumentUrl;
+/**
+ * The document of type INFORMATION TABLE in a filing's header index
+ * ({accession}-index-headers.html), which lists each document as SGML,
+ * HTML-escaped: "&lt;TYPE&gt;INFORMATION TABLE" then "&lt;FILENAME&gt;56757.xml".
+ */
+export function findInformationTableDocument(headers: string): string | undefined {
+    const sgml = headers.replace(/&lt;/gi, '<').replace(/&gt;/gi, '>').replace(/&amp;/gi, '&');
+    for (const document of sgml.split(/<DOCUMENT>/i).slice(1)) {
+        const type = /<TYPE>([^\r\n<]*)/i.exec(document)?.[1]?.trim();
+        const filename = /<FILENAME>([^\r\n<]*)/i.exec(document)?.[1]?.trim();
+        if (type?.toUpperCase() === 'INFORMATION TABLE' && filename && isArchiveFileName(filename) && filename.toLowerCase().endsWith('.xml')) {
+            return filename;
+        }
     }
-
     return undefined;
 }
 
+/**
+ * The information table in a filing's file list (index.json): an XML file
+ * named as one, or else the only XML file besides the cover page. The list
+ * names files only (its types are icons), so a filing with more XML files
+ * than that has none found here.
+ */
 function findInformationTableAttachment(
     index: SecArchiveIndexResponse,
     primaryDocument: string | undefined,
-): { name: string; score: number } | undefined {
-    const items = normalizeArchiveItems(index.directory?.item);
-    const candidates = items
-        .map((item) => ({
-            name: item.name,
-            score: scoreInformationTableAttachment(item, primaryDocument),
-        }))
-        .filter((candidate): candidate is { name: string; score: number } => candidate.score > 0)
+): string | undefined {
+    const coverPage = primaryDocument ? baseName(primaryDocument) : undefined;
+    const xmlFiles = normalizeArchiveItems(index.directory?.item).filter((item) => {
+        const lowerName = item.name.toLowerCase();
+        return lowerName.endsWith('.xml') && lowerName !== coverPage && lowerName !== 'primary_doc.xml' && isArchiveFileName(item.name);
+    });
+    const named = xmlFiles
+        .map((item) => ({ name: item.name, score: scoreInformationTableAttachment(item) }))
+        .filter((candidate) => candidate.score > 0)
         .sort((left, right) => right.score - left.score);
 
-    return candidates[0];
+    return named[0]?.name ?? (xmlFiles.length === 1 ? xmlFiles[0].name : undefined);
+}
+
+/** A file in the filing's own directory, never a path elsewhere. */
+function isArchiveFileName(name: string): boolean {
+    return /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(name);
+}
+
+function baseName(path: string): string {
+    return path.slice(path.lastIndexOf('/') + 1).toLowerCase();
 }
 
 function normalizeArchiveItems(value: unknown): Array<{ name: string; type?: string; description?: string }> {
@@ -550,21 +594,13 @@ function normalizeArchiveItems(value: unknown): Array<{ name: string; type?: str
     });
 }
 
-function scoreInformationTableAttachment(
-    item: { name: string; type?: string; description?: string },
-    primaryDocument: string | undefined,
-): number {
-    const lowerName = item.name.toLowerCase();
-    if (primaryDocument && lowerName === primaryDocument.toLowerCase()) return 0;
-    if (!lowerName.endsWith('.xml')) return 0;
-
+function scoreInformationTableAttachment(item: { name: string; type?: string; description?: string }): number {
     const lowerText = `${item.name} ${item.type ?? ''} ${item.description ?? ''}`.toLowerCase();
     let score = 0;
 
     if (lowerText.includes('information table') || lowerText.includes('informationtable')) score += 100;
     if (lowerText.includes('infotable') || lowerText.includes('info_table') || lowerText.includes('info-table')) score += 90;
     if (lowerText.includes('13f')) score += 20;
-    if (lowerName.endsWith('.xml')) score += 1;
 
     return score >= 80 ? score : 0;
 }

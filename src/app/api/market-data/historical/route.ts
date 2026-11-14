@@ -28,7 +28,7 @@ export async function GET(request: NextRequest) {
 
   const parsedTimeframe = timeframeSchema.safeParse(timeframe.toUpperCase());
   if (!parsedTimeframe.success) {
-    return apiError('Invalid timeframe. Valid values: 1D, 1H, 1M', 'INVALID_TIMEFRAME', 400);
+    return apiError('Invalid timeframe. Valid values: 1D, 1M', 'INVALID_TIMEFRAME', 400);
   }
 
   try {

@@ -87,6 +87,20 @@ test.describe('Privacy policy', () => {
     // Both price providers are named (launch item i33), and get ticker symbols only.
     await expect(sharing.getByText('Market data providers (Massive and Finnhub) and SEC EDGAR')).toBeVisible();
     await expect(sharing).toContainText('We send them ticker symbols, filer IDs and the words you type into ticker search, never your name, email or account details.');
+    // Launch item i62: Alpha Radar's evidence search by meaning.
+    await expect(sharing.getByText('An embedding model provider', { exact: true })).toBeVisible();
+    await expect(sharing).toContainText('It receives the words you type into that search, and the text of SEC filings and Alpha Radar reports, never your name, email or account details.');
+  });
+
+  test('says what Anthropic receives when Claude writes Ask\'s answers, and that it keeps none of it', async ({ page }) => {
+    const sharing = page.getByRole('region', { name: 'Who we share it with' });
+    await expect(sharing.getByText('Anthropic', { exact: true })).toBeVisible();
+    await expect(sharing).toContainText('For each question it receives the question, your last few questions and answers, and what Ask looks up in your data to answer it');
+    await expect(sharing).toContainText('never your name or email');
+    await expect(sharing).toContainText('only to providers that keep none of it once they’ve answered and don’t train AI models on it');
+    const use = page.getByRole('region', { name: 'How we use it' });
+    await expect(use).toContainText('When Ask says under its question box that its answers are written by Claude, your question goes to Anthropic');
+    await expect(use).toContainText('otherwise Ask answers inside Atlas Wealth itself');
   });
 
   test('links to the Plaid end user policy and a contact address', async ({ page }) => {

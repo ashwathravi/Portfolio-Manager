@@ -96,7 +96,7 @@ export interface MarketDataProvider {
 
   /**
    * Fetch historical OHLC bars.
-   * @param range  Human-readable range key, e.g. "1M", "3M", "1Y", "5Y".
+   * @param range  Human-readable range key, e.g. "1M", "3M", "1Y", "MAX".
    *               The adapter is responsible for translating this into
    *               provider-specific date math.
    */

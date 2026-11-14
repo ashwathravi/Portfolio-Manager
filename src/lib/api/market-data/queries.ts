@@ -5,7 +5,8 @@ import { useDebouncedValue } from '@/lib/hooks/useDebouncedValue';
 import { matchesStillTyped } from '@/lib/markets/ticker-search';
 import type { Quote, TickerMatch } from '@/types/market-data';
 
-export type Timeframe = '1D' | '1H' | '1M';
+/** The legacy /historical route's ranges: the last session, or 30 days (x22). */
+export type Timeframe = '1D' | '1M';
 
 export function quotesQueryKey(symbols: readonly string[]) {
     // Sort and dedupe so callers that pass symbols in different order share the same cache entry.

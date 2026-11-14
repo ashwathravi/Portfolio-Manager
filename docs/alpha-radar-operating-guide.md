@@ -66,9 +66,9 @@ Use these fixtures for deterministic parser and diff regression tests. Add new f
 
 Alpha Radar v2 stores searchable evidence in `alpha_radar_semantic_chunks`.
 
-- Filing text and memo sections are chunked with source citations before search.
-- Embeddings are optional. Disabled/no-key environments use keyword fallback instead of failing the workflow.
-- The migration enables pgvector only when the extension is available, but semantic memory does not require pgvector to run locally.
+- Each parsed filing's holdings and its report's sections are chunked with source citations and stored by the refresh, replacing what was stored for that filing and report (launch item i62). Reads return the newest quarters first, at most 500 chunks.
+- Embeddings are optional: `ALPHA_RADAR_EMBEDDING_MODEL` names an AI Gateway embedding model (`src/lib/alpha-radar/embeddings.ts`). With it, the refresh embeds each filing's chunks and the evidence search embeds its query, ranking keyword matches and the most similar chunks together (reciprocal rank fusion, `searchAlphaRadarMemoryChunks`). Without it, or when the gateway fails, chunks are stored without embeddings and the search is by keyword.
+- Embeddings are stored as JSON with each chunk and compared in the app, so semantic memory needs no Postgres extension (the local and CI Postgres have no pgvector). The migration enables pgvector only where it is available.
 - Every result should link back to a source filing, report section, or future thesis draft.
 - Ask Ledger and the Research Alpha Radar tab both use the same semantic memory shape.
 
@@ -165,7 +165,8 @@ npm run test:e2e -- tests/e2e/research.spec.ts
 - `SEC_EDGAR_USER_AGENT is not set` (or `SEC_NOT_CONFIGURED` from a refresh): set `SEC_EDGAR_USER_AGENT` to Atlas's name and a contact.
 - SEC `429` or rate-limit response: retry later; do not run bulk refreshes from CI.
 - No live reports in UI: confirm migrations ran, seed filers exist, and the refresh route can reach EDGAR.
-- No semantic memory results: confirm `alpha_radar_semantic_chunks` has rows for the selected filer/period. If embeddings are unavailable, keyword fallback should still return report-section matches.
+- No semantic memory results: confirm `alpha_radar_semantic_chunks` has rows for the selected filer/period (filings parsed before launch item i62 have none until parsed again with force). If embeddings are unavailable, keyword fallback should still return report-section matches.
+- A filing failed with "SEC lists no information table": neither its header index (`{accession}-index-headers.html`) nor its file list named the table. It is parsed again once SEC lists one; a refresh with force tries it at once.
 - Duplicate alerts after refresh: check the stable Alpha Radar trigger ID shape, which includes rule, filer, period, filing, CUSIP, and change type.
 - Duplicate scheduled runs: compare `alpha-radar` scheduler idempotency keys for the same schedule/window before queueing downstream work.
 - Provider budget blocked: wait until `nextRetryAt` or the window reset before retrying. Do not bypass budgets in preview or production.

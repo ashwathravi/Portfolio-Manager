@@ -7,6 +7,8 @@ import {
     type AlphaRadarSecRefreshService,
 } from './refresh';
 import type { AlphaRadarFilingRecord, AlphaRadarHoldingRecord, AlphaRadarTrackedFilerRecord } from './contracts';
+import type { AlphaRadarEmbeddingProvider } from './memory';
+import type { AlphaRadarFilingMemoryInput } from './memory-repository';
 import type { AlphaRadarHoldingChange, AlphaRadarMemoChange } from './index';
 import type { AlphaRadarReportInput } from '@/lib/validators/alpha-radar';
 import type { ParsedThirteenFHolding, SecRefreshFilerResult, SecTrackedFilerRef, StoredSecFiling } from '@/lib/sec';
@@ -202,6 +204,108 @@ describe('AlphaRadarRefreshService', () => {
     });
 });
 
+class FakeMemory {
+    stored: AlphaRadarFilingMemoryInput[] = [];
+    fails = false;
+
+    async replaceFilingMemory(input: AlphaRadarFilingMemoryInput) {
+        if (this.fails) throw new Error('memory write failed');
+        this.stored.push(input);
+        return { inserted: input.chunks.length };
+    }
+}
+
+function serviceWith(options: Partial<ConstructorParameters<typeof AlphaRadarRefreshService>[0]> & { filings?: StoredSecFiling[] } = {}) {
+    const secIngestion = new FakeSecRefreshService();
+    if (options.filings) secIngestion.filingsByFiler.set(FILER.id, options.filings);
+    const repository = new FakeRepository();
+    const reportRepository = new FakeReportRepository();
+    const reported: unknown[] = [];
+    const service = new AlphaRadarRefreshService({
+        secIngestion,
+        repository,
+        reportRepository,
+        fetchInformationTableXml: async () => REPRESENTATIVE_XML,
+        reportError: (error) => reported.push(error),
+        ...options,
+    });
+    return { service, repository, reportRepository, reported };
+}
+
+describe('AlphaRadarRefreshService: which known filings are parsed again (launch item i62)', () => {
+    for (const [status, parsed] of [['discovered', 1], ['failed', 0], ['parsed', 0]] as const) {
+        test(`a known filing that is ${status} is ${parsed ? 'parsed' : 'skipped'}`, async () => {
+            const { service } = serviceWith({ filings: [{ ...FILING, created: false, status }] });
+            const result = await service.refreshFiler(FILER.id);
+            assert.deepStrictEqual([result.parsed, result.skipped], [parsed, 1 - parsed]);
+        });
+    }
+});
+
+describe('AlphaRadarRefreshService: evidence memory (launch item i62)', () => {
+    test('a parsed filing\'s holdings and report are stored in memory, cited to the information table', async () => {
+        const memory = new FakeMemory();
+        const { service } = serviceWith({ memory });
+
+        const result = await service.refreshFiler(FILER.id);
+
+        assert.strictEqual(memory.stored.length, 1);
+        const [stored] = memory.stored;
+        assert.deepStrictEqual([stored.filingId, stored.reportId], [FILING.id, '55555555-5555-4555-8555-555555555555']);
+        const holdings = stored.chunks.filter((chunk) => chunk.sourceKind === 'filing-text');
+        const memo = stored.chunks.filter((chunk) => chunk.sourceKind === 'memo-section');
+        assert.strictEqual(holdings.length, 1);
+        assert.match(holdings[0].text, /APPLE INC CUSIP 037833100 \$174,000,000,000/);
+        assert.strictEqual(holdings[0].citation.url, FILING.informationTableUrl);
+        assert.ok(memo.length > 0 && memo.every((chunk) => chunk.reportId === stored.reportId && chunk.filingId === FILING.id));
+        assert.deepStrictEqual([result.filers[0].filings[0].memoryChunks, result.filers[0].filings[0].embeddedChunks], [stored.chunks.length, 0]);
+    });
+
+    test('with embeddings on, the chunks are stored embedded', async () => {
+        const memory = new FakeMemory();
+        const embeddings: AlphaRadarEmbeddingProvider = {
+            name: 'ai-gateway', model: 'openai/text-embedding-3-small', dimensions: 0,
+            isEnabled: () => true,
+            embedTexts: async (texts) => texts.map(() => [0.6, 0.8]),
+        };
+        const { service } = serviceWith({ memory, embeddings });
+
+        const result = await service.refreshFiler(FILER.id);
+
+        assert.ok(memory.stored[0].chunks.every((chunk) => chunk.embeddingModel === 'openai/text-embedding-3-small' && chunk.embedding?.length === 2));
+        assert.strictEqual(result.filers[0].filings[0].embeddedChunks, memory.stored[0].chunks.length);
+    });
+
+    test('when embedding fails, the chunks are stored without embeddings and the failure is reported', async () => {
+        const memory = new FakeMemory();
+        const embeddings: AlphaRadarEmbeddingProvider = {
+            name: 'ai-gateway', model: 'openai/text-embedding-3-small', dimensions: 0,
+            isEnabled: () => true,
+            embedTexts: async () => { throw new Error('gateway down'); },
+        };
+        const { service, reported } = serviceWith({ memory, embeddings });
+
+        const result = await service.refreshFiler(FILER.id);
+
+        assert.strictEqual(result.parsed, 1);
+        assert.ok(memory.stored[0].chunks.length > 0 && memory.stored[0].chunks.every((chunk) => chunk.embedding === undefined));
+        assert.match(String(reported[0]), /gateway down/);
+    });
+
+    test('when memory can\'t be stored, the filing is still parsed with its report, and the failure is reported', async () => {
+        const memory = new FakeMemory();
+        memory.fails = true;
+        const { service, reportRepository, reported } = serviceWith({ memory });
+
+        const result = await service.refreshFiler(FILER.id);
+
+        assert.deepStrictEqual([result.parsed, result.memoGenerated, result.errors.length], [1, 1, 0]);
+        assert.strictEqual(reportRepository.reports.length, 1);
+        assert.strictEqual(result.filers[0].filings[0].memoryChunks, 0);
+        assert.match(String(reported[0]), /memory write failed/);
+    });
+});
+
 describe('defaultFetchInformationTableXml', () => {
     const savedUserAgent = process.env.SEC_EDGAR_USER_AGENT;
     beforeEach(() => {
@@ -228,6 +332,25 @@ describe('defaultFetchInformationTableXml', () => {
             stop.abort();
             await assert.rejects(pending, /aborted/);
             assert.strictEqual(signal?.aborted, true);
+        } finally {
+            globalThis.fetch = originalFetch;
+        }
+    });
+
+    test('regression: a filing without an information table fails by name, and its cover page isn\'t fetched in its place', async () => {
+        const originalFetch = globalThis.fetch;
+        let requests = 0;
+        globalThis.fetch = async () => {
+            requests += 1;
+            return new Response('<edgarSubmission />');
+        };
+
+        try {
+            await assert.rejects(
+                () => defaultFetchInformationTableXml({ ...FILING, informationTableUrl: null, primaryDocumentUrl: 'https://example.test/primary_doc.xml' }),
+                /SEC lists no information table among the documents of filing 0000950123-26-000001/,
+            );
+            assert.strictEqual(requests, 0);
         } finally {
             globalThis.fetch = originalFetch;
         }

@@ -8,6 +8,7 @@ import {
     type SplitEvent,
 } from "@/lib/providers/polygon-massive-adapter";
 import type { HoldingSplit } from "@/lib/portfolio/split-adjustments";
+import { MarketDataNotConfiguredError } from "@/lib/providers/errors";
 import type { OHLC } from "@/types/market-data";
 import type { TickerReference } from "./security-profile";
 
@@ -312,6 +313,10 @@ describe("tradingDaysToIngest", () => {
     test("lists the trading days after the stored date, skipping weekends and holidays", () => {
         // Thanksgiving (26 November 2026) is closed; the 27th is an early close but trades.
         assert.deepEqual(tradingDaysToIngest("2026-11-24", "2026-11-30"), ["2026-11-25", "2026-11-27", "2026-11-30"]);
+        // The audit's dates (x23): Good Friday, and Christmas 2027 observed on
+        // Friday Dec 24 with the Saturday New Year's Day not observed at all.
+        assert.deepEqual(tradingDaysToIngest("2026-04-01", "2026-04-06"), ["2026-04-02", "2026-04-06"]);
+        assert.deepEqual(tradingDaysToIngest("2027-12-22", "2028-01-03"), ["2027-12-23", "2027-12-27", "2027-12-28", "2027-12-29", "2027-12-30", "2027-12-31", "2028-01-03"]);
     });
 
     test("is empty when the store is up to date", () => {
@@ -398,15 +403,13 @@ describe("createCallPacer", () => {
 // ---------------------------------------------------------------------------
 
 describe("ingestDailyPrices", () => {
-    test("skips cleanly without an API key, touching neither the provider nor the database", async () => {
+    test("regression: fails without an API key, touching neither the provider nor the database", async () => {
         const { adapter, calls } = fakeAdapter({ configured: false });
         const untouchable = new Proxy({}, {
             get: () => () => assert.fail("the store was used"),
         }) as PriceIngestStore;
 
-        const detail = await ingestDailyPrices({ adapter, store: untouchable, ...fakeClock() });
-
-        assert.deepEqual(detail, { skipped: "Market data is not configured: POLYGON_API_KEY is not set." });
+        await assert.rejects(ingestDailyPrices({ adapter, store: untouchable, ...fakeClock() }), MarketDataNotConfiguredError);
         assert.deepEqual(calls, []);
     });
 

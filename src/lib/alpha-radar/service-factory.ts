@@ -1,4 +1,6 @@
 import { SecEdgarClient, AlphaRadarSecIngestionService, DrizzleSecFilingRepository } from '@/lib/sec';
+import { alphaRadarEmbeddingProvider } from './embeddings';
+import { DrizzleAlphaRadarSemanticMemoryRepository } from './memory-repository';
 import { DrizzleAlphaRadarReportRepository } from './report-repository';
 import { DrizzleAlphaRadarDataRepository } from './repository';
 import { AlphaRadarRefreshService, defaultFetchInformationTableXml } from './refresh';
@@ -16,5 +18,7 @@ export function getAlphaRadarRefreshService({ signal }: { signal?: AbortSignal }
         reportRepository: new DrizzleAlphaRadarReportRepository(),
         fetchInformationTableXml: (filing) => defaultFetchInformationTableXml(filing, signal),
         filingLimit: 3,
+        memory: new DrizzleAlphaRadarSemanticMemoryRepository(),
+        embeddings: alphaRadarEmbeddingProvider(),
     });
 }

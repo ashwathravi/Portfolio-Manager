@@ -51,7 +51,7 @@ function watchForProblems(page: Page, origin: string): string[] {
     page.on('console', (message) => {
         if (message.type() !== 'error') return;
         if (upgradedOrigin && isFailedUpgrade(message, upgradedOrigin)) return;
-        problems.push(`console: ${message.text()}`);
+        problems.push(`console: ${message.text()} (${message.location().url})`);
     });
     page.on('pageerror', (error) => problems.push(`page error: ${String(error)}`));
     page.on('response', (response) => {
@@ -97,6 +97,13 @@ test.describe('After a production deploy', () => {
         expect(body.status).toBe(response.status() === 200 ? 'ok' : 'degraded');
         expect(body.jobs.map((job: { job: string }) => job.job)).toEqual(SCHEDULED_JOBS);
         for (const job of body.jobs) expect(['ok', 'late', 'failed']).toContain(job.status);
+        // And whether the stored closes and the snapshots are recent enough
+        // (none at all is stale).
+        for (const freshness of [body.closes, body.snapshots]) {
+            expect(['ok', 'stale']).toContain(freshness.status);
+            expect(freshness.latest === null || /^\d{4}-\d{2}-\d{2}$/.test(freshness.latest)).toBe(true);
+            expect(freshness.oldestAllowed).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+        }
     });
 
     test('sends a signed-out visitor to sign in, with sign-in configured', async ({ page }) => {

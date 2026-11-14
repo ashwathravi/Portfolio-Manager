@@ -4,8 +4,9 @@ import { consumeDailyQuota } from "@/lib/api/daily-quota";
 import { apiError, internalServerError, logApiEvent } from "@/lib/api/security";
 import { requestIdFrom } from "@/lib/observability/request-id";
 import { requireSessionApiUserScope } from "@/lib/api/session-security";
+import { plaidLinking } from "@/lib/plaid/availability";
 import { MAX_PLAID_CONNECTIONS_PER_USER, plaidConnectionLimitMessage } from "@/lib/plaid/connections";
-import { createPlaidLinkToken, resolvePlaidEnvironment } from "@/lib/plaid/link";
+import { createPlaidLinkToken } from "@/lib/plaid/link";
 import { plaidRedirectUri } from "@/lib/plaid/oauth";
 import { countPlaidConnectionsForUser, getPlaidAccessTokenForUser } from "@/lib/plaid/server-token-vault";
 import { plaidIdSchema } from "@/lib/validators/plaid-sync";
@@ -19,11 +20,17 @@ export const dynamic = "force-dynamic";
  *
  * A new link is refused with 409 PLAID_CONNECTION_LIMIT once the user has
  * MAX_PLAID_CONNECTIONS_PER_USER, and either kind with 429
- * DAILY_QUOTA_REACHED past the day's bank links (launch item i77).
+ * DAILY_QUOTA_REACHED past the day's bank links (launch item i77). Without
+ * Plaid's keys it answers 503 PLAID_NOT_CONFIGURED before anything else, so
+ * nothing is looked up or counted against the day's links (x30).
  */
 export async function POST(request: Request) {
     const auth = await requireSessionApiUserScope(request);
     if (!auth.ok) return auth.response;
+
+    const plaid = plaidLinking();
+    if (!plaid.ok) return apiError(plaid.message, plaid.code, 503);
+    const { credentials, environment } = plaid.config;
 
     // No body (a new link) is fine; one that names a connection must be valid.
     const body = await readJsonBody(request, 1024);
@@ -44,7 +51,6 @@ export async function POST(request: Request) {
         const overQuota = await consumeDailyQuota(auth.context.userId, "bankLinks");
         if (overQuota) return overQuota;
 
-        const environment = resolvePlaidEnvironment(process.env.PLAID_ENV);
         logApiEvent("plaid_link_token_requested", {
             route: "/api/plaid/link-token",
             requestId: requestIdFrom(request.headers),
@@ -53,7 +59,7 @@ export async function POST(request: Request) {
         });
 
         const token = await createPlaidLinkToken({
-            credentials: plaidCredentialsFromEnv(),
+            credentials,
             environment,
             clientUserId: auth.context.userId,
             clientName: readOptionalEnv("PLAID_CLIENT_NAME") ?? "Atlas Wealth",
@@ -76,19 +82,6 @@ export async function POST(request: Request) {
     } catch (error) {
         return internalServerError(error, "Unable to create Plaid link token.", "PLAID_LINK_TOKEN_FAILED");
     }
-}
-
-function plaidCredentialsFromEnv() {
-    return {
-        clientId: readRequiredEnv("PLAID_CLIENT_ID"),
-        secret: readRequiredEnv("PLAID_SECRET"),
-    };
-}
-
-function readRequiredEnv(name: string): string {
-    const value = process.env[name]?.trim();
-    if (!value) throw new Error(`${name} is required`);
-    return value;
 }
 
 function readOptionalEnv(name: string): string | undefined {

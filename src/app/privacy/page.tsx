@@ -91,8 +91,10 @@ export default function PrivacyPage({ searchParams }: { searchParams: LegalSearc
                 </ul>
                 <p>
                     We do not sell your data, use it for advertising, or use it to make credit decisions.
-                    Atlas Wealth does not place trades or move money. Ask answers questions inside Atlas
-                    Wealth itself; your questions are not sent to an outside AI service.
+                    Atlas Wealth does not place trades or move money. When Ask says under its question box
+                    that its answers are written by Claude, your question goes to Anthropic to answer, as
+                    described below; otherwise Ask answers inside Atlas Wealth itself and your questions
+                    aren&rsquo;t sent to an outside AI service.
                 </p>
             </section>
 
@@ -124,9 +126,25 @@ export default function PrivacyPage({ searchParams }: { searchParams: LegalSearc
                         Sentry sees your IP address the way any website you connect to does.
                     </li>
                     <li>
+                        <strong>Anthropic</strong>, through Vercel&rsquo;s AI Gateway, writes Ask&rsquo;s answers
+                        when Ask says they&rsquo;re written by Claude. For each question it receives the question,
+                        your last few questions and answers, and what Ask looks up in your data to answer it:
+                        figures from your holdings, trades, theses, risk policy or Alpha Radar, with the ticker,
+                        holding and account names they come with, never your name or email. The gateway sends
+                        it only to providers that keep none of it once they&rsquo;ve answered and don&rsquo;t
+                        train AI models on it.
+                    </li>
+                    <li>
                         <strong>Market data providers (Massive and Finnhub) and SEC EDGAR</strong> supply prices
                         and filings. We send them ticker symbols, filer IDs and the words you type into ticker
                         search, never your name, email or account details.
+                    </li>
+                    <li>
+                        <strong>An embedding model provider</strong>, through Vercel&rsquo;s AI Gateway, when
+                        Alpha Radar&rsquo;s evidence search says it ranks by meaning. It receives the words you
+                        type into that search, and the text of SEC filings and Alpha Radar reports, never your
+                        name, email or account details. The gateway sends them only to providers that keep none
+                        of it and don&rsquo;t train AI models on it.
                     </li>
                 </ul>
                 <p>

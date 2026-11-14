@@ -68,11 +68,29 @@ const noCronSecret = {
     CRON_SECRET: '',
 };
 
+// No Plaid keys, so nothing reaches Plaid and Settings always shows bank
+// linking as not set up, as production does until its keys are added (x30).
+// Tests that exercise Link stub the /api/plaid routes and the Link SDK.
+const noPlaid = {
+    PLAID_CLIENT_ID: '',
+    PLAID_SECRET: '',
+};
+
 // No Sentry DSN, so the SDK never starts and a test run's errors never reach
 // the production project (and no build uploads source maps).
 const noSentry = {
     NEXT_PUBLIC_SENTRY_DSN: '',
     SENTRY_AUTH_TOKEN: '',
+};
+
+// No Ask model or AI Gateway credentials, so Ask's answers always come from
+// the rules planner and a test run never sends a question to Anthropic
+// (launch item i59). Claude's answers are covered by unit tests over a mock
+// model (src/lib/ask/server/claude.test.ts).
+const noAskModel = {
+    ASK_MODEL: '',
+    AI_GATEWAY_API_KEY: '',
+    VERCEL_OIDC_TOKEN: '',
 };
 
 // The outage servers run `next dev` from an empty build directory every run.
@@ -166,7 +184,9 @@ export default defineConfig({
                 ...noSharedRedis,
                 ...noMarketData,
                 ...noCronSecret,
+                ...noPlaid,
                 ...noSentry,
+                ...noAskModel,
             },
             url: 'http://localhost:3000',
             // Never reuse a running server: it may be connected to a real
@@ -193,7 +213,9 @@ export default defineConfig({
                 ...noSharedRedis,
                 ...noMarketData,
                 ...noCronSecret,
+                ...noPlaid,
                 ...noSentry,
+                ...noAskModel,
             },
             url: 'http://localhost:3100/api/health',
             // Never reuse a running server: it may be connected to a real
@@ -226,7 +248,9 @@ export default defineConfig({
                 ...noSharedRedis,
                 ...noMarketData,
                 ...noCronSecret,
+                ...noPlaid,
                 ...noSentry,
+                ...noAskModel,
             },
             url: 'http://localhost:3200/api/health',
             // Never reuse a running server: it may be connected to a real
