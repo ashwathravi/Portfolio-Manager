@@ -62,6 +62,7 @@ import {
     type HoldingSplit,
     type HoldingSplitOutcome,
 } from "@/lib/portfolio/split-adjustments";
+import { MarketDataNotConfiguredError } from "@/lib/providers/errors";
 import { getMassiveQuota } from "@/lib/providers/massive-quota";
 import {
     PolygonApiError,
@@ -205,8 +206,6 @@ export interface IngestPricesOptions {
 export type IngestStopReason = "not-published" | "budget" | "rate-limited";
 
 export type PriceIngestDetail = {
-    /** Why the run did nothing, e.g. no API key. Absent on a normal run. */
-    skipped?: string;
     /** The last completed session when the run started: what it catches up to. */
     session?: string;
     tracked?: number;
@@ -400,8 +399,9 @@ export function createIngestAdapter(config: Omit<PolygonAdapterConfig, "maxRetri
 
 /**
  * Runs one nightly ingest and reports what it did. A provider or database
- * error during the catch-up fails the run (the job records it); a single
- * symbol's failed backfill is reported and leaves it queued for the next run.
+ * error during the catch-up fails the run (the job records it), and so does
+ * a missing API key, so job health reports it; a single symbol's failed
+ * backfill is reported and leaves it queued for the next run.
  */
 export async function ingestDailyPrices({
     adapter = createIngestAdapter(),
@@ -411,9 +411,7 @@ export async function ingestDailyPrices({
     sleep = defaultSleep,
     budgetMs = DEFAULT_BUDGET_MS,
 }: IngestPricesOptions = {}): Promise<PriceIngestDetail> {
-    if (!adapter.isConfigured) {
-        return { skipped: "Market data is not configured: POLYGON_API_KEY is not set." };
-    }
+    if (!adapter.isConfigured) throw new MarketDataNotConfiguredError("POLYGON_API_KEY");
 
     const pacer = createCallPacer({ now, sleep, deadline: now().getTime() + budgetMs });
     /**
