@@ -10,11 +10,13 @@
  * symbol directory from SEC (launch item i35): one quick request, taken out
  * of the price budget, and run even before a market data key is set. Without
  * that key the price job then fails, so job health reports it. Alerts go
- * last, on the closes and holdings the jobs before them stored (launch item
- * i57).
+ * after them, on the closes and holdings the jobs before them stored
+ * (launch item i57), and then the emails that carry them, with the weekly
+ * review after Friday's close (launch item i58).
  */
 
 import { evaluateAlertRules } from "@/lib/alerts/nightly";
+import { sendScheduledEmails } from "@/lib/email/nightly";
 import { pruneAskHistory } from "@/lib/ask/server/history";
 import { DEFAULT_BUDGET_MS, ingestDailyPrices } from "@/lib/markets/price-ingest";
 import { refreshSymbolDirectory } from "@/lib/markets/symbol-directory";
@@ -47,4 +49,5 @@ export const DAILY_JOBS: readonly ScheduledJob[] = [
     { name: "prices", run: () => refreshMarketData() },
     { name: "snapshots", run: () => recordValuationSnapshots() },
     { name: "alerts", run: async () => ({ ...(await evaluateAlertRules()) }) },
+    { name: "email", run: async () => ({ ...(await sendScheduledEmails()) }) },
 ];
