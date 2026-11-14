@@ -13,6 +13,7 @@ import { holdingName, loadSecurityProfiles } from "@/lib/markets/security-profil
 import { defaultPolicyBucket } from "@/lib/risk-policy/buckets";
 import type { LoadedOptionPosition } from "@/lib/portfolio/option-positions";
 import { loadOptionPositions, loadThesisChoices } from "@/lib/portfolio/option-positions-store";
+import { parseHoldingsRowView, type HoldingsRowView } from "@/lib/holdings/combine";
 
 /**
  * Phase 4 (AR-74) Holdings page.
@@ -24,7 +25,7 @@ import { loadOptionPositions, loadThesisChoices } from "@/lib/portfolio/option-p
 
 export const dynamic = "force-dynamic";
 
-async function HoldingsContent() {
+async function HoldingsContent({ rowView }: { rowView: HoldingsRowView }) {
     const userId = await requirePageUserId();
     let dbHoldings: Array<{
         id: string;
@@ -35,6 +36,7 @@ async function HoldingsContent() {
         currentPrice: number | null;
         marketValue: number | null;
         createdAt: Date;
+        portfolioId: string;
         portfolioName: string;
     }> = [];
     let accounts: Array<ImportAccountOption & { cashBalance: number | null }> = [];
@@ -108,6 +110,7 @@ async function HoldingsContent() {
             avgCost: avg,
             currentPrice: last,
             marketValue,
+            accountId: h.portfolioId,
             account: h.portfolioName,
             holdingDays,
         };
@@ -128,6 +131,7 @@ async function HoldingsContent() {
             />
             <HoldingsPageClient
                 holdings={seed}
+                initialRowView={rowView}
                 importAccounts={accounts.map(({ id, name }) => ({ id, name }))}
                 // The LEAPS ledger measures against what Today and Trade do:
                 // holdings, cash and options together.
@@ -139,7 +143,13 @@ async function HoldingsContent() {
     );
 }
 
-export default function CurrentHoldingsPage() {
+export default async function CurrentHoldingsPage({
+    searchParams,
+}: {
+    searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+    // ?view=symbol: one row per symbol across accounts (launch item i79).
+    const { view } = await searchParams;
     return (
         <>
             <PageHeaderSync
@@ -148,7 +158,7 @@ export default function CurrentHoldingsPage() {
                 crumbs={["Portfolio", "Holdings"]}
             />
             <Suspense fallback={<HoldingsLoading />}>
-                <HoldingsContent />
+                <HoldingsContent rowView={parseHoldingsRowView(view)} />
             </Suspense>
         </>
     );
