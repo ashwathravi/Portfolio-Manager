@@ -21,6 +21,7 @@ import {
     portfolioSnapshotPositions,
     portfolioSnapshots,
     portfolios,
+    strategies,
     theses,
     thesisCatalysts,
     thesisEvidence,
@@ -29,6 +30,7 @@ import {
     watchlistItems,
 } from "@/db/schema";
 
+import { buildListFollowedFilersQuery } from "@/lib/alpha-radar/follows";
 import { orderFromRow } from "@/lib/execution/orders";
 
 import { ACCOUNT_EXPORT_FORMAT, ACCOUNT_EXPORT_VERSION, type AccountExport, type ExportedValuationPosition } from "./export-data";
@@ -99,6 +101,9 @@ export async function buildAccountExport(userId: string, database: Database = db
             tx.select().from(thesisCatalysts).where(eq(thesisCatalysts.userId, userId)).orderBy(asc(thesisCatalysts.position)),
             tx.select().from(thesisEvidence).where(eq(thesisEvidence.userId, userId)).orderBy(asc(thesisEvidence.position)),
         ]);
+        const saved = await tx.select().from(strategies)
+            .where(eq(strategies.userId, userId)).orderBy(asc(strategies.createdAt), asc(strategies.id));
+        const followed = await buildListFollowedFilersQuery(userId, tx);
         const asked = await tx.select().from(askMessages)
             .where(and(eq(askMessages.userId, userId), eq(askMessages.cleared, false))).orderBy(asc(askMessages.createdAt), asc(askMessages.id));
 
@@ -166,6 +171,12 @@ export async function buildAccountExport(userId: string, database: Database = db
                 evidence: evidence.filter((e) => e.thesisId === thesis.id).map((e) => plain({ ...e, thesisId: undefined })),
             })),
             askHistory: asked.map(plain),
+            strategies: saved.map(plain),
+            alphaRadarFollows: followed.map((follow) => ({
+                filerId: follow.trackedFilerId,
+                name: follow.name,
+                followedAt: follow.followedAt.toISOString(),
+            })),
         };
     }, { isolationLevel: "repeatable read", accessMode: "read only" });
 }

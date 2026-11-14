@@ -8,7 +8,9 @@ import {
     type AlphaRadarHoldingChange,
 } from './diff';
 import {
+    configuredSecUserAgent,
     parseThirteenFInformationTable,
+    SEC_USER_AGENT_MISSING,
     SecEdgarError,
     type SecRefreshFilerResult,
     type SecTrackedFilerRef,
@@ -290,14 +292,15 @@ export class AlphaRadarRefreshService {
     }
 }
 
-export async function defaultFetchInformationTableXml(filing: StoredSecFiling): Promise<string> {
+export async function defaultFetchInformationTableXml(filing: StoredSecFiling, stop?: AbortSignal): Promise<string> {
     const url = filing.informationTableUrl ?? filing.primaryDocumentUrl;
     if (!url) {
         throw new Error(`No SEC information table URL available for ${filing.accessionNumber}.`);
     }
 
-    const userAgent = (process.env.SEC_EDGAR_USER_AGENT ?? 'Portfolio-Manager Alpha Radar local-dev contact@example.invalid').trim();
-    const timeout = createRequestTimeout(SEC_INFORMATION_TABLE_TIMEOUT_MS);
+    const userAgent = configuredSecUserAgent();
+    if (!userAgent) throw new SecEdgarError('configuration', SEC_USER_AGENT_MISSING);
+    const timeout = createRequestTimeout(SEC_INFORMATION_TABLE_TIMEOUT_MS, stop);
     let response: Response;
     try {
         response = await fetch(url, {

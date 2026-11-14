@@ -44,6 +44,8 @@ export interface AdherenceRulesPanelProps {
     /** When `adherenceScore` is set, this is the tier the parent computes
      *  via `adherenceTier()`. Drives the medal copy ("best quartile"). */
     adherenceTier?: 'top' | 'good' | 'ok' | 'low' | null;
+    /** A line under the header, e.g. where the rules are checked. */
+    note?: string;
 }
 
 export function AdherenceRulesPanel({
@@ -51,6 +53,7 @@ export function AdherenceRulesPanel({
     onChange,
     adherenceScore,
     adherenceTier,
+    note,
 }: AdherenceRulesPanelProps) {
     const [pickerOpen, setPickerOpen] = useState(false);
 
@@ -117,6 +120,7 @@ export function AdherenceRulesPanel({
                     )}
                 </div>
             </header>
+            {note && <p className="pm-rb-section-hint" data-testid="adherence-note">{note}</p>}
 
             {rules.length === 0 ? (
                 <div className="pm-rb-empty" data-testid="adherence-rules-empty">

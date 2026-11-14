@@ -29,10 +29,18 @@ const V1_WORKFLOWS = [
         ],
     },
     {
-        title: "Refresh filing data",
+        title: "Follow a filer",
         steps: [
-            "Use Refresh from Research or the Dashboard card when local database and SEC access are configured.",
-            "Treat seeded data as a local fallback until live storage is available.",
+            "Pick a filer in Research › Alpha Radar and choose Follow.",
+            "Today's Alpha Radar card then shows the latest reports from the filers you follow.",
+            "Atlas checks SEC for every tracked filer's new 13F filings once a day, so there is nothing to refresh.",
+        ],
+    },
+    {
+        title: "Refresh filing data (admins)",
+        steps: [
+            "Admins can refresh from Research or the Today card, once SEC_EDGAR_USER_AGENT names Atlas and a contact.",
+            "Example filers show only while Atlas tracks none, to users who show example data, and are labelled Sample.",
             "Review failures before retrying so duplicate runs do not create duplicate alerts.",
         ],
     },
@@ -84,7 +92,8 @@ const V2_WORKFLOWS = [
 
 const LIMITATIONS = [
     "13F filings are delayed and do not show shorts, non-reportable assets, or intra-quarter trades.",
-    "Fallback data is seeded for local development and should not be treated as live market intelligence.",
+    "Example filers and reports are labelled Sample and are not real 13F data.",
+    "Overlap with your holdings, watchlist and theses is matched by company name, since 13F filings name issuers, not tickers: an unusual abbreviation can be missed.",
     "Backtests are exploratory signal-quality checks and are not production trading recommendations.",
     "External overlays and generated drafts require human review before they affect active theses or portfolio decisions.",
 ];

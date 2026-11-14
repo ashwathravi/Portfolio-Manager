@@ -93,6 +93,10 @@ export interface AccountExport {
     theses: Record<string, unknown>[];
     /** The Ask conversation: each question and its answer, oldest first. */
     askHistory: Record<string, unknown>[];
+    /** Saved strategies, each with its definition, discipline rules and last backtest. */
+    strategies: Record<string, unknown>[];
+    /** The Alpha Radar filers followed, by name. The filers themselves are shared, not the user's. */
+    alphaRadarFollows: { filerId: string; name: string; followedAt: string }[];
 }
 
 /** One row per holding, across the user's accounts. */

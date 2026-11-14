@@ -1,5 +1,6 @@
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { gotoAppPage } from './helpers/app';
+import { researchLoaded } from './helpers/research';
 import { userKey } from './helpers/storage';
 import { signInAsFreshUser } from './helpers/users';
 
@@ -11,6 +12,13 @@ const WATCHLIST_KEY = 'atlas:research:watchlist';
 
 function list(page: Page) {
     return page.locator('.pm-research-list');
+}
+
+/** Opens the watchlist and waits for the account's list: a change made before it loads is refused. */
+async function openWatchlist(page: Page) {
+    const loaded = researchLoaded(page, 'watchlist');
+    await gotoAppPage(page, '/research?tab=watchlist');
+    await loaded;
 }
 
 async function addTicker(page: Page, ticker: string) {
@@ -37,7 +45,7 @@ test.describe('Watchlist in the account', () => {
 
     test('a ticker you add follows you to another browser', async ({ browser, context, page }) => {
         await signInAsFreshUser(context);
-        await gotoAppPage(page, '/research?tab=watchlist');
+        await openWatchlist(page);
         await addTicker(page, 'NVDA');
 
         const elsewhere = await anotherBrowser(browser, context);
@@ -88,7 +96,7 @@ test.describe('Watchlist in the account', () => {
 
     test("one account's watchlist doesn't reach another", async ({ browser, context, page }) => {
         await signInAsFreshUser(context);
-        await gotoAppPage(page, '/research?tab=watchlist');
+        await openWatchlist(page);
         await addTicker(page, 'TSLA');
 
         const other = await browser.newContext();

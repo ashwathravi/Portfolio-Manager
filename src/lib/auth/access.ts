@@ -9,6 +9,11 @@ export interface GoogleAccessPolicy {
     allowedDomains?: string;
     /** Deny every sign-in when neither list is set. Defaults to on in production. */
     requireAllowlist?: boolean;
+    /** Any verified Google account may sign up, and the invite lists are ignored (AUTH_OPEN_SIGNUP). */
+    openSignup?: boolean;
+    /** Never allowed in, whatever else applies (AUTH_BLOCKED_EMAILS, AUTH_BLOCKED_DOMAINS). */
+    blockedEmails?: string;
+    blockedDomains?: string;
 }
 
 export interface AuthEnvironment {
@@ -20,6 +25,10 @@ export interface AuthEnvironment {
     AUTH_LOCAL_DEV_USER_ID?: string;
     AUTH_ALLOWED_EMAILS?: string;
     AUTH_ALLOWED_DOMAINS?: string;
+    AUTH_OPEN_SIGNUP?: string;
+    AUTH_SIGNUP_DAILY_LIMIT?: string;
+    AUTH_BLOCKED_EMAILS?: string;
+    AUTH_BLOCKED_DOMAINS?: string;
     AUTH_ADMIN_EMAILS?: string;
     INTERNAL_API_SECRET?: string;
 }
@@ -31,7 +40,18 @@ export function currentAccessPolicy(env: AuthEnvironment = process.env): GoogleA
         allowedEmails: env.AUTH_ALLOWED_EMAILS,
         allowedDomains: env.AUTH_ALLOWED_DOMAINS,
         requireAllowlist: env.NODE_ENV === "production",
+        openSignup: isOpenSignup(env),
+        blockedEmails: env.AUTH_BLOCKED_EMAILS,
+        blockedDomains: env.AUTH_BLOCKED_DOMAINS,
     };
+}
+
+/**
+ * Whether anyone with a verified Google account may sign up (launch item
+ * i77): AUTH_OPEN_SIGNUP="1". Otherwise only the invite list may.
+ */
+export function isOpenSignup(env: AuthEnvironment = process.env): boolean {
+    return env.AUTH_OPEN_SIGNUP?.trim() === "1";
 }
 
 export function isGoogleProfileAllowed(
@@ -42,6 +62,10 @@ export function isGoogleProfileAllowed(
     const emailVerified = profile?.email_verified === true;
     if (!email || !emailVerified) return false;
 
+    const hostedDomain = typeof profile?.hd === "string" ? profile.hd.trim().toLowerCase() : "";
+    if (isBlocked(email, hostedDomain, policy)) return false;
+    if (policy.openSignup) return true;
+
     // When both lists are set, a profile must match both (email AND domain).
     const allowedEmails = parseCsv(policy.allowedEmails).map((entry) => entry.toLowerCase());
     const allowedDomainsConfigured = parseCsv(policy.allowedDomains).length > 0;
@@ -51,30 +75,56 @@ export function isGoogleProfileAllowed(
     const allowedDomains = parseCsv(policy.allowedDomains).map((entry) => entry.toLowerCase());
     if (allowedDomains.length === 0) return true;
 
-    const hostedDomain = typeof profile?.hd === "string" ? profile.hd.trim().toLowerCase() : "";
     return allowedDomains.includes(hostedDomain);
 }
 
 /**
- * Whether an existing session's user is still on the invite list. Checked on
- * every session read, so removing someone from the list ends their access
+ * Whether an existing session's user may still come in: on the invite list
+ * (or sign-up is open) and not blocked. Checked on every session read, so
+ * removing someone from the list, or blocking them, ends their access
  * immediately rather than when their session expires. At sign-in the domain
- * list is checked against Google's hosted-domain claim; here, where only the
- * stored email is available, against the email's domain.
+ * lists are checked against Google's hosted-domain claim too; here, where
+ * only the stored email is available, against the email's domain. A blocked
+ * Workspace domain is checked against the user's stored Google sign-in too
+ * (src/lib/auth/session-access.ts).
  */
 export function isSessionEmailAllowed(
     email: unknown,
     policy: GoogleAccessPolicy = currentAccessPolicy(),
 ): boolean {
+    const normalized = typeof email === "string" ? email.trim().toLowerCase() : "";
+    if (normalized && isBlocked(normalized, "", policy)) return false;
+    if (policy.openSignup) return true;
+
     const allowedEmails = parseCsv(policy.allowedEmails).map((entry) => entry.toLowerCase());
     const allowedDomains = parseCsv(policy.allowedDomains).map((entry) => entry.toLowerCase());
     if (allowedEmails.length === 0 && allowedDomains.length === 0) return !policy.requireAllowlist;
 
-    const normalized = typeof email === "string" ? email.trim().toLowerCase() : "";
     if (!normalized) return false;
     if (allowedEmails.length > 0 && !allowedEmails.includes(normalized)) return false;
     if (allowedDomains.length === 0) return true;
-    return allowedDomains.includes(normalized.slice(normalized.lastIndexOf("@") + 1));
+    return allowedDomains.includes(emailDomain(normalized));
+}
+
+/** Whether AUTH_BLOCKED_DOMAINS names any domain. */
+export function hasBlockedDomains(policy: GoogleAccessPolicy = currentAccessPolicy()): boolean {
+    return parseCsv(policy.blockedDomains).length > 0;
+}
+
+/** Whether `domain` (an email's, or a Google Workspace's) is on the block list. */
+export function isBlockedDomain(domain: string, policy: GoogleAccessPolicy = currentAccessPolicy()): boolean {
+    const normalized = domain.trim().toLowerCase();
+    return normalized !== "" && parseCsv(policy.blockedDomains).some((entry) => entry.toLowerCase() === normalized);
+}
+
+/** On the block list by email, or by the email's or Google Workspace's domain. */
+function isBlocked(email: string, hostedDomain: string, policy: GoogleAccessPolicy): boolean {
+    if (parseCsv(policy.blockedEmails).some((entry) => entry.toLowerCase() === email)) return true;
+    return isBlockedDomain(emailDomain(email), policy) || isBlockedDomain(hostedDomain, policy);
+}
+
+function emailDomain(email: string): string {
+    return email.slice(email.lastIndexOf("@") + 1);
 }
 
 /**
@@ -100,9 +150,10 @@ export function authRuntimeMode(env: AuthEnvironment = process.env): AuthRuntime
         env.AUTH_GOOGLE_SECRET?.trim(),
     ];
     if (authValues.every(Boolean)) {
-        // Production never runs with open sign-up: without an invite list any
-        // verified Google account could create an account.
-        if (env.NODE_ENV === "production" && !hasAccessAllowlist(env)) return "invalid";
+        // Production never opens sign-up by accident: without an invite list
+        // any verified Google account could create an account, so that takes
+        // AUTH_OPEN_SIGNUP (launch item i77).
+        if (env.NODE_ENV === "production" && !hasAccessAllowlist(env) && !isOpenSignup(env)) return "invalid";
         return "configured";
     }
 

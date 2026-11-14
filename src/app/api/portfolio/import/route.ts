@@ -7,12 +7,14 @@
  * Body:     { portfolioId?: uuid, newPortfolioName?: string, rows: ImportRow[] }
  * Response: { data: { portfolioId, createdPortfolio, insert, update, unchanged } }
  * Errors:   400 INVALID_IMPORT; 404 PORTFOLIO_NOT_FOUND; 409 DUPLICATE_ACCOUNT_NAME
- *           or ACCOUNT_LIMIT (a new account, checked as creating one); 413 IMPORT_TOO_LARGE
+ *           or ACCOUNT_LIMIT (a new account, checked as creating one); 413 IMPORT_TOO_LARGE;
+ *           429 DAILY_QUOTA_REACHED (the day's CSV imports, shared with transactions)
  */
 
 import { NextResponse } from 'next/server';
 
 import { readJsonBody } from '@/lib/api/body';
+import { consumeDailyQuota } from '@/lib/api/daily-quota';
 import { apiError, internalServerError, logApiEvent } from '@/lib/api/security';
 import { requestIdFrom } from '@/lib/observability/request-id';
 import { requireSessionApiUserScope } from '@/lib/api/session-security';
@@ -40,6 +42,8 @@ export async function POST(request: Request) {
     if (!parsed.success) {
         return apiError(parsed.error.issues[0]?.message ?? 'Invalid import', 'INVALID_IMPORT', 400);
     }
+    const overQuota = await consumeDailyQuota(auth.context.userId, 'imports');
+    if (overQuota) return overQuota;
 
     try {
         // The last stored prices, so imported positions show their worth at

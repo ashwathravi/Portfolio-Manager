@@ -3358,6 +3358,31 @@
   border-color: color-mix(in oklab, var(--pm-success) 35%, transparent);
 }
 
+.pm-alpha-filer-badges {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+.pm-alpha-following {
+  flex: 0 0 auto;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--pm-accent);
+  background: color-mix(in oklab, var(--pm-accent) 12%, transparent);
+  border: 1px solid color-mix(in oklab, var(--pm-accent) 35%, transparent);
+}
+
+.pm-alpha-follow-error {
+  margin: 0;
+  font-size: 13px;
+  color: var(--pm-neg);
+}
+
 .pm-alpha-detail {
   display: flex;
   flex-direction: column;

@@ -1,4 +1,4 @@
-import { and, desc, eq, lt, or } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, lt, or } from 'drizzle-orm';
 import { db } from '@/db';
 import {
     alphaRadarFilingHoldings,
@@ -14,6 +14,7 @@ import type {
     AlphaRadarTrackedFilerRecord,
 } from './contracts';
 import type { AlphaRadarMemoChange } from './memo';
+import type { AlphaRadarChangeRank } from './user-overlap';
 import type { AlphaRadarHoldingChange } from './diff';
 import type { AlphaRadarTrackedFilerInput } from '@/lib/validators/alpha-radar';
 import type { ParsedThirteenFHolding } from '@/lib/sec';
@@ -28,6 +29,8 @@ export interface AlphaRadarFilingQuery {
 
 export interface AlphaRadarReportQuery {
     trackedFilerId?: string;
+    /** Reports from any of these filers. */
+    trackedFilerIds?: readonly string[];
     reportPeriod?: string;
     limit?: number;
 }
@@ -237,11 +240,14 @@ export class DrizzleAlphaRadarDataRepository {
     async listHoldingChanges(input: {
         trackedFilerId: string;
         reportPeriod?: string;
+        /** Only these changes. */
+        ids?: readonly string[];
         limit?: number;
     }): Promise<AlphaRadarMemoChange[]> {
         const conditions = [
             eq(alphaRadarHoldingChanges.trackedFilerId, input.trackedFilerId),
             input.reportPeriod ? eq(alphaRadarHoldingChanges.reportPeriod, input.reportPeriod) : undefined,
+            input.ids ? inArray(alphaRadarHoldingChanges.id, [...input.ids]) : undefined,
         ].filter(isDefined);
         const rows = await this.database
             .select()
@@ -252,9 +258,38 @@ export class DrizzleAlphaRadarDataRepository {
         return rows.map(toMemoChange);
     }
 
+    /**
+     * What ranks a filer's changes scoring at least `minScore`, in
+     * listHoldingChanges' order: enough to find the ones a reader's
+     * overlap lifts without reading every change in full.
+     */
+    async listHoldingChangeRanks(input: {
+        trackedFilerId: string;
+        reportPeriod?: string;
+        minScore: number;
+    }): Promise<AlphaRadarChangeRank[]> {
+        const conditions = [
+            eq(alphaRadarHoldingChanges.trackedFilerId, input.trackedFilerId),
+            input.reportPeriod ? eq(alphaRadarHoldingChanges.reportPeriod, input.reportPeriod) : undefined,
+            gte(alphaRadarHoldingChanges.materialityScore, input.minScore),
+        ].filter(isDefined);
+        const rows = await this.database
+            .select({
+                id: alphaRadarHoldingChanges.id,
+                issuerName: alphaRadarHoldingChanges.issuerName,
+                ticker: alphaRadarHoldingChanges.ticker,
+                materialityScore: alphaRadarHoldingChanges.materialityScore,
+            })
+            .from(alphaRadarHoldingChanges)
+            .where(and(...conditions))
+            .orderBy(desc(alphaRadarHoldingChanges.materialityScore), alphaRadarHoldingChanges.issuerName);
+        return rows.map((row) => ({ ...row, ticker: row.ticker ?? undefined }));
+    }
+
     async listReports(query: AlphaRadarReportQuery = {}): Promise<AlphaRadarReportRecord[]> {
         const conditions = [
             query.trackedFilerId ? eq(alphaRadarReports.trackedFilerId, query.trackedFilerId) : undefined,
+            query.trackedFilerIds ? inArray(alphaRadarReports.trackedFilerId, [...query.trackedFilerIds]) : undefined,
             query.reportPeriod ? eq(alphaRadarReports.reportPeriod, query.reportPeriod) : undefined,
         ].filter(isDefined);
         const rows = await this.database

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { useAccountStorage, useViewerIdentity } from '@/components/providers/IdentityProvider';
 import { useRequestTime } from '@/components/providers/RequestTimeProvider';
+import { alphaRadarQueryKeys } from '@/lib/api/alpha-radar/queries';
 import { storageScopeFor } from '@/lib/storage/user-scope';
 import {
     addCatalyst,
@@ -225,6 +226,8 @@ function useAccountTheses(enabled: boolean, scope: string, examples: Thesis[]): 
         send: (id, w, order) => sendThesisWrite(id, w, order),
         apply: applyThesisWrite,
         failedMessage: saveFailedMessage,
+        // Alpha Radar ranks a filer's changes with these (launch item i61).
+        dependents: [alphaRadarQueryKeys.allChanges()],
         loadFailedMessage: "Couldn't load your theses. Showing examples only.",
     });
 

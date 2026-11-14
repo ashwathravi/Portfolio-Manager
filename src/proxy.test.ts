@@ -309,6 +309,10 @@ describe("API proxy security", () => {
             ["/api/ask", "POST"],
             ["/api/ask", "DELETE"],
             ["/api/market-data/search", "GET"],
+            ["/api/strategies", "POST"],
+            ["/api/strategies/00000000-0000-4000-8000-000000000501", "PUT"],
+            ["/api/strategies/00000000-0000-4000-8000-000000000501", "DELETE"],
+            ["/api/strategies/00000000-0000-4000-8000-000000000501/backtest", "POST"],
             ["/api/research/watchlist", "GET"],
             ["/api/research/watchlist/import", "POST"],
             ["/api/research/watchlist/w-coin", "PUT"],
@@ -323,6 +327,10 @@ describe("API proxy security", () => {
             ["/api/alpha-radar/filers/00000000-0000-4000-8000-000000000001", "PATCH"],
             ["/api/alpha-radar/filers/00000000-0000-4000-8000-000000000001", "DELETE"],
             ["/api/alpha-radar/filers/00000000-0000-4000-8000-000000000001/refresh", "POST"],
+            ["/api/alpha-radar/filers/00000000-0000-4000-8000-000000000001/changes", "GET"],
+            ["/api/alpha-radar/follows", "GET"],
+            ["/api/alpha-radar/follows/00000000-0000-4000-8000-000000000001", "PUT"],
+            ["/api/alpha-radar/follows/00000000-0000-4000-8000-000000000001", "DELETE"],
         ] as const;
 
         for (const [pathname, method] of delegated) {
@@ -394,6 +402,10 @@ describe("API proxy security", () => {
             ["/api/research/theses/seed-nvda", "DELETE"],
             ["/api/research/theses/seed-nvda/catalysts", "PUT"],
             ["/api/market-data/search", "POST"],
+            ["/api/strategies", "GET"],
+            ["/api/strategies/00000000-0000-4000-8000-000000000501", "PATCH"],
+            ["/api/strategies/00000000-0000-4000-8000-000000000501/backtest", "GET"],
+            ["/api/strategies/00000000-0000-4000-8000-000000000501/trades", "POST"],
             ["/api/market-data/quotes", "GET"],
         ] as const) {
             const response = await handleVerifiedRequest(apiRequest({}, pathname, null, [], method));

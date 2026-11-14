@@ -1,66 +1,41 @@
 "use client";
 
+import { useState, type FormEvent } from "react";
 import { X, Plus } from "lucide-react";
-import type {
-    Strategy,
-    StrategyConjunction,
-    StrategyGuardrails,
-    StrategyOp,
-    StrategyRule,
-    StrategyUniverseFilter,
+import { TickerSearchInput } from "@/components/command/TickerSearchInput";
+import { INDICATOR_PRESETS, parseIndicator, parseOperand } from "@/lib/strategies/indicators";
+import {
+    opLabel,
+    STRATEGY_LIMITS,
+    STRATEGY_OPS,
+    type Strategy,
+    type StrategyConjunction,
+    type StrategyGuardrails,
+    type StrategyRule,
 } from "@/lib/strategies/strategy";
-import { opLabel } from "@/lib/strategies/strategy";
+import { tickerSchema } from "@/lib/validators/market-data";
 
 /**
- * Phase 6 (AR-81) Rule builder · Universe · Guardrails.
+ * Rule builder · Tickers · Guardrails (AR-81).
  *
- * The left side (64%) of the builder split. Lets the user compose the
- * decision logic that feeds AR-82's backtest:
+ * The left side of the builder split. Lets the user compose the decision
+ * logic the backtest runs (launch item i55):
  *
- *   1. RULES — flat list of (field, op, value) conditions glued by AND/OR
- *      conjunction pills. The conjunction array is length `rules.length - 1`
- *      so there's exactly one glue between each adjacent pair of rules.
- *   2. UNIVERSE — toggleable chip row. Each chip is either enabled (solid)
- *      or disabled (dimmed). Represents the rough scope of the screen.
- *   3. GUARDRAILS — three sliders with mono readouts: max position %,
- *      stop loss %, rebalance cadence (days).
+ *   1. RULES — flat list of (indicator, op, value) conditions glued by
+ *      AND/OR pills; AND binds tighter. The value is a number or another
+ *      indicator, and one the engine can't read is marked as typed.
+ *   2. TICKERS — what the strategy may hold: added by ticker or company
+ *      name, or a preset (index or sector ETFs).
+ *   3. GUARDRAILS — max position, stop loss, and how often the rules are
+ *      checked.
  *
- * Purely controlled. The parent owns the strategies array and passes a
- * per-field update callback so we can use the reducer helpers in
- * `strategy.ts` without duplicating them here. Keeping all mutation
- * behind typed callbacks also makes it trivial to swap local state for
- * a URL-synced or backend-persisted draft later.
+ * Purely controlled. The parent owns the strategies and passes typed
+ * callbacks, so edits go through the reducer helpers in `strategy.ts`.
  */
 
-const FIELD_OPTIONS = [
-    "MomScore(6M)",
-    "MomScore(3M)",
-    "P/E",
-    "P/B",
-    "P/S",
-    "EV/EBITDA",
-    "RSI(14)",
-    "SMA(10)",
-    "SMA(50)",
-    "SMA(200)",
-    "ADV(30)",
-    "Close",
-    "SectorRS(3M)",
-    "Breadth(40D)",
-    "Beta(1Y)",
-    "MktCap",
-];
-
-const OP_OPTIONS: StrategyOp[] = [
-    ">",
-    ">=",
-    "<",
-    "<=",
-    "=",
-    "!=",
-    "crosses above",
-    "crosses below",
-];
+/** The benchmark ETFs the price store always keeps (price-ingest.ts), so these backtest from day one. */
+const INDEX_ETFS = ["SPY", "QQQ", "DIA", "IWM"];
+const SECTOR_ETFS = ["XLB", "XLC", "XLE", "XLF", "XLI", "XLK", "XLP", "XLRE", "XLU", "XLV", "XLY"];
 
 export interface RuleBuilderPanelProps {
     strategy: Strategy;
@@ -68,11 +43,14 @@ export interface RuleBuilderPanelProps {
     onAddRule: () => void;
     onRemoveRule: (ruleId: string) => void;
     onChangeConjunction: (index: number, next: StrategyConjunction) => void;
-    onToggleUniverse: (filterId: string) => void;
+    onAddSymbols: (symbols: readonly string[]) => void;
+    onRemoveSymbol: (symbol: string) => void;
     onChangeGuardrail: <K extends keyof StrategyGuardrails>(
         key: K,
         value: StrategyGuardrails[K],
     ) => void;
+    /** Renames the strategy; absent for the examples, whose names stay. */
+    onRename?: (name: string) => void;
 }
 
 export function RuleBuilderPanel(props: RuleBuilderPanelProps) {
@@ -80,8 +58,20 @@ export function RuleBuilderPanel(props: RuleBuilderPanelProps) {
 
     return (
         <div className="pm-rule-builder pm-card">
+            {props.onRename && (
+                <label className="pm-rb-name">
+                    <span className="pm-rb-section-title">Name</span>
+                    <input
+                        className="pm-exec-input"
+                        value={strategy.name}
+                        maxLength={STRATEGY_LIMITS.name}
+                        onChange={(e) => props.onRename!(e.target.value)}
+                        aria-label="Strategy name"
+                    />
+                </label>
+            )}
             <RulesSection {...props} />
-            <UniverseSection universe={strategy.universe} onToggle={props.onToggleUniverse} />
+            <TickersSection symbols={strategy.symbols} onAdd={props.onAddSymbols} onRemove={props.onRemoveSymbol} />
             <GuardrailsSection
                 guardrails={strategy.guardrails}
                 onChange={props.onChangeGuardrail}
@@ -107,6 +97,7 @@ function RulesSection(props: RuleBuilderPanelProps) {
                     className="pm-rb-add-rule"
                     onClick={props.onAddRule}
                     aria-label="Add rule"
+                    disabled={rules.length >= STRATEGY_LIMITS.rules}
                 >
                     <Plus className="pm-rb-add-icon" aria-hidden="true" />
                     Add rule
@@ -150,6 +141,9 @@ function RulePill({
     onChange: (patch: Partial<StrategyRule>) => void;
     onRemove: () => void;
 }) {
+    const presets: readonly string[] = INDICATOR_PRESETS;
+    const valueOk = parseOperand(rule.value) !== null;
+    const fieldOk = parseIndicator(rule.field) !== null;
     return (
         <div className="pm-rb-rule">
             <select
@@ -157,11 +151,12 @@ function RulePill({
                 value={rule.field}
                 onChange={(e) => onChange({ field: e.target.value })}
                 aria-label="Field"
+                aria-invalid={!fieldOk || undefined}
             >
-                {FIELD_OPTIONS.includes(rule.field) ? null : (
+                {presets.includes(rule.field) ? null : (
                     <option value={rule.field}>{rule.field}</option>
                 )}
-                {FIELD_OPTIONS.map((f) => (
+                {presets.map((f) => (
                     <option key={f} value={f}>{f}</option>
                 ))}
             </select>
@@ -169,10 +164,10 @@ function RulePill({
             <select
                 className="pm-rb-op"
                 value={rule.op}
-                onChange={(e) => onChange({ op: e.target.value as StrategyOp })}
+                onChange={(e) => onChange({ op: e.target.value as StrategyRule["op"] })}
                 aria-label="Operator"
             >
-                {OP_OPTIONS.map((op) => (
+                {STRATEGY_OPS.map((op) => (
                     <option key={op} value={op}>{opLabel(op)}</option>
                 ))}
             </select>
@@ -181,9 +176,12 @@ function RulePill({
                 type="text"
                 className="pm-rb-value"
                 value={rule.value}
+                maxLength={STRATEGY_LIMITS.ruleText}
                 onChange={(e) => onChange({ value: e.target.value })}
                 aria-label="Value"
-                placeholder="value"
+                aria-invalid={!valueOk || undefined}
+                title={valueOk ? undefined : "A number (30, 10%, $5M) or an indicator (SMA(50), RSI(14), Mom(6M))"}
+                placeholder="30 or SMA(50)"
             />
 
             <button
@@ -224,38 +222,75 @@ function ConjunctionPill({
 }
 
 // --------------------------------------------------------------------- //
-// Universe
+// Tickers
 // --------------------------------------------------------------------- //
 
-function UniverseSection({
-    universe,
-    onToggle,
+function TickersSection({
+    symbols,
+    onAdd,
+    onRemove,
 }: {
-    universe: StrategyUniverseFilter[];
-    onToggle: (id: string) => void;
+    symbols: string[];
+    onAdd: (symbols: readonly string[]) => void;
+    onRemove: (symbol: string) => void;
 }) {
+    const [draft, setDraft] = useState("");
+    const [error, setError] = useState<string | null>(null);
+    const full = symbols.length >= STRATEGY_LIMITS.symbols;
+    const add = (list: readonly string[]) => {
+        onAdd(list);
+        setDraft("");
+        setError(null);
+    };
+    const submit = (e: FormEvent) => {
+        e.preventDefault();
+        const symbol = draft.trim().toUpperCase();
+        if (!symbol) return;
+        if (!tickerSchema.safeParse(symbol).success) {
+            setError(`"${draft.trim()}" isn't a ticker. Type one, or pick a company from the list.`);
+            return;
+        }
+        add([symbol]);
+    };
     return (
         <section className="pm-rb-section" aria-labelledby="rb-universe">
             <header className="pm-rb-section-head">
-                <h3 id="rb-universe" className="pm-rb-section-title">Universe</h3>
+                <h3 id="rb-universe" className="pm-rb-section-title">Tickers</h3>
                 <span className="pm-rb-section-hint">
-                    {universe.filter((u) => u.enabled).length} of {universe.length} active
+                    {symbols.length} of {STRATEGY_LIMITS.symbols}
                 </span>
             </header>
-            <div className="pm-rb-universe-chips">
-                {universe.map((u) => (
-                    <button
-                        key={u.id}
-                        type="button"
-                        role="switch"
-                        aria-checked={u.enabled}
-                        onClick={() => onToggle(u.id)}
-                        className={`pm-rb-universe-chip${u.enabled ? " is-on" : " is-off"}`}
-                    >
-                        {u.label}
-                    </button>
+            <div className="pm-rb-universe-chips" data-testid="strategy-tickers">
+                {symbols.length === 0 && <span className="pm-rb-section-hint">No tickers yet: add what the strategy may hold.</span>}
+                {symbols.map((symbol) => (
+                    <span key={symbol} className="pm-rb-universe-chip is-on">
+                        {symbol}
+                        <button type="button" className="pm-rb-chip-del" onClick={() => onRemove(symbol)} aria-label={`Remove ${symbol}`}>
+                            <X size={12} aria-hidden="true" />
+                        </button>
+                    </span>
                 ))}
             </div>
+            <form className="pm-rb-ticker-add" onSubmit={submit}>
+                <TickerSearchInput
+                    value={draft}
+                    onChange={(v) => {
+                        setDraft(v);
+                        setError(null);
+                    }}
+                    onPick={(match) => add([match.symbol])}
+                    placeholder="Add ticker or company"
+                    aria-label="Add ticker to strategy"
+                    aria-invalid={error ? true : undefined}
+                    maxLength={40}
+                />
+                <button type="submit" className="pm-btn pm-btn-ghost" disabled={full}>Add</button>
+            </form>
+            <div className="pm-rb-presets">
+                <button type="button" className="pm-rb-preset" onClick={() => add(INDEX_ETFS)} disabled={full}>+ Index ETFs</button>
+                <button type="button" className="pm-rb-preset" onClick={() => add(SECTOR_ETFS)} disabled={full}>+ Sector ETFs</button>
+            </div>
+            {error && <p className="pm-rb-error" role="alert">{error}</p>}
         </section>
     );
 }
@@ -283,9 +318,9 @@ function GuardrailsSection({
             <div className="pm-rb-guardrails">
                 <SliderRow
                     label="Max position"
-                    hint="Cap per position as % of equity"
+                    hint="Each buy, as % of equity"
                     min={0.005}
-                    max={0.30}
+                    max={1}
                     step={0.005}
                     value={guardrails.maxPositionPct}
                     onChange={(v) => onChange("maxPositionPct", v)}
@@ -303,7 +338,7 @@ function GuardrailsSection({
                 />
                 <SliderRow
                     label="Rebalance cadence"
-                    hint="How often the screen re-runs"
+                    hint="How often the rules are checked"
                     min={1}
                     max={90}
                     step={1}

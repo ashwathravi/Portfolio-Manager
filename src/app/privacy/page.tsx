@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { ContactLink, LegalDocument, type LegalSearchParams } from "@/components/legal/LegalDocument";
+import { isOpenSignup } from "@/lib/auth/access";
 
 export const metadata: Metadata = {
     title: "Privacy Policy | Atlas Wealth",
@@ -18,7 +19,7 @@ export default function PrivacyPage({ searchParams }: { searchParams: LegalSearc
             searchParams={searchParams}
             intro={
                 <p>
-                    Atlas Wealth is a personal investment tracking app, currently in an invite-only beta.
+                    Atlas Wealth is a personal investment tracking app, currently in {isOpenSignup() ? "a public" : "an invite-only"} beta.
                     This policy explains what it collects, why, who it is shared with, and how to have it
                     deleted. Questions go to <ContactLink />.
                 </p>
@@ -50,10 +51,10 @@ export default function PrivacyPage({ searchParams }: { searchParams: LegalSearc
                         CSV or enter by hand, orders you draft on Trade (with the reasons and risk-policy
                         overrides you record for them), your watchlist (tickers, why they&rsquo;re on it, target
                         prices and notes), your decision journal, your research theses (with their catalysts and
-                        evidence links), the questions you ask Ask and its answers (the last 25 of each), and the
-                        SEC filers you add to Alpha Radar. During the beta,
-                        Alpha Radar&rsquo;s list of filers and any notes on them are shared by every account,
-                        so don&rsquo;t put anything private there.
+                        evidence links), the strategies you save (their rules, tickers, guardrails and last
+                        backtest), the questions you ask Ask and its answers (the last 25 of each), and the
+                        Alpha Radar filers you follow. The filers themselves, and any notes on them, are shared
+                        by every account, and only Atlas&rsquo;s admins add or change them.
                     </li>
                     <li>
                         <strong>Your settings.</strong> Profile, display, notification and trading
@@ -140,7 +141,7 @@ export default function PrivacyPage({ searchParams }: { searchParams: LegalSearc
                     We keep your data while your account is open. Download a copy of it at any time in
                     Settings (one JSON file, or your transactions and holdings as CSV). Delete your account in
                     Settings and we remove, straight away, your account, portfolios, holdings, transactions,
-                    drafted orders, value history, watchlist, journal, theses, Ask questions and settings from
+                    drafted orders, value history, watchlist, journal, theses, strategies, the filers you follow, Ask questions and settings from
                     our database, end our access to your linked institutions at Plaid and erase our encrypted
                     access to them, and clear what this browser kept for you. You can also email{" "}
                     <ContactLink /> to have it done within 30 days. We keep nothing afterwards unless the law
@@ -177,8 +178,8 @@ export default function PrivacyPage({ searchParams }: { searchParams: LegalSearc
                     interfaces, and the app reaches it through a restricted role that cannot change its
                     structure. Every query for your portfolios, holdings, transactions and linked accounts is limited
                     to your account in the app&rsquo;s code, and automated tests check that one account cannot
-                    read another&rsquo;s. Alpha Radar&rsquo;s filer list is the exception: it is shared during
-                    the beta. No system is perfectly secure; if a breach affects your data we will tell you
+                    read another&rsquo;s. Alpha Radar&rsquo;s list of filers is the exception: every account
+                    sees the same one, though which you follow is yours alone. No system is perfectly secure; if a breach affects your data we will tell you
                     promptly.
                 </p>
             </section>

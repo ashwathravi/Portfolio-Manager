@@ -47,6 +47,13 @@ export interface PlaidConnection {
     accounts: PlaidConnectionAccount[];
 }
 
+/** Connections a user may keep at once (launch item i77): Plaid charges for each one. */
+export const MAX_PLAID_CONNECTIONS_PER_USER = 10;
+
+export function plaidConnectionLimitMessage(): string {
+    return `You can link up to ${MAX_PLAID_CONNECTIONS_PER_USER} institutions. Disconnect one in Settings to link another.`;
+}
+
 function statusOf(raw: string): PlaidConnectionStatus {
     return raw === "login_required" || raw === "pending_expiration" ? raw : "active";
 }

@@ -36,7 +36,10 @@ export function generateAlphaRadarThesisDrafts(
         .map((item) => {
             const change = changesBySecurity.get(securityKey(item.ticker ?? item.cusip));
             if (!change) return null;
-            const duplicate = Boolean(item.ticker && existingTickers.has(item.ticker.toUpperCase()));
+            // The change's overlap knows the user's theses even when the 13F
+            // gave no ticker (launch item i61).
+            const duplicate = change.userRelevance.thesis
+                || Boolean(item.ticker && existingTickers.has(item.ticker.toUpperCase()));
             return buildDraft({
                 item,
                 change,

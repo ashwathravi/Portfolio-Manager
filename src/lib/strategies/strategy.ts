@@ -1,26 +1,21 @@
 /**
- * Strategy data model used by the Phase 6 (AR-80/81/82) Strategy Builder.
+ * Strategy data model for the Strategy Builder (AR-80/81/82), saved to the
+ * user's account since launch item i55.
  *
- * Kept pure (no DOM, no localStorage) so the reducer logic is easy to
- * unit-test and reusable when the builder is eventually persisted to the
- * backend. The types intentionally mirror the handoff JSON shape: rules
- * are flat records so the builder can flatten them into a conjunction list
- * the user renders as AND/OR pills.
+ * A strategy's definition is what a backtest runs: entry rules glued by
+ * AND/OR, the tickers it may hold, and guardrails for sizing, stops and how
+ * often the rules are checked. The helpers here are pure, so the builder,
+ * the API and the backtest engine share them.
  */
 
-export type StrategyStatus = 'active' | 'paused' | 'backtesting';
-export type StrategyConjunction = 'AND' | 'OR';
-export type StrategyOp =
-    | '>'
-    | '>='
-    | '<'
-    | '<='
-    | '='
-    | '!='
-    | 'crosses above'
-    | 'crosses below';
+import type { AdherenceRule } from '@/lib/adherence/rules';
 
-const OP_LABELS: Partial<Record<StrategyOp, string>> = { '>=': '≥', '<=': '≤', '!=': '≠' };
+export type StrategyConjunction = 'AND' | 'OR';
+export type StrategyOp = '>' | '>=' | '<' | '<=' | 'crosses above' | 'crosses below';
+
+export const STRATEGY_OPS: readonly StrategyOp[] = ['>', '>=', '<', '<=', 'crosses above', 'crosses below'];
+
+const OP_LABELS: Partial<Record<StrategyOp, string>> = { '>=': '≥', '<=': '≤' };
 
 /** How an operator reads on screen — typographic symbols, not ASCII `>=`. */
 export function opLabel(op: StrategyOp): string {
@@ -29,16 +24,11 @@ export function opLabel(op: StrategyOp): string {
 
 export interface StrategyRule {
     id: string;
-    field: string; // e.g. "RSI(14)", "P/E", "MomScore"
+    /** An indicator (indicators.ts): "RSI(14)", "Mom(6M)", "Close". */
+    field: string;
     op: StrategyOp;
-    value: string; // stringified so "30" and "SMA(50)" both fit
-}
-
-export interface StrategyUniverseFilter {
-    id: string;
-    label: string;
-    /** Filters are on/off toggles in the UI — disabled ones render dimmed. */
-    enabled: boolean;
+    /** A number ("30", "10%", "$5M") or another indicator ("SMA(50)"). */
+    value: string;
 }
 
 export interface StrategyGuardrails {
@@ -46,41 +36,45 @@ export interface StrategyGuardrails {
     maxPositionPct: number;
     /** Hard stop on a single position (0..1, e.g. 0.12 = 12%). */
     stopLossPct: number;
-    /** Rebalance cadence in days (7=weekly, 30=monthly, 90=quarterly). */
+    /** How often the rules are checked, in calendar days (7 = weekly). */
     rebalanceDays: number;
 }
 
-export type MonteCarloPercentile = 5 | 25 | 50 | 75 | 95;
-
-export interface MonteCarloCell {
-    percentile: MonteCarloPercentile;
-    /** Terminal equity multiplier (1.0 = flat). */
-    value: number;
-    /** Implied annualized return for that percentile. */
-    cagrPct: number;
+export interface StrategyDefinition {
+    rules: StrategyRule[];
+    conjunctions: StrategyConjunction[]; // length = rules.length - 1
+    /** The tickers the strategy may hold. */
+    symbols: string[];
+    guardrails: StrategyGuardrails;
 }
+
+export type BacktestVerdict = 'Robust' | 'Fragile' | 'Promising' | 'Unproven';
 
 export interface BacktestStats {
-    /** Compound annual growth rate (%). */
-    cagrPct: number;
+    totalReturnPct: number;
+    /** Compound annual growth rate (%); null under a year, where it would overstate. */
+    cagrPct: number | null;
     /** Net profit in USD from $100k starting equity. */
     netProfitUsd: number;
-    sharpe: number;
-    sortino: number;
+    /** Annualized from daily returns; null with too few of them. */
+    sharpe: number | null;
+    sortino: number | null;
     /** Worst peak-to-trough, reported as negative %. */
     maxDrawdownPct: number;
-    profitFactor: number;
+    /** Gross profit over gross loss of closed trades; null without a losing trade. */
+    profitFactor: number | null;
+    /** Closed trades. */
     tradeCount: number;
-    winRatePct: number;
+    winRatePct: number | null;
 }
 
-export type PromotionStepKey =
-    | 'rules'
-    | 'backtest'
-    | 'robustness'
-    | 'paper'
-    | 'live';
+export interface MonteCarloCell {
+    percentile: 5 | 25 | 50 | 75 | 95;
+    /** Ending equity as a multiple of the start (1.0 = flat). */
+    value: number;
+}
 
+export type PromotionStepKey = 'rules' | 'backtest' | 'robustness' | 'paper' | 'live';
 export type PromotionStatus = 'done' | 'active' | 'pending';
 
 export interface PromotionStep {
@@ -90,43 +84,57 @@ export interface PromotionStep {
 }
 
 export interface StrategyBacktest {
-    /** Pretty label for the head, e.g. "Jan 2020 – Apr 2026". */
-    windowLabel: string;
-    /** Overall robustness verdict rendered next to the head. */
-    verdict: 'Robust' | 'Fragile' | 'Promising' | 'Unproven';
-    /** Equity curve series (normalized so start = 100). */
+    /** First and last session of the window, YYYY-MM-DD. */
+    from: string;
+    to: string;
+    verdict: BacktestVerdict;
+    /** Why, in a sentence: the verdict is never an opaque score. */
+    verdictReason: string;
+    /** Equity at each session's close, normalized so the start = 100. */
     equityCurve: number[];
     stats: BacktestStats;
-    /** 5 cells, 95/75/50/25/5th percentiles. Callers enforce order. */
-    monteCarlo: MonteCarloCell[];
-    /** Ordered promotion ladder. */
-    promotion: PromotionStep[];
+    /** Buy-and-hold SPY over the same window, when Atlas has its closes. */
+    benchmark: { symbol: string; totalReturnPct: number } | null;
+    /** 5th to 95th percentile, lowest first; null with too few daily returns. */
+    monteCarlo: MonteCarloCell[] | null;
+    /** Tickers in the strategy without stored history; left out of the run. */
+    symbolsWithoutHistory: string[];
+    /** The definition the backtest ran on. */
+    definition: StrategyDefinition;
+    /** When it ran (ISO); absent on the examples. */
+    ranAt?: string;
+    /** The examples' promotion ladder; Atlas has no paper trading to promote a saved strategy to. */
+    promotion?: PromotionStep[];
 }
 
-export interface Strategy {
+export interface Strategy extends StrategyDefinition {
     id: string;
-    shortId: string; // "S-001" — shown on the card
     name: string;
     description: string;
-    status: StrategyStatus;
-    stats: {
-        /** Total return % since inception. */
-        totalReturnPct: number;
-        sharpe: number;
-        maxDrawdownPct: number;
-        winRatePct: number;
-    };
-    rules: StrategyRule[];
-    conjunctions: StrategyConjunction[]; // length = rules.length - 1
-    universe: StrategyUniverseFilter[];
-    guardrails: StrategyGuardrails;
-    backtest: StrategyBacktest;
+    /** An example (labelled Sample), not one saved to the user's account. */
+    example?: boolean;
+    /** AR-111 discipline rules checked when the user trades. */
+    adherenceRules: AdherenceRule[];
+    /** The last backtest; null before the first. */
+    backtest: StrategyBacktest | null;
 }
 
+export const STRATEGY_LIMITS = {
+    perUser: 20,
+    name: 80,
+    description: 280,
+    rules: 10,
+    ruleText: 24,
+    symbols: 25,
+    adherenceRules: 20,
+} as const;
+
+export const DEFAULT_GUARDRAILS: StrategyGuardrails = { maxPositionPct: 0.25, stopLossPct: 0.1, rebalanceDays: 7 };
+
 // ---------------------------------------------------------------------------
-// Reducer helpers — used by the Phase 6 client to edit rules/guardrails.
-// All return new arrays/objects so the client can rely on shallow equality
-// for memoization and we never mutate the seed data.
+// Reducer helpers — used by the builder to edit rules, symbols and
+// guardrails. All return new arrays/objects so the client can rely on
+// shallow equality for memoization.
 // ---------------------------------------------------------------------------
 
 export function addRule(
@@ -164,11 +172,17 @@ export function setConjunction(
     return conjunctions.map((c, i) => (i === index ? next : c));
 }
 
-export function toggleUniverseFilter(
-    universe: readonly StrategyUniverseFilter[],
-    id: string,
-): StrategyUniverseFilter[] {
-    return universe.map((u) => (u.id === id ? { ...u, enabled: !u.enabled } : u));
+/** Adds tickers not there yet, uppercased, in order, up to the limit. */
+export function addSymbols(symbols: readonly string[], added: readonly string[]): string[] {
+    const out = [...symbols];
+    for (const symbol of added.map((s) => s.trim().toUpperCase())) {
+        if (symbol && !out.includes(symbol) && out.length < STRATEGY_LIMITS.symbols) out.push(symbol);
+    }
+    return out;
+}
+
+export function removeSymbol(symbols: readonly string[], symbol: string): string[] {
+    return symbols.filter((s) => s !== symbol);
 }
 
 export function setGuardrail<K extends keyof StrategyGuardrails>(
@@ -190,50 +204,52 @@ export function summarizeRules(strategy: Pick<Strategy, 'rules'>): string {
     return `${n} rule${n === 1 ? '' : 's'}`;
 }
 
+export function strategyDefinition(s: StrategyDefinition): StrategyDefinition {
+    return { rules: s.rules, conjunctions: s.conjunctions, symbols: s.symbols, guardrails: s.guardrails };
+}
+
 /**
- * Copies a strategy so the user can experiment without touching the
- * original. The copy keeps the original's rules — and therefore its
- * backtest — but starts paused, with a fresh id and the next short id.
+ * A copy for the user to experiment with: a new name ("(copy)", then
+ * "(copy 2)"), new rule ids and no backtest of its own. The caller gives it
+ * an id (the server does, for a saved one).
  */
-export function duplicateStrategy(source: Strategy, existing: readonly Pick<Strategy, 'id' | 'shortId' | 'name'>[]): Strategy {
-    const ids = new Set(existing.map((s) => s.id));
-    let n = 1;
-    while (ids.has(`${source.id}-copy-${n}`)) n += 1;
-    const maxShort = existing.reduce((max, s) => {
-        const m = /^S-(\d+)$/.exec(s.shortId);
-        return m ? Math.max(max, Number(m[1])) : max;
-    }, 0);
+export function duplicateStrategy(source: Strategy, existing: readonly Pick<Strategy, 'name'>[], id: string): Strategy {
     const names = new Set(existing.map((s) => s.name));
     let name = `${source.name} (copy)`;
     let k = 2;
     while (names.has(name)) name = `${source.name} (copy ${k++})`;
     return {
-        ...source,
-        id: `${source.id}-copy-${n}`,
-        shortId: `S-${String(maxShort + 1).padStart(3, '0')}`,
-        name,
-        status: source.status === 'backtesting' ? 'backtesting' : 'paused',
-        rules: source.rules.map((r) => ({ ...r, id: `${r.id}-c${n}` })),
+        id,
+        name: name.slice(0, STRATEGY_LIMITS.name),
+        description: source.description,
+        rules: source.rules.map((r, i) => ({ ...r, id: `r${i + 1}` })),
         conjunctions: [...source.conjunctions],
-        universe: source.universe.map((u) => ({ ...u })),
+        symbols: [...source.symbols],
         guardrails: { ...source.guardrails },
+        adherenceRules: source.adherenceRules.map((r) => ({ ...r, params: { ...r.params } })),
+        backtest: null,
     };
 }
 
 /**
- * True when the rules, universe, or guardrails differ from the version the
- * backtest was run against — the backtest panel then flags its results as
- * out of date instead of silently showing numbers for different rules.
+ * True when the rules, symbols, or guardrails differ from the version the
+ * backtest ran on — the backtest panel then flags its results as out of
+ * date instead of silently showing numbers for different rules.
  */
-export function hasUnbacktestedChanges(
-    current: Pick<Strategy, 'rules' | 'conjunctions' | 'universe' | 'guardrails'>,
-    backtested: Pick<Strategy, 'rules' | 'conjunctions' | 'universe' | 'guardrails'>,
-): boolean {
-    const strip = (s: typeof current) => ({
+export function hasUnbacktestedChanges(current: StrategyDefinition, backtested: StrategyDefinition): boolean {
+    const strip = (s: StrategyDefinition) => ({
         rules: s.rules.map(({ field, op, value }) => ({ field, op, value })),
         conjunctions: s.conjunctions,
-        universe: s.universe.map(({ id, enabled }) => ({ id, enabled })),
+        symbols: s.symbols,
         guardrails: s.guardrails,
     });
     return JSON.stringify(strip(current)) !== JSON.stringify(strip(backtested));
+}
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/** "Jan 2020 – Apr 2026" for a window's first and last session. */
+export function backtestWindowLabel(from: string, to: string): string {
+    const label = (date: string) => `${MONTHS[Number(date.slice(5, 7)) - 1]} ${date.slice(0, 4)}`;
+    return `${label(from)} – ${label(to)}`;
 }

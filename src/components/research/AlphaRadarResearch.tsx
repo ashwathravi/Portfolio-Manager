@@ -2,16 +2,21 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { Activity, AlertCircle, CalendarClock, ExternalLink, RefreshCw, Search } from "lucide-react";
+import { Activity, AlertCircle, CalendarClock, Check, ExternalLink, Plus, RefreshCw, Search } from "lucide-react";
 import {
     useAlphaRadarChangesQuery,
     useAlphaRadarFilersQuery,
+    useAlphaRadarFollowsQuery,
     useAlphaRadarMemorySearchQuery,
     useAlphaRadarReportsQuery,
+    useFollowAlphaRadarFilerMutation,
     useRefreshAlphaRadarFilerMutation,
 } from "@/lib/api/alpha-radar/queries";
-import { useViewerIdentity } from "@/components/providers/IdentityProvider";
+import { useAccountStorage, useViewerIdentity } from "@/components/providers/IdentityProvider";
+import { SampleTag } from "@/components/data-display/SampleTag";
 import { useAlphaRadarAlertEngine } from "@/lib/alerts/useAlphaRadarAlertEngine";
+import { useShowSampleData } from "@/lib/hooks/useShowSampleData";
+import { useSettingsStore } from "@/lib/stores/settingsStore";
 import {
     buildAlphaRadarReportMemoryChunks,
     searchAlphaRadarSemanticChunks,
@@ -77,8 +82,22 @@ export interface AlphaRadarResearchData {
     selectedFilerId: string | null;
     setSelectedFilerId: (id: string) => void;
     isLoading: boolean;
+    /** The example filers: Atlas tracks none, and the user shows example data. */
     isFallback: boolean;
     errorMessage?: string;
+    /** Following (launch item i60): a signed-in user with a database, and filers that aren't examples. */
+    follows: AlphaRadarFollows;
+}
+
+export interface AlphaRadarFollows {
+    available: boolean;
+    /** False until the user's follows have loaded. */
+    loaded: boolean;
+    followedIds: ReadonlySet<string>;
+    setFollowing: (filerId: string, following: boolean) => void;
+    /** A change is being saved; the next waits for it. */
+    saving: boolean;
+    error: string | null;
 }
 
 export function useAlphaRadarResearchData(): AlphaRadarResearchData {
@@ -86,20 +105,49 @@ export function useAlphaRadarResearchData(): AlphaRadarResearchData {
         retry: false,
         refetchOnWindowFocus: false,
     });
+    const showSample = useShowSampleData();
     const liveFilers = filersQuery.data ?? [];
-    const filers = liveFilers.length > 0 ? liveFilers : FALLBACK_FILERS;
+    // Examples only while Atlas tracks no filer, and only for a user who
+    // shows example data; otherwise an empty state (launch item i61).
+    const isFallback = liveFilers.length === 0 && showSample;
+    const filers = liveFilers.length > 0 ? liveFilers : isFallback ? FALLBACK_FILERS : [];
     const [requestedFilerId, setRequestedFilerId] = useState<string | null>(null);
     const selectedFilerId = requestedFilerId && filers.some((filer) => filer.id === requestedFilerId)
         ? requestedFilerId
         : filers[0]?.id ?? null;
+    const accountStorage = useAccountStorage();
+    const follows = useAlphaRadarFollows(accountStorage && liveFilers.length > 0);
 
     return {
         filers,
         selectedFilerId,
         setSelectedFilerId: setRequestedFilerId,
         isLoading: filersQuery.isLoading,
-        isFallback: liveFilers.length === 0,
+        isFallback,
         errorMessage: filersQuery.error?.message,
+        follows,
+    };
+}
+
+/** The filers the user follows, kept with their account. */
+export function useAlphaRadarFollows(available: boolean): AlphaRadarFollows {
+    const followsQuery = useAlphaRadarFollowsQuery({
+        enabled: available,
+        retry: false,
+        refetchOnWindowFocus: false,
+    });
+    const mutation = useFollowAlphaRadarFilerMutation();
+    const ids = followsQuery.data;
+    const followedIds = useMemo(() => new Set(ids ?? []), [ids]);
+    return {
+        available,
+        loaded: available && followsQuery.isSuccess,
+        followedIds,
+        setFollowing: (filerId, following) => {
+            if (!mutation.isPending) mutation.mutate({ filerId, following });
+        },
+        saving: mutation.isPending,
+        error: mutation.isError ? "Couldn't save that. Try again." : followsQuery.isError ? "Couldn't load the filers you follow." : null,
     };
 }
 
@@ -117,6 +165,14 @@ export function AlphaRadarFilerColumn({
 
     if (data.isLoading && filtered.length === 0) {
         return <div className="pm-research-empty-hint" data-testid="alpha-radar-loading">Loading tracked filers.</div>;
+    }
+
+    if (data.filers.length === 0) {
+        return (
+            <div className="pm-research-empty-hint" data-testid="alpha-radar-no-filers">
+                {data.errorMessage ? "Couldn't load the tracked filers." : "No filers are tracked yet."}
+            </div>
+        );
     }
 
     if (filtered.length === 0) {
@@ -138,8 +194,13 @@ export function AlphaRadarFilerColumn({
                             <span className="pm-alpha-filer-name">{filer.name}</span>
                             <span className="pm-alpha-filer-style">{filer.fundStyle ?? "13F manager"}</span>
                         </span>
-                        <span className={`pm-alpha-health${filer.enabled ? " is-on" : ""}`}>
-                            {filer.enabled ? "Tracking" : "Paused"}
+                        <span className="pm-alpha-filer-badges">
+                            {data.follows.followedIds.has(filer.id) && (
+                                <span className="pm-alpha-following" data-testid="alpha-radar-filer-following">Following</span>
+                            )}
+                            <span className={`pm-alpha-health${filer.enabled ? " is-on" : ""}`}>
+                                {filer.enabled ? "Tracking" : "Paused"}
+                            </span>
                         </span>
                     </span>
                     <span className="pm-alpha-filer-meta">
@@ -165,31 +226,35 @@ export function AlphaRadarDetailPane({
     const selectedFiler = data.filers.find((filer) => filer.id === data.selectedFilerId) ?? data.filers[0];
     const reportsQuery = useAlphaRadarReportsQuery(
         { trackedFilerId: selectedFiler?.id },
-        { enabled: Boolean(selectedFiler), retry: false, refetchOnWindowFocus: false },
+        { enabled: Boolean(selectedFiler) && !data.isFallback, retry: false, refetchOnWindowFocus: false },
     );
     const changesQuery = useAlphaRadarChangesQuery(
         selectedFiler?.id ?? "",
         undefined,
-        { enabled: Boolean(selectedFiler), retry: false, refetchOnWindowFocus: false },
+        { enabled: Boolean(selectedFiler) && !data.isFallback, retry: false, refetchOnWindowFocus: false },
     );
     const refresh = useRefreshAlphaRadarFilerMutation(selectedFiler?.id ?? "");
     // Refreshing calls SEC EDGAR for data every user shares: admins only.
     const canRefresh = useViewerIdentity()?.admin === true;
-    const reports = reportsQuery.data && reportsQuery.data.length > 0
-        ? reportsQuery.data
-        : fallbackReportsFor(selectedFiler?.id);
+    const { follows } = data;
+    const following = selectedFiler ? follows.followedIds.has(selectedFiler.id) : false;
+    // A tracked filer shows only what Atlas has loaded for it, never the
+    // examples (launch item i61); its changes carry the reader's overlap.
+    const usesFallback = data.isFallback;
+    const reports = usesFallback ? fallbackReportsFor(selectedFiler?.id) : reportsQuery.data ?? [];
     const report = reports[0];
-    const changes = changesQuery.data && changesQuery.data.length > 0
-        ? changesQuery.data
-        : fallbackChangesFor(selectedFiler?.id);
+    const changes = usesFallback ? fallbackChangesFor(selectedFiler?.id) : changesQuery.data ?? [];
+    const liveLoading = !usesFallback && (reportsQuery.isPending || changesQuery.isPending);
+    const liveError = !usesFallback && Boolean(reportsQuery.error || changesQuery.error);
+    const nothingLoaded = !usesFallback && !liveLoading && !liveError && reports.length === 0 && changes.length === 0;
     useAlphaRadarAlertEngine({
         changes,
         reports,
         filers: data.filers,
     });
     const materialChanges = changes.filter((change) => change.changeType !== "unchanged");
-    const overlapCount = changes.filter((change) => change.userRelevance.reasons.length > 0).length;
-    const usesFallback = data.isFallback || !reportsQuery.data?.length || !changesQuery.data?.length;
+    const overlapChanges = changes.filter((change) => change.userRelevance.reasons.length > 0);
+    const analysisChanges = usesFallback ? FALLBACK_CHANGES : changes;
     const memoryChunks = reports.flatMap((item) => buildAlphaRadarReportMemoryChunks({ report: item, filer: selectedFiler }));
     const localMemorySearch = searchAlphaRadarSemanticChunks({
         query: memoryQuery,
@@ -212,36 +277,37 @@ export function AlphaRadarDetailPane({
     const memorySearch = liveMemorySearch.data?.matches.length
         ? liveMemorySearch.data
         : localMemorySearch;
+    // A tracked filer's changes carry the reader's overlap, so the clone
+    // graph and drafts read it from them; the examples name an example
+    // user's tickers.
     const cloneGraph = buildAlphaRadarCloneGraph({
         filers: data.filers,
-        changes: usesFallback ? FALLBACK_CHANGES : changes,
+        changes: analysisChanges,
         reportPeriod: report?.reportPeriod,
-        userPortfolioTickers: ["AAPL", "MSFT"],
-        userWatchlistTickers: ["CB", "NVDA", "PG"],
-        userThesisTickers: ["AAPL", "NVDA"],
+        ...(usesFallback ? FALLBACK_USER_TICKERS : {}),
     });
     const cloneFundStyles = ["all", ...new Set(cloneGraph.clusters.flatMap((cluster) => cluster.fundStyles))];
     const cloneClusters = filterAlphaRadarCloneClusters(cloneGraph.clusters, cloneStyleFilter);
     const convictionItems = scoreAlphaRadarConviction({
-        changes: usesFallback ? FALLBACK_CHANGES : changes,
+        changes: analysisChanges,
         cloneClusters: cloneGraph.clusters,
         semanticContext: memorySearch.matches,
         reportPeriod: report?.reportPeriod,
     });
     const overlayIdeas = attachAlphaRadarOverlaysToIdeas({
-        changes: usesFallback ? FALLBACK_CHANGES : changes,
+        changes: analysisChanges,
         overlays: usesFallback ? FALLBACK_EXTERNAL_OVERLAYS : [],
     });
     const overlayFilters = getAlphaRadarOverlayFilters(overlayIdeas);
     const filteredOverlayIdeas = filterAlphaRadarOverlayIdeas(overlayIdeas, overlayFilter);
     const thesisDrafts = generateAlphaRadarThesisDrafts({
-        changes: usesFallback ? FALLBACK_CHANGES : changes,
+        changes: analysisChanges,
         convictionItems,
         reportPeriod: report?.reportPeriod ?? "latest",
         sourceFilingIds: report?.sourceFilingIds ?? [],
         semanticContext: memorySearch.matches,
         externalOverlays: usesFallback ? FALLBACK_EXTERNAL_OVERLAYS : [],
-        existingThesisTickers: ["AAPL", "NVDA"],
+        existingThesisTickers: usesFallback ? FALLBACK_USER_TICKERS.userThesisTickers : undefined,
         sourceReportId: report?.id,
         limit: 3,
     });
@@ -282,7 +348,7 @@ export function AlphaRadarDetailPane({
     });
     const backtestResult = runAlphaRadarBacktest({
         signals: buildAlphaRadarBacktestSignals({
-            changes: usesFallback ? FALLBACK_CHANGES : changes,
+            changes: analysisChanges,
             convictionItems,
             cloneClusters: cloneGraph.clusters,
             reportPeriodEndByPeriod: FALLBACK_REPORT_PERIOD_END_BY_PERIOD,
@@ -296,12 +362,7 @@ export function AlphaRadarDetailPane({
     });
 
     if (!selectedFiler) {
-        return (
-            <div className="pm-research-empty" data-testid="alpha-radar-detail-empty">
-                <h2 className="pm-card-title">Alpha Radar</h2>
-                <p className="pm-card-subtitle">No tracked filers are available.</p>
-            </div>
-        );
+        return <AlphaRadarNoFilers data={data} />;
     }
 
     return (
@@ -314,6 +375,19 @@ export function AlphaRadarDetailPane({
                         {report?.reportPeriod ?? "Latest quarter"} · {selectedFiler.fundStyle ?? "13F manager"}
                     </p>
                 </div>
+                {follows.available && (
+                    <button
+                        type="button"
+                        className={`pm-btn ${following ? "pm-btn-secondary" : "pm-btn-primary"}`}
+                        aria-pressed={following}
+                        onClick={() => follows.setFollowing(selectedFiler.id, !following)}
+                        disabled={!follows.loaded || follows.saving}
+                        data-testid="alpha-radar-follow"
+                    >
+                        {following ? <Check size={14} aria-hidden="true" /> : <Plus size={14} aria-hidden="true" />}
+                        <span>{following ? "Following" : "Follow"}</span>
+                    </button>
+                )}
                 {canRefresh && (
                     <button
                         type="button"
@@ -332,111 +406,194 @@ export function AlphaRadarDetailPane({
                 </Link>
             </header>
 
-            {(usesFallback || data.errorMessage || reportsQuery.error || changesQuery.error) && (
+            {follows.error && (
+                <p className="pm-alpha-follow-error" role="alert" data-testid="alpha-radar-follow-error">{follows.error}</p>
+            )}
+
+            {usesFallback && (
                 <div className="pm-alpha-status" data-testid="alpha-radar-fallback">
                     <AlertCircle size={14} aria-hidden="true" />
                     <span>
-                        Showing seeded Alpha Radar data until the live 13F refresh pipeline has local database and SEC access.{" "}
-                        <Link href="/help#alpha-radar-v1">Read setup notes</Link>
+                        <SampleTag /> Example filers and reports, not real 13F data: Atlas isn&rsquo;t tracking a filer yet.{" "}
+                        <Link href={ALPHA_RADAR_HELP_HREF}>Read the guide</Link>
                     </span>
                 </div>
             )}
 
-            <AlphaRadarSchedulerPanel plan={schedulerPlan} />
-
-            <AlphaRadarOperationsPanel
-                health={operationsHealth}
-                providerDecisions={providerDecisions}
-                maintenancePlan={maintenancePlan}
-            />
-
-            <AlphaRadarBacktestPanel result={backtestResult} />
-
-            <div className="pm-alpha-stat-grid" data-testid="alpha-radar-stats">
-                <AlphaRadarStat label="Material changes" value={materialChanges.length.toString()} />
-                <AlphaRadarStat label="Overlap" value={overlapCount.toString()} />
-                <AlphaRadarStat label="Source filings" value={(report?.sourceFilingIds.length ?? 0).toString()} />
-            </div>
-
-            {report && (
-                <section className="pm-alpha-report" data-testid="alpha-radar-report">
-                    <div className="pm-alpha-report-head">
-                        <div>
-                            <h3>{report.title}</h3>
-                            <p>{report.summary}</p>
-                        </div>
-                        <a href="/research" className="pm-card-link">
-                            Link context <ExternalLink size={12} aria-hidden="true" />
-                        </a>
-                    </div>
-                    <div className="pm-alpha-section-grid">
-                        {report.sections.slice(1, 6).map((section) => (
-                            <article key={section.id} className="pm-alpha-section" data-kind={section.kind}>
-                                <span className="pm-alpha-section-title">{section.title}</span>
-                                <p>{stripMarkdownList(section.markdown)}</p>
-                            </article>
-                        ))}
-                    </div>
-                </section>
+            {liveError && (
+                <div className="pm-alpha-status" role="alert" data-testid="alpha-radar-load-error">
+                    <AlertCircle size={14} aria-hidden="true" />
+                    <span>Couldn&rsquo;t load {selectedFiler.name}&rsquo;s 13F data. Try again later.</span>
+                </div>
             )}
 
-            <section className="pm-alpha-changes" aria-label="Material 13F changes">
-                <h3 className="pm-alpha-subhead">Material 13F changes</h3>
-                <div className="pm-alpha-change-list">
-                    {materialChanges.slice(0, 6).map((change) => (
-                        <AlphaRadarChangeRow key={alphaRadarChangeKey(change)} change={change} />
-                    ))}
+            {liveLoading ? (
+                <p className="pm-research-empty-hint" data-testid="alpha-radar-filer-loading">
+                    Loading {selectedFiler.name}&rsquo;s 13F changes.
+                </p>
+            ) : nothingLoaded ? (
+                <div className="pm-research-empty-hint" data-testid="alpha-radar-filer-empty">
+                    No 13F filings are loaded for {selectedFiler.name} yet. Atlas checks SEC for new filings every
+                    day, and their changes show here once one is in.
                 </div>
-            </section>
+            ) : liveError ? null : (
+                <>
+                    {/* Run planning, provider budgets and the backtest have only example inputs so far. */}
+                    {usesFallback && (
+                        <>
+                            <AlphaRadarSchedulerPanel plan={schedulerPlan} />
 
-            <AlphaRadarCloneGraphPanel
-                graph={cloneGraph}
-                clusters={cloneClusters}
-                fundStyles={cloneFundStyles}
-                selectedFundStyle={cloneStyleFilter}
-                onFundStyleChange={setCloneStyleFilter}
-            />
+                            <AlphaRadarOperationsPanel
+                                health={operationsHealth}
+                                providerDecisions={providerDecisions}
+                                maintenancePlan={maintenancePlan}
+                            />
 
-            <AlphaRadarConvictionPanel items={convictionItems} />
+                            <AlphaRadarBacktestPanel result={backtestResult} />
+                        </>
+                    )}
 
-            <AlphaRadarOverlayPanel
-                ideas={filteredOverlayIdeas}
-                filters={overlayFilters}
-                selectedFilter={overlayFilter}
-                onFilterChange={setOverlayFilter}
-            />
+                    <div className="pm-alpha-stat-grid" data-testid="alpha-radar-stats">
+                        <AlphaRadarStat label="Material changes" value={materialChanges.length.toString()} />
+                        <AlphaRadarStat label="Your overlap" value={overlapChanges.length.toString()} />
+                        <AlphaRadarStat label="Source filings" value={(report?.sourceFilingIds.length ?? 0).toString()} />
+                    </div>
 
-            <AlphaRadarThesisDraftPanel
-                drafts={thesisDrafts}
-                reviewStates={draftReviewStates}
-                hypothesisEdits={draftHypothesisEdits}
-                onEdit={(draft) => {
-                    setDraftReviewStates((current) => ({ ...current, [draft.id ?? draft.title]: "editing" }));
-                    setDraftHypothesisEdits((current) => ({
-                        ...current,
-                        [draft.id ?? draft.title]: current[draft.id ?? draft.title] ?? draft.hypothesis,
-                    }));
-                }}
-                onHypothesisChange={(draft, value) => {
-                    setDraftHypothesisEdits((current) => ({ ...current, [draft.id ?? draft.title]: value }));
-                }}
-                onSave={(draft) => {
-                    setDraftReviewStates((current) => ({ ...current, [draft.id ?? draft.title]: "needs-review" }));
-                }}
-                onAccept={(draft) => {
-                    setDraftReviewStates((current) => ({ ...current, [draft.id ?? draft.title]: "accepted" }));
-                }}
-                onArchive={(draft) => {
-                    setDraftReviewStates((current) => ({ ...current, [draft.id ?? draft.title]: "archived" }));
-                }}
-            />
+                    {report && (
+                        <section className="pm-alpha-report" data-testid="alpha-radar-report">
+                            <div className="pm-alpha-report-head">
+                                <div>
+                                    <h3>{report.title}</h3>
+                                    <p>{report.summary}</p>
+                                </div>
+                                <a href="/research" className="pm-card-link">
+                                    Link context <ExternalLink size={12} aria-hidden="true" />
+                                </a>
+                            </div>
+                            <div className="pm-alpha-section-grid">
+                                {/* A stored overlap section is shared; the reader's own takes its place. */}
+                                {report.sections
+                                    .filter((section) => section.kind !== "summary" && section.kind !== "overlap")
+                                    .slice(0, 4)
+                                    .map((section) => (
+                                        <article key={section.id} className="pm-alpha-section" data-kind={section.kind}>
+                                            <span className="pm-alpha-section-title">{section.title}</span>
+                                            <p>{stripMarkdownList(section.markdown)}</p>
+                                        </article>
+                                    ))}
+                                <article className="pm-alpha-section" data-kind="overlap" data-testid="alpha-radar-your-overlap">
+                                    <span className="pm-alpha-section-title">Your overlap</span>
+                                    <p>
+                                        {overlapChanges.length > 0
+                                            ? overlapChanges
+                                                .slice(0, 3)
+                                                .map((change) => `${change.ticker ? `${change.issuerName} (${change.ticker})` : change.issuerName}: ${change.userRelevance.reasons.join(", ").toLowerCase()}`)
+                                                .join("; ")
+                                            : "None of these changes are in your holdings, watchlist or active theses."}
+                                    </p>
+                                </article>
+                            </div>
+                        </section>
+                    )}
 
-            <AlphaRadarMemorySearch
-                query={memoryQuery}
-                onQueryChange={setMemoryQuery}
-                search={memorySearch}
-                isFallback={Boolean(memoryQuery.trim()) && (!liveMemorySearch.data?.matches.length || Boolean(liveMemorySearch.error))}
-            />
+                    <section className="pm-alpha-changes" aria-label="Material 13F changes">
+                        <h3 className="pm-alpha-subhead">Material 13F changes</h3>
+                        <div className="pm-alpha-change-list">
+                            {materialChanges.length > 0 ? materialChanges.slice(0, 6).map((change) => (
+                                <AlphaRadarChangeRow key={alphaRadarChangeKey(change)} change={change} />
+                            )) : (
+                                <div className="pm-research-empty-hint" data-testid="alpha-radar-changes-empty">
+                                    No material changes in the latest 13F.
+                                </div>
+                            )}
+                        </div>
+                    </section>
+
+                    <AlphaRadarCloneGraphPanel
+                        graph={cloneGraph}
+                        clusters={cloneClusters}
+                        fundStyles={cloneFundStyles}
+                        selectedFundStyle={cloneStyleFilter}
+                        onFundStyleChange={setCloneStyleFilter}
+                    />
+
+                    <AlphaRadarConvictionPanel items={convictionItems} />
+
+                    {/* External overlays come only from example providers so far. */}
+                    {usesFallback && (
+                        <AlphaRadarOverlayPanel
+                            ideas={filteredOverlayIdeas}
+                            filters={overlayFilters}
+                            selectedFilter={overlayFilter}
+                            onFilterChange={setOverlayFilter}
+                        />
+                    )}
+
+                    <AlphaRadarThesisDraftPanel
+                        drafts={thesisDrafts}
+                        reviewStates={draftReviewStates}
+                        hypothesisEdits={draftHypothesisEdits}
+                        onEdit={(draft) => {
+                            setDraftReviewStates((current) => ({ ...current, [draft.id ?? draft.title]: "editing" }));
+                            setDraftHypothesisEdits((current) => ({
+                                ...current,
+                                [draft.id ?? draft.title]: current[draft.id ?? draft.title] ?? draft.hypothesis,
+                            }));
+                        }}
+                        onHypothesisChange={(draft, value) => {
+                            setDraftHypothesisEdits((current) => ({ ...current, [draft.id ?? draft.title]: value }));
+                        }}
+                        onSave={(draft) => {
+                            setDraftReviewStates((current) => ({ ...current, [draft.id ?? draft.title]: "needs-review" }));
+                        }}
+                        onAccept={(draft) => {
+                            setDraftReviewStates((current) => ({ ...current, [draft.id ?? draft.title]: "accepted" }));
+                        }}
+                        onArchive={(draft) => {
+                            setDraftReviewStates((current) => ({ ...current, [draft.id ?? draft.title]: "archived" }));
+                        }}
+                    />
+
+                    <AlphaRadarMemorySearch
+                        query={memoryQuery}
+                        onQueryChange={setMemoryQuery}
+                        search={memorySearch}
+                        isFallback={Boolean(memoryQuery.trim()) && (!liveMemorySearch.data?.matches.length || Boolean(liveMemorySearch.error))}
+                    />
+                </>
+            )}
+        </div>
+    );
+}
+
+/** Atlas tracks no filer (or they couldn't be loaded), and examples are off. */
+function AlphaRadarNoFilers({ data }: { data: AlphaRadarResearchData }) {
+    const setShowSampleData = useSettingsStore((s) => s.setShowSampleData);
+    return (
+        <div className="pm-research-empty" data-testid="alpha-radar-detail-empty">
+            <h2 className="pm-card-title">Alpha Radar</h2>
+            {data.isLoading ? (
+                <p className="pm-card-subtitle">Loading tracked filers.</p>
+            ) : data.errorMessage ? (
+                <p className="pm-card-subtitle" role="alert">Couldn&rsquo;t load Alpha Radar&rsquo;s filers. Try again later.</p>
+            ) : (
+                <>
+                    <p className="pm-card-subtitle">
+                        Atlas isn&rsquo;t tracking any 13F filers yet. Once it is, it checks SEC for their filings every
+                        day, and each change shows where it meets your holdings, watchlist and theses.
+                    </p>
+                    <div className="pm-empty-actions">
+                        <button
+                            type="button"
+                            className="pm-btn pm-btn-ghost"
+                            onClick={() => setShowSampleData(true)}
+                            data-testid="alpha-radar-show-examples"
+                        >
+                            Show example data
+                        </button>
+                    </div>
+                </>
+            )}
         </div>
     );
 }
@@ -985,6 +1142,13 @@ function AlphaRadarCloneGraphPanel({
         </section>
     );
 }
+
+// The example user's holdings, watchlist and theses, for the example filers.
+const FALLBACK_USER_TICKERS = {
+    userPortfolioTickers: ["AAPL", "MSFT"],
+    userWatchlistTickers: ["CB", "NVDA", "PG"],
+    userThesisTickers: ["AAPL", "NVDA"],
+};
 
 function fallbackReportsFor(trackedFilerId: string | undefined): AlphaRadarReportRecord[] {
     return FALLBACK_REPORTS.filter((report) => !trackedFilerId || report.trackedFilerId === trackedFilerId);

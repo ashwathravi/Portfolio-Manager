@@ -42,7 +42,11 @@ export function generateAlphaRadarMemo(input: GenerateAlphaRadarMemoInput): Alph
         section('trims', 'Trims and reductions', 'trims', buildChangeList(trims, 'No material trims detected.'), trims),
         section('exits', 'Exited positions', 'exits', buildChangeList(exits, 'No exits detected.'), exits),
         section('new-positions', 'New positions', 'new_positions', buildChangeList(newPositions, 'No new positions detected.'), newPositions),
-        section('overlap', 'Portfolio Manager overlap', 'overlap', buildOverlapMarkdown(overlap), overlap),
+        // Only for changes that carry a user's overlap. The reports Atlas
+        // stores are shared, so their changes carry none: each reader's
+        // overlap is worked out when they read it (./user-overlap.ts), and a
+        // stored "no overlap" would be wrong for anyone who holds one.
+        ...(overlap.length > 0 ? [section('overlap', 'Portfolio Manager overlap', 'overlap', buildOverlapMarkdown(overlap), overlap)] : []),
         section('watch-next', 'Watch next', 'watch_next', buildWatchNextMarkdown(sortedChanges), sortedChanges.slice(0, 5)),
         section('risks', 'Caveats', 'risks', buildRisksMarkdown(input), []),
     ];
@@ -128,10 +132,6 @@ function buildChangeList(changes: readonly AlphaRadarMemoChange[], emptyText: st
 }
 
 function buildOverlapMarkdown(changes: readonly AlphaRadarMemoChange[]): string {
-    if (changes.length === 0) {
-        return 'No direct overlap with current Portfolio Manager holdings, watchlist tickers, or active theses was detected.';
-    }
-
     return changes
         .slice(0, 5)
         .map((change) => `- ${displayName(change)}: ${change.userRelevance.reasons.join(', ')}.`)

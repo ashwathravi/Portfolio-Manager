@@ -8,6 +8,8 @@ import postgres from 'postgres';
 import * as schema from '../../src/db/schema';
 import { AccountDeletionBlockedError, deleteAccount } from '../../src/lib/account/delete';
 import { buildAccountExport } from '../../src/lib/account/export';
+import { hasGoogleAccount } from '../../src/lib/auth/new-accounts';
+import { googleWorkspaceDomains } from '../../src/lib/auth/session-access';
 import type { PlaidFetch } from '../../src/lib/plaid/link';
 
 // Launch item i65: deleting an account and exporting its data, against a
@@ -58,6 +60,9 @@ describe('account deletion and export', { skip: !DATABASE_URL && 'SCRIPTS_TEST_D
         await sql`INSERT INTO portfolio_snapshot_positions (portfolio_id, date, symbol, quantity, cost_basis, close, close_date, market_value) VALUES (${p.id}, '2026-10-23', 'AAPL', 10, 800, 100, '2026-10-23', 1000)`;
         await sql`INSERT INTO order_plans (user_id, portfolio_id, instrument_type, symbol, side, order_type, quantity, limit_price, time_in_force, status, reference_price, rationale, created_at, updated_at) VALUES (${user}, ${p.id}, 'equity', 'AAPL', 'buy', 'limit', 5, 95, 'day', 'ready', 100, ${JSON.stringify({ thesisId: 't-1', setupType: 'breakout', conviction: 7, mood: 'calm', rationale: 'add on the dip', capturedAt: '2026-10-24T14:00:00.000Z', timeToDecisionMs: 1000 })}::jsonb, '2026-10-24 14:00', '2026-10-24 14:00')`;
         await sql`INSERT INTO user_settings (user_id, version, settings) VALUES (${user}, 15, ${JSON.stringify({ demo: { showSampleData: false } })}::jsonb)`;
+        await sql`INSERT INTO alpha_radar_tracked_filers (name, slug, cik) VALUES ('Followed filer', 'followed-filer', '0000000002') ON CONFLICT DO NOTHING`;
+        await sql`INSERT INTO alpha_radar_filer_follows (user_id, tracked_filer_id) SELECT ${user}, id FROM alpha_radar_tracked_filers WHERE slug = 'followed-filer'`;
+        await sql`INSERT INTO strategies (user_id, name, definition) VALUES (${user}, 'Trend', ${JSON.stringify({ rules: [{ id: 'r1', field: 'Close', op: '>', value: 'SMA(50)' }], conjunctions: [], symbols: ['SPY'], guardrails: { maxPositionPct: 0.1, stopLossPct: 0.1, rebalanceDays: 7 } })}::jsonb)`;
         await sql`INSERT INTO watchlist_items (user_id, id, ticker, company_name, reason, notes, added_at, write_session, write_seq) VALUES (${user}, 'w-1', 'MSFT', 'Microsoft', 'cloud', 'n', '2026-03-01', 'session-1', 1)`;
         await sql`INSERT INTO watchlist_items (user_id, id, ticker, company_name, reason, notes, added_at, dismissed, write_session, write_seq) VALUES (${user}, 'w-2', 'TSLA', '', '', '', '2026-03-01', true, 'session-1', 2)`;
         await sql`INSERT INTO journal_entries (user_id, id, date, type, ticker, decision, rationale, outcome, write_session, write_seq) VALUES (${user}, 'j-1', '2026-03-05', 'entry', 'AAPL', 'Bought', 'cheap', 'pending', 'session-1', 3)`;
@@ -93,6 +98,8 @@ describe('account deletion and export', { skip: !DATABASE_URL && 'SCRIPTS_TEST_D
                 (SELECT count(*) FROM thesis_catalysts WHERE user_id = ${user})::int AS catalysts,
                 (SELECT count(*) FROM thesis_evidence WHERE user_id = ${user})::int AS evidence,
                 (SELECT count(*) FROM ask_messages WHERE user_id = ${user})::int AS ask_messages,
+                (SELECT count(*) FROM strategies WHERE user_id = ${user})::int AS strategies,
+                (SELECT count(*) FROM alpha_radar_filer_follows WHERE user_id = ${user})::int AS alpha_radar_follows,
                 (SELECT count(*) FROM plaid_items WHERE user_id = ${user})::int AS plaid_items,
                 (SELECT count(*) FROM plaid_accounts WHERE user_id = ${user})::int AS plaid_accounts`;
         return { ...counts };
@@ -144,6 +151,10 @@ describe('account deletion and export', { skip: !DATABASE_URL && 'SCRIPTS_TEST_D
             ['a-1', 'assistant', 'Mostly AAPL.', [{ label: 'Closed trades' }]],
         ]);
 
+        // Strategies (launch item i55): the definition and backtest as saved.
+        assert.deepEqual(data.strategies.map((st) => [st.name, (st.definition as { symbols: string[] }).symbols, st.backtest]), [['Trend', ['SPY'], null]]);
+        assert.deepEqual(data.alphaRadarFollows.map((follow) => follow.name), ['Followed filer']);
+
         const text = JSON.stringify(data);
         for (const leak of ['userId', 'writeSession', 'writeSeq', 'dismissed', 'cleared', 'An earlier question', 'secret-cipher', 'item-u-export', 'acc-u-export', 'u-other']) {
             assert.ok(!text.includes(leak), leak);
@@ -166,6 +177,8 @@ describe('account deletion and export', { skip: !DATABASE_URL && 'SCRIPTS_TEST_D
         assert.deepEqual(await rowsOf('u-delete'), Object.fromEntries(Object.keys(before).map((k) => [k, 0])));
         assert.deepEqual(await rowsOf('u-other'), others);
         assert.equal((await sql`SELECT 1 FROM alpha_radar_tracked_filers WHERE slug = 'shared-filer'`).length, 1);
+        // The filer the user followed is shared: only the follow goes.
+        assert.equal((await sql`SELECT 1 FROM alpha_radar_tracked_filers WHERE slug = 'followed-filer'`).length, 1);
     });
 
     test('regression: a connection Plaid can\'t be told about blocks the deletion, and nothing is deleted', async () => {
@@ -242,5 +255,31 @@ describe('account deletion and export', { skip: !DATABASE_URL && 'SCRIPTS_TEST_D
         assert.deepEqual(await deleteAccount('u-plain', { plaid: null, database, fetchImpl: plaid.fetchImpl, now: NOW }), { accounts: 1, connections: 0 });
         assert.equal(plaid.requests.length, 0);
         assert.equal((await rowsOf('u-plain')).users, 0);
+    });
+
+    test('a Google account that has signed in before is known, so open sign-up\'s daily limit never turns it away (launch item i77)', async () => {
+        await sql`INSERT INTO auth_users (id, email) VALUES ('u-google', 'u-google@example.test')`;
+        await sql`INSERT INTO auth_accounts (user_id, type, provider, provider_account_id) VALUES ('u-google', 'oidc', 'google', 'google-sub-1')`;
+        await sql`INSERT INTO auth_accounts (user_id, type, provider, provider_account_id) VALUES ('u-google', 'oauth', 'schwab', 'google-sub-2')`;
+
+        assert.equal(await hasGoogleAccount('google-sub-1', database), true);
+        assert.equal(await hasGoogleAccount('google-sub-new', database), false);
+        // Another provider's account with the same ID isn't a Google one.
+        assert.equal(await hasGoogleAccount('google-sub-2', database), false);
+    });
+
+    test('a user\'s Google Workspace is read from the ID token stored with their Google account, so blocking it ends their session (launch item i77)', async () => {
+        const token = (claims: Record<string, unknown>) => `h.${Buffer.from(JSON.stringify(claims)).toString('base64url')}.s`;
+        await sql`INSERT INTO auth_users (id, email) VALUES ('u-ws-alias', 'someone@alias.example'), ('u-ws-gmail', 'someone@gmail.com'), ('u-ws-untokened', 'other@abuse.example')`;
+        await sql`INSERT INTO auth_accounts (user_id, type, provider, provider_account_id, id_token) VALUES ('u-ws-alias', 'oidc', 'google', 'google-sub-w', ${token({ sub: 'google-sub-w', hd: 'abuse.example' })})`;
+        await sql`INSERT INTO auth_accounts (user_id, type, provider, provider_account_id, id_token) VALUES ('u-ws-alias', 'oauth', 'schwab', 'schwab-1', ${token({ hd: 'elsewhere.example' })})`;
+        await sql`INSERT INTO auth_accounts (user_id, type, provider, provider_account_id, id_token) VALUES ('u-ws-gmail', 'oidc', 'google', 'google-sub-g', ${token({ sub: 'google-sub-g' })})`;
+        await sql`INSERT INTO auth_accounts (user_id, type, provider, provider_account_id) VALUES ('u-ws-untokened', 'oidc', 'google', 'google-sub-o')`;
+
+        assert.deepEqual(await googleWorkspaceDomains('u-ws-alias', database), ['abuse.example']);
+        // A Gmail account has no Workspace, and an account stored without its token says none.
+        assert.deepEqual(await googleWorkspaceDomains('u-ws-gmail', database), []);
+        assert.deepEqual(await googleWorkspaceDomains('u-ws-untokened', database), []);
+        assert.deepEqual(await googleWorkspaceDomains('u-ws-nobody', database), []);
     });
 });
