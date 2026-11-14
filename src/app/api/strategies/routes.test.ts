@@ -1,6 +1,7 @@
 import { afterEach, describe, test } from "node:test";
 import assert from "node:assert/strict";
 
+import { createMemoryRateLimitStore, setRateLimitStoreForTests } from "@/lib/api/rate-limit";
 import { resetApiSecurityForTests } from "@/lib/api/security";
 
 import { POST as createStrategy } from "./route";
@@ -75,5 +76,24 @@ describe("strategy routes", () => {
         assert.deepEqual(await missing.json(), { error: "Strategy not found", code: "STRATEGY_NOT_FOUND" });
         assert.equal((await deleteStrategy(request("DELETE", "/api/strategies/x"), params("x"))).status, 404);
         assert.equal((await runBacktest(request("POST", "/api/strategies/x/backtest"), params("x"))).status, 404);
+    });
+
+    test("regression (i77): a backtest past the day's is refused before the database is touched", async () => {
+        signedIn();
+        const memory = createMemoryRateLimitStore();
+        setRateLimitStoreForTests({
+            kind: "memory",
+            consume: (key, rule) => key === `quota:backtests:${USER_ID}`
+                ? Promise.resolve({ allowed: false, retryAfterSeconds: 30 * 60 })
+                : memory.consume(key, rule),
+        });
+
+        const response = await runBacktest(request("POST", `/api/strategies/${STRATEGY_ID}/backtest`), params(STRATEGY_ID));
+
+        assert.equal(response.status, 429);
+        assert.deepEqual(await response.json(), {
+            error: "You can run up to 100 backtests a day. Try again in 30 minutes.",
+            code: "DAILY_QUOTA_REACHED",
+        });
     });
 });

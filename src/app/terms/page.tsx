@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { ContactLink, LegalDocument, type LegalSearchParams } from "@/components/legal/LegalDocument";
+import { isOpenSignup } from "@/lib/auth/access";
 
 export const metadata: Metadata = {
     title: "Terms of Service | Atlas Wealth",
@@ -21,7 +22,7 @@ export default function TermsPage({ searchParams }: { searchParams: LegalSearchP
                 <>
                     <p>
                         These terms cover your use of Atlas Wealth, a personal investment tracking app currently
-                        in an invite-only beta. &ldquo;We&rdquo; means the person who runs Atlas Wealth, and
+                        in {isOpenSignup() ? "a public" : "an invite-only"} beta. &ldquo;We&rdquo; means the person who runs Atlas Wealth, and
                         &ldquo;you&rdquo; means you. By signing in you agree to these terms.
                     </p>
                     <p>
@@ -35,7 +36,11 @@ export default function TermsPage({ searchParams }: { searchParams: LegalSearchP
             <section aria-labelledby="terms-using">
                 <h2 id="terms-using">Using Atlas Wealth</h2>
                 <ul>
-                    <li>During the beta you need an invitation and a Google account to sign in.</li>
+                    <li>
+                        {isOpenSignup()
+                            ? "You need a Google account to sign in. We may close an account that abuses Atlas Wealth or the services it relies on."
+                            : "During the beta you need an invitation and a Google account to sign in."}
+                    </li>
                     <li>You must be at least 18.</li>
                     <li>
                         Your account is for you alone. Keep your Google account secure: anyone who can sign in

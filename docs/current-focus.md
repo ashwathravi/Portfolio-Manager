@@ -44,4 +44,6 @@ Retired routes redirect (307): `/portfolios`, `/portfolios/trade-log`,
 - **Product gaps still on example data or missing:** server-side alerts and
   email (i57, i58), and options positions for the LEAPS ledger (i63).
 - **Public launch (phase 5):** invite the first users (i75), upgrade plans
-  (i76), then open sign-up with per-user quotas (i77).
+  (i76), then open sign-up: `AUTH_OPEN_SIGNUP`, with the per-user daily
+  quotas, the limit on new accounts a day and the block list already in
+  place (i77, `docs/deployment.md` › Opening sign-up).

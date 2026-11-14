@@ -8,7 +8,8 @@ import postgres from 'postgres';
 import * as schema from '../../src/db/schema';
 import type { PlaidFetch } from '../../src/lib/plaid/link';
 import { deletePortfolio } from '../../src/lib/portfolio/manage';
-import { PlaidTokenUnavailableError, disconnectPlaidItem, handlePlaidWebhook, listPlaidConnections } from '../../src/lib/plaid/connections';
+import { MAX_PLAID_CONNECTIONS_PER_USER, PlaidTokenUnavailableError, disconnectPlaidItem, handlePlaidWebhook, listPlaidConnections } from '../../src/lib/plaid/connections';
+import { createDrizzlePlaidTokenRegistryStore, resetPlaidTokenVaultForTests, setPlaidTokenRegistryStoreForTests, storePlaidConnection } from '../../src/lib/plaid/server-token-vault';
 import { PlaidItemNotFoundError, connectedAccountFingerprints, refreshPlaidItem, selectPlaidAccounts, syncAllPlaidItems, syncPlaidItem } from '../../src/lib/plaid/sync';
 
 // Launch item i44: Plaid's holdings and investment transactions synced into
@@ -77,6 +78,7 @@ describe('Plaid sync into portfolios', { skip: !DATABASE_URL && 'SCRIPTS_TEST_DA
     let server: ReturnType<typeof postgres>;
     let sql: ReturnType<typeof postgres>;
     let database: Parameters<typeof syncPlaidItem>[2]['database'] & object;
+    let scratchUrl: string;
 
     before(async () => {
         server = postgres(DATABASE_URL!, { max: 1, onnotice: () => {} });
@@ -84,7 +86,8 @@ describe('Plaid sync into portfolios', { skip: !DATABASE_URL && 'SCRIPTS_TEST_DA
         await server.unsafe(`CREATE DATABASE ${name}`);
         const scratch = new URL(DATABASE_URL!);
         scratch.pathname = `/${name}`;
-        sql = postgres(scratch.toString(), { max: 1, onnotice: () => {} });
+        scratchUrl = scratch.toString();
+        sql = postgres(scratchUrl, { max: 1, onnotice: () => {} });
         await sql.unsafe(readFileSync('scripts/db/init-local.sql', 'utf8'));
         await migrate(drizzle(sql), { migrationsFolder: 'drizzle' });
         database = drizzle(sql, { schema });
@@ -688,5 +691,53 @@ describe('Plaid sync into portfolios', { skip: !DATABASE_URL && 'SCRIPTS_TEST_DA
         assert.equal(waited, true);
         assert.equal(result, 1);
     });
-});
 
+    test('regression (i77): two links finishing at once past the most connections save only one', async () => {
+        // The Codex finding on PR #194: a count before saving let both through.
+        const user = 'u-cap';
+        await sql`INSERT INTO auth_users (id, email) VALUES (${user}, ${`${user}@example.test`})`;
+        for (let i = 1; i < MAX_PLAID_CONNECTIONS_PER_USER; i += 1) {
+            await sql`
+                INSERT INTO plaid_items (user_id, plaid_item_id, institution_id, institution_name, access_token_ciphertext, access_token_iv, access_token_auth_tag)
+                VALUES (${user}, ${`item-cap-${i}`}, 'ins_1', 'Fidelity', 'c', 'i', 't')`;
+        }
+        // A disconnected one doesn't count.
+        await sql`
+            INSERT INTO plaid_items (user_id, plaid_item_id, institution_id, institution_name, access_token_ciphertext, access_token_iv, access_token_auth_tag, status, revoked_at)
+            VALUES (${user}, 'item-cap-gone', 'ins_1', 'Fidelity', '', '', '', 'revoked', now())`;
+        const active = async () => Number((await sql<{ n: string }[]>`
+            SELECT count(*) AS n FROM plaid_items WHERE user_id = ${user} AND status <> 'revoked' AND revoked_at IS NULL`)[0].n);
+
+        // Two connections, so the two saves really run at once.
+        const pool = postgres(scratchUrl, { max: 2, onnotice: () => {} });
+        const env = { storage: process.env.PLAID_TOKEN_STORAGE, key: process.env.PLAID_TOKEN_ENCRYPTION_KEY };
+        process.env.PLAID_TOKEN_STORAGE = 'postgres';
+        process.env.PLAID_TOKEN_ENCRYPTION_KEY = 'test-only-registry-key';
+        setPlaidTokenRegistryStoreForTests({ ...createDrizzlePlaidTokenRegistryStore(drizzle(pool, { schema })), configured: () => true });
+        try {
+            const link = (item: string) => storePlaidConnection({
+                userId: user,
+                exchange: { itemId: item, accessToken: `access-${item}`, requestId: 'r', institution: { id: 'ins_2', name: 'Schwab' }, accounts: [] },
+                maxConnections: MAX_PLAID_CONNECTIONS_PER_USER,
+                now: NOW,
+            });
+            const results = await Promise.all([link('item-new-a'), link('item-new-b')]);
+            assert.deepEqual(results.map((r) => r.stored).sort(), [false, true]);
+            assert.deepEqual(results.map((r) => r.limitReached === true).sort(), [false, true]);
+            assert.equal(await active(), MAX_PLAID_CONNECTIONS_PER_USER);
+
+            // The one saved, linked again, is saved again: it isn't a new connection.
+            const saved = results[0].stored ? 'item-new-a' : 'item-new-b';
+            assert.equal((await link(saved)).stored, true);
+            assert.equal(await active(), MAX_PLAID_CONNECTIONS_PER_USER);
+        } finally {
+            setPlaidTokenRegistryStoreForTests(null);
+            resetPlaidTokenVaultForTests();
+            for (const [key, value] of [['PLAID_TOKEN_STORAGE', env.storage], ['PLAID_TOKEN_ENCRYPTION_KEY', env.key]] as const) {
+                if (value === undefined) delete process.env[key];
+                else process.env[key] = value;
+            }
+            await pool.end();
+        }
+    });
+});
