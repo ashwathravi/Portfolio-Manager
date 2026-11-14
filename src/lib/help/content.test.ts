@@ -1,14 +1,34 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert';
 import { activeDestination } from '@/lib/navigation';
-import { GETTING_STARTED, GLOSSARY } from './content';
+import { GLOSSARY, gettingStarted } from './content';
 
 const path = (href: string) => href.split(/[?#]/)[0];
 
 describe('help content', () => {
-    test('getting started is five steps, each linking to a live page', () => {
-        assert.strictEqual(GETTING_STARTED.length, 5);
-        for (const step of GETTING_STARTED) assert.ok(activeDestination(path(step.href)), step.href);
+    test('getting started is five steps, each linking to a live page, with bank linking or without', () => {
+        for (const bankLinking of [false, true]) {
+            const steps = gettingStarted(bankLinking);
+            assert.strictEqual(steps.length, 5);
+            for (const step of steps) assert.ok(activeDestination(path(step.href)), step.href);
+        }
+    });
+
+    // x30: step one sent everyone to Settings to connect an account, where
+    // without Plaid's keys the card only says bank linking isn't set up and
+    // points back at Accounts.
+    test('regression (x30): without bank linking, step one adds an account by hand on Accounts', () => {
+        const [first, ...rest] = gettingStarted(false);
+        assert.strictEqual(first.href, '/portfolios/accounts');
+        assert.strictEqual(first.cta, 'Add an account');
+        assert.doesNotMatch(`${first.title} ${first.body}`, /connect|link a brokerage/i);
+        for (const step of [first, ...rest]) assert.notStrictEqual(step.href, '/settings#accounts', step.title);
+    });
+
+    test('with bank linking, step one connects a brokerage in Settings', () => {
+        const [first] = gettingStarted(true);
+        assert.strictEqual(first.href, '/settings#accounts');
+        assert.strictEqual(first.cta, 'Connect an account');
     });
 
     test('glossary terms are unique, alphabetical (numbers last), and link to live pages', () => {

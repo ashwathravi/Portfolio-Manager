@@ -276,20 +276,29 @@ export function HoldingsPageClient({
     }, [rows, bySymbol, sectorFilter, bucketFilter, themeFilter, sortKey, policySummary]);
 
     if (rows.length === 0) {
+        // With an account already, importing its positions is the next step,
+        // so Import CSV leads, as on Today's first-run steps; before one,
+        // getting an account (connected or added by hand) does.
+        const hasAccount = importAccounts.length > 0;
+        const variant = hasAccount ? "ghost" : "primary";
+        const accountAction = bankLinking
+            ? <Link href="/settings#accounts" className={`pm-btn pm-btn-${variant}`}>Connect an account</Link>
+            : <NewAccountButton variant={variant} />;
         return (
             <div className="pm-holdings-stack">
                 <section className="pm-card pm-empty-card" data-testid="holdings-empty">
                     <h2>No holdings yet</h2>
                     <p>
-                        {bankLinking ? "Connect an account" : "Add an account"}, or import a positions export
-                        from your broker. Market value, unrealized gain, policy buckets, and theme exposure are
-                        all calculated from your own positions.
+                        {hasAccount
+                            ? `Import a positions export from your broker into ${importAccounts.length === 1 ? "your account" : "one of your accounts"}, or ${bankLinking ? "connect" : "add"} another account.`
+                            : `${bankLinking ? "Connect an account" : "Add an account"}, or import a positions export from your broker.`}{" "}
+                        Market value, unrealized gain, policy buckets, and theme exposure are all calculated from
+                        your own positions.
                     </p>
                     <div className="pm-empty-actions">
-                        {bankLinking
-                            ? <Link href="/settings#accounts" className="pm-btn pm-btn-primary">Connect an account</Link>
-                            : <NewAccountButton />}
-                        <ImportHoldingsDialog accounts={importAccounts} />
+                        {!hasAccount && accountAction}
+                        <ImportHoldingsDialog accounts={importAccounts} triggerClassName={`pm-btn pm-btn-${hasAccount ? "primary" : "ghost"}`} />
+                        {hasAccount && accountAction}
                         <Link href="/portfolios/accounts" className="pm-btn pm-btn-ghost">View accounts</Link>
                     </div>
                 </section>

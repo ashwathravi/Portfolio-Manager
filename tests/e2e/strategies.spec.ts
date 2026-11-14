@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { gotoAppPage, reloadAppPage } from './helpers/app';
-import { databaseAuthEnabled, signInAsFreshUser } from './helpers/users';
+import { databaseAuthEnabled, signInAsFreshUser, signInAsNewUser } from './helpers/users';
 
 /**
  * Phase 6 Strategy Builder tests (AR-80/81/82) + AR-111 coverage.
@@ -30,6 +30,19 @@ test.describe('Strategies page — Phase 6 builder shell', () => {
 
     test('labels the strategies as example data', async ({ page }) => {
         await expect(page.getByTestId('sample-data-notice')).toBeVisible();
+    });
+
+    test('regression (x30): without bank linking, the way to your own data is adding an account, not Settings', async ({ context, page }) => {
+        // E2E runs without Plaid's keys, as production does until they're
+        // set: Settings says bank linking isn't set up and points back at
+        // Accounts, so "Connect an account" went round in a circle. A new
+        // user starts with example data off (the empty state); without a
+        // database examples are on (the notice over them).
+        const signedIn = await signInAsNewUser(context, { firstSignIn: true });
+        if (signedIn) await gotoAppPage(page, '/strategies');
+        const way = page.getByTestId(signedIn ? 'sample-empty-state' : 'sample-data-notice').first();
+        await expect(way.getByRole('link', { name: 'Add an account' })).toHaveAttribute('href', '/portfolios/accounts');
+        await expect(page.locator('a[href="/settings#accounts"]')).toHaveCount(0);
     });
 
     test('regression: Duplicate creates and selects a copy (was a dead button)', async ({ context, page }) => {

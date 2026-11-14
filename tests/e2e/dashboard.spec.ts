@@ -79,6 +79,13 @@ test.describe('Today page', () => {
         await expect(hero.getByRole('button', { name: 'New account' })).toBeVisible();
         await expect(hero.getByRole('link', { name: 'Connect an account' })).toHaveCount(0);
         await expect(hero.locator('a[href^="/settings"]')).toHaveCount(0);
+        // Nor anywhere else on the page: the example section's notice led
+        // there too, and leads to Accounts instead.
+        await expect(page.locator('a[href="/settings#accounts"]')).toHaveCount(0);
+        const notice = page.getByTestId('today-examples').getByTestId('sample-data-notice');
+        if (await notice.count()) {
+            await expect(notice.getByRole('link', { name: 'Add an account' })).toHaveAttribute('href', '/portfolios/accounts');
+        }
         await expect(page.getByTestId('policy-strip')).toHaveCount(0);
         await expect(page.getByText('$10,050')).toHaveCount(0);
     });
@@ -727,6 +734,13 @@ test.describe('Today › First run', () => {
         await examples.getByRole('button', { name: 'Show example data' }).click();
         await expect(page.getByTestId('today-examples')).toBeVisible();
         await expect(examples).toHaveCount(0);
+
+        // Regression (x30): the examples' notice offered "Connect an account",
+        // a link to the Settings card that says bank linking isn't set up
+        // (E2E has no Plaid keys, as production until they're set).
+        const notice = page.getByTestId('today-examples').getByTestId('sample-data-notice');
+        await expect(notice.getByRole('link', { name: 'Add an account' })).toHaveAttribute('href', '/portfolios/accounts');
+        await expect(page.locator('a[href="/settings#accounts"]')).toHaveCount(0);
     });
 
     test('regression: the page arrives with the stored setting, so examples never flash in or out as it loads', async ({ context, page }) => {

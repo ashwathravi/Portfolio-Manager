@@ -56,7 +56,7 @@ test.describe('Portfolio › Holdings', () => {
         await expect(empty.getByRole('link', { name: 'Connect an account' })).toHaveCount(0);
         await expect(empty.locator('a[href^="/settings"]')).toHaveCount(0);
         await expect(empty.getByRole('button', { name: 'New account' })).toHaveClass(/pm-btn-primary/);
-        await expect(empty.getByRole('button', { name: 'Import CSV' })).toBeVisible();
+        await expect(empty.getByRole('button', { name: 'Import CSV' })).toHaveClass(/pm-btn-ghost/);
         await expect(empty.getByRole('link', { name: 'View accounts' })).toHaveAttribute('href', '/portfolios/accounts');
     });
 
@@ -73,6 +73,12 @@ test.describe('Portfolio › Holdings', () => {
         expect((await (await page.request.get('/api/portfolios/count')).json()).count).toBe(1);
         // Still no positions: the empty state stays, now with an account to import into.
         await expect(empty).toBeVisible();
+        // Regression: it still led with New account, steering a user with an
+        // account toward a second one. Importing into it is the next step.
+        await expect(empty).toContainText('Import a positions export from your broker into your account, or add another account.');
+        await expect(empty.getByRole('button', { name: 'Import CSV' })).toHaveClass(/pm-btn-primary/);
+        await expect(empty.getByRole('button', { name: 'New account' })).toHaveClass(/pm-btn-ghost/);
+        await expect(empty.locator('a[href^="/settings"]')).toHaveCount(0);
     });
 
     test('regression: no dead links to retired routes', async ({ page }) => {

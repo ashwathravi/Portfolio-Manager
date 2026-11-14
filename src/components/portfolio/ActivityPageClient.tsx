@@ -16,6 +16,7 @@ import {
     type ActivitySide,
     type MoneyAmount,
 } from "@/lib/portfolio/activity";
+import { NewAccountButton } from "./AccountControls";
 import { AddTransactionDialog, type TransactionAccountOption } from "./AddTransactionDialog";
 import { ImportTransactionsDialog } from "./ImportTransactionsDialog";
 
@@ -25,6 +26,11 @@ import { ImportTransactionsDialog } from "./ImportTransactionsDialog";
  * tax-friction callout (kept from the trade log) runs on the same rows.
  * Transactions are added by hand or from a broker's CSV, and deleted here
  * (launch item i40).
+ *
+ * `bankLinking` is whether Settings can connect a bank (bankLinkingAvailable,
+ * x30). Without it Settings says bank linking isn't set up and points back
+ * at Accounts, so the empty state has no Connect link: it leads with adding
+ * transactions, or with New account when there is no account to add them to.
  */
 
 const SIDES: ReadonlyArray<{ key: "ALL" | ActivitySide; label: string }> = [
@@ -78,10 +84,13 @@ function DeleteTransactionButton({ row }: { row: ActivityRow }) {
 export function ActivityPageClient({
     rows,
     accountOptions = [],
+    bankLinking,
 }: {
     rows: ActivityRow[];
     /** The user's accounts, to add or import transactions into. */
     accountOptions?: readonly TransactionAccountOption[];
+    /** Whether Settings can connect a bank (x30). */
+    bankLinking: boolean;
 }) {
     const [query, setQuery] = useState("");
     const [side, setSide] = useState<"ALL" | ActivitySide>("ALL");
@@ -108,14 +117,24 @@ export function ActivityPageClient({
             <div className="pm-page" data-testid="activity-view">
                 <section className="pm-card pm-empty-card" data-testid="activity-empty">
                     <h2>No transactions yet</h2>
-                    <p>
-                        Buys, sells, dividends, and transfers from your connected accounts show up here,
-                        along with a churn and tax-friction check on repeat trading. You can also add them
-                        yourself or import your broker&apos;s activity CSV.
-                    </p>
+                    {bankLinking ? (
+                        <p>
+                            Buys, sells, dividends, and transfers from your connected accounts show up here,
+                            along with a churn and tax-friction check on repeat trading. You can also add them
+                            yourself or import your broker&apos;s activity CSV.
+                        </p>
+                    ) : (
+                        <p>
+                            Add buys, sells, dividends, and transfers yourself or import your broker&apos;s
+                            activity CSV, and they show up here, along with a churn and tax-friction check on
+                            repeat trading.{accountOptions.length === 0 && " They go in an account, so add one first."}
+                        </p>
+                    )}
                     <div className="pm-empty-actions">
-                        <Link href="/settings#accounts" className="pm-btn pm-btn-primary">Connect an account</Link>
-                        <AddControls accounts={accountOptions} />
+                        {bankLinking && <Link href="/settings#accounts" className="pm-btn pm-btn-primary">Connect an account</Link>}
+                        {!bankLinking && accountOptions.length === 0
+                            ? <NewAccountButton />
+                            : <AddControls accounts={accountOptions} />}
                     </div>
                 </section>
             </div>
