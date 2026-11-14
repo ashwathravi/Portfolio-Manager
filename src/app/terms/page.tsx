@@ -8,7 +8,7 @@ export const metadata: Metadata = {
     description: "The terms for using Atlas Wealth, including why nothing in it is investment advice.",
 };
 
-const LAST_UPDATED = "November 2, 2026";
+const LAST_UPDATED = "November 14, 2026";
 const PLAID_PRIVACY_URL = "https://plaid.com/legal/#end-user-privacy-policy";
 
 export default function TermsPage({ searchParams }: { searchParams: LegalSearchParams }) {
