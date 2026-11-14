@@ -1,0 +1,2 @@
+ALTER TABLE "alert_notifications" ADD COLUMN "email_batch" text;--> statement-breakpoint
+CREATE INDEX "alert_notifications_pending_email_batch_idx" ON "alert_notifications" USING btree ("email_batch") WHERE "alert_notifications"."email_batch" is not null and "alert_notifications"."emailed_at" is null;
