@@ -94,7 +94,11 @@ jobs:
         run: npm run build
 
   e2e-tests:
-    runs-on: ubuntu-latest
+    # Pinned, like deploy-production: ubuntu-latest is now Ubuntu 26.04, and
+    # Playwright 1.58 won't install Chromium there ("Playwright does not
+    # support chromium on ubuntu26.04-x64"). Move both jobs together, with a
+    # Playwright release that supports the new image.
+    runs-on: ubuntu-24.04
     needs: lint-and-test
     timeout-minutes: 30
     permissions:
@@ -225,7 +229,8 @@ jobs:
     # newer entry in that queue cancels an older one, deploy or test.
     if: github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     needs: [build, lint-and-test, e2e-tests]
-    runs-on: ubuntu-latest
+    # Pinned with e2e-tests: the smoke test installs Playwright's Chromium.
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     environment:
       name: production
