@@ -1,6 +1,7 @@
 import { afterEach, describe, test } from "node:test";
 import assert from "node:assert/strict";
 
+import { EMAIL_JOB_MAX_MS } from "@/lib/email/nightly";
 import { DAILY_JOBS } from "@/lib/jobs/daily-jobs";
 import { DEFAULT_BUDGET_MS } from "@/lib/markets/price-ingest";
 import { PLAID_JOB_BUDGET_MS } from "@/lib/plaid/sync";
@@ -39,11 +40,14 @@ describe("GET /api/cron/daily", () => {
         }
     });
 
-    test("runs the session cleanup, the linked-account sync, the price ingest, then the snapshots valued at those prices and the alerts on them, with room for the budgets", () => {
+    test("runs the session cleanup, the linked-account sync, the price ingest, then the snapshots valued at those prices, the alerts on them and their emails, with room for every job's worst case", () => {
         assert.deepEqual(DAILY_JOBS.map((job) => job.name), ["expired-sessions", "ask-history", "plaid", "prices", "snapshots", "alerts", "email"]);
         assert.equal(maxDuration, 300);
-        // The sync and the price backfill each stop at their budget, together
-        // short of the limit, leaving the cleanup, snapshots and alerts room.
-        assert.ok(PLAID_JOB_BUDGET_MS + DEFAULT_BUDGET_MS <= (maxDuration - 20) * 1000);
+        // The three jobs that call out stop at their budgets: the sync and the
+        // price backfill at theirs, the email job once its last send has timed
+        // out. Together they leave 20 s for the cleanups, snapshots and alerts,
+        // which only use the database, and for each job's last writes.
+        const worstCaseMs = PLAID_JOB_BUDGET_MS + DEFAULT_BUDGET_MS + EMAIL_JOB_MAX_MS;
+        assert.ok(worstCaseMs <= (maxDuration - 20) * 1000, `the jobs that call out can take ${worstCaseMs / 1000} s`);
     });
 });

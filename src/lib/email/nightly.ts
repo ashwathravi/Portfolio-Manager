@@ -54,7 +54,7 @@ import type { WeekBounds } from "@/lib/reviews/types";
 import { currentWeekBounds } from "@/lib/reviews/weeks";
 
 import { emailSetup, type EmailConfig } from "./config";
-import { classifySendFailure, resendSender, type OutgoingEmail, type SendEmail, type SendFailure } from "./resend";
+import { classifySendFailure, RESEND_TIMEOUT_MS, resendSender, type OutgoingEmail, type SendEmail, type SendFailure } from "./resend";
 import { alertsEmail, unsubscribeHeaders, unsubscribeUrls, weeklyReviewEmail, type RenderedEmail } from "./templates";
 
 type Database = typeof db;
@@ -69,6 +69,13 @@ export const WEEKLY_REVIEW_SEND_DAYS = 4;
 export const SEND_SPACING_MS = 500;
 /** No email is started after this; the nightly run's five minutes are mostly the price job's. */
 export const EMAIL_JOB_BUDGET_MS = 15_000;
+/**
+ * The longest the job's sends can take: the last one (or its one retry) is
+ * started within the budget, waits at most the half second between sends,
+ * and is given up at Resend's timeout. Its database reads and writes come on
+ * top. The nightly route's time limit has to hold it (route.test.ts).
+ */
+export const EMAIL_JOB_MAX_MS = EMAIL_JOB_BUDGET_MS + SEND_SPACING_MS + RESEND_TIMEOUT_MS;
 /**
  * A claim this old that was never marked sent was cut off: the cron route
  * stops at five minutes, and one run goes at a time.

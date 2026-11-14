@@ -114,8 +114,13 @@ export const PRICE_SOURCE = "massive";
 export const MAX_CATCH_UP_DAYS = 5;
 /** The free plan keeps two years of daily history. */
 export const HISTORY_RANGE = "2Y";
-/** Under Vercel's 300-second function limit, with room for the last call. */
-export const DEFAULT_BUDGET_MS = 240_000;
+/**
+ * No call starts unless it can finish by then. The nightly route's five
+ * minutes also hold the Plaid sync and the email job, so this leaves them
+ * theirs (src/app/api/cron/daily/route.test.ts checks the sum); on the free
+ * plan it still fits four windows of five calls.
+ */
+export const DEFAULT_BUDGET_MS = 220_000;
 /** Free plan: 5 calls a minute. The window has 5 s of slack for clock drift. */
 export const CALLS_PER_WINDOW = 5;
 export const CALL_WINDOW_MS = 65_000;

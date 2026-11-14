@@ -6,9 +6,9 @@ import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import postgres from 'postgres';
 
 import * as schema from '../../src/db/schema';
-import { EmailJobError, sendScheduledEmails, type EmailJobDeps } from '../../src/lib/email/nightly';
+import { EMAIL_JOB_BUDGET_MS, EMAIL_JOB_MAX_MS, EmailJobError, SEND_SPACING_MS, sendScheduledEmails, type EmailJobDeps } from '../../src/lib/email/nightly';
 import { loadEmailPreferences, saveEmailPreferences, unsubscribe } from '../../src/lib/email/preferences';
-import { EmailSendError, type OutgoingEmail } from '../../src/lib/email/resend';
+import { EmailSendError, RESEND_TIMEOUT_MS, type OutgoingEmail } from '../../src/lib/email/resend';
 import type { TradeJournal } from '../../src/lib/journal/trades';
 import type { JournalEntry } from '../../src/types/trade';
 
@@ -386,6 +386,40 @@ describe('email kept with the account, and the nightly email job', { skip: !DATA
             assert.deepEqual(detail.alerts, { sent: 2, failed: 0, deferred: 1 });
             const waiting = await sql`SELECT 1 FROM alert_notifications WHERE emailed_at IS NULL`;
             assert.equal(waiting.length, 1);
+        });
+
+        test('with the default budget, a retry started just before it ends and left hanging until Resend\'s timeout still ends within EMAIL_JOB_MAX_MS', async () => {
+            for (const user of ['u-1', 'u-2', 'u-3']) {
+                await saveEmailPreferences(user, { alerts: true }, { database, now: new Date('2026-10-29T12:00:00Z') });
+                await raise(user, '2026-11-02 22:35');
+            }
+            let clock = 0;
+            const pauses: number[] = [];
+            const starts: number[] = [];
+            // u-1's email takes most of the budget; u-2's fails at once with no
+            // answer worth trusting, so it's tried again, and that try hangs
+            // until Resend's timeout ends it.
+            const script: Array<() => Promise<{ id: string }>> = [
+                async () => { clock += EMAIL_JOB_BUDGET_MS - 100; return { id: 'email-1' }; },
+                async () => { clock += 10; throw new EmailSendError('Resend refused the email (HTTP 500).', 500); },
+                async () => { clock += RESEND_TIMEOUT_MS; throw new EmailSendError('Resend timed out.', null); },
+            ];
+            const send = async () => {
+                starts.push(clock);
+                const next = script.shift();
+                assert.ok(next, 'no send starts once the budget is spent');
+                return next();
+            };
+
+            await assert.rejects(run(MONDAY, { send, clock: () => clock, pause: async (ms) => { pauses.push(ms); clock += ms; } }), (error: unknown) => {
+                assert.ok(error instanceof EmailJobError);
+                assert.deepEqual(error.detail.alerts, { sent: 1, failed: 1, deferred: 1 });
+                return true;
+            });
+            assert.deepEqual(pauses, [490], 'the retry waits out the half second between sends');
+            assert.deepEqual(starts, [0, EMAIL_JOB_BUDGET_MS - 100, EMAIL_JOB_BUDGET_MS + SEND_SPACING_MS - 100]);
+            assert.ok(clock <= EMAIL_JOB_MAX_MS, `ran for ${clock} ms`);
+            assert.equal(clock, EMAIL_JOB_MAX_MS - 100);
         });
 
         test('regression: an email whose run was cut off after claiming it goes on a later run; one a live run holds isn\'t taken', async () => {
