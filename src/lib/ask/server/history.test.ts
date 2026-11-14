@@ -7,7 +7,9 @@ import { PgDialect } from 'drizzle-orm/pg-core';
 import {
     ASK_HISTORY_LIMIT,
     buildAskHistoryQuery,
+    buildAskQuestionQuery,
     buildClearAskHistoryQuery,
+    buildDeleteQuestionQuery,
     buildInsertMessagesQuery,
     buildLockAskQuery,
     buildPruneAllAskHistoryQuery,
@@ -30,6 +32,15 @@ describe('Ask history queries', () => {
         assert.match(sql, /select count\(\*\) from "ask_messages" where \("ask_messages"."user_id" = \$1 and "ask_messages"."role" = \$2 and "ask_messages"."created_at" >= \$3\)/);
         assert.deepEqual(params.slice(0, 2), ['user-a', 'user']);
         assert.doesNotMatch(sql, /cleared/);
+    });
+
+    test('a question kept before its answer: whether it\'s still in the conversation, and giving it back', () => {
+        const state = buildAskQuestionQuery('user-a', 'q1').toSQL();
+        assert.match(state.sql, /^select "cleared" from "ask_messages" where \("ask_messages"."user_id" = \$1 and "ask_messages"."id" = \$2 and "ask_messages"."role" = \$3\)$/);
+        assert.deepEqual(state.params, ['user-a', 'q1', 'user']);
+        const release = buildDeleteQuestionQuery('user-a', 'q1').toSQL();
+        assert.match(release.sql, /^delete from "ask_messages" where \("ask_messages"."user_id" = \$1 and "ask_messages"."id" = \$2 and "ask_messages"."role" = \$3\)$/);
+        assert.deepEqual(release.params, ['user-a', 'q1', 'user']);
     });
 
     test('clearing marks the user\'s rows; it doesn\'t delete them', () => {
