@@ -9,9 +9,11 @@ Every half hour, `.github/workflows/production-monitor.yml` runs `scripts/monito
 | Check | Endpoint | Fails when |
 |---|---|---|
 | The site and its database | `/api/health/ready` | No answer, an error page or a redirect (deployment protection, say), or the app can't reach its database or has none configured. |
-| The nightly jobs | `/api/health/jobs` | `expired-sessions`, `ask-history`, `plaid`, `prices` or `snapshots` hasn't succeeded after 22:00 UTC on a weekday by midnight UTC. Vercel Hobby starts the 22:30 cron at any minute of that hour. |
+| The nightly jobs | `/api/health/jobs` | `expired-sessions`, `ask-history`, `plaid`, `prices` or `snapshots` hasn't succeeded after 22:00 UTC on a weekday by midnight UTC. Vercel Hobby starts the 22:30 cron at any minute of that hour. `prices` fails without `POLYGON_API_KEY`. |
 | Alpha Radar's SEC job | `/api/health/jobs` | `alpha-radar` hasn't succeeded after 11:00 UTC by 13:00 UTC (launch item i60). It runs every day; it fails without `SEC_EDGAR_USER_AGENT` or when every filer failed (SEC refusing Atlas, say). |
 | The nightly backup | `/api/health/jobs` | The `backup` workflow hasn't succeeded after 06:00 UTC by 10:00 UTC. It's scheduled at 06:41, and GitHub sometimes starts scheduled runs late. |
+| The stored closing prices | `/api/health/jobs` | The newest close in `price_bars` is older than the trading session before the one the last due `prices` run was for, or none is stored. That means two runs in a row stored no new day, even if they succeeded: a run that is rate-limited, out of its time budget or finds the day's file not yet published stops early and still counts as a success. One session behind is allowed, because the day's file may not be out by 22:30 UTC; the next run stores it. |
+| The portfolio snapshots | `/api/health/jobs` | The newest close a successful `snapshots` run valued the portfolios at (`latest` in its `job_runs.detail`) is older than that same session, or no run has. A run skips, and still succeeds, while held positions haven't been checked against splits through the newest close, for example when the price run was rate-limited first. Portfolios that changed after the close or wait for a re-import after a split don't hold it back. |
 
 The monitor waits 30 seconds and asks again, up to three times, before counting no answer, an error or an unreachable database. A late or failed job is a settled answer and isn't retried.
 
@@ -31,7 +33,7 @@ The repository is public, so the issue is too. It says which check failed and wh
 
 ## `/api/health/jobs`
 
-Public, like `/api/health/ready`. It answers 200 when every scheduled job has succeeded since its last run fell due, and 503 otherwise:
+Public, like `/api/health/ready`. It answers 200 when every scheduled job has succeeded since its last run fell due and the stored closes and snapshots are recent enough, and 503 otherwise:
 
 ```json
 {
@@ -41,6 +43,8 @@ Public, like `/api/health/ready`. It answers 200 when every scheduled job has su
     { "job": "prices", "status": "failed", "lastSucceededAt": "2026-10-27T22:31:04.120Z", "dueSince": "2026-10-28T22:00:00.000Z" },
     { "job": "backup", "status": "ok", "lastSucceededAt": "2026-10-29T06:49:58.000Z", "dueSince": "2026-10-29T06:00:00.000Z" }
   ],
+  "closes": { "status": "ok", "latest": "2026-10-27", "oldestAllowed": "2026-10-27" },
+  "snapshots": { "status": "ok", "latest": "2026-10-27", "oldestAllowed": "2026-10-27" },
   "checkedAt": "2026-10-29T09:07:12.401Z"
 }
 ```
@@ -48,8 +52,10 @@ Public, like `/api/health/ready`. It answers 200 when every scheduled job has su
 - **`ok`:** succeeded since `dueSince`, the start of the scheduled hour of its most recent run that should be done by now. A manual run counts.
 - **`failed`:** its run since then failed, or was cut off (still `running` after 15 minutes).
 - **`late`:** nothing has run since then, or it never has (`lastSucceededAt` is null).
+- **`closes`:** `latest` is the newest Eastern trading date in `price_bars` (null when none is stored), and `oldestAllowed` the oldest it may be: one session before the session that had closed when the last due `prices` run began (Friday's run on a weekend, and the calendar's holidays skipped). `status` is `stale` when `latest` is older, or null. It is `null` when the database couldn't be read.
+- **`snapshots`:** the same, where `latest` is the newest close a successful `snapshots` run valued every portfolio it could at (null when none has).
 
-The endpoint has a 3-second statement timeout. Its answer is reused for a minute, or for 10 seconds while the database is unavailable, when `database` is `"unavailable"` (or `"not_configured"`) and `jobs` is empty.
+The endpoint has a 3-second statement timeout. Its answer is reused for a minute, or for 10 seconds while the database is unavailable, when `database` is `"unavailable"` (or `"not_configured"`), `jobs` is empty and `closes` and `snapshots` are null.
 
 The schedules live in `src/lib/health/job-health.ts`. Tests keep them equal to `vercel.json` and the backup workflow. The nightly jobs record their runs themselves (`src/lib/jobs/runner.ts`). The backup workflow records one row per run as its last step (`scripts/db/record-backup-run.ts`): `succeeded` only when the backup was kept and restored exactly.
 
@@ -80,7 +86,9 @@ from job_runs order by started_at desc limit 20;
 **"The nightly job "…" failed on its last run."**
 1. Read its `error` in `job_runs`, and the Vercel logs for `/api/cron/daily` around 22:00 UTC.
 2. Fix the cause.
-3. Run the jobs again with **Run** in Vercel › Settings › Cron Jobs. A job that skips because its provider isn't configured (`prices` without `POLYGON_API_KEY`) succeeds, so it never shows here.
+3. Run the jobs again with **Run** in Vercel › Settings › Cron Jobs.
+
+An error naming `POLYGON_API_KEY` means the key is missing in Vercel: add it, then redeploy, because a variable only reaches new deployments. `plaid` is different. It skips and succeeds without Plaid's keys, because Plaid is optional, so it never shows here.
 
 **"The nightly job "…" has never succeeded" or "hasn't succeeded since …".** Usually every nightly job is late together, because nothing called `/api/cron/daily`.
 1. Check `CRON_SECRET` in Vercel. Without it the route answers 503 `CRON_NOT_CONFIGURED`.
@@ -100,6 +108,17 @@ A single late job means the run was cut off before it. `alpha-radar` has a route
 
 A backup that ran but couldn't record itself (the database was down at the end) also shows as late, and its run is red.
 
+**"The newest stored closing prices are from …" or "No closing prices are stored".** The price job hasn't stored a new day in two runs.
+1. If `prices` is also failed, start there: its error says why (`POLYGON_API_KEY` missing, say).
+2. Otherwise read the latest `prices` runs' `detail` in `job_runs`. `stopped.catchUp` says why each run stopped before storing a day: `rate-limited` or `budget` (Massive's limit, or a long history backfill using up the run; it catches up five days a run), or `not-published` (Massive hadn't published the day's file). `days` lists the days it stored.
+3. Check Massive's status page, and that the key's plan still allows grouped daily bars.
+4. Run the jobs again with **Run** in Vercel › Settings › Cron Jobs once the cause is fixed. Until then, everything valued at a close uses the last one stored.
+
+**"The portfolio snapshots were last brought up to …" or "No snapshots run has valued the portfolios yet".** Two `snapshots` runs valued nothing.
+1. If the closes are stale too, start there: snapshots are valued at stored closes, and catch up on the first run after prices do.
+2. Otherwise read the latest `snapshots` runs' `detail` in `job_runs`. A `skipped` reason about the holdings split check means the `prices` run didn't check held positions against splits through the newest close: its `holdingSplits.skipped` says why (`rate-limited`, `budget`, or the error from Massive's splits endpoint).
+3. Once a `prices` run checks them, the next `snapshots` run fills in the missed days from stored closes. Run the jobs again with **Run** in Vercel › Settings › Cron Jobs to do it now.
+
 **"…/api/health/jobs answered HTTP 404" (or something it can't read).** The deployment is older than this check, or the route is failing. See the Vercel logs.
 
 ## When the monitor itself stops
@@ -110,7 +129,7 @@ For a check that doesn't depend on GitHub, add two monitors in a free uptime ser
 - `https://atlas-wealth-lovat.vercel.app/api/health/ready`
 - `https://atlas-wealth-lovat.vercel.app/api/health/jobs`
 
-The second answers 503 whenever a job or the backup is late or failed, so it covers them as well.
+The second answers 503 whenever a job or the backup is late or failed, or the closes or snapshots are stale, so it covers them as well.
 
 ## Running it yourself
 
