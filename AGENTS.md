@@ -235,6 +235,8 @@ The GitHub Actions workflow (`.github/workflows/docker-build.yml`) runs these jo
 4. **`publish-image`** — On `master` only, after the three checks pass: pushes the image to GHCR.
 5. **`deploy-production`** — On `master` only, after the three checks pass: applies migrations, has Vercel build and deploy the commit (Sensitive variables such as the Sentry DSN only exist in Vercel's own builds), checks `/api/health/ready`, then runs the post-deploy smoke test (`npm run test:production`) once the site serves the commit. See `docs/deployment.md`, including the rule that migrations must work with the code already running.
 
+`e2e-tests` and `deploy-production` install Playwright, so they run on `ubuntu-24.04`, not `ubuntu-latest`: GitHub's `ubuntu-latest` is now Ubuntu 26.04, where Playwright 1.58 refuses to install Chromium. Move them back in the change that upgrades Playwright (1.65 supports 26.04).
+
 `.github/workflows/database-backup.yml` backs up production every night: an encrypted dump kept as an artifact for 30 days, restored into a scratch database in the same run and checked table by table; on a pull request that changes the backup or the migrations it rehearses on the E2E fixtures instead. See `docs/backups.md`.
 
 `.github/workflows/production-monitor.yml` checks production every half hour (`/api/health/ready`, and `/api/health/jobs` for the jobs, the stored closes and the snapshots) and keeps one issue open, mentioning the owner, while a check fails. It runs `scripts/monitor/run.mts` with plain Node and no install, so `scripts/monitor` uses only Node's built-ins. See `docs/monitoring.md`.
