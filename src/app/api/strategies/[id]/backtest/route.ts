@@ -6,12 +6,14 @@
  * says how a run works).
  *
  * Responses: 200 { data: Strategy }; 404 STRATEGY_NOT_FOUND;
- *            422 NO_RULES | INVALID_RULE | NO_SYMBOLS | NO_HISTORY | SHORT_HISTORY, with a message to show
+ *            422 NO_RULES | INVALID_RULE | NO_SYMBOLS | NO_HISTORY | SHORT_HISTORY, with a message to show;
+ *            429 DAILY_QUOTA_REACHED (the day's backtests)
  */
 
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 
+import { consumeDailyQuota } from '@/lib/api/daily-quota';
 import { apiError, internalServerError } from '@/lib/api/security';
 import { requireSessionApiUserScope } from '@/lib/api/session-security';
 import { runStrategyBacktest } from '@/lib/strategies/store';
@@ -28,6 +30,8 @@ export async function POST(request: Request, { params }: Params) {
     const { id } = await params;
     const notFound = () => apiError('Strategy not found', 'STRATEGY_NOT_FOUND', 404);
     if (!idSchema.safeParse(id).success) return notFound();
+    const overQuota = await consumeDailyQuota(auth.context.userId, 'backtests');
+    if (overQuota) return overQuota;
 
     try {
         const run = await runStrategyBacktest(auth.context.userId, id);

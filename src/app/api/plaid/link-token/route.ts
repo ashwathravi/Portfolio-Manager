@@ -1,11 +1,13 @@
 import { NextResponse } from "next/server";
 import { readJsonBody } from "@/lib/api/body";
+import { consumeDailyQuota } from "@/lib/api/daily-quota";
 import { apiError, internalServerError, logApiEvent } from "@/lib/api/security";
 import { requestIdFrom } from "@/lib/observability/request-id";
 import { requireSessionApiUserScope } from "@/lib/api/session-security";
+import { MAX_PLAID_CONNECTIONS_PER_USER, plaidConnectionLimitMessage } from "@/lib/plaid/connections";
 import { createPlaidLinkToken, resolvePlaidEnvironment } from "@/lib/plaid/link";
 import { plaidRedirectUri } from "@/lib/plaid/oauth";
-import { getPlaidAccessTokenForUser } from "@/lib/plaid/server-token-vault";
+import { countPlaidConnectionsForUser, getPlaidAccessTokenForUser } from "@/lib/plaid/server-token-vault";
 import { plaidIdSchema } from "@/lib/validators/plaid-sync";
 
 export const dynamic = "force-dynamic";
@@ -14,6 +16,10 @@ export const dynamic = "force-dynamic";
  * POST /api/plaid/link-token: a token for Plaid Link. With `{ itemId }`, one
  * of the user's connections, Link opens in update mode to sign in to it
  * again (launch item i45) instead of linking a new institution.
+ *
+ * A new link is refused with 409 PLAID_CONNECTION_LIMIT once the user has
+ * MAX_PLAID_CONNECTIONS_PER_USER, and either kind with 429
+ * DAILY_QUOTA_REACHED past the day's bank links (launch item i77).
  */
 export async function POST(request: Request) {
     const auth = await requireSessionApiUserScope(request);
@@ -31,6 +37,13 @@ export async function POST(request: Request) {
     }
 
     try {
+        const newLink = accessToken === undefined;
+        if (newLink && (await countPlaidConnectionsForUser(auth.context.userId)) >= MAX_PLAID_CONNECTIONS_PER_USER) {
+            return apiError(plaidConnectionLimitMessage(), "PLAID_CONNECTION_LIMIT", 409);
+        }
+        const overQuota = await consumeDailyQuota(auth.context.userId, "bankLinks");
+        if (overQuota) return overQuota;
+
         const environment = resolvePlaidEnvironment(process.env.PLAID_ENV);
         logApiEvent("plaid_link_token_requested", {
             route: "/api/plaid/link-token",
