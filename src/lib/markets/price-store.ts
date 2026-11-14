@@ -276,7 +276,7 @@ export function buildHasBarsQuery(symbol: string, database: Database = db) {
 }
 
 /** The newest bar date stored for any symbol (served by price_bars_date_idx). */
-export function buildLatestBarDateQuery(database: Database = db) {
+export function buildLatestBarDateQuery(database: Pick<Database, "select"> = db) {
     return database.select({ date: max(priceBars.date) }).from(priceBars);
 }
 
