@@ -90,12 +90,15 @@ const noSentry = {
     SENTRY_AUTH_TOKEN: '',
 };
 
-// No Ask model or AI Gateway credentials, so Ask's answers always come from
-// the rules planner and a test run never sends a question to Anthropic
-// (launch item i59). Claude's answers are covered by unit tests over a mock
-// model (src/lib/ask/server/claude.test.ts).
+// No Ask model, embedding model or AI Gateway credentials, so Ask's answers
+// always come from the rules planner, Alpha Radar's evidence is searched by
+// keyword, and a test run never sends a question or a filing to a model
+// (launch items i59 and i62). Claude's answers are covered by unit tests over
+// a mock model (src/lib/ask/server/claude.test.ts), and so are embeddings
+// (src/lib/alpha-radar/embeddings.test.ts).
 const noAskModel = {
     ASK_MODEL: '',
+    ALPHA_RADAR_EMBEDDING_MODEL: '',
     AI_GATEWAY_API_KEY: '',
     VERCEL_OIDC_TOKEN: '',
 };
