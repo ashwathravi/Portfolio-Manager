@@ -11,7 +11,7 @@
  * write older than one the row already has from that page is ignored, so a
  * request that arrives late can't undo a later edit.
  *
- * Responses: 204; 400 INVALID_WATCH_ITEM; 409 DUPLICATE_TICKER; 413
+ * Responses: 204; 400 INVALID_WATCH_ITEM; 409 DUPLICATE_TICKER or WATCHLIST_LIMIT; 413
  */
 
 import { NextResponse } from 'next/server';
@@ -19,6 +19,8 @@ import { NextResponse } from 'next/server';
 import { readJsonBody } from '@/lib/api/body';
 import { apiError, internalServerError } from '@/lib/api/security';
 import { requireSessionApiUserScope } from '@/lib/api/session-security';
+import { RecordLimitError } from '@/lib/limits/records';
+import { recordLimitResponse } from '@/lib/limits/records-server';
 import { DuplicateTickerError, saveWatchItem } from '@/lib/research/server/watchlist';
 import { WATCH_ITEM_PUT_MAX_BYTES, watchItemPutSchema } from '@/lib/validators/watchlist';
 
@@ -47,6 +49,7 @@ export async function PUT(request: Request, { params }: Params) {
         await saveWatchItem(auth.context.userId, parsed.data.item, parsed.data.order);
         return new NextResponse(null, { status: 204 });
     } catch (err) {
+        if (err instanceof RecordLimitError) return recordLimitResponse(err);
         if (err instanceof DuplicateTickerError) {
             return apiError(`${err.ticker} is already on your watchlist.`, 'DUPLICATE_TICKER', 409);
         }

@@ -4,16 +4,19 @@
  *
  * Rows are never deleted on request: a removed item is kept as `dismissed`
  * with its text cleared, so a save from the same page that arrives after the
- * removal can't bring it back. They go when the account does.
+ * removal can't bring it back. They go when the account does. A user keeps at
+ * most RECORD_LIMITS.watchlist live items (launch item i77).
  */
 
 import { asc, desc, eq, or, sql } from "drizzle-orm";
 
 import { db } from "@/db";
 import { watchlistItems } from "@/db/schema";
+import { withinRecordLimit } from "@/lib/limits/records-server";
 import type { WatchItemInput, WatchWriteOrder } from "@/lib/validators/watchlist";
 
 type Database = typeof db;
+type Executor = Database | Parameters<Parameters<Database["transaction"]>[0]>[0];
 
 export interface StoredWatchlist {
     items: WatchItemInput[];
@@ -81,7 +84,7 @@ function isNewerThanRow(order: WatchWriteOrder) {
 }
 
 /** Adds the item or replaces the user's row with that ID, unless the row has a later write from the same page. */
-export function buildSaveWatchItemQuery(userId: string, item: WatchItemInput, order: WatchWriteOrder, now: Date, database: Database = db) {
+export function buildSaveWatchItemQuery(userId: string, item: WatchItemInput, order: WatchWriteOrder, now: Date, database: Executor = db) {
     const row = toRow(userId, item, now, order);
     return database
         .insert(watchlistItems)
@@ -110,7 +113,10 @@ export class DuplicateTickerError extends Error {
     }
 }
 
-/** Saves one item. Throws DuplicateTickerError when another live row has its ticker. */
+/**
+ * Saves one item. Throws DuplicateTickerError when another live row has its
+ * ticker, and RecordLimitError when it would add one past the limit.
+ */
 export async function saveWatchItem(
     userId: string,
     item: WatchItemInput,
@@ -118,7 +124,7 @@ export async function saveWatchItem(
     { now = new Date(), database = db }: { now?: Date; database?: Database } = {},
 ): Promise<void> {
     try {
-        await buildSaveWatchItemQuery(userId, item, order, now, database);
+        await database.transaction((tx) => withinRecordLimit(tx, "watchlist", userId, () => buildSaveWatchItemQuery(userId, item, order, now, tx)));
     } catch (error) {
         if (isUniqueViolation(error, "watchlist_items_user_ticker_idx")) throw new DuplicateTickerError(item.ticker);
         throw error;
@@ -139,7 +145,7 @@ export function buildImportWatchlistQuery(
     userId: string,
     { items, first = 0, startedAt }: { items: readonly WatchItemInput[]; first?: number; startedAt?: number },
     now: Date,
-    database: Database = db,
+    database: Executor = db,
 ) {
     const base = Math.min(startedAt ?? now.getTime(), now.getTime());
     return database
@@ -154,7 +160,8 @@ export async function importWatchlist(
     { now = new Date(), database = db }: { now?: Date; database?: Database } = {},
 ): Promise<void> {
     if (batch.items.length === 0) return;
-    await buildImportWatchlistQuery(userId, batch, now, database);
+    // Refused whole (RecordLimitError) when it would take the list past the limit.
+    await database.transaction((tx) => withinRecordLimit(tx, "watchlist", userId, () => buildImportWatchlistQuery(userId, batch, now, tx)));
 }
 
 function isUniqueViolation(error: unknown, constraint: string): boolean {

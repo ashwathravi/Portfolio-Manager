@@ -16,7 +16,15 @@ const BUY: TransactionRow = { type: "BUY", date: "2026-03-05", symbol: "AAPL", q
 function fakeDatabase({ owns = true, duplicates = 0 } = {}) {
     const inserted: Record<string, unknown>[][] = [];
     const tx = {
-        select: () => ({ from: (table: unknown) => ({ where: () => ({ limit: async () => (table === portfolios && owns ? [{ id: ACCOUNT }] : []) }) }) }),
+        // The record limit's lock and counts (launch item i77; scripts/db/record-limits.test.ts checks them for real).
+        execute: async () => [],
+        select: () => ({
+            from: (table: unknown) => ({
+                where: () => Object.assign(Promise.resolve([{ n: 0 }]), {
+                    limit: async () => (table === portfolios && owns ? [{ id: ACCOUNT }] : []),
+                }),
+            }),
+        }),
         insert: (table: unknown) => ({
             values: (rows: Record<string, unknown> | Record<string, unknown>[]) => {
                 const list = Array.isArray(rows) ? rows : [rows];

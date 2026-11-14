@@ -1,5 +1,6 @@
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { gotoAppPage } from './helpers/app';
+import { researchLoaded } from './helpers/research';
 import { userKey } from './helpers/storage';
 import { signInAsFreshUser } from './helpers/users';
 
@@ -20,6 +21,13 @@ async function anotherBrowser(browser: Browser, context: BrowserContext): Promis
     return other.newPage();
 }
 
+/** Opens the journal and waits for the account's entries: a change made before they load is refused. */
+async function openJournal(page: Page) {
+    const loaded = researchLoaded(page, 'journal');
+    await gotoAppPage(page, '/research?tab=journal');
+    await loaded;
+}
+
 async function addEntry(page: Page, ticker: string, decision: string) {
     await page.getByRole('button', { name: 'New entry' }).click();
     const dialog = page.getByRole('dialog');
@@ -37,7 +45,7 @@ test.describe('Journal in the account', () => {
 
     test('an entry you add follows you to another browser', async ({ browser, context, page }) => {
         await signInAsFreshUser(context);
-        await gotoAppPage(page, '/research?tab=journal');
+        await openJournal(page);
         await addEntry(page, 'AMD', 'Opened a starter position');
 
         const elsewhere = await anotherBrowser(browser, context);
@@ -84,7 +92,7 @@ test.describe('Journal in the account', () => {
 
     test("one account's journal doesn't reach another", async ({ browser, context, page }) => {
         await signInAsFreshUser(context);
-        await gotoAppPage(page, '/research?tab=journal');
+        await openJournal(page);
         await addEntry(page, 'TSLA', 'Sold covered calls');
 
         const other = await browser.newContext();
@@ -167,5 +175,30 @@ test.describe('Journal in the account', () => {
         const data = (await (await page.request.get('/api/research/journal')).json()).data;
         expect(data.entries).toEqual([]);
         expect(data.dismissed).toEqual([entry.id]);
+    });
+
+    test('a journal at its limit refuses a new entry; an edit still saves (launch item i77)', async ({ context, page }) => {
+        await signInAsFreshUser(context);
+        await gotoAppPage(page, '/research?tab=journal');
+        const entry = (i: number) => ({
+            id: `j-cap-${i}`, date: '2026-11-14', type: 'entry', ticker: 'NVDA',
+            decision: 'Opened', rationale: 'Demand', outcome: 'pending', thesisId: null, dismissed: false,
+        });
+        for (let first = 0; first < 2_000; first += 500) {
+            const batch = await page.request.post('/api/research/journal/import', {
+                data: { items: Array.from({ length: 500 }, (_, i) => entry(first + i)), first },
+            });
+            expect(batch.status()).toBe(204);
+        }
+
+        const order = { session: 'e2e-limit-test', seq: 1 };
+        const another = await page.request.put('/api/research/journal/j-cap-new', { data: { entry: { ...entry(0), id: 'j-cap-new' }, order } });
+        expect(another.status()).toBe(409);
+        expect(await another.json()).toMatchObject({
+            code: 'JOURNAL_LIMIT',
+            error: 'Your journal holds at most 2,000 entries. Delete one to add another.',
+        });
+        const edited = await page.request.put('/api/research/journal/j-cap-0', { data: { entry: { ...entry(0), rationale: 'Edited' }, order: { ...order, seq: 2 } } });
+        expect(edited.status()).toBe(204);
     });
 });

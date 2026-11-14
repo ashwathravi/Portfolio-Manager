@@ -183,4 +183,23 @@ test.describe('Theses in the account', () => {
         expect(stored.catalysts).toHaveLength(50);
         expect(stored.catalysts[0].id).toBe('cat-0');
     });
+
+    test('theses at their limit refuse a new one; an edit still saves (launch item i77)', async ({ context, page }) => {
+        await signInAsFreshUser(context);
+        await gotoAppPage(page, '/research');
+        const filled = await page.request.post('/api/research/theses/import', {
+            data: { items: Array.from({ length: 200 }, (_, i) => ({ ...THESIS, id: `t-cap-${i}` })) },
+        });
+        expect(filled.status()).toBe(204);
+
+        const order = { session: 'e2e-limit-test', seq: 1 };
+        const another = await page.request.put('/api/research/theses/t-cap-new', { data: { thesis: { ...THESIS, id: 't-cap-new' }, order } });
+        expect(another.status()).toBe(409);
+        expect(await another.json()).toMatchObject({
+            code: 'THESIS_LIMIT',
+            error: 'You can keep at most 200 theses. Delete one to add another.',
+        });
+        const edited = await page.request.put('/api/research/theses/t-cap-0', { data: { thesis: { ...THESIS, id: 't-cap-0', title: 'Edited' }, order: { ...order, seq: 2 } } });
+        expect(edited.status()).toBe(204);
+    });
 });
