@@ -8,10 +8,11 @@
  * use only stored closes, so they run, and stay quick, even when the price
  * job stopped early). The price job first refreshes the ticker search's
  * symbol directory from SEC (launch item i35): one quick request, taken out
- * of the price budget, and run even before a market data key is set.
- * Alerts go after them, on the closes and holdings the jobs before them
- * stored (launch item i57), and then the emails that carry them, with the
- * weekly review after Friday's close (launch item i58).
+ * of the price budget, and run even before a market data key is set. Without
+ * that key the price job then fails, so job health reports it. Alerts go
+ * after them, on the closes and holdings the jobs before them stored
+ * (launch item i57), and then the emails that carry them, with the weekly
+ * review after Friday's close (launch item i58).
  */
 
 import { evaluateAlertRules } from "@/lib/alerts/nightly";

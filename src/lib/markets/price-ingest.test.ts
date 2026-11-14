@@ -8,6 +8,7 @@ import {
     type SplitEvent,
 } from "@/lib/providers/polygon-massive-adapter";
 import type { HoldingSplit } from "@/lib/portfolio/split-adjustments";
+import { MarketDataNotConfiguredError } from "@/lib/providers/errors";
 import type { OHLC } from "@/types/market-data";
 import type { TickerReference } from "./security-profile";
 
@@ -398,15 +399,13 @@ describe("createCallPacer", () => {
 // ---------------------------------------------------------------------------
 
 describe("ingestDailyPrices", () => {
-    test("skips cleanly without an API key, touching neither the provider nor the database", async () => {
+    test("regression: fails without an API key, touching neither the provider nor the database", async () => {
         const { adapter, calls } = fakeAdapter({ configured: false });
         const untouchable = new Proxy({}, {
             get: () => () => assert.fail("the store was used"),
         }) as PriceIngestStore;
 
-        const detail = await ingestDailyPrices({ adapter, store: untouchable, ...fakeClock() });
-
-        assert.deepEqual(detail, { skipped: "Market data is not configured: POLYGON_API_KEY is not set." });
+        await assert.rejects(ingestDailyPrices({ adapter, store: untouchable, ...fakeClock() }), MarketDataNotConfiguredError);
         assert.deepEqual(calls, []);
     });
 
