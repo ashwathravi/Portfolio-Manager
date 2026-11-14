@@ -28,7 +28,7 @@ export function AttributionPageClient() {
                 fallback={
                     <SampleEmptyState
                         title="No attribution yet"
-                        body="Attribution compares what you owned and how it did against a benchmark. It needs your account history. Connect an account to start."
+                        body="Attribution compares what you owned and how it did against a benchmark. It needs your accounts' valuation history, which starts at the close after you add holdings."
                     />
                 }
             >

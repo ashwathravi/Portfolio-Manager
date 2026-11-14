@@ -11,7 +11,11 @@ test.describe('Help page', () => {
         await expect(page.locator('h1.pm-topbar-title')).toHaveText('Help');
         const steps = page.getByTestId('help-getting-started').locator('ol > li');
         await expect(steps).toHaveCount(5);
-        await expect(steps.first().getByRole('link', { name: /Connect an account/ })).toHaveAttribute('href', '/settings#accounts');
+        // Regression (x30): step one linked to Settings to connect an
+        // account, whose card without Plaid's keys (E2E, and production until
+        // they're set) only says bank linking isn't set up and points back.
+        await expect(steps.first().getByRole('link', { name: /Add an account/ })).toHaveAttribute('href', '/portfolios/accounts');
+        await expect(page.getByTestId('help-getting-started').locator('a[href="/settings#accounts"]')).toHaveCount(0);
         const glossary = page.getByTestId('help-glossary');
         for (const term of ['Bucket', 'Churn', 'Re-underwrite', 'Sample']) {
             await expect(glossary.locator('dt', { hasText: new RegExp(`^${term}$`) })).toBeVisible();
