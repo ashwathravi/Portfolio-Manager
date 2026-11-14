@@ -22,4 +22,6 @@ test("GET /api/health/jobs reports not_configured without a usable DATABASE_URL"
     assert.equal(body.status, "degraded");
     assert.equal(body.database, "not_configured");
     assert.deepEqual(body.jobs, []);
+    assert.equal(body.closes, null);
+    assert.equal(body.snapshots, null);
 });

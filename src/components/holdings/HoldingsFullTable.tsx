@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useMemo, useState } from "react";
 import { PriceSparkline } from "@/components/charts";
 import type { Sector } from "@/lib/holdings/sector";
@@ -25,7 +26,7 @@ import {
  *   8. Today % (green/red)
  *   9. Total return % (green/red)
  *  10. Allocation bar + %
- *  11. Account
+ *  11. Account (by symbol: how many accounts, linking to the breakdown)
  *  12. 30-day sparkline of real daily closes (a dash when unavailable)
  */
 
@@ -48,6 +49,10 @@ export interface HoldingsTableRow {
     totalReturnPct: number | null;
     allocationPct: number; // 0..100
     account: string;
+    /** By symbol: every account holding it. */
+    accounts?: readonly string[];
+    /** By symbol: some of the shares, not all, have no price and are valued at cost. */
+    partlyAtCost?: boolean;
 }
 
 export interface HoldingsFullTableProps {
@@ -190,6 +195,7 @@ function HoldingRow({
             <td className="num" data-testid="holding-value">
                 {fmtCurrency0(row.marketValue)}
                 {row.last === null && <span className="pm-card-subtitle" title="No price yet, so it is valued at what you paid"> at cost</span>}
+                {row.partlyAtCost && <span className="pm-card-subtitle" title="Some of these shares have no price yet, so they are valued at what you paid"> partly at cost</span>}
             </td>
             <td className={`num ${todayClass}`} data-testid="holding-today">
                 {row.todayPct === null ? "—" : fmtSignedPct(row.todayPct)}
@@ -213,7 +219,18 @@ function HoldingRow({
                 </div>
             </td>
             <td>
-                <span className="pm-account-pill">{row.account}</span>
+                {row.accounts && row.accounts.length > 1 ? (
+                    <Link
+                        href={`/portfolios/detail/${encodeURIComponent(row.symbol)}`}
+                        className="pm-account-pill"
+                        title={row.accounts.join(", ")}
+                        aria-label={`${row.accounts.length} accounts: ${row.accounts.join(", ")}`}
+                    >
+                        {row.accounts.length} accounts
+                    </Link>
+                ) : (
+                    <span className="pm-account-pill">{row.account}</span>
+                )}
             </td>
             <td>
                 <PriceSparkline symbol={row.symbol} />
