@@ -153,7 +153,7 @@ After every production deploy (launch item i72), `deploy-production` waits until
 - the site can reach its database, and `/api/health/jobs` reads every scheduled job (whether they ran on time is the production monitor's alert, not the deploy's);
 - a signed-out visit to an app page goes to sign in, and the sign-in button is on;
 - **Continue with Google** sends the browser to Google with a real client ID and this site's callback. The test answers that request itself, so Google's page never loads;
-- the sign-in page, the privacy policy and the terms answer 200 with their security headers (a nonce-based Content-Security-Policy, HSTS, `X-Frame-Options`), and load without console errors, policy violations or failed requests to the site;
+- the sign-in page, the privacy policy and the terms answer 200 with their security headers (a nonce-based Content-Security-Policy with `upgrade-insecure-requests`, HSTS, `X-Frame-Options`), and load without console errors, policy violations or failed requests to the site. Against a local build served over plain http (E2E), that directive makes Chrome ask for a redirect's target over https, where nothing answers, as when a signed-out prefetch of `/` is sent to `/login`; the test lets through only the error Chrome logs for that, and only for the same host and port over https;
 - those pages ask search engines to leave them out of their results (`noindex, nofollow` as a header and a meta tag, launch item i74), and `robots.txt` lets crawlers in to read that;
 - the sign-in page fits a phone;
 - the API refuses signed-out callers, and `/api/cron/daily` and `/api/cron/alpha-radar` refuse a call without the cron secret.
