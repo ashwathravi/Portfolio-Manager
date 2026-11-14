@@ -25,6 +25,13 @@ describe("isTodaysQuote", () => {
         assert.equal(isTodaysQuote(close("2026-10-16T20:00:00.000Z"), new Date("2026-10-17T15:00:00Z")), false);
     });
 
+    test("regression (x23): on a market holiday, the last session's close is not today's move", () => {
+        // Good Friday 2026-04-03 is closed: Thursday's close, read at 11:00 AM EDT.
+        assert.equal(isTodaysQuote(close("2026-04-02T20:00:00.000Z"), new Date("2026-04-03T15:00:00Z")), false);
+        // After the 1:00 PM early close on 2026-11-27, that day's close is.
+        assert.equal(isTodaysQuote(close("2026-11-27T18:00:00.000Z"), new Date("2026-11-27T19:00:00Z")), true);
+    });
+
     test("accepts today's Eastern date as a string", () => {
         assert.equal(isTodaysQuote(close("2026-10-16T20:00:00.000Z"), "2026-10-16"), true);
         assert.equal(isTodaysQuote(close("2026-10-16T20:00:00.000Z"), "2026-10-17"), false);
