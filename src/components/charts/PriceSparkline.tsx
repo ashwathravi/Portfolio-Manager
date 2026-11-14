@@ -4,10 +4,12 @@ import { useHistoricalQuery } from "@/lib/api/market-data/queries";
 import { Sparkline } from "./Sparkline";
 
 /**
- * A 30-day sparkline of real daily closes for one symbol. When the market
- * data provider can't answer, it renders a dash instead of an invented line
- * (both the holdings table and Today used to draw a seeded random walk).
- * react-query dedupes the request across every row showing the same symbol.
+ * A 30-day sparkline of real daily closes for one symbol: the price store's
+ * daily bars, which the history route reads with a database (x09), so a
+ * table of them costs no Massive calls. When there is no history to draw,
+ * it renders a dash instead of an invented line (both the holdings table and
+ * Today used to draw a seeded random walk). react-query dedupes the request
+ * across every row showing the same symbol.
  */
 export function PriceSparkline({
     symbol,
