@@ -106,9 +106,14 @@ describe('job health', { skip: !DATABASE_URL && 'SCRIPTS_TEST_DATABASE_URL is no
         assert.equal(report.status, 'degraded');
         assert.deepEqual(report.closes, { status: 'stale', latest: null, oldestAllowed: '2026-10-26' });
         assert.deepEqual(report.snapshots, { status: 'stale', latest: null, oldestAllowed: '2026-10-26' });
+        // Alerts and email were added on 14 November (x35), after this
+        // check, so they wait for their first run rather than being late.
         assert.deepEqual(
             Object.fromEntries(report.jobs.map((job) => [job.job, job.status])),
-            Object.fromEntries(JOB_SCHEDULES.map(({ job }) => [job, ({ prices: 'failed', plaid: 'failed', backup: 'ok' } as Record<string, string>)[job] ?? 'late'])),
+            Object.fromEntries(JOB_SCHEDULES.map(({ job }) => [
+                job,
+                ({ prices: 'failed', plaid: 'failed', backup: 'ok', alerts: 'pending', email: 'pending' } as Record<string, string>)[job] ?? 'late',
+            ])),
         );
     });
 

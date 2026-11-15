@@ -19,7 +19,8 @@ const checkJobs = createJobHealthCheck({
 
 /**
  * Public: whether every scheduled job (the nightly jobs and the backup) has
- * succeeded since its last run fell due, and whether the stored closing
+ * succeeded since its last run fell due (a job added since then is pending
+ * until its first), and whether the stored closing
  * prices and the portfolio snapshots valued at them are recent enough. 200
  * when all hold, 503 otherwise, with each job's status and when it last
  * succeeded, and the dates the closes and snapshots are through, never error

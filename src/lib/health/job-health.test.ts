@@ -6,6 +6,7 @@ import { ALPHA_RADAR_JOB, ALPHA_RADAR_JOBS } from "@/lib/alpha-radar/daily-refre
 import { DAILY_JOBS } from "@/lib/jobs/daily-jobs";
 
 import {
+    addedAt,
     ALPHA_RADAR_CRON,
     ALPHA_RADAR_JOB_NAME,
     assessFreshness,
@@ -16,6 +17,7 @@ import {
     buildSnapshotsThroughQuery,
     createJobHealthCheck,
     DAILY_JOB_NAMES,
+    DAILY_JOBS_ADDED_ON,
     DAILY_JOBS_CRON,
     JOB_SCHEDULES,
     lastDueSlot,
@@ -65,6 +67,46 @@ describe("the schedules match what runs the jobs", () => {
         const jobs = JOB_SCHEDULES.map((schedule) => schedule.job);
         assert.deepEqual(jobs, [...DAILY_JOB_NAMES, ALPHA_RADAR_JOB_NAME, BACKUP_JOB]);
         for (const schedule of JOB_SCHEDULES) assert.doesNotThrow(() => parseDailyCron(schedule.cron));
+    });
+
+    test("every job added after its schedule first ran in production says when (x35)", () => {
+        // These have been in every run. A job added from now on gets the date
+        // its deploy goes out in DAILY_JOBS_ADDED_ON (or its schedule's
+        // addedOn), not a place here: without it, it reads late from a run
+        // from before it existed.
+        assert.deepEqual(
+            JOB_SCHEDULES.filter((schedule) => schedule.addedOn === undefined).map((schedule) => schedule.job),
+            ["expired-sessions", "ask-history", "plaid", "prices", "snapshots", ALPHA_RADAR_JOB_NAME, BACKUP_JOB],
+        );
+        assert.deepEqual(
+            JOB_SCHEDULES.filter((schedule) => schedule.addedOn !== undefined).map(({ job, addedOn }) => [job, addedOn]),
+            [["alerts", "2026-11-14"], ["email", "2026-11-14"]],
+        );
+        assert.deepEqual(Object.keys(DAILY_JOBS_ADDED_ON), ["alerts", "email"]);
+        for (const schedule of JOB_SCHEDULES) assert.doesNotThrow(() => addedAt(schedule), schedule.job);
+    });
+
+    test("no job's added date is more than a day ahead (x35)", () => {
+        // A date too far ahead (a typo, or a guess at a deploy that slipped)
+        // would keep the job pending past runs that failed or never happened.
+        const tomorrow = Date.now() + 24 * 60 * 60_000;
+        for (const schedule of JOB_SCHEDULES) {
+            const added = addedAt(schedule);
+            if (added) assert.ok(added.getTime() <= tomorrow, `${schedule.job}: addedOn ${schedule.addedOn} is in the future`);
+        }
+    });
+});
+
+describe("addedAt", () => {
+    test("the start of the UTC day the job was added, or null for one in every run", () => {
+        assert.equal(addedAt(NIGHTLY), null);
+        assert.deepEqual(addedAt({ ...NIGHTLY, addedOn: "2026-11-14" }), at("2026-11-14T00:00:00Z"));
+    });
+
+    test("refuses anything but a real date", () => {
+        for (const addedOn of ["", "2026-11-31", "2026-02-29", "2026-11-14T22:30:00Z", "14 November 2026", "2026-1-4"]) {
+            assert.throws(() => addedAt({ ...NIGHTLY, addedOn }), /Unsupported addedOn/, addedOn);
+        }
     });
 });
 
@@ -141,6 +183,66 @@ describe("assessJob", () => {
     });
 });
 
+// x35: alerts and email joined the nightly run on Saturday 14 November 2026,
+// after Friday's run, and read late until Monday's.
+describe("assessJob for a job added to a schedule production already ran", () => {
+    const ALERTS: JobSchedule = { job: "alerts", cron: DAILY_JOBS_CRON, graceMinutes: 120, addedOn: "2026-11-14" };
+    const added = "2026-11-14T00:00:00.000Z";
+
+    test("regression: pending, not late, until its first run falls due", () => {
+        // Monday's run may go on until midnight UTC.
+        for (const now of ["2026-11-14T23:00:00Z", "2026-11-15T12:00:00Z", "2026-11-16T23:59:59Z"]) {
+            assert.deepEqual(assessJob(ALERTS, undefined, at(now)), { job: "alerts", status: "pending", lastSucceededAt: null, dueSince: added }, now);
+        }
+        // Without its date, Friday's run, before it existed, counted against it.
+        assert.deepEqual(assessJob({ ...ALERTS, addedOn: undefined }, undefined, at("2026-11-15T12:00:00Z")), { job: "alerts", status: "late", lastSucceededAt: null, dueSince: "2026-11-13T22:00:00.000Z" });
+    });
+
+    test("late once it misses a run due after it was added", () => {
+        assert.deepEqual(
+            assessJob(ALERTS, undefined, at("2026-11-17T00:00:00Z")),
+            { job: "alerts", status: "late", lastSucceededAt: null, dueSince: "2026-11-16T22:00:00.000Z" },
+        );
+        // Added on a weekday before its run: that evening's run counts.
+        assert.equal(assessJob({ ...ALERTS, addedOn: "2026-11-16" }, undefined, at("2026-11-17T09:00:00Z")).status, "late");
+        // A run that came is assessed like any job's.
+        const monday = at("2026-11-16T22:31:00Z");
+        assert.equal(assessJob(ALERTS, summary({ job: "alerts", lastSucceededAt: monday, latestStartedAt: monday, latestStatus: "succeeded" }), at("2026-11-17T09:00:00Z")).status, "ok");
+        assert.equal(assessJob(ALERTS, summary({ job: "alerts", latestStartedAt: monday, latestStatus: "failed" }), at("2026-11-17T09:00:00Z")).status, "failed");
+    });
+
+    test("before its first run is due, a run since it was added counts, and one from before doesn't", () => {
+        const now = at("2026-11-15T12:00:00Z");
+        const manual = at("2026-11-15T10:00:00Z");
+        assert.deepEqual(
+            assessJob(ALERTS, summary({ job: "alerts", lastSucceededAt: manual, latestStartedAt: manual, latestStatus: "succeeded" }), now),
+            { job: "alerts", status: "ok", lastSucceededAt: "2026-11-15T10:00:00.000Z", dueSince: added },
+        );
+        assert.equal(assessJob(ALERTS, summary({ job: "alerts", latestStartedAt: manual, latestStatus: "failed" }), now).status, "failed");
+        // Still going, then cut off.
+        const running = summary({ job: "alerts", latestStartedAt: manual, latestStatus: "running" });
+        assert.equal(assessJob(ALERTS, running, at("2026-11-15T10:05:00Z")).status, "pending");
+        assert.equal(assessJob(ALERTS, running, now).status, "failed");
+        // Runs from before it was added aren't its own.
+        const friday = at("2026-11-13T22:31:00Z");
+        assert.equal(assessJob(ALERTS, summary({ job: "alerts", lastSucceededAt: friday, latestStartedAt: friday, latestStatus: "succeeded" }), now).status, "pending");
+        assert.equal(assessJob(ALERTS, summary({ job: "alerts", latestStartedAt: friday, latestStatus: "failed" }), now).status, "pending");
+    });
+
+    test("the same on a schedule that runs every day, like the backup's and the SEC job's", () => {
+        // Added on Sunday 1 November: that morning's 06:00 run counts once its grace has passed.
+        const backup: JobSchedule = { ...BACKUP, addedOn: "2026-11-01" };
+        assert.deepEqual(assessJob(backup, undefined, at("2026-11-01T09:59:59Z")), { job: BACKUP_JOB, status: "pending", lastSucceededAt: null, dueSince: "2026-11-01T00:00:00.000Z" });
+        assert.deepEqual(assessJob(backup, undefined, at("2026-11-01T10:00:00Z")), { job: BACKUP_JOB, status: "late", lastSucceededAt: null, dueSince: "2026-11-01T06:00:00.000Z" });
+
+        // Deployed on 1 November after 11:00 UTC, so added on the 2nd.
+        const sec: JobSchedule = { job: ALPHA_RADAR_JOB_NAME, cron: ALPHA_RADAR_CRON, graceMinutes: 120, addedOn: "2026-11-02" };
+        assert.equal(assessJob(sec, undefined, at("2026-11-01T14:00:00Z")).status, "pending");
+        assert.equal(assessJob(sec, undefined, at("2026-11-02T12:59:59Z")).status, "pending");
+        assert.equal(assessJob(sec, undefined, at("2026-11-02T13:00:00Z")).status, "late");
+    });
+});
+
 // The stored closes and the snapshots valued at them follow the same nightly run.
 describe("assessFreshness", () => {
     // Wednesday morning: Tuesday's run is due, so Tuesday's close, or
@@ -191,21 +293,22 @@ describe("assessFreshness", () => {
 });
 
 describe("createJobHealthCheck", () => {
-    const now = () => at("2026-10-28T09:00:00Z").getTime();
+    // A Wednesday after every job was added: Tuesday's run is due.
+    const now = () => at("2026-11-18T09:00:00Z").getTime();
     const succeeded = (job: string): JobRunSummary => ({
         job,
-        lastSucceededAt: at("2026-10-27T22:31:00Z"),
-        latestStartedAt: at("2026-10-27T22:31:00Z"),
+        lastSucceededAt: at("2026-11-17T22:31:00Z"),
+        latestStartedAt: at("2026-11-17T22:31:00Z"),
         latestStatus: "succeeded",
     });
-    const backupSucceeded: JobRunSummary = { ...succeeded(BACKUP_JOB), lastSucceededAt: at("2026-10-28T06:50:00Z"), latestStartedAt: at("2026-10-28T06:50:00Z") };
-    const secSucceeded: JobRunSummary = { ...succeeded(ALPHA_RADAR_JOB_NAME), lastSucceededAt: at("2026-10-27T11:20:00Z"), latestStartedAt: at("2026-10-27T11:20:00Z") };
+    const backupSucceeded: JobRunSummary = { ...succeeded(BACKUP_JOB), lastSucceededAt: at("2026-11-18T06:50:00Z"), latestStartedAt: at("2026-11-18T06:50:00Z") };
+    const secSucceeded: JobRunSummary = { ...succeeded(ALPHA_RADAR_JOB_NAME), lastSucceededAt: at("2026-11-17T11:20:00Z"), latestStartedAt: at("2026-11-17T11:20:00Z") };
     const allSucceeded = [...DAILY_JOB_NAMES.map(succeeded), secSucceeded, backupSucceeded];
     /** Tuesday's run stored Tuesday's closes and valued the portfolios at them. */
     const data = (
         runs: readonly JobRunSummary[],
-        latestClose: string | null = "2026-10-27",
-        snapshotsThrough: string | null = "2026-10-27",
+        latestClose: string | null = "2026-11-17",
+        snapshotsThrough: string | null = "2026-11-17",
     ): JobHealthData => ({ runs, latestClose, snapshotsThrough });
 
     test("ok when every job ran on time, asking for every scheduled job", async () => {
@@ -225,42 +328,42 @@ describe("createJobHealthCheck", () => {
         assert.equal(report.status, "ok");
         assert.equal(report.database, "ok");
         assert.deepEqual(report.jobs.map((job) => [job.job, job.status]), JOB_SCHEDULES.map((schedule) => [schedule.job, "ok"]));
-        assert.deepEqual(report.closes, { status: "ok", latest: "2026-10-27", oldestAllowed: "2026-10-26" });
-        assert.deepEqual(report.snapshots, { status: "ok", latest: "2026-10-27", oldestAllowed: "2026-10-26" });
-        assert.equal(report.checkedAt, "2026-10-28T09:00:00.000Z");
+        assert.deepEqual(report.closes, { status: "ok", latest: "2026-11-17", oldestAllowed: "2026-11-16" });
+        assert.deepEqual(report.snapshots, { status: "ok", latest: "2026-11-17", oldestAllowed: "2026-11-16" });
+        assert.equal(report.checkedAt, "2026-11-18T09:00:00.000Z");
     });
 
     test("regression: degraded when the closes are stale, though every job succeeded", async () => {
-        for (const latestClose of ["2026-10-23", null]) {
+        for (const latestClose of ["2026-11-13", null]) {
             const check = createJobHealthCheck({ isConfigured: () => true, load: async () => data(allSucceeded, latestClose), now });
 
             const report = await check();
 
             assert.equal(report.status, "degraded", String(latestClose));
             assert.ok(report.jobs.every((job) => job.status === "ok"));
-            assert.deepEqual(report.closes, { status: "stale", latest: latestClose, oldestAllowed: "2026-10-26" });
+            assert.deepEqual(report.closes, { status: "stale", latest: latestClose, oldestAllowed: "2026-11-16" });
         }
     });
 
     test("regression: degraded when the snapshots are stale, though every job succeeded and the closes are recent", async () => {
         // Snapshots runs that skip (the holdings split check didn't run)
         // succeed without valuing anything.
-        for (const snapshotsThrough of ["2026-10-23", null]) {
-            const check = createJobHealthCheck({ isConfigured: () => true, load: async () => data(allSucceeded, "2026-10-27", snapshotsThrough), now });
+        for (const snapshotsThrough of ["2026-11-13", null]) {
+            const check = createJobHealthCheck({ isConfigured: () => true, load: async () => data(allSucceeded, "2026-11-17", snapshotsThrough), now });
 
             const report = await check();
 
             assert.equal(report.status, "degraded", String(snapshotsThrough));
             assert.ok(report.jobs.every((job) => job.status === "ok"));
             assert.equal(report.closes?.status, "ok");
-            assert.deepEqual(report.snapshots, { status: "stale", latest: snapshotsThrough, oldestAllowed: "2026-10-26" });
+            assert.deepEqual(report.snapshots, { status: "stale", latest: snapshotsThrough, oldestAllowed: "2026-11-16" });
         }
     });
 
     test("degraded when any job is late or failed, listing every job", async () => {
         const check = createJobHealthCheck({
             isConfigured: () => true,
-            load: async () => data([succeeded("prices"), { ...succeeded("plaid"), latestStartedAt: at("2026-10-28T08:00:00Z"), latestStatus: "failed", lastSucceededAt: at("2026-10-26T22:30:00Z") }]),
+            load: async () => data([succeeded("prices"), { ...succeeded("plaid"), latestStartedAt: at("2026-11-18T08:00:00Z"), latestStatus: "failed", lastSucceededAt: at("2026-11-16T22:30:00Z") }]),
             now,
         });
 
@@ -272,11 +375,39 @@ describe("createJobHealthCheck", () => {
         assert.deepEqual(statuses, { "expired-sessions": "late", "ask-history": "late", plaid: "failed", prices: "ok", snapshots: "late", alerts: "late", email: "late", "alpha-radar": "late", backup: "late" });
     });
 
+    test("regression: ok while a job added since the last run waits for its first, then degraded once it misses it (x35)", async () => {
+        // Sunday 15 November: Friday's run is the last due. Alerts and email
+        // were added on the Saturday and haven't run.
+        const friday = at("2026-11-13T22:31:00Z");
+        const runs: JobRunSummary[] = [
+            ...DAILY_JOB_NAMES.filter((job) => !DAILY_JOBS_ADDED_ON[job])
+                .map((job) => ({ job, lastSucceededAt: friday, latestStartedAt: friday, latestStatus: "succeeded" as const })),
+            { ...secSucceeded, lastSucceededAt: at("2026-11-14T11:20:00Z"), latestStartedAt: at("2026-11-14T11:20:00Z") },
+            { ...backupSucceeded, lastSucceededAt: at("2026-11-15T06:50:00Z"), latestStartedAt: at("2026-11-15T06:50:00Z") },
+        ];
+        const checkAt = (iso: string) => createJobHealthCheck({ isConfigured: () => true, load: async () => data(runs, "2026-11-13", "2026-11-13"), now: () => at(iso).getTime() })();
+
+        const sunday = await checkAt("2026-11-15T12:00:00Z");
+
+        assert.equal(sunday.status, "ok");
+        assert.deepEqual(
+            Object.fromEntries(sunday.jobs.map((job) => [job.job, job.status])),
+            { "expired-sessions": "ok", "ask-history": "ok", plaid: "ok", prices: "ok", snapshots: "ok", alerts: "pending", email: "pending", "alpha-radar": "ok", backup: "ok" },
+        );
+        assert.deepEqual(sunday.jobs.find((job) => job.job === "alerts"), { job: "alerts", status: "pending", lastSucceededAt: null, dueSince: "2026-11-14T00:00:00.000Z" });
+
+        // Monday's run is due at midnight; without it, every nightly job is late.
+        const tuesday = await checkAt("2026-11-17T00:00:00Z");
+        assert.equal(tuesday.status, "degraded");
+        assert.equal(tuesday.jobs.find((job) => job.job === "alerts")?.status, "late");
+        assert.equal(tuesday.jobs.find((job) => job.job === "email")?.status, "late");
+    });
+
     test("not_configured without loading when no database is set", async () => {
         let loads = 0;
         const check = createJobHealthCheck({ isConfigured: () => false, load: async () => { loads += 1; return data([]); }, now });
 
-        assert.deepEqual(await check(), { status: "degraded", database: "not_configured", jobs: [], closes: null, snapshots: null, checkedAt: "2026-10-28T09:00:00.000Z" });
+        assert.deepEqual(await check(), { status: "degraded", database: "not_configured", jobs: [], closes: null, snapshots: null, checkedAt: "2026-11-18T09:00:00.000Z" });
         assert.equal(loads, 0);
     });
 

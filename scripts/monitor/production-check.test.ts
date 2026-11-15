@@ -35,7 +35,7 @@ function fakeFetch(replies: Record<string, Reply[]>) {
 }
 
 const ready = { status: 200, body: { status: 'ok', database: 'ok', checkedAt: DUE } };
-const job = (name: string, status: 'ok' | 'late' | 'failed', lastSucceededAt: string | null = '2026-10-27T22:31:00.000Z') =>
+const job = (name: string, status: 'ok' | 'pending' | 'late' | 'failed', lastSucceededAt: string | null = '2026-10-27T22:31:00.000Z') =>
     ({ job: name, status, lastSucceededAt, dueSince: DUE });
 const closesOk = { status: 'ok', latest: '2026-10-28', oldestAllowed: '2026-10-27' };
 const snapshotsOk = closesOk;
@@ -124,6 +124,23 @@ describe('checkProduction', () => {
         ]);
     });
 
+    test('regression: a job waiting for its first run is not a problem (x35)', async () => {
+        // A job added since its last run fell due, such as alerts and email
+        // the weekend they were added, is pending until its first.
+        const pending = { ...job('alerts', 'pending', null), dueSince: '2026-11-14T00:00:00.000Z' };
+        const ok = await check({
+            '/api/health/ready': [ready],
+            '/api/health/jobs': [{ status: 200, body: { ...jobsOk.body, jobs: [job('prices', 'ok'), pending, job('backup', 'ok')] } }],
+        });
+        assert.deepEqual(ok.problems, []);
+
+        const late = await check({
+            '/api/health/ready': [ready],
+            '/api/health/jobs': [{ status: 503, body: { ...jobsOk.body, status: 'degraded', jobs: [job('prices', 'late'), pending, job('backup', 'ok')] } }],
+        });
+        assert.deepEqual(late.problems.map((problem) => problem.key), ['job:prices:late']);
+    });
+
     test('regression: stale closes are a problem though every job succeeded, after any job\'s', async () => {
         const stale = (latest: string | null, jobs = [job('prices', 'ok'), job('backup', 'ok')]) => ({
             status: 503,
@@ -188,6 +205,9 @@ describe('checkProduction', () => {
             [{ status: 200, body: { status: 'ok', database: 'ok', jobs: [job('prices', 'late')] } }, 'answered HTTP 200'],
             [{ status: 503, body: { status: 'degraded', database: 'ok', jobs: [job('::error::x', 'late')] } }, 'answered HTTP 503'],
             [{ status: 503, body: { status: 'degraded', database: 'ok', jobs: [{ ...job('prices', 'late'), dueSince: 'soon' }] } }, 'answered HTTP 503'],
+            [{ status: 503, body: { status: 'degraded', database: 'ok', jobs: [{ ...job('prices', 'late'), status: 'waiting' }] } }, 'answered HTTP 503'],
+            // A job waiting for its first run is no reason for a 503.
+            [{ status: 503, body: { ...jobsOk.body, status: 'degraded', jobs: [job('prices', 'ok'), job('alerts', 'pending', null)] } }, 'answered HTTP 503'],
             // Closes that don't agree with the status, or that it can't read.
             [{ status: 200, body: { ...jobsOk.body, closes: { ...closesOk, status: 'stale' } } }, 'answered HTTP 200'],
             [{ status: 503, body: { ...jobsOk.body, status: 'degraded' } }, 'answered HTTP 503'],
@@ -405,8 +425,8 @@ describe('createGitHub', () => {
 test('describeRun summarises the checks and the issue', () => {
     assert.equal(
         describeRun([], { action: 'closed', number: 40 }, SITE),
-        `## Production monitor: ${SITE}\n\nEvery check passes: the database answers and every scheduled job ran on time.\n\nClosed issue #40.`,
+        `## Production monitor: ${SITE}\n\nEvery check passes: the database answers and every scheduled job that was due ran on time.\n\nClosed issue #40.`,
     );
     assert.equal(describeRun([down], { action: 'unchanged', number: 40 }, SITE), `## Production monitor: ${SITE}\n\n- ${down.message}\n\nAlready open: issue #40.`);
-    assert.equal(describeRun([], { action: 'none' }, SITE), `## Production monitor: ${SITE}\n\nEvery check passes: the database answers and every scheduled job ran on time.`);
+    assert.equal(describeRun([], { action: 'none' }, SITE), `## Production monitor: ${SITE}\n\nEvery check passes: the database answers and every scheduled job that was due ran on time.`);
 });

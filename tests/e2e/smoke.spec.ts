@@ -281,7 +281,8 @@ test.describe('Scheduled job health', () => {
     // Launch item i71: public, so the production monitor and any uptime
     // service can read it, and coarse: each job's status and last success,
     // never an error. No job has run in the E2E database, so every one is
-    // late; without a database it is not configured.
+    // late, except one added since its last run fell due, which is pending
+    // until its first (x35); without a database it is not configured.
     test('/api/health/jobs answers without a session, listing every scheduled job, the newest close and how far the snapshots got', async ({ playwright, baseURL }) => {
         const dbMode = Boolean(process.env.CI || process.env.E2E_DATABASE_AUTH === '1');
         const sessionless = await playwright.request.newContext({ baseURL, storageState: { cookies: [], origins: [] } });
@@ -302,9 +303,19 @@ test.describe('Scheduled job health', () => {
                 expect(body.jobs.map((job: { job: string }) => job.job)).toEqual(['expired-sessions', 'ask-history', 'plaid', 'prices', 'snapshots', 'alerts', 'email', 'alpha-radar', 'backup']);
                 for (const job of body.jobs) {
                     expect(Object.keys(job).sort()).toEqual(['dueSince', 'job', 'lastSucceededAt', 'status']);
-                    expect(job.status).toBe('late');
                     expect(job.lastSucceededAt).toBeNull();
-                    expect(Date.parse(job.dueSince)).toBeLessThan(Date.now());
+                    if (job.status === 'pending') {
+                        // Only the jobs with an added date (DAILY_JOBS_ADDED_ON)
+                        // can be waiting for their first run.
+                        expect(['alerts', 'email']).toContain(job.job);
+                        // Since the start of the UTC day it was added, after
+                        // its last due run, so less than a week ago.
+                        expect(job.dueSince).toMatch(/T00:00:00\.000Z$/);
+                        expect(Date.now() - Date.parse(job.dueSince)).toBeLessThan(8 * 24 * 60 * 60_000);
+                    } else {
+                        expect(job.status).toBe('late');
+                        expect(Date.parse(job.dueSince)).toBeLessThan(Date.now());
+                    }
                 }
             } else {
                 expect(body.database).toBe('not_configured');
