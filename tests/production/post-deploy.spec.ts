@@ -96,7 +96,7 @@ test.describe('After a production deploy', () => {
         expect(body.database).toBe('ok');
         expect(body.status).toBe(response.status() === 200 ? 'ok' : 'degraded');
         expect(body.jobs.map((job: { job: string }) => job.job)).toEqual(SCHEDULED_JOBS);
-        for (const job of body.jobs) expect(['ok', 'late', 'failed']).toContain(job.status);
+        for (const job of body.jobs) expect(['ok', 'pending', 'late', 'failed']).toContain(job.status);
         // And whether the stored closes and the snapshots are recent enough
         // (none at all is stale).
         for (const freshness of [body.closes, body.snapshots]) {
