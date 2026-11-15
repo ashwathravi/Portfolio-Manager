@@ -11,6 +11,7 @@
  */
 
 import { sentryIngestOrigin } from "@/lib/observability/sentry-options";
+import { plaidBaseUrl, resolvePlaidEnvironment } from "@/lib/plaid/link";
 
 export interface ContentSecurityPolicyOptions {
     /** This request's nonce (see {@link createNonce}). */
@@ -79,14 +80,9 @@ export function buildContentSecurityPolicy(options: ContentSecurityPolicyOptions
     ].join("; ");
 }
 
-/**
- * The Plaid API host for PLAID_ENV, chosen the way resolvePlaidEnvironment
- * (src/lib/plaid/link.ts) chooses the environment: sandbox unless it says
- * production or development.
- */
+/** The Plaid API host for PLAID_ENV, the one the server calls. */
 function plaidApiOrigin(plaidEnv: string | undefined): string {
-    const environment = plaidEnv === "production" || plaidEnv === "development" ? plaidEnv : "sandbox";
-    return `https://${environment}.plaid.com`;
+    return plaidBaseUrl(resolvePlaidEnvironment(plaidEnv));
 }
 
 function directive(name: string, sources: string[]): string {

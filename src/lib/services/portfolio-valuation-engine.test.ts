@@ -26,7 +26,7 @@ function provider(getBatchQuotes: (symbols: string[]) => Promise<Quote[]>): Mark
 }
 
 function quote(symbol: string, price: number): Quote {
-  return { symbol, price, change: 0, changePercent: 0, timestamp: '2026-07-02T20:00:00.000Z', isRealtime: false };
+  return { symbol, price, change: 0, changePercent: 0, timestamp: '2026-07-02T20:00:00.000Z', kind: 'close', isRealtime: false };
 }
 
 describe('PortfolioValuationEngine', () => {

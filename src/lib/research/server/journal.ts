@@ -5,17 +5,20 @@
  * As with the watchlist, entries are never deleted on request: a deleted
  * entry is kept as `dismissed` with its text cleared, so a save from the
  * same page that arrives after the deletion can't bring it back. They go
- * when the account does.
+ * when the account does. A user keeps at most RECORD_LIMITS.journal live
+ * entries (launch item i77).
  */
 
 import { asc, desc, eq, or, sql } from "drizzle-orm";
 
 import { db } from "@/db";
 import { journalEntries } from "@/db/schema";
+import { withinRecordLimit } from "@/lib/limits/records-server";
 import type { JournalEntryInput } from "@/lib/validators/journal";
 import type { WriteOrder } from "@/lib/validators/research-ids";
 
 type Database = typeof db;
+type Executor = Database | Parameters<Parameters<Database["transaction"]>[0]>[0];
 
 export interface StoredJournal {
     entries: JournalEntryInput[];
@@ -85,7 +88,7 @@ function isNewerThanRow(order: WriteOrder) {
 }
 
 /** Adds the entry or replaces the user's entry with that ID, unless it has a later write from the same page. */
-export function buildSaveJournalEntryQuery(userId: string, entry: JournalEntryInput, order: WriteOrder, now: Date, database: Database = db) {
+export function buildSaveJournalEntryQuery(userId: string, entry: JournalEntryInput, order: WriteOrder, now: Date, database: Executor = db) {
     const row = toRow(userId, entry, now, order);
     return database
         .insert(journalEntries)
@@ -115,7 +118,8 @@ export async function saveJournalEntry(
     order: WriteOrder,
     { now = new Date(), database = db }: { now?: Date; database?: Database } = {},
 ): Promise<void> {
-    await buildSaveJournalEntryQuery(userId, entry, order, now, database);
+    // RecordLimitError when it would add an entry past the limit.
+    await database.transaction((tx) => withinRecordLimit(tx, "journal", userId, () => buildSaveJournalEntryQuery(userId, entry, order, now, tx)));
 }
 
 /**
@@ -130,7 +134,7 @@ export function buildImportJournalQuery(
     userId: string,
     { items, first = 0, startedAt }: { items: readonly JournalEntryInput[]; first?: number; startedAt?: number },
     now: Date,
-    database: Database = db,
+    database: Executor = db,
 ) {
     const base = Math.min(startedAt ?? now.getTime(), now.getTime());
     return database
@@ -145,5 +149,6 @@ export async function importJournal(
     { now = new Date(), database = db }: { now?: Date; database?: Database } = {},
 ): Promise<void> {
     if (batch.items.length === 0) return;
-    await buildImportJournalQuery(userId, batch, now, database);
+    // Refused whole (RecordLimitError) when it would take the journal past the limit.
+    await database.transaction((tx) => withinRecordLimit(tx, "journal", userId, () => buildImportJournalQuery(userId, batch, now, tx)));
 }

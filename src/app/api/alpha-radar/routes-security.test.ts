@@ -4,6 +4,7 @@ import type { NextRequest } from "next/server";
 
 import { resetApiSecurityForTests } from "@/lib/api/security";
 import { POST as refreshAll } from "./refresh/route";
+import { POST as refreshFiler } from "./filers/[filerId]/refresh/route";
 import { POST as createTrackedFiler } from "./filers/route";
 import { PATCH as updateTrackedFiler } from "./filers/[filerId]/route";
 
@@ -14,6 +15,7 @@ describe("Alpha Radar route security", () => {
         delete process.env.INTERNAL_API_SECRET;
         delete process.env.AUTH_LOCAL_DEV_BYPASS;
         delete process.env.AUTH_LOCAL_DEV_USER_ID;
+        delete process.env.SEC_EDGAR_USER_AGENT;
         resetApiSecurityForTests();
     });
 
@@ -47,6 +49,23 @@ describe("Alpha Radar route security", () => {
 
         assert.equal(response.status, 400);
         assert.equal((await response.json()).code, "INVALID_REFRESH_PAYLOAD");
+    });
+
+    test("regression: a refresh asks SEC nothing without SEC_EDGAR_USER_AGENT", async () => {
+        signInAsLocalUser();
+        delete process.env.SEC_EDGAR_USER_AGENT;
+
+        const responses = [
+            await refreshAll(apiRequest("/api/alpha-radar/refresh", { force: true })),
+            await refreshFiler(
+                apiRequest("/api/alpha-radar/filers/00000000-0000-4000-8000-000000000001/refresh", {}),
+                { params: Promise.resolve({ filerId: "00000000-0000-4000-8000-000000000001" }) },
+            ),
+        ];
+        for (const response of responses) {
+            assert.equal(response.status, 503);
+            assert.deepEqual(await response.json(), { error: "SEC requests are not configured.", code: "SEC_NOT_CONFIGURED" });
+        }
     });
 
     test("requires a signed-in user for tracked filer mutations", async () => {

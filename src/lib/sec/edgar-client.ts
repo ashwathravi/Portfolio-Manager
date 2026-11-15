@@ -17,10 +17,30 @@ export interface SecEdgarClientOptions {
     maxRetries?: number;
     retryBaseDelayMs?: number;
     requestTimeoutMs?: number;
+    /** A retry SEC asks to wait longer than this for (Retry-After) isn't made. */
+    maxRetryDelayMs?: number;
+    /** Ends every request and retry wait once it aborts: a run's deadline. */
+    signal?: AbortSignal;
     maxJsonResponseBytes?: number;
     dataBaseUrl?: string;
     archivesBaseUrl?: string;
     companyTickersUrl?: string;
+    exchangeTickersUrl?: string;
+}
+
+/** SEC's company_tickers_exchange.json: column names, then one array per ticker. */
+interface SecExchangeTickersResponse {
+    fields?: unknown;
+    data?: unknown;
+}
+
+/** One row of SEC's exchange ticker file, as published. */
+export interface SecExchangeTicker {
+    cik: string;
+    name: string;
+    ticker: string;
+    /** "Nasdaq", "NYSE", "CBOE", "OTC", ...; null when it has none. */
+    exchange: string | null;
 }
 
 interface SecCompanyTickerRow {
@@ -59,12 +79,28 @@ interface SecArchiveIndexResponse {
     };
 }
 
-const DEFAULT_USER_AGENT = 'Portfolio-Manager Alpha Radar local-dev contact@example.invalid';
+/**
+ * SEC_EDGAR_USER_AGENT, trimmed, or null when it isn't set. SEC's fair
+ * access rules ask every client to say who it is, with a contact, so no SEC
+ * request is made without it (launch item i60).
+ */
+export function configuredSecUserAgent(env: Record<string, string | undefined> = process.env): string | null {
+    return env.SEC_EDGAR_USER_AGENT?.trim() || null;
+}
+
+export const SEC_USER_AGENT_MISSING = 'SEC_EDGAR_USER_AGENT is not set: SEC asks every client to name itself and a contact.';
+
 const DEFAULT_DATA_BASE_URL = 'https://data.sec.gov';
 const DEFAULT_ARCHIVES_BASE_URL = 'https://www.sec.gov/Archives';
 const DEFAULT_COMPANY_TICKERS_URL = 'https://www.sec.gov/files/company_tickers.json';
+const DEFAULT_EXCHANGE_TICKERS_URL = 'https://www.sec.gov/files/company_tickers_exchange.json';
+const EXCHANGE_TICKER_FIELDS = ['cik', 'name', 'ticker', 'exchange'];
 const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
 const DEFAULT_MAX_JSON_RESPONSE_BYTES = 10 * 1024 * 1024;
+// A filing's header index is a few KB: its SEC header and a line per document.
+const MAX_HEADERS_RESPONSE_BYTES = 1024 * 1024;
+// SEC's rate-limit block lasts minutes; a Retry-After that long fails now.
+const DEFAULT_MAX_RETRY_DELAY_MS = 10_000;
 
 export class SecEdgarClient {
     private readonly userAgent: string;
@@ -74,10 +110,13 @@ export class SecEdgarClient {
     private readonly maxRetries: number;
     private readonly retryBaseDelayMs: number;
     private readonly requestTimeoutMs: number;
+    private readonly maxRetryDelayMs: number;
+    private readonly signal?: AbortSignal;
     private readonly maxJsonResponseBytes: number;
     private readonly dataBaseUrl: string;
     private readonly archivesBaseUrl: string;
     private readonly companyTickersUrl: string;
+    private readonly exchangeTickersUrl: string;
     private lastRequestAt = 0;
     private companyCache: SecCompanyMatch[] | null = null;
 
@@ -87,9 +126,9 @@ export class SecEdgarClient {
             throw new SecEdgarError('configuration', 'No fetch implementation is available for SEC EDGAR requests.');
         }
 
-        this.userAgent = (options.userAgent ?? process.env.SEC_EDGAR_USER_AGENT ?? DEFAULT_USER_AGENT).trim();
+        this.userAgent = (options.userAgent ?? configuredSecUserAgent() ?? '').trim();
         if (!this.userAgent) {
-            throw new SecEdgarError('configuration', 'SEC EDGAR user-agent cannot be empty.');
+            throw new SecEdgarError('configuration', SEC_USER_AGENT_MISSING);
         }
 
         this.fetcher = fetcher;
@@ -98,10 +137,46 @@ export class SecEdgarClient {
         this.maxRetries = options.maxRetries ?? 2;
         this.retryBaseDelayMs = options.retryBaseDelayMs ?? 1_000;
         this.requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+        this.maxRetryDelayMs = options.maxRetryDelayMs ?? DEFAULT_MAX_RETRY_DELAY_MS;
+        this.signal = options.signal;
         this.maxJsonResponseBytes = options.maxJsonResponseBytes ?? DEFAULT_MAX_JSON_RESPONSE_BYTES;
         this.dataBaseUrl = trimTrailingSlash(options.dataBaseUrl ?? DEFAULT_DATA_BASE_URL);
         this.archivesBaseUrl = trimTrailingSlash(options.archivesBaseUrl ?? DEFAULT_ARCHIVES_BASE_URL);
         this.companyTickersUrl = options.companyTickersUrl ?? DEFAULT_COMPANY_TICKERS_URL;
+        this.exchangeTickersUrl = options.exchangeTickersUrl ?? DEFAULT_EXCHANGE_TICKERS_URL;
+    }
+
+    /**
+     * Every ticker in SEC's exchange ticker file (launch item i35's symbol
+     * directory). Rows that aren't a CIK, a name and a ticker are skipped;
+     * a file whose columns aren't the expected ones is refused.
+     */
+    async fetchExchangeTickers(): Promise<SecExchangeTicker[]> {
+        const response = await this.requestJson<SecExchangeTickersResponse>(this.exchangeTickersUrl);
+        const { fields, data } = response ?? {};
+        if (
+            !Array.isArray(fields)
+            || fields.length !== EXCHANGE_TICKER_FIELDS.length
+            || fields.some((field, index) => field !== EXCHANGE_TICKER_FIELDS[index])
+            || !Array.isArray(data)
+        ) {
+            throw new SecEdgarError('malformed_response', `SEC exchange ticker file at ${this.exchangeTickersUrl} has unexpected columns.`);
+        }
+
+        const tickers: SecExchangeTicker[] = [];
+        for (const row of data) {
+            if (!Array.isArray(row)) continue;
+            const [cik, name, ticker, exchange] = row;
+            if (typeof cik !== 'number' || !Number.isInteger(cik) || cik <= 0) continue;
+            if (typeof name !== 'string' || !name.trim() || typeof ticker !== 'string' || !ticker.trim()) continue;
+            tickers.push({
+                cik: String(cik).padStart(10, '0'),
+                name: name.trim(),
+                ticker: ticker.trim().toUpperCase(),
+                exchange: typeof exchange === 'string' && exchange.trim() ? exchange.trim() : null,
+            });
+        }
+        return tickers;
     }
 
     async resolveCik(query: string): Promise<SecCompanyMatch> {
@@ -202,6 +277,15 @@ export class SecEdgarClient {
         return this.requestJson<SecSubmissionsResponse>(`${this.dataBaseUrl}/submissions/CIK${cik}.json`);
     }
 
+    /**
+     * Where the filing's information table is (launch item i62). A 13F-HR's
+     * primary document is its cover page (primary_doc.xml); the table is an
+     * attachment, usually named by number ("56757.xml"). The filing's header
+     * index names each document's type, so the table is the one of type
+     * INFORMATION TABLE. Without that index, the archive's file list is read:
+     * an XML file named as the table, or else the one XML file that isn't
+     * the cover page. Undefined when neither finds it; a stopped run throws.
+     */
     private async resolveInformationTableUrl(input: {
         cik: string;
         accessionNumber: string;
@@ -209,28 +293,40 @@ export class SecEdgarClient {
         primaryDocument: string | undefined;
         primaryDocDescription: string | undefined;
     }): Promise<string | undefined> {
-        const inferredUrl = inferInformationTableUrl(
-            input.primaryDocumentUrl,
-            input.primaryDocument,
-            input.primaryDocDescription,
-        );
-        if (inferredUrl) return inferredUrl;
+        if (input.primaryDocumentUrl && input.primaryDocDescription?.toLowerCase().includes('information table')) {
+            return input.primaryDocumentUrl;
+        }
 
-        try {
-            const index = await this.requestJson<SecArchiveIndexResponse>(
+        const found = await this.findAttachment(() => this.requestText(
+            this.buildArchiveHeadersUrl(input.cik, input.accessionNumber),
+        ).then(findInformationTableDocument))
+            ?? await this.findAttachment(() => this.requestJson<SecArchiveIndexResponse>(
                 this.buildArchiveIndexUrl(input.cik, input.accessionNumber),
-            );
-            const attachment = findInformationTableAttachment(index, input.primaryDocument);
-            return attachment
-                ? this.buildArchiveDocumentUrl(input.cik, input.accessionNumber, attachment.name)
-                : undefined;
-        } catch {
+            ).then((index) => findInformationTableAttachment(index, input.primaryDocument)));
+        return found ? this.buildArchiveDocumentUrl(input.cik, input.accessionNumber, found) : undefined;
+    }
+
+    /** The attachment's name, or undefined when SEC can't say: discovery goes on without it. */
+    private async findAttachment(find: () => Promise<string | undefined>): Promise<string | undefined> {
+        try {
+            return await find();
+        } catch (error) {
+            if (this.signal?.aborted) throw error;
             return undefined;
         }
     }
 
+    private async requestText(url: string): Promise<string> {
+        const response = await this.request(url, 'text/html,text/plain');
+        try {
+            return await readResponseTextWithLimit(response, { url, maxBytes: MAX_HEADERS_RESPONSE_BYTES, label: 'SEC filing index' });
+        } catch (error) {
+            throw new SecEdgarError('malformed_response', `SEC filing index at ${url} exceeded configured safety limits.`, { cause: error });
+        }
+    }
+
     private async requestJson<T>(url: string): Promise<T> {
-        const response = await this.request(url);
+        const response = await this.request(url, 'application/json');
         const text = await this.readJsonResponseText(response, url);
         try {
             return JSON.parse(text) as T;
@@ -253,28 +349,32 @@ export class SecEdgarClient {
         }
     }
 
-    private async request(url: string): Promise<Response> {
+    private async request(url: string, accept: string): Promise<Response> {
         let lastError: SecEdgarError | null = null;
 
         for (let attempt = 0; attempt <= this.maxRetries; attempt += 1) {
             if (attempt > 0 && lastError) {
-                await this.sleep(lastError.retryAfterMs ?? this.retryBaseDelayMs * attempt);
+                const delayMs = lastError.retryAfterMs ?? this.retryBaseDelayMs * attempt;
+                if (delayMs > this.maxRetryDelayMs) throw lastError;
+                await this.wait(delayMs);
             }
 
+            this.throwIfStopped(url);
             await this.paceRequest();
 
             let response: Response;
-            const timeout = createRequestTimeout(this.requestTimeoutMs);
+            const timeout = createRequestTimeout(this.requestTimeoutMs, this.signal);
             try {
                 response = await this.fetcher(url, {
                     headers: {
                         'User-Agent': this.userAgent,
                         'Accept-Encoding': 'gzip, deflate',
-                        Accept: 'application/json',
+                        Accept: accept,
                     },
                     signal: timeout.signal,
                 });
             } catch (error) {
+                this.throwIfStopped(url);
                 lastError = new SecEdgarError('network', `SEC EDGAR request failed for ${url}.`, { cause: error });
                 continue;
             } finally {
@@ -290,6 +390,27 @@ export class SecEdgarClient {
         }
 
         throw lastError ?? new SecEdgarError('network', `SEC EDGAR request failed for ${url}.`);
+    }
+
+    /** Sleeps, but no further than the deadline. */
+    private async wait(ms: number): Promise<void> {
+        const signal = this.signal;
+        if (!signal) return this.sleep(ms);
+        if (signal.aborted) return;
+        let stopWaiting!: () => void;
+        const aborted = new Promise<void>((resolve) => { stopWaiting = resolve; });
+        signal.addEventListener('abort', stopWaiting, { once: true });
+        try {
+            await Promise.race([this.sleep(ms), aborted]);
+        } finally {
+            signal.removeEventListener('abort', stopWaiting);
+        }
+    }
+
+    private throwIfStopped(url: string): void {
+        if (this.signal?.aborted) {
+            throw new SecEdgarError('network', `SEC EDGAR request for ${url} stopped: the run is out of time.`);
+        }
     }
 
     private async paceRequest(): Promise<void> {
@@ -312,6 +433,10 @@ export class SecEdgarClient {
 
     private buildArchiveIndexUrl(cik: string, accessionNumber: string): string {
         return `${this.archivesBaseUrl}/edgar/data/${Number(cik)}/${accessionNumber.replaceAll('-', '')}/index.json`;
+    }
+
+    private buildArchiveHeadersUrl(cik: string, accessionNumber: string): string {
+        return `${this.archivesBaseUrl}/edgar/data/${Number(cik)}/${accessionNumber.replaceAll('-', '')}/${accessionNumber}-index-headers.html`;
     }
 }
 
@@ -404,36 +529,53 @@ function acceptanceDateToIso(value: string | undefined): string | undefined {
     return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : undefined;
 }
 
-function inferInformationTableUrl(
-    primaryDocumentUrl: string | undefined,
-    primaryDocument: string | undefined,
-    description: string | undefined,
-): string | undefined {
-    if (!primaryDocumentUrl || !primaryDocument) return undefined;
-
-    const lowerName = primaryDocument.toLowerCase();
-    const lowerDescription = description?.toLowerCase() ?? '';
-    if (lowerName.endsWith('.xml') || lowerDescription.includes('information table')) {
-        return primaryDocumentUrl;
+/**
+ * The document of type INFORMATION TABLE in a filing's header index
+ * ({accession}-index-headers.html), which lists each document as SGML,
+ * HTML-escaped: "&lt;TYPE&gt;INFORMATION TABLE" then "&lt;FILENAME&gt;56757.xml".
+ */
+export function findInformationTableDocument(headers: string): string | undefined {
+    const sgml = headers.replace(/&lt;/gi, '<').replace(/&gt;/gi, '>').replace(/&amp;/gi, '&');
+    for (const document of sgml.split(/<DOCUMENT>/i).slice(1)) {
+        const type = /<TYPE>([^\r\n<]*)/i.exec(document)?.[1]?.trim();
+        const filename = /<FILENAME>([^\r\n<]*)/i.exec(document)?.[1]?.trim();
+        if (type?.toUpperCase() === 'INFORMATION TABLE' && filename && isArchiveFileName(filename) && filename.toLowerCase().endsWith('.xml')) {
+            return filename;
+        }
     }
-
     return undefined;
 }
 
+/**
+ * The information table in a filing's file list (index.json): an XML file
+ * named as one, or else the only XML file besides the cover page. The list
+ * names files only (its types are icons), so a filing with more XML files
+ * than that has none found here.
+ */
 function findInformationTableAttachment(
     index: SecArchiveIndexResponse,
     primaryDocument: string | undefined,
-): { name: string; score: number } | undefined {
-    const items = normalizeArchiveItems(index.directory?.item);
-    const candidates = items
-        .map((item) => ({
-            name: item.name,
-            score: scoreInformationTableAttachment(item, primaryDocument),
-        }))
-        .filter((candidate): candidate is { name: string; score: number } => candidate.score > 0)
+): string | undefined {
+    const coverPage = primaryDocument ? baseName(primaryDocument) : undefined;
+    const xmlFiles = normalizeArchiveItems(index.directory?.item).filter((item) => {
+        const lowerName = item.name.toLowerCase();
+        return lowerName.endsWith('.xml') && lowerName !== coverPage && lowerName !== 'primary_doc.xml' && isArchiveFileName(item.name);
+    });
+    const named = xmlFiles
+        .map((item) => ({ name: item.name, score: scoreInformationTableAttachment(item) }))
+        .filter((candidate) => candidate.score > 0)
         .sort((left, right) => right.score - left.score);
 
-    return candidates[0];
+    return named[0]?.name ?? (xmlFiles.length === 1 ? xmlFiles[0].name : undefined);
+}
+
+/** A file in the filing's own directory, never a path elsewhere. */
+function isArchiveFileName(name: string): boolean {
+    return /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(name);
+}
+
+function baseName(path: string): string {
+    return path.slice(path.lastIndexOf('/') + 1).toLowerCase();
 }
 
 function normalizeArchiveItems(value: unknown): Array<{ name: string; type?: string; description?: string }> {
@@ -452,21 +594,13 @@ function normalizeArchiveItems(value: unknown): Array<{ name: string; type?: str
     });
 }
 
-function scoreInformationTableAttachment(
-    item: { name: string; type?: string; description?: string },
-    primaryDocument: string | undefined,
-): number {
-    const lowerName = item.name.toLowerCase();
-    if (primaryDocument && lowerName === primaryDocument.toLowerCase()) return 0;
-    if (!lowerName.endsWith('.xml')) return 0;
-
+function scoreInformationTableAttachment(item: { name: string; type?: string; description?: string }): number {
     const lowerText = `${item.name} ${item.type ?? ''} ${item.description ?? ''}`.toLowerCase();
     let score = 0;
 
     if (lowerText.includes('information table') || lowerText.includes('informationtable')) score += 100;
     if (lowerText.includes('infotable') || lowerText.includes('info_table') || lowerText.includes('info-table')) score += 90;
     if (lowerText.includes('13f')) score += 20;
-    if (lowerName.endsWith('.xml')) score += 1;
 
     return score >= 80 ? score : 0;
 }

@@ -164,6 +164,18 @@ test.describe('Trade ticket on the user\'s accounts', () => {
         await expect(page.locator('.pm-exec-preview')).toContainText('1 sh');
     });
 
+    test('a delayed quote is priced with the time it was quoted, never as live or as a close (i33)', async ({ page }) => {
+        const quotedAt = new Date();
+        await page.route('**/api/market-data/quotes**', (route) => route.fulfill({ status: 200, json: { data: [
+            { symbol: 'CRM', price: 251.2, change: 1.2, changePercent: 0.48, timestamp: quotedAt.toISOString(), kind: 'delayed', isRealtime: false },
+        ] } }));
+        await chooseTicker(page, 'CRM');
+        await expect(page.getByTestId('ticker-price')).toHaveText('$251.20');
+        const clock = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit' }).format(quotedAt);
+        await expect(page.getByTestId('ticker-price-note')).toHaveText(new RegExp(`^Delayed quote, (\\w{3} \\d{1,2} )?${clock} ET$`));
+        await expect(page.getByLabel('Limit price')).toHaveValue('251.2');
+    });
+
     test('a market order without any price is refused: it needs a limit to be sized', async ({ page }) => {
         await chooseTicker(page, 'ZZZZ');
         await expect(page.getByTestId('ticker-price-note')).toHaveText('No price yet');
@@ -567,11 +579,11 @@ test.describe('Execution page — live adherence panel (AR-111)', () => {
         await expect(page.getByTestId('adherence-live-panel')).toHaveCount(0);
     });
 
-    test('renders with the example NVDA thesis → Momentum + Value strategy', async ({ page }) => {
+    test('renders with the example NVDA thesis → Momentum + Trend strategy', async ({ page }) => {
         const livePanel = await linkNvdaThesis(page);
         await expect(livePanel.locator('.pm-adherence-live-row')).toHaveCount(5);
-        // Header contains "Discipline check · Momentum + Value".
-        await expect(livePanel.locator('.pm-adherence-live-eyebrow')).toContainText('Momentum + Value');
+        // Header contains "Discipline check · Momentum + Trend".
+        await expect(livePanel.locator('.pm-adherence-live-eyebrow')).toContainText('Momentum + Trend');
     });
 
     test('score badge and rule rows carry their tier, tone, severity and rule type', async ({ page }) => {
@@ -687,6 +699,27 @@ test.describe('Trade › risk policy on the user\'s own portfolio', () => {
     // These change settings and write theses: each test has a user of its own.
     test.beforeEach(async ({ context }) => {
         await signInAsFreshUser(context);
+    });
+
+    test('the options budget counts the option positions the user holds (launch item i63)', async ({ page }) => {
+        const created = await page.request.post('/api/portfolios', { data: { name: 'LEAPS account' } });
+        const { id: portfolioId } = (await created.json()).data;
+        // $100,000 of premium at risk: far over the 5% options cap.
+        const added = await page.request.post('/api/portfolio/options', {
+            data: { portfolioId, position: { underlying: 'NVDA', contractType: 'call', strike: 150, expiry: '2027-01-15', quantity: 20, premium: 50 } },
+        });
+        expect(added.status()).toBe(201);
+
+        await gotoAppPage(page, '/execution');
+        await page.getByRole('tab', { name: 'Option / LEAPS' }).click();
+        await chooseTicker(page, 'RIVN');
+        await page.getByLabel('Quantity').fill('1');
+        await page.getByLabel('Limit price').fill('5');
+        await page.getByLabel('Option strike').fill('25');
+        await page.getByLabel('Option expiry').fill('2027-01-16');
+
+        // Without the user's positions it would start from 0%.
+        await expect(page.getByTestId('risk-policy-impact')).toContainText(/Options premium at risk worsens from [1-9]\d*(\.\d)?%/);
     });
 
     test('the checks see the user\'s holdings: TSLA is already over the speculative cap', async ({ page }) => {

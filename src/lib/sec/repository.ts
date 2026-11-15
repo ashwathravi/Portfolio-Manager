@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { db } from '@/db';
 import { alphaRadarSecFilings, alphaRadarTrackedFilers } from '@/db/schema';
 import type { SecFilingMetadata, SecFilingRepository, SecTrackedFilerRef, StoredSecFiling } from './types';
@@ -59,8 +59,21 @@ export class DrizzleSecFilingRepository implements SecFilingRepository {
                     filedAt: filing.filedAt ? new Date(filing.filedAt) : null,
                     acceptedAt: filing.acceptedAt ? new Date(filing.acceptedAt) : null,
                     primaryDocumentUrl: filing.primaryDocumentUrl ?? null,
-                    informationTableUrl: filing.informationTableUrl ?? null,
-                    status: filing.status,
+                    // A table found before stays when SEC can't say this time.
+                    informationTableUrl: sql`case
+                        when ${alphaRadarSecFilings.accessionNumber} is distinct from excluded.accession_number then excluded.information_table_url
+                        else coalesce(excluded.information_table_url, ${alphaRadarSecFilings.informationTableUrl})
+                    end`,
+                    // A filing already parsed (or failed) keeps its status, so
+                    // the next quarter's changes are counted from it; it is
+                    // parsed again once SEC lists another filing or table.
+                    status: sql`case
+                        when ${alphaRadarSecFilings.accessionNumber} is distinct from excluded.accession_number
+                            or (excluded.information_table_url is not null
+                                and excluded.information_table_url is distinct from ${alphaRadarSecFilings.informationTableUrl})
+                        then excluded.status
+                        else ${alphaRadarSecFilings.status}
+                    end`,
                     rawSubmission: filing.rawSubmission,
                     updatedAt: new Date(),
                 },
@@ -73,6 +86,7 @@ export class DrizzleSecFilingRepository implements SecFilingRepository {
                 filingType: alphaRadarSecFilings.filingType,
                 primaryDocumentUrl: alphaRadarSecFilings.primaryDocumentUrl,
                 informationTableUrl: alphaRadarSecFilings.informationTableUrl,
+                status: alphaRadarSecFilings.status,
             });
 
         return {
@@ -83,6 +97,7 @@ export class DrizzleSecFilingRepository implements SecFilingRepository {
             filingType: stored.filingType as StoredSecFiling['filingType'],
             primaryDocumentUrl: stored.primaryDocumentUrl,
             informationTableUrl: stored.informationTableUrl,
+            status: stored.status as StoredSecFiling['status'],
             created: existing.length === 0,
         };
     }

@@ -99,7 +99,7 @@ gh secret delete DATABASE_URL --repo ashwathravi/Portfolio-Manager
 - **The fix:** in the integration's settings, connect the store to Production only.
 
 **Optional hardening:**
-- Turn off Supabase's Data API (i74). It's already closed: row-level security is on every table, `anon` and `authenticated` have no grants, and the advisors report nothing.
+- Supabase's Data API is off (i74, turned off on 1 November 2026, Integrations › Data API). Nothing used it: the app reaches Postgres through Drizzle, and the project's logs showed no API requests. It was mostly closed already: row-level security is on every table, `anon` and `authenticated` have no table grants, and the advisors report nothing. The one thing it served, `public.codex_keepalive_ping()` (a function no migration in this repo created), had no callers; the weekly keep-alive job outside this repo queries through Supabase's management API instead, which the switch doesn't affect.
 - Require actions pinned to full commit SHAs in GitHub's Actions settings; every workflow already pins them.
 
 ## Accepted, with reasons
@@ -129,7 +129,7 @@ gh secret delete DATABASE_URL --repo ashwathravi/Portfolio-Manager
 
 **Sign-in and sessions** (`src/auth.ts`, `src/lib/auth/access.ts`)
 - **Accounts:** Google only, with a verified email.
-- **Invite list:** production refuses sign-in without one (`AUTH_ALLOWED_EMAILS`), and every session read checks it again. Removing someone ends their access at once.
+- **Invite list:** production refuses sign-in without one (`AUTH_ALLOWED_EMAILS`) unless sign-up is opened on purpose (`AUTH_OPEN_SIGNUP`, launch item i77, with at most `AUTH_SIGNUP_DAILY_LIMIT` new accounts a day), and every session read checks it again. Removing someone, or adding them to the block list (`AUTH_BLOCKED_EMAILS`, `AUTH_BLOCKED_DOMAINS`), ends their access at once; a blocked domain is matched against the email's domain and, on sign-in and every session read, the user's Google Workspace (`src/lib/auth/session-access.ts`).
 - **Sessions:** stored in the database, last 7 days, and are renewed daily. The cookie is `httpOnly`, `Secure` and `SameSite=Lax`.
 - **Local bypass:** refused in production.
 
@@ -139,7 +139,7 @@ gh secret delete DATABASE_URL --repo ashwathravi/Portfolio-Manager
   - **User-scoped routes:** `requireSessionApiUserScope` takes the user from the Auth.js session and nothing else: no header, no shared secret.
   - **Cron routes:** need `CRON_SECRET`, compared in constant time.
   - **The Plaid webhook:** needs Plaid's ES256 signature with a known key, issued within 5 minutes, over the exact body.
-  - **Open without a session:** only `/api/health` (i72: also the deployed commit, which the public repository shows anyway), `/api/health/ready` and `/api/health/jobs` (i71: each scheduled job's status and last success, no error text, cached for a minute).
+  - **Open without a session:** only `/api/health` (i72: also the deployed commit, which the public repository shows anyway), `/api/health/ready` and `/api/health/jobs` (i71: each scheduled job's status and last success, and the dates the stored closes and snapshots are through, no error text, cached for a minute).
 - **`INTERNAL_API_SECRET`:** not set in production, and it never stands for a user.
 - **CSRF:** state changes are JSON calls from the app, carried by a `SameSite=Lax` cookie, which browsers don't send on cross-site requests. Auth.js protects its own forms with a token.
 
@@ -187,6 +187,8 @@ Every ID from a URL or body is checked against the session's user, in the WHERE 
 | Market data | 120 a minute | 240 a minute |
 | Everything else | 180 a minute | 300 a minute |
 
+- **Daily quotas** (`src/lib/api/daily-quota.ts`, launch item i77): per user, on top of these, for what costs more than a request: 20 CSV imports, 10 bank links, 20 syncs on request and 100 backtests a day, in the same Upstash store; Ask keeps its own 30 questions a day. A user keeps at most 10 linked institutions, counted under a per-user lock as each is saved, and at most 500 watchlist tickers, 2,000 journal entries, 200 theses and 50,000 transactions (`src/lib/limits/records.ts`), checked the same way in each write's transaction. `docs/deployment.md` › Opening sign-up has the table.
+
 **Delivery**
 - **Actions:** every one is pinned to a commit SHA, and the default token is read-only.
 - **Triggers:** no `pull_request_target`.
@@ -209,7 +211,7 @@ Every ID from a URL or body is checked against the session's user, in the WHERE 
 | A file-based Plaid token vault | Encrypted in Postgres in production. |
 | CSP with `'unsafe-inline'` and `'unsafe-eval'` | A nonce with `'strict-dynamic'`. |
 | No CORS configuration | Same-origin only. No CORS headers are sent, which is right for a single-domain app. |
-| `.dockerignore` missing `.env*` | `.env*` and `.runtime` are excluded. `*.pem` goes with i74. |
+| `.dockerignore` missing `.env*` | `.env*`, `.runtime` and `*.pem` in any folder are excluded (`scripts/dockerignore.test.ts`). |
 
 ## Repeating this review
 

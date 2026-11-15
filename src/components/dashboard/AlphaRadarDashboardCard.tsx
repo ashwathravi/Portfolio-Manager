@@ -5,6 +5,7 @@ import { AlertCircle, ExternalLink, RefreshCw } from "lucide-react";
 import { useViewerIdentity } from "@/components/providers/IdentityProvider";
 import {
     useAlphaRadarFilersQuery,
+    useAlphaRadarFollowsQuery,
     useAlphaRadarReportsQuery,
     useRefreshAlphaRadarAllMutation,
 } from "@/lib/api/alpha-radar/queries";
@@ -16,14 +17,29 @@ import type {
 const RESEARCH_ALPHA_RADAR_HREF = "/research?tab=alpha-radar";
 const ALPHA_RADAR_HELP_HREF = "/help#alpha-radar-v1";
 
-export function AlphaRadarDashboardCard() {
+/**
+ * Today's Alpha Radar card. With `following` (a database, and filers Atlas
+ * tracks: launch item i60) it shows reports from the filers the user
+ * follows, or asks them to follow some. Otherwise it's an example: the
+ * latest reports, or seeded ones until there are any.
+ */
+export function AlphaRadarDashboardCard({ following = false }: { following?: boolean }) {
     const filersQuery = useAlphaRadarFilersQuery({
         retry: false,
         refetchOnWindowFocus: false,
     });
+    const followsQuery = useAlphaRadarFollowsQuery({
+        enabled: following,
+        retry: false,
+        refetchOnWindowFocus: false,
+    });
+    const followedIds = following && followsQuery.isSuccess ? new Set(followsQuery.data) : null;
+    // Following: the latest reports of the filers followed, asked for by
+    // ID, so other filers' newer reports can't crowd them out of the list.
     const reportsQuery = useAlphaRadarReportsQuery(
-        {},
+        following ? { trackedFilerIds: followsQuery.data ?? [] } : {},
         {
+            enabled: !following || (followedIds?.size ?? 0) > 0,
             retry: false,
             refetchOnWindowFocus: false,
         },
@@ -34,8 +50,10 @@ export function AlphaRadarDashboardCard() {
 
     const liveFilers = filersQuery.data ?? [];
     const liveReports = reportsQuery.data ?? [];
-    const filers = liveFilers.length > 0 ? liveFilers : FALLBACK_FILERS;
-    const reports = liveReports.length > 0 ? liveReports : FALLBACK_REPORTS;
+    const filers = following || liveFilers.length > 0 ? liveFilers : FALLBACK_FILERS;
+    const reports = following
+        ? liveReports.filter((report) => followedIds?.has(report.trackedFilerId))
+        : liveReports.length > 0 ? liveReports : FALLBACK_REPORTS;
     const latestReports = [...reports]
         .sort((a, b) => b.reportPeriod.localeCompare(a.reportPeriod))
         .slice(0, 3);
@@ -43,7 +61,8 @@ export function AlphaRadarDashboardCard() {
     const enabledCount = filers.filter((filer) => filer.enabled).length;
     const topReport = latestReports[0];
     const topFiler = topReport ? filerById.get(topReport.trackedFilerId) : undefined;
-    const isFallback = liveFilers.length === 0 || liveReports.length === 0 || Boolean(filersQuery.error) || Boolean(reportsQuery.error);
+    const isFallback = !following
+        && (liveFilers.length === 0 || liveReports.length === 0 || Boolean(filersQuery.error) || Boolean(reportsQuery.error));
 
     return (
         <section
@@ -54,8 +73,8 @@ export function AlphaRadarDashboardCard() {
             <header className="pm-card-header">
                 <div>
                     <h3 className="pm-card-title">Alpha Radar</h3>
-                    <p className="pm-card-subtitle">
-                        Latest 13F changes from tracked managers
+                    <p className="pm-card-subtitle" data-testid="alpha-radar-dashboard-subtitle">
+                        {following ? "Latest 13F changes from the managers you follow" : "Latest 13F changes from tracked managers"}
                     </p>
                 </div>
                 <div className="pm-alpha-dashboard-actions">
@@ -91,19 +110,39 @@ export function AlphaRadarDashboardCard() {
             )}
 
             <div className="pm-alpha-dashboard-summary" data-testid="alpha-radar-dashboard-summary">
-                <AlphaRadarDashboardMetric label="Tracked" value={enabledCount.toString()} />
+                {following ? (
+                    <AlphaRadarDashboardMetric label="Following" value={followedIds ? followedIds.size.toString() : "—"} />
+                ) : (
+                    <AlphaRadarDashboardMetric label="Tracked" value={enabledCount.toString()} />
+                )}
                 <AlphaRadarDashboardMetric label="Reports" value={latestReports.length.toString()} />
                 <AlphaRadarDashboardMetric label="Latest" value={topReport?.reportPeriod ?? "None"} />
             </div>
 
-            {topReport ? (
+            {following && !followedIds ? (
+                <p className="pm-card-subtitle" data-testid="alpha-radar-dashboard-follows-loading">
+                    {followsQuery.isError ? "Couldn't load the managers you follow." : "Loading the managers you follow."}
+                </p>
+            ) : followedIds?.size === 0 ? (
+                <p className="pm-card-subtitle" data-testid="alpha-radar-dashboard-follow-prompt">
+                    Follow managers in <Link href={RESEARCH_ALPHA_RADAR_HREF}>Research › Alpha Radar</Link> to see their 13F changes here.
+                </p>
+            ) : following && !reportsQuery.isSuccess ? (
+                <p className="pm-card-subtitle" data-testid="alpha-radar-dashboard-reports-loading">
+                    {reportsQuery.isError ? "Couldn't load their reports." : "Loading their latest reports."}
+                </p>
+            ) : topReport ? (
                 <Link href={RESEARCH_ALPHA_RADAR_HREF} className="pm-alpha-dashboard-headline">
                     <span>{topFiler?.name ?? "Tracked filer"}</span>
                     <strong>{topReport.title}</strong>
                     <small>{topReport.summary}</small>
                 </Link>
             ) : (
-                <p className="pm-card-subtitle">No Alpha Radar reports generated yet.</p>
+                <p className="pm-card-subtitle" data-testid="alpha-radar-dashboard-no-reports">
+                    {following
+                        ? "No reports yet from the managers you follow. Atlas checks SEC for their new filings every day."
+                        : "No Alpha Radar reports generated yet."}
+                </p>
             )}
 
             <div className="pm-alpha-dashboard-list" aria-label="Latest Alpha Radar reports">

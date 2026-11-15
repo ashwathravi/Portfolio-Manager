@@ -8,6 +8,8 @@ import postgres from 'postgres';
 import * as schema from '../../src/db/schema';
 import { AccountDeletionBlockedError, deleteAccount } from '../../src/lib/account/delete';
 import { buildAccountExport } from '../../src/lib/account/export';
+import { hasGoogleAccount } from '../../src/lib/auth/new-accounts';
+import { googleWorkspaceDomains } from '../../src/lib/auth/session-access';
 import type { PlaidFetch } from '../../src/lib/plaid/link';
 
 // Launch item i65: deleting an account and exporting its data, against a
@@ -57,7 +59,11 @@ describe('account deletion and export', { skip: !DATABASE_URL && 'SCRIPTS_TEST_D
         await sql`INSERT INTO portfolio_snapshots (portfolio_id, date, holdings_value, cash, total_value, cost_basis, positions, unpriced) VALUES (${p.id}, '2026-10-23', 1000, 250, 1250, 800, 1, '{}')`;
         await sql`INSERT INTO portfolio_snapshot_positions (portfolio_id, date, symbol, quantity, cost_basis, close, close_date, market_value) VALUES (${p.id}, '2026-10-23', 'AAPL', 10, 800, 100, '2026-10-23', 1000)`;
         await sql`INSERT INTO order_plans (user_id, portfolio_id, instrument_type, symbol, side, order_type, quantity, limit_price, time_in_force, status, reference_price, rationale, created_at, updated_at) VALUES (${user}, ${p.id}, 'equity', 'AAPL', 'buy', 'limit', 5, 95, 'day', 'ready', 100, ${JSON.stringify({ thesisId: 't-1', setupType: 'breakout', conviction: 7, mood: 'calm', rationale: 'add on the dip', capturedAt: '2026-10-24T14:00:00.000Z', timeToDecisionMs: 1000 })}::jsonb, '2026-10-24 14:00', '2026-10-24 14:00')`;
+        await sql`INSERT INTO option_positions (user_id, portfolio_id, contract, underlying, contract_type, strike, expiry, quantity, premium, thesis_id, exit_rule) VALUES (${user}, ${p.id}, 'O:AAPL270115C00250000', 'AAPL', 'call', 250, '2027-01-15', 3, 18.2, 't-1', 'Exit at half')`;
         await sql`INSERT INTO user_settings (user_id, version, settings) VALUES (${user}, 15, ${JSON.stringify({ demo: { showSampleData: false } })}::jsonb)`;
+        await sql`INSERT INTO alpha_radar_tracked_filers (name, slug, cik) VALUES ('Followed filer', 'followed-filer', '0000000002') ON CONFLICT DO NOTHING`;
+        await sql`INSERT INTO alpha_radar_filer_follows (user_id, tracked_filer_id) SELECT ${user}, id FROM alpha_radar_tracked_filers WHERE slug = 'followed-filer'`;
+        await sql`INSERT INTO strategies (user_id, name, definition) VALUES (${user}, 'Trend', ${JSON.stringify({ rules: [{ id: 'r1', field: 'Close', op: '>', value: 'SMA(50)' }], conjunctions: [], symbols: ['SPY'], guardrails: { maxPositionPct: 0.1, stopLossPct: 0.1, rebalanceDays: 7 } })}::jsonb)`;
         await sql`INSERT INTO watchlist_items (user_id, id, ticker, company_name, reason, notes, added_at, write_session, write_seq) VALUES (${user}, 'w-1', 'MSFT', 'Microsoft', 'cloud', 'n', '2026-03-01', 'session-1', 1)`;
         await sql`INSERT INTO watchlist_items (user_id, id, ticker, company_name, reason, notes, added_at, dismissed, write_session, write_seq) VALUES (${user}, 'w-2', 'TSLA', '', '', '', '2026-03-01', true, 'session-1', 2)`;
         await sql`INSERT INTO journal_entries (user_id, id, date, type, ticker, decision, rationale, outcome, write_session, write_seq) VALUES (${user}, 'j-1', '2026-03-05', 'entry', 'AAPL', 'Bought', 'cheap', 'pending', 'session-1', 3)`;
@@ -67,6 +73,13 @@ describe('account deletion and export', { skip: !DATABASE_URL && 'SCRIPTS_TEST_D
         await sql`INSERT INTO ask_messages (user_id, id, role, content, cleared, created_at) VALUES (${user}, 'q-0', 'user', 'An earlier question', true, '2026-10-22 09:00')`;
         await sql`INSERT INTO ask_messages (user_id, id, role, content, created_at) VALUES (${user}, 'q-1', 'user', 'Where did P&L come from?', '2026-10-23 09:00')`;
         await sql`INSERT INTO ask_messages (user_id, id, role, content, citations, created_at) VALUES (${user}, 'a-1', 'assistant', 'Mostly AAPL.', '[{"label":"Closed trades"}]', '2026-10-23 09:00:01')`;
+        const [rule] = await sql<{ id: string }[]>`
+            INSERT INTO alert_rules (user_id, name, metric, symbol, comparator, threshold, rearm, note, created_at)
+            VALUES (${user}, 'AAPL above $95', 'price', 'AAPL', 'gte', 95, 'daily', 'trim', '2026-10-20 12:00') RETURNING id`;
+        await sql`
+            INSERT INTO alert_notifications (user_id, rule_id, occurrence, rule_name, metric, symbol, comparator, threshold, observed_value, message, href, triggered_at, email_batch)
+            VALUES (${user}, ${rule.id}, 'session:2026-10-23', 'AAPL above $95', 'price', 'AAPL', 'gte', 95, 100, 'AAPL closed at $100.00 on Oct 23, at or above $95.00.', '/portfolios/detail/AAPL', '2026-10-23 22:31', ${`alerts/batch-${user}`})`;
+        await sql`INSERT INTO email_preferences (user_id, alerts, weekly_review, alerts_since, unsubscribe_token, updated_at) VALUES (${user}, true, false, '2026-10-21 12:00', ${`unsubscribe-secret-${user}`}, '2026-10-21 12:00')`;
         const [item] = await sql<{ id: string }[]>`
             INSERT INTO plaid_items (user_id, plaid_item_id, institution_id, institution_name, access_token_ciphertext, access_token_iv, access_token_auth_tag)
             VALUES (${user}, ${`item-${user}`}, 'ins_1', 'Fidelity', 'secret-cipher', 'i', 't') RETURNING id`;
@@ -86,6 +99,7 @@ describe('account deletion and export', { skip: !DATABASE_URL && 'SCRIPTS_TEST_D
                 (SELECT count(*) FROM holdings h JOIN portfolios p ON p.id = h.portfolio_id WHERE p.user_id = ${user})::int AS holdings,
                 (SELECT count(*) FROM portfolio_snapshot_positions s JOIN portfolios p ON p.id = s.portfolio_id WHERE p.user_id = ${user})::int AS snapshot_positions,
                 (SELECT count(*) FROM order_plans WHERE user_id = ${user})::int AS order_plans,
+                (SELECT count(*) FROM option_positions WHERE user_id = ${user})::int AS option_positions,
                 (SELECT count(*) FROM user_settings WHERE user_id = ${user})::int AS settings,
                 (SELECT count(*) FROM watchlist_items WHERE user_id = ${user})::int AS watchlist,
                 (SELECT count(*) FROM journal_entries WHERE user_id = ${user})::int AS journal,
@@ -93,6 +107,11 @@ describe('account deletion and export', { skip: !DATABASE_URL && 'SCRIPTS_TEST_D
                 (SELECT count(*) FROM thesis_catalysts WHERE user_id = ${user})::int AS catalysts,
                 (SELECT count(*) FROM thesis_evidence WHERE user_id = ${user})::int AS evidence,
                 (SELECT count(*) FROM ask_messages WHERE user_id = ${user})::int AS ask_messages,
+                (SELECT count(*) FROM strategies WHERE user_id = ${user})::int AS strategies,
+                (SELECT count(*) FROM alpha_radar_filer_follows WHERE user_id = ${user})::int AS alpha_radar_follows,
+                (SELECT count(*) FROM alert_rules WHERE user_id = ${user})::int AS alert_rules,
+                (SELECT count(*) FROM alert_notifications WHERE user_id = ${user})::int AS alert_notifications,
+                (SELECT count(*) FROM email_preferences WHERE user_id = ${user})::int AS email_preferences,
                 (SELECT count(*) FROM plaid_items WHERE user_id = ${user})::int AS plaid_items,
                 (SELECT count(*) FROM plaid_accounts WHERE user_id = ${user})::int AS plaid_accounts`;
         return { ...counts };
@@ -129,6 +148,10 @@ describe('account deletion and export', { skip: !DATABASE_URL && 'SCRIPTS_TEST_D
             date: '2026-10-23', totalValue: 1250, holdingsValue: 1000, cash: 250, costBasis: 800,
             positions: [{ symbol: 'AAPL', quantity: 10, costBasis: 800, close: 100, closeDate: '2026-10-23', marketValue: 1000 }],
         }]);
+        // Option positions (launch item i63), as entered.
+        assert.deepEqual(account.optionPositions.map((o) => [o.underlying, o.contractType, o.strike, o.expiry, o.quantity, o.premium, o.thesisId, o.exitRule, o.source]), [
+            ['AAPL', 'call', 250, '2027-01-15', 3, 18.2, 't-1', 'Exit at half', 'manual'],
+        ]);
         // What the user drafted on Trade, with the reasons they gave.
         assert.deepEqual(account.orderPlans.map((o) => [o.ticker, o.side, o.type, o.quantity, o.limitPrice, o.status, o.referencePrice, o.rationale?.rationale, o.createdAt]), [
             ['AAPL', 'buy', 'limit', 5, 95, 'ready', 100, 'add on the dip', '2026-10-24T14:00:00.000Z'],
@@ -144,8 +167,23 @@ describe('account deletion and export', { skip: !DATABASE_URL && 'SCRIPTS_TEST_D
             ['a-1', 'assistant', 'Mostly AAPL.', [{ label: 'Closed trades' }]],
         ]);
 
+        // Strategies (launch item i55): the definition and backtest as saved.
+        assert.deepEqual(data.strategies.map((st) => [st.name, (st.definition as { symbols: string[] }).symbols, st.backtest]), [['Trend', ['SPY'], null]]);
+        assert.deepEqual(data.alphaRadarFollows.map((follow) => follow.name), ['Followed filer']);
+
+        // Alert rules and what they raised (launch item i57).
+        assert.deepEqual(data.alertRules.map((r) => [r.name, r.metric, r.symbol, r.comparator, r.threshold, r.rearm, r.enabled, r.note, r.createdAt]), [
+            ['AAPL above $95', 'price', 'AAPL', 'gte', 95, 'daily', true, 'trim', '2026-10-20T12:00:00.000Z'],
+        ]);
+        assert.deepEqual(data.alerts.map((a) => [a.ruleName, a.observedValue, a.message, a.triggeredAt, a.readAt]), [
+            ['AAPL above $95', 100, 'AAPL closed at $100.00 on Oct 23, at or above $95.00.', '2026-10-23T22:31:00.000Z', null],
+        ]);
+
+        // Which emails it gets (launch item i58), without the unsubscribe token.
+        assert.deepEqual(data.emailPreferences, { alerts: true, weeklyReview: false, updatedAt: '2026-10-21T12:00:00.000Z' });
+
         const text = JSON.stringify(data);
-        for (const leak of ['userId', 'writeSession', 'writeSeq', 'dismissed', 'cleared', 'An earlier question', 'secret-cipher', 'item-u-export', 'acc-u-export', 'u-other']) {
+        for (const leak of ['userId', 'writeSession', 'writeSeq', 'dismissed', 'cleared', 'occurrence', 'An earlier question', 'secret-cipher', 'item-u-export', 'acc-u-export', 'u-other', 'unsubscribe-secret', 'alertsSince', 'emailClaimedAt', 'emailBatch', 'alerts/batch-']) {
             assert.ok(!text.includes(leak), leak);
         }
     });
@@ -166,6 +204,8 @@ describe('account deletion and export', { skip: !DATABASE_URL && 'SCRIPTS_TEST_D
         assert.deepEqual(await rowsOf('u-delete'), Object.fromEntries(Object.keys(before).map((k) => [k, 0])));
         assert.deepEqual(await rowsOf('u-other'), others);
         assert.equal((await sql`SELECT 1 FROM alpha_radar_tracked_filers WHERE slug = 'shared-filer'`).length, 1);
+        // The filer the user followed is shared: only the follow goes.
+        assert.equal((await sql`SELECT 1 FROM alpha_radar_tracked_filers WHERE slug = 'followed-filer'`).length, 1);
     });
 
     test('regression: a connection Plaid can\'t be told about blocks the deletion, and nothing is deleted', async () => {
@@ -242,5 +282,31 @@ describe('account deletion and export', { skip: !DATABASE_URL && 'SCRIPTS_TEST_D
         assert.deepEqual(await deleteAccount('u-plain', { plaid: null, database, fetchImpl: plaid.fetchImpl, now: NOW }), { accounts: 1, connections: 0 });
         assert.equal(plaid.requests.length, 0);
         assert.equal((await rowsOf('u-plain')).users, 0);
+    });
+
+    test('a Google account that has signed in before is known, so open sign-up\'s daily limit never turns it away (launch item i77)', async () => {
+        await sql`INSERT INTO auth_users (id, email) VALUES ('u-google', 'u-google@example.test')`;
+        await sql`INSERT INTO auth_accounts (user_id, type, provider, provider_account_id) VALUES ('u-google', 'oidc', 'google', 'google-sub-1')`;
+        await sql`INSERT INTO auth_accounts (user_id, type, provider, provider_account_id) VALUES ('u-google', 'oauth', 'schwab', 'google-sub-2')`;
+
+        assert.equal(await hasGoogleAccount('google-sub-1', database), true);
+        assert.equal(await hasGoogleAccount('google-sub-new', database), false);
+        // Another provider's account with the same ID isn't a Google one.
+        assert.equal(await hasGoogleAccount('google-sub-2', database), false);
+    });
+
+    test('a user\'s Google Workspace is read from the ID token stored with their Google account, so blocking it ends their session (launch item i77)', async () => {
+        const token = (claims: Record<string, unknown>) => `h.${Buffer.from(JSON.stringify(claims)).toString('base64url')}.s`;
+        await sql`INSERT INTO auth_users (id, email) VALUES ('u-ws-alias', 'someone@alias.example'), ('u-ws-gmail', 'someone@gmail.com'), ('u-ws-untokened', 'other@abuse.example')`;
+        await sql`INSERT INTO auth_accounts (user_id, type, provider, provider_account_id, id_token) VALUES ('u-ws-alias', 'oidc', 'google', 'google-sub-w', ${token({ sub: 'google-sub-w', hd: 'abuse.example' })})`;
+        await sql`INSERT INTO auth_accounts (user_id, type, provider, provider_account_id, id_token) VALUES ('u-ws-alias', 'oauth', 'schwab', 'schwab-1', ${token({ hd: 'elsewhere.example' })})`;
+        await sql`INSERT INTO auth_accounts (user_id, type, provider, provider_account_id, id_token) VALUES ('u-ws-gmail', 'oidc', 'google', 'google-sub-g', ${token({ sub: 'google-sub-g' })})`;
+        await sql`INSERT INTO auth_accounts (user_id, type, provider, provider_account_id) VALUES ('u-ws-untokened', 'oidc', 'google', 'google-sub-o')`;
+
+        assert.deepEqual(await googleWorkspaceDomains('u-ws-alias', database), ['abuse.example']);
+        // A Gmail account has no Workspace, and an account stored without its token says none.
+        assert.deepEqual(await googleWorkspaceDomains('u-ws-gmail', database), []);
+        assert.deepEqual(await googleWorkspaceDomains('u-ws-untokened', database), []);
+        assert.deepEqual(await googleWorkspaceDomains('u-ws-nobody', database), []);
     });
 });

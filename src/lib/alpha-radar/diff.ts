@@ -246,6 +246,15 @@ function classifyChange(input: {
     return 'unchanged';
 }
 
+/**
+ * What overlap with the user adds to a change's materiality score. Stored
+ * changes are shared, so they are scored without it; adding it to the
+ * stored score (capped at 100) gives the score the change would have had.
+ */
+export function alphaRadarRelevanceBoost(relevance: Pick<AlphaRadarUserRelevance, 'portfolio' | 'watchlist' | 'thesis'>): number {
+    return (relevance.portfolio ? 12 : 0) + (relevance.watchlist ? 7 : 0) + (relevance.thesis ? 7 : 0);
+}
+
 function resolveUserRelevance(
     input: AlphaRadarUserOverlapInput | undefined,
     ticker: string | undefined,
@@ -296,11 +305,7 @@ function scoreMateriality(input: {
             ? 1
             : 0;
     const bestRank = Math.min(input.currentHolding?.positionRank ?? Infinity, input.priorHolding?.positionRank ?? Infinity);
-    const relevanceBoost = [
-        input.userRelevance.portfolio ? 12 : 0,
-        input.userRelevance.watchlist ? 7 : 0,
-        input.userRelevance.thesis ? 7 : 0,
-    ].reduce((sum, value) => sum + value, 0);
+    const relevanceBoost = alphaRadarRelevanceBoost(input.userRelevance);
 
     let score = 0;
     score += Math.min(35, absWeightDelta * 350);

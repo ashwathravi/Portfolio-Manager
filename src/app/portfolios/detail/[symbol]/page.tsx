@@ -34,7 +34,7 @@ async function HoldingDetailContent({ symbol }: { symbol: string }) {
     // The view decides on the client whether the change is today's, so a page
     // left open past midnight ET stops calling Friday's move "today".
     const quote = live
-        ? { price: live.price, change: live.change, changePercent: live.changePercent, timestamp: live.timestamp, isRealtime: live.isRealtime }
+        ? { price: live.price, change: live.change, changePercent: live.changePercent, timestamp: live.timestamp, kind: live.kind, isRealtime: live.isRealtime }
         : null;
     const header = (
         <PageHeaderSync

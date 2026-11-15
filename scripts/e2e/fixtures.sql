@@ -82,6 +82,22 @@ VALUES
   ('IBM', (now() AT TIME ZONE 'America/New_York')::date, 200, 206, 199, 205, 1000, 'e2e')
 ON CONFLICT (symbol, date) DO NOTHING;
 
+-- Charts read history from these bars once a symbol's two-year backfill has
+-- run (x09). Nobody holds either of these. CRWV is tracked with one daily
+-- file's bar and its backfill still pending, so a chart asks Massive rather
+-- than draw that day as the range. FSKAX (a mutual fund, which Massive's
+-- stocks feed doesn't price) was backfilled and got nothing, so a chart
+-- answers empty from the store without asking.
+INSERT INTO securities (symbol, name, history_start_date)
+VALUES
+  ('CRWV', 'CoreWeave, Inc.', NULL),
+  ('FSKAX', 'Fidelity Total Market Index Fund', (now() AT TIME ZONE 'America/New_York')::date - 1)
+ON CONFLICT (symbol) DO NOTHING;
+
+INSERT INTO price_bars (symbol, date, open, high, low, close, volume, source)
+VALUES ('CRWV', (now() AT TIME ZONE 'America/New_York')::date, 100, 104, 99, 102, 1000, 'e2e')
+ON CONFLICT (symbol, date) DO NOTHING;
+
 -- Valuation history for user A (launch item i49), on fixed past sessions so
 -- Performance › Returns has known numbers. Main holds 100 KO and 1,000 cash,
 -- Growth 50 PG; on Oct 1 Main moves 500 of cash to Growth, which must not
@@ -208,3 +224,23 @@ JOIN price_bars AS spy ON spy.symbol = 'SPY' AND spy.date IN ('2026-08-31', '202
 WHERE etf.date = '2026-08-28'
   AND etf.symbol IN ('XLK', 'XLC', 'XLY', 'XLP', 'XLF', 'XLV', 'XLI', 'XLE', 'XLB', 'XLRE', 'XLU')
 ON CONFLICT (symbol, date) DO NOTHING;
+
+-- Ticker search (launch item i35): a few rows of the symbol directory, as
+-- the nightly job stores them from SEC's ticker file. User A holds AAPL and
+-- MSFT. User B's XUSR is in nobody else's search.
+INSERT INTO symbol_directory (symbol, name, exchange, cik, position)
+VALUES
+  ('AAPL', 'Apple Inc.', 'Nasdaq', '0000320193', 0),
+  ('MSFT', 'MICROSOFT CORP', 'Nasdaq', '0000789019', 2),
+  ('BRK.B', 'BERKSHIRE HATHAWAY INC', 'NYSE', '0001067983', 9),
+  ('KO', 'COCA COLA CO', 'NYSE', '0000021344', 24),
+  ('IBM', 'INTERNATIONAL BUSINESS MACHINES CORP', 'NYSE', '0000051143', 60),
+  ('APLE', 'Apple Hospitality REIT, Inc.', 'NYSE', '0001418121', 1525)
+ON CONFLICT (symbol) DO NOTHING;
+
+-- The LEAPS ledger (launch item i63): one option contract's close, as the
+-- nightly job stores it. No fixture user holds an option; a test that adds
+-- this contract sees it marked at the close.
+INSERT INTO option_marks (contract, close, close_date, checked_session, checked_at, source)
+VALUES ('O:NVDA270115C00150000', 31.25, '2026-10-01', '2026-10-01', '2026-10-01 22:30:00', 'e2e')
+ON CONFLICT (contract) DO NOTHING;

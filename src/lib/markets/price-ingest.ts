@@ -28,7 +28,14 @@
  *    asked about again only when that copy would be stale. A fetch that
  *    fails is retried on later runs, behind symbols not yet tried, so one
  *    that keeps failing can't hold the others back.
- * 4. Backfill two years of history for symbols that don't have it yet, one
+ * 4. Option marks (launch item i63): the newest close of each option
+ *    contract anyone holds, asked about once a session, at most
+ *    MAX_OPTION_MARKS_PER_RUN a run (one aggregates call each). Massive's
+ *    free options plan has end-of-day bars; a plan without options answers
+ *    403, which ends this step for the run without failing the job, and
+ *    positions stay at the user's own price or the premium paid. Marks of
+ *    contracts no one holds any more are dropped.
+ * 5. Backfill two years of history for symbols that don't have it yet, one
  *    aggregates call per symbol, while the run's time budget lasts: held
  *    symbols and benchmarks first, and a looked-up symbol only once a daily
  *    file has priced it (a made-up ticker never costs a call). A
@@ -62,6 +69,7 @@ import {
     type HoldingSplit,
     type HoldingSplitOutcome,
 } from "@/lib/portfolio/split-adjustments";
+import { MarketDataNotConfiguredError } from "@/lib/providers/errors";
 import { getMassiveQuota } from "@/lib/providers/massive-quota";
 import {
     PolygonApiError,
@@ -73,6 +81,15 @@ import {
 } from "@/lib/providers/polygon-massive-adapter";
 import type { OHLC } from "@/types/market-data";
 import type { TickerReference } from "./security-profile";
+
+import {
+    countOptionContractsToMark,
+    listOptionContractsToMark,
+    MAX_OPTION_MARKS_PER_RUN,
+    optionCloseWindowStart,
+    pruneOptionMarks,
+    saveOptionMark,
+} from "./option-marks";
 
 import { getEasternParts, lastCompletedSession, nextTradingDay, previousTradingDay } from "./market-hours";
 import {
@@ -113,8 +130,13 @@ export const PRICE_SOURCE = "massive";
 export const MAX_CATCH_UP_DAYS = 5;
 /** The free plan keeps two years of daily history. */
 export const HISTORY_RANGE = "2Y";
-/** Under Vercel's 300-second function limit, with room for the last call. */
-export const DEFAULT_BUDGET_MS = 240_000;
+/**
+ * No call starts unless it can finish by then. The nightly route's five
+ * minutes also hold the Plaid sync and the email job, so this leaves them
+ * theirs (src/app/api/cron/daily/route.test.ts checks the sum); on the free
+ * plan it still fits four windows of five calls.
+ */
+export const DEFAULT_BUDGET_MS = 220_000;
 /** Free plan: 5 calls a minute. The window has 5 s of slack for clock drift. */
 export const CALLS_PER_WINDOW = 5;
 export const CALL_WINDOW_MS = 65_000;
@@ -141,6 +163,8 @@ export interface PriceIngestAdapter {
     getSplits(from: string, to: string, tickers?: readonly string[]): Promise<SplitEvent[]>;
     /** A ticker's reference data; null when the provider doesn't know it. */
     getTickerReference(symbol: string): Promise<TickerReference | null>;
+    /** An option contract's newest close in the window; null when it didn't trade (PolygonMassiveAdapter.getLatestOptionClose). */
+    getLatestOptionClose(contract: string, from: string, to: string): Promise<{ date: string; close: number } | null>;
 }
 
 /** The database calls the ingest makes; the price store in production. */
@@ -188,6 +212,13 @@ export interface PriceIngestStore {
     saveReference(symbol: string, reference: TickerReference | null, at: Date): Promise<void>;
     /** Records a failed fetch, so the symbol goes behind untried ones next run. */
     markReferenceAttempted(symbol: string, at: Date): Promise<void>;
+    /** Held, unexpired option contracts not yet asked about for `session`, never-asked first. */
+    listOptionContractsToMark(limit: number, session: string): Promise<string[]>;
+    countOptionContractsToMark(session: string): Promise<number>;
+    /** Records the answer for a contract (null: no trade in the window); an older close never replaces a newer one. */
+    saveOptionMark(contract: string, found: { date: string; close: number } | null, session: string, at: Date): Promise<void>;
+    /** Drops the marks of contracts no one holds; returns how many. */
+    pruneOptionMarks(): Promise<number>;
 }
 
 export interface IngestPricesOptions {
@@ -205,8 +236,6 @@ export interface IngestPricesOptions {
 export type IngestStopReason = "not-published" | "budget" | "rate-limited";
 
 export type PriceIngestDetail = {
-    /** Why the run did nothing, e.g. no API key. Absent on a normal run. */
-    skipped?: string;
     /** The last completed session when the run started: what it catches up to. */
     session?: string;
     tracked?: number;
@@ -248,7 +277,22 @@ export type PriceIngestDetail = {
      * (`unadjusted`: re-import those), or why there was no check.
      */
     holdingSplits?: ({ from: string; to: string } & Partial<HoldingSplitOutcome>) | { skipped: string };
-    stopped?: { catchUp?: IngestStopReason; reference?: IngestStopReason; backfill?: IngestStopReason };
+    /**
+     * Option closes fetched this run (`updated`), contracts that didn't trade
+     * in the window (`noTrade`), failures (asked again next session), how
+     * many held contracts still wait to be asked about this session, and
+     * marks dropped because no one holds the contract. `notIncluded`: Massive
+     * answered 403, so the plan has no options data and the step stopped.
+     */
+    optionMarks?: {
+        updated: string[];
+        noTrade: string[];
+        errors: Array<{ contract: string; error: string }>;
+        queue: number;
+        pruned: number;
+        notIncluded?: true;
+    };
+    stopped?: { catchUp?: IngestStopReason; reference?: IngestStopReason; optionMarks?: IngestStopReason; backfill?: IngestStopReason };
     /** Provider calls made. */
     calls?: number;
 };
@@ -376,6 +420,10 @@ export function createPriceIngestStore(database: Database = db): PriceIngestStor
         countSymbolsNeedingReference: (staleBefore) => countSymbolsNeedingReference(staleBefore, database),
         saveReference: (symbol, reference, at) => saveReference(symbol, reference, at, database),
         markReferenceAttempted: (symbol, at) => markReferenceAttempted(symbol, at, database),
+        listOptionContractsToMark: (limit, session) => listOptionContractsToMark(limit, session, database),
+        countOptionContractsToMark: (session) => countOptionContractsToMark(session, database),
+        saveOptionMark: (contract, found, session, at) => saveOptionMark(contract, found, { session, at, source: PRICE_SOURCE }, database),
+        pruneOptionMarks: () => pruneOptionMarks(database),
     };
 }
 
@@ -400,8 +448,9 @@ export function createIngestAdapter(config: Omit<PolygonAdapterConfig, "maxRetri
 
 /**
  * Runs one nightly ingest and reports what it did. A provider or database
- * error during the catch-up fails the run (the job records it); a single
- * symbol's failed backfill is reported and leaves it queued for the next run.
+ * error during the catch-up fails the run (the job records it), and so does
+ * a missing API key, so job health reports it; a single symbol's failed
+ * backfill is reported and leaves it queued for the next run.
  */
 export async function ingestDailyPrices({
     adapter = createIngestAdapter(),
@@ -411,9 +460,7 @@ export async function ingestDailyPrices({
     sleep = defaultSleep,
     budgetMs = DEFAULT_BUDGET_MS,
 }: IngestPricesOptions = {}): Promise<PriceIngestDetail> {
-    if (!adapter.isConfigured) {
-        return { skipped: "Market data is not configured: POLYGON_API_KEY is not set." };
-    }
+    if (!adapter.isConfigured) throw new MarketDataNotConfiguredError("POLYGON_API_KEY");
 
     const pacer = createCallPacer({ now, sleep, deadline: now().getTime() + budgetMs });
     /**
@@ -588,13 +635,51 @@ export async function ingestDailyPrices({
     }
     reference.queue = await store.countSymbolsNeedingReference(staleBefore);
 
-    // 4. Backfill history, up to the newest day the daily files have covered.
+    // 4. Option marks for held contracts, once a session, a few a run.
+    const optionMarks: NonNullable<PriceIngestDetail["optionMarks"]> = { updated: [], noTrade: [], errors: [], queue: 0, pruned: 0 };
+    optionMarks.pruned = await store.pruneOptionMarks();
+    const beforeMarks = stopped.reference ?? stopped.catchUp;
+    if (beforeMarks === "rate-limited" || beforeMarks === "budget") {
+        stopped.optionMarks = beforeMarks;
+    } else {
+        const from = optionCloseWindowStart(session);
+        for (const contract of await store.listOptionContractsToMark(MAX_OPTION_MARKS_PER_RUN, session)) {
+            let found: { date: string; close: number } | null;
+            try {
+                const answer = await paced(() => adapter.getLatestOptionClose(contract, from, session));
+                if ("stopped" in answer) {
+                    stopped.optionMarks = answer.stopped;
+                    break;
+                }
+                found = answer.value;
+            } catch (error) {
+                if (error instanceof PolygonApiError && error.status === 403) {
+                    // The plan has no options data: nothing to ask about tonight.
+                    optionMarks.notIncluded = true;
+                    break;
+                }
+                if (error instanceof PolygonApiError && error.status === 404) {
+                    found = null;
+                } else {
+                    // Recorded as asked, so it's tried again next session, not ahead of the others.
+                    optionMarks.errors.push({ contract, error: summarizeError(error) });
+                    await store.saveOptionMark(contract, null, session, now());
+                    continue;
+                }
+            }
+            await store.saveOptionMark(contract, found, session, now());
+            (found ? optionMarks.updated : optionMarks.noTrade).push(contract);
+        }
+    }
+    optionMarks.queue = await store.countOptionContractsToMark(session);
+
+    // 5. Backfill history, up to the newest day the daily files have covered.
     // With nothing stored at all, the day before the session: the session
     // itself will come from its daily file.
     const historyThrough = latestAfter ?? previousTradingDay(session);
     const backfilled: NonNullable<PriceIngestDetail["backfilled"]> = [];
     const backfillErrors: NonNullable<PriceIngestDetail["backfillErrors"]> = [];
-    const ended = stopped.reference ?? stopped.catchUp;
+    const ended = stopped.optionMarks ?? stopped.reference ?? stopped.catchUp;
     if (ended === "rate-limited" || ended === "budget") {
         stopped.backfill = ended;
     } else {
@@ -665,6 +750,7 @@ export async function ingestDailyPrices({
         backfillErrors,
         backfillQueue: await store.countSymbolsNeedingHistory(priority),
         reference,
+        optionMarks,
         splits,
         stopped,
         calls: pacer.calls,

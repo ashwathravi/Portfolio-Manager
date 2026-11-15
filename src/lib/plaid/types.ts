@@ -1,4 +1,5 @@
-export type PlaidEnvironment = "sandbox" | "development" | "production";
+/** Plaid retired its Development environment in 2024; Sandbox and Production remain. */
+export type PlaidEnvironment = "sandbox" | "production";
 
 export type PlaidAccountType =
     | "investment"

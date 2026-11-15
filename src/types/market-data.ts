@@ -16,11 +16,18 @@ export interface Quote {
   /** Change since the previous close; null when there is no earlier close to compare with. */
   change: number | null;
   changePercent: number | null;
-  /** ISO-8601 timestamp of the quote */
+  /** ISO-8601 timestamp of the quote: a session's close, or when a delayed quote was quoted. */
   timestamp: string;
-  /** Whether the quote reflects real-time or delayed data */
+  /**
+   * What the price is (launch item i33): a session's closing price from the
+   * price store, or an intraday quote that is at least a minute old.
+   */
+  kind: QuoteKind;
+  /** Whether the quote is from a real-time feed. Always false: Atlas has none (see launch item i78). */
   isRealtime: boolean;
 }
+
+export type QuoteKind = 'close' | 'delayed';
 
 // ---------------------------------------------------------------------------
 // OHLC (candlestick / aggregate bar)
@@ -66,6 +73,16 @@ export interface SymbolResult {
   active: boolean;
 }
 
+/** A ticker search result (launch item i35): what the pickers and ⌘K show. */
+export interface TickerMatch {
+  symbol: string;
+  name: string;
+  /** Where it lists ("Nasdaq", "NYSE", "NYSE Arca", "OTC"), when known. */
+  exchange: string | null;
+  /** In one of the user's own accounts. */
+  held: boolean;
+}
+
 // ---------------------------------------------------------------------------
 // MarketDataProvider — the abstraction every adapter must implement
 // ---------------------------------------------------------------------------
@@ -79,7 +96,7 @@ export interface MarketDataProvider {
 
   /**
    * Fetch historical OHLC bars.
-   * @param range  Human-readable range key, e.g. "1M", "3M", "1Y", "5Y".
+   * @param range  Human-readable range key, e.g. "1M", "3M", "1Y", "MAX".
    *               The adapter is responsible for translating this into
    *               provider-specific date math.
    */

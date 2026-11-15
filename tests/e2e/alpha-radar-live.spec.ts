@@ -1,0 +1,271 @@
+import { randomUUID } from 'node:crypto';
+
+import { test, expect, type Page } from '@playwright/test';
+
+import { gotoAppPage, reloadAppPage } from './helpers/app';
+import { researchLoaded } from './helpers/research';
+import { database, databaseAuthEnabled, signInAsFreshUser, signInAsNewUser } from './helpers/users';
+
+/**
+ * Launch item i60: following Alpha Radar filers, with a tracked filer and a
+ * report of its own in the database. Filers are shared by every user and the
+ * other specs expect none, so this file runs in its own Playwright project
+ * after them (playwright.config.ts), one test at a time, and removes the
+ * filer when it's done.
+ */
+
+test.describe.configure({ mode: 'serial' });
+
+test.describe('Following Alpha Radar filers', () => {
+    test.skip(!databaseAuthEnabled, 'Follows are kept with the account: only with database sessions.');
+
+    const filerId = randomUUID();
+    const filerName = 'E2E Follow Capital';
+    const summary = 'Added to Apple and trimmed Chubb.';
+    // Nobody follows this one; its 21 newer reports are more than the
+    // latest 20 the reports API returns by default.
+    const crowdId = randomUUID();
+    // Nothing has been loaded from SEC for this one yet.
+    const quietId = randomUUID();
+    const quietName = 'E2E Quiet Fund';
+
+    test.beforeAll(async () => {
+        const sql = database();
+        const cik = String(Date.now()).slice(-10).padStart(10, '0');
+        await sql`
+            INSERT INTO alpha_radar_tracked_filers (id, name, slug, cik, fund_style, enabled)
+            VALUES (${filerId}, ${filerName}, ${`e2e-follow-${filerId}`}, ${cik}, 'Concentrated value', true)`;
+        await sql`
+            INSERT INTO alpha_radar_reports (tracked_filer_id, report_period, title, summary, sections, markdown, source_filing_ids)
+            VALUES (${filerId}, '2026-Q3', ${`${filerName} Alpha Radar 2026-Q3`}, ${summary},
+                    ${sql.json([{ id: 'summary', title: 'Summary', kind: 'summary', markdown: summary, changeIds: [] }])},
+                    ${summary}, ${sql.json([])})`;
+        await sql`
+            INSERT INTO alpha_radar_tracked_filers (id, name, slug, cik, fund_style, enabled)
+            VALUES (${crowdId}, 'E2E Crowd Partners', ${`e2e-crowd-${crowdId}`}, ${String(Number(cik) + 1).padStart(10, '0')}, 'Macro', true)`;
+        await sql`
+            INSERT INTO alpha_radar_reports (tracked_filer_id, report_period, title, summary, sections, markdown, source_filing_ids)
+            SELECT ${crowdId}, (2027 + n / 4)::text || '-Q' || (n % 4 + 1)::text, 'E2E Crowd Partners report', 'A newer report.',
+                   ${sql.json([{ id: 'summary', title: 'Summary', kind: 'summary', markdown: 'A newer report.', changeIds: [] }])},
+                   'A newer report.', ${sql.json([])}
+            FROM generate_series(0, 20) AS n`;
+        // The filer's changes as the ingest stores them (launch item i61):
+        // issuers, not tickers, and no user's overlap, though the last one
+        // has some written in, which no reader should see.
+        await sql`
+            INSERT INTO alpha_radar_holding_changes (tracked_filer_id, report_period, change_type, issuer_name, cusip, materiality_score, user_relevance, display_reason)
+            VALUES
+                (${filerId}, '2026-Q3', 'new', 'CHUBB LIMITED', 'H1467J104', 60, NULL, 'New position in Chubb.'),
+                (${filerId}, '2026-Q3', 'increased', 'APPLE INC', '037833100', 50, NULL, 'Added to Apple.'),
+                (${filerId}, '2026-Q3', 'decreased', 'APPLE HOSPITALITY REIT INC', '03784Y200', 30,
+                 ${sql.json({ portfolio: true, watchlist: false, thesis: false, reasons: ['Held in portfolio'], matchedTickers: ['APLE'], matchedCusips: [] })},
+                 'Trimmed Apple Hospitality.')`;
+        await sql`
+            INSERT INTO alpha_radar_tracked_filers (id, name, slug, cik, fund_style, enabled)
+            VALUES (${quietId}, ${quietName}, ${`e2e-quiet-${quietId}`}, ${String(Number(cik) + 2).padStart(10, '0')}, 'Activist', true)`;
+        // Chubb in SEC's ticker file, as the nightly job stores it, so a CB
+        // added to a watchlist has a company name to meet the 13F's.
+        await sql`
+            INSERT INTO symbol_directory (symbol, name, exchange, cik, position)
+            VALUES ('CB', 'Chubb Ltd', 'NYSE', '0000896159', 300)
+            ON CONFLICT (symbol) DO NOTHING`;
+    });
+
+    test.afterAll(async () => {
+        // Their reports, changes and every follow go with them.
+        await database()`DELETE FROM alpha_radar_tracked_filers WHERE id IN (${filerId}, ${crowdId}, ${quietId})`;
+        await database()`DELETE FROM symbol_directory WHERE symbol = 'CB' AND cik = '0000896159'`;
+    });
+
+    const changeRow = (page: Page, issuer: string) => page.getByTestId('alpha-radar-change-row')
+        .filter({ has: page.getByRole('heading', { name: issuer, exact: true }) });
+
+    test('each change shows where it meets the reader, and ranks by it (launch item i61)', async ({ page, context }) => {
+        // A copy of user A, who holds AAPL ("Apple Inc.") and doesn't watch Chubb.
+        await signInAsFreshUser(context);
+        const watchlistLoaded = researchLoaded(page, 'watchlist');
+        await gotoAppPage(page, '/research?tab=alpha-radar');
+        await watchlistLoaded;
+        await page.getByTestId('alpha-radar-filer').filter({ hasText: filerName }).click();
+
+        // The 13F names Apple, not AAPL: matched by company, and not to
+        // Apple Hospitality, whatever was stored on that row.
+        const rows = page.getByTestId('alpha-radar-change-row');
+        await expect(rows).toHaveCount(3);
+        await expect(changeRow(page, 'APPLE INC').locator('.pm-alpha-overlap')).toHaveText('Held in portfolio');
+        await expect(changeRow(page, 'CHUBB LIMITED').locator('.pm-alpha-overlap')).toHaveCount(0);
+        await expect(changeRow(page, 'APPLE HOSPITALITY REIT INC').locator('.pm-alpha-overlap')).toHaveCount(0);
+        await expect(page.getByTestId('alpha-radar-your-overlap')).toContainText('APPLE INC: held in portfolio');
+        // Apple's 50 with what holding it adds (12) comes before Chubb's 60.
+        await expect(rows.first()).toContainText('APPLE INC');
+        await expect(changeRow(page, 'APPLE INC')).toContainText('62');
+        await expect(page.getByTestId('alpha-radar-fallback')).toHaveCount(0);
+        // The limit applies to the reader's ranking, not the stored one.
+        const limited = await page.request.get(`/api/alpha-radar/filers/${filerId}/changes?limit=1`);
+        expect((await limited.json()).data.map((change: { issuerName: string }) => change.issuerName)).toEqual(['APPLE INC']);
+
+        // Watching Chubb puts it on the list, and above Apple, as soon as
+        // the reader is back on Alpha Radar: no reload (the Codex finding on
+        // PR #191).
+        await page.getByRole('tab', { name: 'Watchlist' }).click();
+        const add = page.getByLabel('Add ticker to watchlist');
+        await expect(async () => {
+            await add.fill('cb');
+            await expect(add).toHaveValue('CB', { timeout: 1_000 });
+        }).toPass({ timeout: 10_000 });
+        const saved = page.waitForResponse((response) =>
+            response.url().includes('/api/research/watchlist/') && response.request().method() === 'PUT' && response.ok());
+        await page.getByRole('button', { name: 'Add', exact: true }).click();
+        await saved;
+        await page.getByRole('tab', { name: 'Alpha Radar' }).click();
+        await page.getByTestId('alpha-radar-filer').filter({ hasText: filerName }).click();
+        await expect(changeRow(page, 'CHUBB LIMITED').locator('.pm-alpha-overlap')).toHaveText('On watchlist');
+        await expect(rows.first()).toContainText('CHUBB LIMITED');
+        await expect(page.getByTestId('alpha-radar-your-overlap')).toContainText('CHUBB LIMITED: on watchlist');
+    });
+
+    test('another reader\'s overlap is their own', async ({ page, context }) => {
+        // Holds nothing, watches nothing, has no theses.
+        await signInAsNewUser(context);
+        await gotoAppPage(page, '/research?tab=alpha-radar');
+        await page.getByTestId('alpha-radar-filer').filter({ hasText: filerName }).click();
+
+        await expect(page.getByTestId('alpha-radar-change-row')).toHaveCount(3);
+        await expect(page.getByTestId('alpha-radar-change-row').locator('.pm-alpha-overlap')).toHaveCount(0);
+        await expect(page.getByTestId('alpha-radar-change-row').first()).toContainText('CHUBB LIMITED');
+        await expect(page.getByTestId('alpha-radar-your-overlap')).toContainText('None of these changes are in your holdings, watchlist or active theses.');
+
+        const response = await page.request.get(`/api/alpha-radar/filers/${filerId}/changes`);
+        expect(response.status()).toBe(200);
+        expect((await response.json()).data.map((change: { issuerName: string; userRelevance: { reasons: string[] } }) =>
+            [change.issuerName, change.userRelevance.reasons])).toEqual([
+            ['CHUBB LIMITED', []],
+            ['APPLE INC', []],
+            ['APPLE HOSPITALITY REIT INC', []],
+        ]);
+    });
+
+    test('a filer with nothing loaded yet says so, and shows no examples in its place', async ({ page, context }) => {
+        await signInAsFreshUser(context);
+        await gotoAppPage(page, '/research?tab=alpha-radar');
+        await page.getByTestId('alpha-radar-filer').filter({ hasText: quietName }).click();
+
+        await expect(page.getByTestId('alpha-radar-detail')).toContainText(quietName);
+        await expect(page.getByTestId('alpha-radar-filer-empty')).toContainText(`No 13F filings are loaded for ${quietName} yet`);
+        await expect(page.getByTestId('alpha-radar-change-row')).toHaveCount(0);
+        await expect(page.getByTestId('alpha-radar-report')).toHaveCount(0);
+        await expect(page.getByTestId('alpha-radar-fallback')).toHaveCount(0);
+        await expect(page.getByTestId('alpha-radar-scheduler')).toHaveCount(0);
+        await expect(page.getByTestId('alpha-radar-follow')).toBeVisible();
+    });
+
+    test('a user follows a filer, it stays followed, and Today shows its reports', async ({ page, context }) => {
+        await signInAsFreshUser(context);
+
+        // Today, before following anything: no example card, a prompt instead.
+        await gotoAppPage(page, '/');
+        const card = page.getByTestId('alpha-radar-dashboard-card');
+        await expect(card).toHaveCount(1);
+        await expect(card.getByTestId('alpha-radar-dashboard-subtitle')).toHaveText('Latest 13F changes from the managers you follow');
+        await expect(card.getByTestId('alpha-radar-dashboard-follow-prompt')).toBeVisible();
+        await expect(card.getByTestId('alpha-radar-dashboard-fallback')).toHaveCount(0);
+        await expect(card.getByTestId('alpha-radar-dashboard-row')).toHaveCount(0);
+        await expect(page.getByTestId('today-examples').getByTestId('alpha-radar-dashboard-card')).toHaveCount(0);
+
+        await gotoAppPage(page, '/research?tab=alpha-radar');
+        await page.getByTestId('alpha-radar-filer').filter({ hasText: filerName }).click();
+        const follow = page.getByTestId('alpha-radar-follow');
+        await expect(follow).toHaveText('Follow');
+        await expect(follow).toHaveAttribute('aria-pressed', 'false');
+        await expect(follow).toBeEnabled();
+
+        const saved = page.waitForResponse((response) => response.url().endsWith(`/api/alpha-radar/follows/${filerId}`) && response.request().method() === 'PUT');
+        await follow.click();
+        expect((await saved).status()).toBe(200);
+        await expect(follow).toHaveText('Following');
+        await expect(follow).toHaveAttribute('aria-pressed', 'true');
+        await expect(page.getByTestId('alpha-radar-filer').filter({ hasText: filerName }).getByTestId('alpha-radar-filer-following')).toBeVisible();
+
+        // Research opens on the first filer by name, so pick it again.
+        await reloadAppPage(page);
+        await page.getByTestId('alpha-radar-filer').filter({ hasText: filerName }).click();
+        await expect(page.getByTestId('alpha-radar-follow')).toHaveText('Following');
+
+        // Its report, though another filer has 21 newer ones (a regression:
+        // Today filtered the latest 20 of every filer's).
+        await gotoAppPage(page, '/');
+        await expect(card.getByTestId('alpha-radar-dashboard-follow-prompt')).toHaveCount(0);
+        const row = card.getByTestId('alpha-radar-dashboard-row');
+        await expect(row).toHaveCount(1);
+        await expect(row).toContainText(filerName);
+        await expect(row).toContainText(summary);
+        await expect(row).toContainText('2026-Q3');
+
+        // Unfollowing puts it back.
+        await gotoAppPage(page, '/research?tab=alpha-radar');
+        await page.getByTestId('alpha-radar-filer').filter({ hasText: filerName }).click();
+        await page.getByTestId('alpha-radar-follow').click();
+        await expect(page.getByTestId('alpha-radar-follow')).toHaveText('Follow');
+        await expect.poll(async () => (await (await page.request.get('/api/alpha-radar/follows')).json()).data.filerIds).toEqual([]);
+        await reloadAppPage(page);
+        await page.getByTestId('alpha-radar-filer').filter({ hasText: filerName }).click();
+        await expect(page.getByTestId('alpha-radar-follow')).toHaveText('Follow');
+    });
+
+    test('one account\'s follows never reach another', async ({ page, context, browser }) => {
+        await signInAsFreshUser(context);
+        expect((await page.request.put(`/api/alpha-radar/follows/${filerId}`)).status()).toBe(200);
+        expect((await (await page.request.get('/api/alpha-radar/follows')).json()).data.filerIds).toEqual([filerId]);
+
+        const otherContext = await browser.newContext();
+        await signInAsFreshUser(otherContext);
+        const other = await otherContext.newPage();
+        expect((await (await other.request.get('/api/alpha-radar/follows')).json()).data.filerIds).toEqual([]);
+        await gotoAppPage(other, '/research?tab=alpha-radar');
+        await other.getByTestId('alpha-radar-filer').filter({ hasText: filerName }).click();
+        await expect(other.getByTestId('alpha-radar-follow')).toHaveText('Follow');
+        await otherContext.close();
+    });
+
+    test('a follow that can\'t be saved is put back, and says so', async ({ page, context }) => {
+        await signInAsFreshUser(context);
+        await page.route(`**/api/alpha-radar/follows/${filerId}`, (route) => route.fulfill({
+            status: 500,
+            contentType: 'application/json',
+            body: JSON.stringify({ error: 'Unable to follow the filer.', code: 'ALPHA_RADAR_FOLLOW_FAILED' }),
+        }));
+
+        await gotoAppPage(page, '/research?tab=alpha-radar');
+        await page.getByTestId('alpha-radar-filer').filter({ hasText: filerName }).click();
+        await page.getByTestId('alpha-radar-follow').click();
+
+        await expect(page.getByTestId('alpha-radar-follow-error')).toHaveText("Couldn't save that. Try again.");
+        await expect(page.getByTestId('alpha-radar-follow')).toHaveText('Follow');
+        await expect(page.getByTestId('alpha-radar-follow')).toHaveAttribute('aria-pressed', 'false');
+    });
+
+    test('the API follows only filers that exist, and refuses signed-out callers', async ({ page, context, playwright }) => {
+        await signInAsFreshUser(context);
+
+        for (const id of ['00000000-0000-4000-8000-0000000f0000', 'not-a-filer']) {
+            const response = await page.request.put(`/api/alpha-radar/follows/${id}`);
+            expect(response.status(), id).toBe(404);
+            expect(await response.json()).toEqual({ error: 'Tracked filer not found', code: 'TRACKED_FILER_NOT_FOUND' });
+        }
+        // Stopping a follow that isn't there changes nothing.
+        const unfollowed = await page.request.delete('/api/alpha-radar/follows/00000000-0000-4000-8000-0000000f0000');
+        expect(unfollowed.status()).toBe(200);
+        expect((await (await page.request.get('/api/alpha-radar/follows')).json()).data.filerIds).toEqual([]);
+
+        const anonymous = await playwright.request.newContext({
+            baseURL: 'http://localhost:3000',
+            storageState: { cookies: [], origins: [] },
+        });
+        expect((await anonymous.get('/api/alpha-radar/follows')).status()).toBe(401);
+        // A filer's changes carry the reader's overlap, so they need a reader.
+        expect((await anonymous.get(`/api/alpha-radar/filers/${filerId}/changes`)).status()).toBe(401);
+        expect((await anonymous.put(`/api/alpha-radar/follows/${filerId}`)).status()).toBe(401);
+        expect((await anonymous.delete(`/api/alpha-radar/follows/${filerId}`)).status()).toBe(401);
+        await anonymous.dispose();
+    });
+});

@@ -33,13 +33,20 @@ const IRA: TicketAccount = {
 
 describe("ticket prices", () => {
     test("a stored close keeps its Eastern date: a 4 PM ET close is that day, not the next UTC one", () => {
-        assert.deepEqual(ticketPriceFromQuote({ price: 205, timestamp: "2026-10-26T20:00:00.000Z" }), { price: 205, closeDate: "2026-10-26" });
+        assert.deepEqual(ticketPriceFromQuote({ price: 205, timestamp: "2026-10-26T20:00:00.000Z", kind: "close" }), { price: 205, closeDate: "2026-10-26" });
+    });
+
+    test("a delayed quote keeps the time it was quoted, not a close date (i33)", () => {
+        assert.deepEqual(
+            ticketPriceFromQuote({ price: 206.5, timestamp: "2026-10-27T15:42:00.000Z", kind: "delayed" }),
+            { price: 206.5, quotedAt: "2026-10-27T15:42:00.000Z" },
+        );
     });
 
     test("no price, a zero price or a broken time isn't made into a price", () => {
-        assert.equal(ticketPriceFromQuote({ price: 0, timestamp: "2026-10-26T20:00:00.000Z" }), undefined);
-        assert.equal(ticketPriceFromQuote({ price: Number.NaN, timestamp: "2026-10-26T20:00:00.000Z" }), undefined);
-        assert.deepEqual(ticketPriceFromQuote({ price: 5, timestamp: "soon" }), { price: 5 });
+        assert.equal(ticketPriceFromQuote({ price: 0, timestamp: "2026-10-26T20:00:00.000Z", kind: "close" }), undefined);
+        assert.equal(ticketPriceFromQuote({ price: Number.NaN, timestamp: "2026-10-26T20:00:00.000Z", kind: "close" }), undefined);
+        assert.deepEqual(ticketPriceFromQuote({ price: 5, timestamp: "soon", kind: "delayed" }), { price: 5 });
     });
 
     test("the label says where the price came from, never that it's live", () => {
@@ -48,6 +55,7 @@ describe("ticket prices", () => {
         assert.equal(describeTicketPrice({ price: 1, closeDate: "2026-10-27" }, "2026-10-27"), "Today's close");
         assert.equal(describeTicketPrice({ price: 1, closeDate: "2026-10-23" }, "2026-10-27"), "Last close, Oct 23");
         assert.equal(describeTicketPrice({ price: 1, closeDate: "2025-12-31" }, "2026-10-27"), "Last close, Dec 31, 2025");
+        assert.equal(describeTicketPrice({ price: 1, quotedAt: "2026-10-27T15:42:00.000Z" }, "2026-10-27"), "Delayed quote, 11:42 AM ET");
     });
 });
 

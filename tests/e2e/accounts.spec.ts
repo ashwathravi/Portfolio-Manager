@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { gotoAppPage, reloadAppPage } from './helpers/app';
-import { signInAsFreshUser } from './helpers/users';
+import { signInAsFreshUser, signInAsNewUser } from './helpers/users';
 
 const databaseAuthEnabled = Boolean(process.env.CI || process.env.E2E_DATABASE_AUTH === '1');
 // User B's account, which no one else may see or change.
@@ -33,11 +33,30 @@ test.describe('Portfolio › Accounts', () => {
         await expect(page.getByText('$1,100,601.39')).toHaveCount(0);
     });
 
-    test('empty state links to connecting an account, and offers to add one', async ({ page }) => {
+    test('regression (x30): without bank linking, the empty state offers to add an account by hand first, not a Connect link that loops', async ({ context, page }) => {
+        // E2E runs without Plaid's keys, as production does until they're
+        // set: Settings says bank linking isn't set up and points back here,
+        // so "Connect an account" went round in a circle. With a database,
+        // a user with no accounts yet (fixture user A has some).
+        if (await signInAsNewUser(context)) await gotoAppPage(page, '/portfolios/accounts');
         const empty = page.getByTestId('accounts-empty');
-        test.skip(!(await empty.isVisible()), 'database has accounts');
-        await expect(empty.getByRole('link', { name: 'Connect an account' })).toHaveAttribute('href', '/settings#accounts');
-        await expect(empty.getByRole('button', { name: 'New account' })).toBeVisible();
+        await expect(empty).toContainText('Accounts appear here once you add one yourself or import positions.');
+        await expect(empty.getByRole('link', { name: 'Connect an account' })).toHaveCount(0);
+        await expect(empty.locator('a[href^="/settings"]')).toHaveCount(0);
+        await expect(empty.getByRole('button', { name: 'New account' })).toHaveClass(/pm-btn-primary/);
+        await expect(empty.getByRole('link', { name: 'Import a CSV' })).toHaveAttribute('href', '/portfolios/holdings');
+    });
+
+    test('x30: a new user adds an account by hand from the empty state', async ({ context, page }) => {
+        test.skip(!databaseAuthEnabled, 'requires the database-auth E2E mode');
+        await signInAsNewUser(context);
+        await gotoAppPage(page, '/portfolios/accounts');
+        await page.getByTestId('accounts-empty').getByRole('button', { name: 'New account' }).click();
+        const dialog = await fillAccount(page, { name: 'Brokerage', cash: '500' });
+        await dialog.getByRole('button', { name: 'Add account' }).click();
+        await expect(dialog).toBeHidden();
+        await expect(row(page, 'Brokerage')).toContainText('$500');
+        await expect(page.getByTestId('accounts-empty')).toHaveCount(0);
     });
 });
 
@@ -132,7 +151,7 @@ test.describe('Portfolio › Accounts — managing accounts', () => {
         await page.getByRole('button', { name: 'Actions for Main Portfolio' }).click();
         await page.getByRole('menuitem', { name: 'Delete account' }).click();
         await expect(row(page, 'Main Portfolio')).toHaveCount(0);
-        expect(dialogs[0]).toContain('Delete Main Portfolio? Its 6 positions, transactions, drafted orders and value history go with it.');
+        expect(dialogs[0]).toContain('Delete Main Portfolio? Its 6 positions, transactions, drafted orders, option positions and value history go with it.');
 
         await gotoAppPage(page, '/portfolios/holdings');
         await expect(page.getByRole('cell', { name: 'NVDA', exact: true })).toHaveCount(0);

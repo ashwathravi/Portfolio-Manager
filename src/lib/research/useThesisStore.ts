@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { useAccountStorage, useViewerIdentity } from '@/components/providers/IdentityProvider';
 import { useRequestTime } from '@/components/providers/RequestTimeProvider';
+import { alphaRadarQueryKeys } from '@/lib/api/alpha-radar/queries';
+import { browserImportLimitMessageFor, recordLimitMessageFor } from '@/lib/limits/records';
 import { storageScopeFor } from '@/lib/storage/user-scope';
 import {
     addCatalyst,
@@ -192,7 +194,9 @@ function useBrowserTheses(enabled: boolean, examples: Thesis[]): ThesisSource {
     return { all: theses, hydrated, failed: false, save, remove };
 }
 
-function saveFailedMessage(write: ThesisWrite): string {
+function saveFailedMessage(write: ThesisWrite, error: unknown): string {
+    const limit = recordLimitMessageFor('theses', error);
+    if (limit) return limit;
     const action = write.thesis.dismissed ? 'delete' : 'save';
     return `Couldn't ${action} your ${write.thesis.ticker} thesis. Try again.`;
 }
@@ -218,13 +222,17 @@ function useAccountTheses(enabled: boolean, scope: string, examples: Thesis[]): 
                 });
             } catch (error) {
                 // Kept in this browser and sent again next time.
-                console.warn('[theses] import from this browser failed', error);
+                const limit = browserImportLimitMessageFor('theses', error);
+                if (limit) toast(limit, { id: 'theses-import-limit', duration: 15_000 });
+                else console.warn('[theses] import from this browser failed', error);
             }
             return fetchAccountTheses();
         },
         send: (id, w, order) => sendThesisWrite(id, w, order),
         apply: applyThesisWrite,
         failedMessage: saveFailedMessage,
+        // Alpha Radar ranks a filer's changes with these (launch item i61).
+        dependents: [alphaRadarQueryKeys.allChanges()],
         loadFailedMessage: "Couldn't load your theses. Showing examples only.",
     });
 

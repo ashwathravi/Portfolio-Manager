@@ -1,29 +1,33 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert';
+import { compileRules } from './backtest';
 import { SEED_STRATEGIES } from './seed';
 import {
     addRule,
+    addSymbols,
+    backtestWindowLabel,
     duplicateStrategy,
     hasUnbacktestedChanges,
     opLabel,
     removeRule,
+    removeSymbol,
     setConjunction,
     setGuardrail,
+    STRATEGY_LIMITS,
     summarizeRules,
-    toggleUniverseFilter,
 } from './strategy';
 
 const base = SEED_STRATEGIES[0];
 
 describe('strategy reducers', () => {
     test('addRule appends a rule and glues it with AND by default', () => {
-        const next = addRule(base.rules, base.conjunctions, { id: 'x', field: 'P/E', op: '<', value: '20' });
+        const next = addRule(base.rules, base.conjunctions, { id: 'x', field: 'RSI(14)', op: '<', value: '30' });
         assert.strictEqual(next.rules.length, base.rules.length + 1);
         assert.strictEqual(next.conjunctions.at(-1), 'AND');
     });
 
     test('addRule to an empty rule set adds no conjunction', () => {
-        const next = addRule([], [], { id: 'x', field: 'P/E', op: '<', value: '20' }, 'OR');
+        const next = addRule([], [], { id: 'x', field: 'RSI(14)', op: '<', value: '30' }, 'OR');
         assert.deepStrictEqual(next.conjunctions, []);
     });
 
@@ -34,13 +38,18 @@ describe('strategy reducers', () => {
         assert.deepStrictEqual(removeRule(base.rules, base.conjunctions, 'missing').rules, base.rules);
     });
 
-    test('setConjunction, toggleUniverseFilter, setGuardrail return new values', () => {
+    test('setConjunction and setGuardrail return new values', () => {
         assert.strictEqual(setConjunction(['AND', 'AND'], 1, 'OR')[1], 'OR');
-        const toggled = toggleUniverseFilter(base.universe, base.universe[0].id);
-        assert.strictEqual(toggled[0].enabled, !base.universe[0].enabled);
         const g = setGuardrail(base.guardrails, 'maxPositionPct', 7);
         assert.strictEqual(g.maxPositionPct, 7);
         assert.notStrictEqual(g, base.guardrails);
+    });
+
+    test('addSymbols uppercases, skips repeats and stops at the limit; removeSymbol drops one', () => {
+        assert.deepStrictEqual(addSymbols(['SPY'], [' qqq', 'SPY', 'QQQ', '']), ['SPY', 'QQQ']);
+        const full = Array.from({ length: STRATEGY_LIMITS.symbols }, (_, i) => `T${i}`);
+        assert.strictEqual(addSymbols(full, ['NEW']).length, STRATEGY_LIMITS.symbols);
+        assert.deepStrictEqual(removeSymbol(['SPY', 'QQQ'], 'SPY'), ['QQQ']);
     });
 
     test('summarizeRules', () => {
@@ -51,41 +60,41 @@ describe('strategy reducers', () => {
 });
 
 describe('duplicateStrategy', () => {
-    test('creates a paused copy with a fresh id, short id, and name', () => {
-        const copy = duplicateStrategy(base, SEED_STRATEGIES);
-        assert.strictEqual(copy.id, `${base.id}-copy-1`);
-        assert.strictEqual(copy.shortId, 'S-004');
+    test('copies the definition and discipline rules under a new name, without the backtest', () => {
+        const copy = duplicateStrategy(base, SEED_STRATEGIES, 'local-1');
+        assert.strictEqual(copy.id, 'local-1');
         assert.strictEqual(copy.name, `${base.name} (copy)`);
-        assert.strictEqual(copy.status, 'paused');
-        assert.notStrictEqual(copy.rules, base.rules);
-        assert.ok(copy.rules.every((r, i) => r.id !== base.rules[i].id));
+        assert.strictEqual(copy.example, undefined);
+        assert.strictEqual(copy.backtest, null);
+        assert.deepStrictEqual(copy.symbols, base.symbols);
+        assert.notStrictEqual(copy.symbols, base.symbols);
+        assert.deepStrictEqual(copy.adherenceRules, base.adherenceRules);
+        assert.deepStrictEqual(copy.rules.map((r) => r.id), base.rules.map((_, i) => `r${i + 1}`));
     });
 
-    test('a second copy gets the next id and a numbered name', () => {
-        const first = duplicateStrategy(base, SEED_STRATEGIES);
-        const second = duplicateStrategy(base, [...SEED_STRATEGIES, first]);
-        assert.strictEqual(second.id, `${base.id}-copy-2`);
-        assert.strictEqual(second.shortId, 'S-005');
-        assert.strictEqual(second.name, `${base.name} (copy 2)`);
-    });
-
-    test('copying a strategy that has not been backtested keeps that status', () => {
-        const pending = SEED_STRATEGIES.find((s) => s.status === 'backtesting');
-        assert.ok(pending);
-        assert.strictEqual(duplicateStrategy(pending, SEED_STRATEGIES).status, 'backtesting');
+    test('a second copy gets a numbered name', () => {
+        const first = duplicateStrategy(base, SEED_STRATEGIES, 'local-1');
+        assert.strictEqual(duplicateStrategy(base, [...SEED_STRATEGIES, first], 'local-2').name, `${base.name} (copy 2)`);
     });
 });
 
 describe('hasUnbacktestedChanges', () => {
     test('an unedited strategy and a fresh copy match their backtest', () => {
-        assert.strictEqual(hasUnbacktestedChanges(base, base), false);
-        assert.strictEqual(hasUnbacktestedChanges(duplicateStrategy(base, SEED_STRATEGIES), base), false);
+        assert.strictEqual(hasUnbacktestedChanges(base, base.backtest!.definition), false);
+        assert.strictEqual(hasUnbacktestedChanges(duplicateStrategy(base, SEED_STRATEGIES, 'local-1'), base.backtest!.definition), false);
     });
 
-    test('changing a rule value, universe filter, or guardrail flags the backtest as stale', () => {
-        assert.strictEqual(hasUnbacktestedChanges({ ...base, rules: base.rules.map((r, i) => (i === 0 ? { ...r, value: '0.9' } : r)) }, base), true);
-        assert.strictEqual(hasUnbacktestedChanges({ ...base, universe: toggleUniverseFilter(base.universe, base.universe[0].id) }, base), true);
-        assert.strictEqual(hasUnbacktestedChanges({ ...base, guardrails: setGuardrail(base.guardrails, 'maxPositionPct', 9) }, base), true);
+    test('changing a rule value, a ticker, or a guardrail flags the backtest as stale', () => {
+        const ran = base.backtest!.definition;
+        assert.strictEqual(hasUnbacktestedChanges({ ...base, rules: base.rules.map((r, i) => (i === 0 ? { ...r, value: '20%' } : r)) }, ran), true);
+        assert.strictEqual(hasUnbacktestedChanges({ ...base, symbols: removeSymbol(base.symbols, base.symbols[0]) }, ran), true);
+        assert.strictEqual(hasUnbacktestedChanges({ ...base, guardrails: setGuardrail(base.guardrails, 'maxPositionPct', 0.09) }, ran), true);
+    });
+});
+
+describe('backtestWindowLabel', () => {
+    test('first and last month of the window', () => {
+        assert.strictEqual(backtestWindowLabel('2024-05-01', '2026-04-30'), 'May 2024 – Apr 2026');
     });
 });
 
@@ -93,12 +102,21 @@ describe('opLabel', () => {
     test('renders comparison operators as typographic symbols', () => {
         assert.strictEqual(opLabel('>='), '≥');
         assert.strictEqual(opLabel('<='), '≤');
-        assert.strictEqual(opLabel('!='), '≠');
     });
 
     test('leaves single-character and word operators alone', () => {
         assert.strictEqual(opLabel('>'), '>');
-        assert.strictEqual(opLabel('='), '=');
         assert.strictEqual(opLabel('crosses above'), 'crosses above');
+    });
+});
+
+describe('example strategies', () => {
+    test('regression: every example rule is one the backtest engine can read', () => {
+        for (const s of SEED_STRATEGIES) {
+            assert.ok(compileRules(s).ok, s.name);
+            assert.strictEqual(s.example, true);
+            assert.strictEqual(s.conjunctions.length, s.rules.length - 1);
+            assert.strictEqual(hasUnbacktestedChanges(s, s.backtest!.definition), false, s.name);
+        }
     });
 });

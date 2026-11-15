@@ -441,7 +441,7 @@ function OrderForm({ accounts, prices, onSubmit }: OrderFormProps) {
     const priceNote = !tickerUpper
         ? undefined
         : priceLookupPending
-            ? "Looking up the last close…"
+            ? "Looking up the price…"
             : describeTicketPrice(tickerPrice, todayEt);
 
     const handleInstrumentChange = (next: OrderInstrumentType) => {
@@ -534,12 +534,13 @@ function OrderForm({ accounts, prices, onSubmit }: OrderFormProps) {
                 maxLossAcknowledged,
                 whatMustBeTrueByExpiry,
                 plannedExitRule,
-                // No options feed yet: no option positions, rather than example ones.
-                existingPositions: [],
+                // The user's own option positions (launch item i63).
+                existingPositions: policyPortfolio.options,
                 policy: optionsRiskPolicy,
             }),
         [
             policyValue,
+            policyPortfolio.options,
             isOptionOrder,
             tickerUpper,
             optionContractType,
@@ -594,7 +595,7 @@ function OrderForm({ accounts, prices, onSubmit }: OrderFormProps) {
                     linkedThesisId: rationaleDraft.thesisId,
                     thesisUpdatedAt: selectedThesis?.dateUpdated,
                 },
-                existingOptionPositions: [],
+                existingOptionPositions: policyPortfolio.options,
                 bucketPolicies: riskPolicy.bucketPolicies,
                 themeCaps: riskPolicy.themeCaps,
                 optionsRiskPolicy,
@@ -606,6 +607,7 @@ function OrderForm({ accounts, prices, onSubmit }: OrderFormProps) {
         [
             policyUnavailable,
             policyHoldingRows,
+            policyPortfolio.options,
             policyValue,
             policyEmployerSymbols,
             tickerUpper,

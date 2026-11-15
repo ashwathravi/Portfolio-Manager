@@ -5,8 +5,15 @@ npm-debug.log
 README.md
 .next
 .git
+# Agent worktrees are full checkouts, each with its own node_modules.
+.claude
+playwright-report*
+test-results
+coverage
 .env
 .env.*
 !.env.example
 !.env*.example
 .runtime
+# Keys and certificates anywhere; a bare *.pem would match only the root.
+**/*.pem

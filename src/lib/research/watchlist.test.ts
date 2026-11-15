@@ -54,6 +54,12 @@ describe('addToWatchlist', () => {
         assert.strictEqual(list.length, 4);
     });
 
+    test('a picked search match brings its company name, cut to what the account keeps', () => {
+        assert.strictEqual(addToWatchlist([], 'aapl', { now: NOW, companyName: ' Apple Inc. ' }).item?.companyName, 'Apple Inc.');
+        const long = addToWatchlist([], 'LONG', { now: NOW, companyName: 'x'.repeat(250) }).item;
+        assert.strictEqual(long?.companyName.length, 200);
+    });
+
     test('refuses duplicates case-insensitively and invalid tickers', () => {
         const mine = addToWatchlist([], 'COIN', { now: NOW }).list;
         assert.strictEqual(addToWatchlist(mine, 'coin', { now: NOW }).error, 'duplicate');

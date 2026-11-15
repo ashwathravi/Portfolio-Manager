@@ -14,14 +14,18 @@ import { AppFrame } from "@/components/layout/AppFrame";
 import { IdentityProvider } from "@/components/providers/IdentityProvider";
 import { RequestTimeProvider } from "@/components/providers/RequestTimeProvider";
 import { SettingsSync } from "@/components/providers/SettingsSync";
+import { BankLinkingProvider } from "@/components/providers/BankLinkingProvider";
 import { isDatabaseConfigured } from "@/db/connection-options";
 import { resolveViewerIdentity } from "@/lib/auth/viewer";
+import { bankLinkingAvailable } from "@/lib/plaid/availability";
+import { ROBOTS_DIRECTIVES } from "@/lib/security/search-engines";
 import { serverSettingsFor } from "@/lib/settings/server";
 import { storageScopeFor } from "@/lib/storage/user-scope";
 
 export const metadata: Metadata = {
   title: "Atlas Wealth | Personal Investment Operating System",
   description: "Comprehensive wealth management platform",
+  robots: ROBOTS_DIRECTIVES,
 };
 
 /**
@@ -34,6 +38,7 @@ export const metadata: Metadata = {
  *     ThemeProvider     — hydrates `data-theme`/`data-density`/`--pm-accent`
  *       IdentityProvider / RequestTimeProvider — the viewer and the
  *                          request time the server rendered with
+ *         BankLinkingProvider — whether Settings can connect a bank (x30)
  *         AppFrame       — app chrome for product routes; auth routes render
  *                          without the sidebar/topbar shell
  *
@@ -71,7 +76,9 @@ export default async function RootLayout({
             <ThemeProvider>
               <IdentityProvider identity={identity} accountStorage={isDatabaseConfigured()}>
                 <RequestTimeProvider now={requestTime}>
-                  <AppFrame>{children}</AppFrame>
+                  <BankLinkingProvider available={bankLinkingAvailable()}>
+                    <AppFrame>{children}</AppFrame>
+                  </BankLinkingProvider>
                 </RequestTimeProvider>
               </IdentityProvider>
             </ThemeProvider>

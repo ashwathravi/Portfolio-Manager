@@ -207,6 +207,23 @@ test.describe('Settings page', () => {
         expect(syncRequests[1]).toEqual({ itemId: 'item-plaid-sandbox-investments' });
     });
 
+    test('regression (x30): without Plaid\'s keys the card says bank linking isn\'t set up, with no Connect button that fails', async ({ page }) => {
+        // E2E servers run without Plaid's keys (playwright.config.ts), as
+        // production did: Link's routes threw on the missing variable (500).
+        const card = page.getByTestId('integrations-card');
+        const notSetUp = card.getByTestId('plaid-not-set-up');
+        await expect(notSetUp).toContainText("Bank linking isn't set up yet.");
+        await expect(notSetUp.getByRole('link', { name: 'Accounts' })).toHaveAttribute('href', '/portfolios/accounts');
+        await expect(card.getByRole('button', { name: /^Connect$/ })).toHaveCount(0);
+        await expect(card).not.toContainText('No accounts connected yet');
+
+        for (const [path, data] of [['/api/plaid/link-token', {}], ['/api/plaid/exchange-public-token', { publicToken: 'public-sandbox-e2e' }]] as const) {
+            const response = await page.request.post(path, { data });
+            expect(response.status(), path).toBe(503);
+            expect(await response.json()).toEqual({ error: "Bank linking isn't set up yet.", code: 'PLAID_NOT_CONFIGURED' });
+        }
+    });
+
     test('the Plaid token exchange reads at most 64 KB (i69)', async ({ page }) => {
         // Refused before anything reaches Plaid, which E2E never calls anyway.
         const response = await page.request.post('/api/plaid/exchange-public-token', {
@@ -282,6 +299,147 @@ test.describe('Settings page', () => {
         await expect.poll(() => syncRequests.length).toBe(1);
         expect(linkTokenBodies).toEqual([{ itemId: 'item-fidelity' }, { itemId: 'item-fidelity' }]);
         expect(syncRequests[0]).toEqual({ itemId: 'item-fidelity', reconnected: true });
+    });
+
+    test('an OAuth bank that sends the user back to Settings finishes the new connection there (i47)', async ({ page }) => {
+        // Where Link can't open the bank in a pop-up (phones' in-app browsers),
+        // the bank sends the user back to PLAID_REDIRECT_URI: Settings opens
+        // Link again with the same token and the address it came back to.
+        await page.route('**/api/plaid/connections', async (route) => {
+            await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: [] }) });
+        });
+        let linkTokenRequests = 0;
+        await page.route('**/api/plaid/link-token', async (route) => {
+            linkTokenRequests += 1;
+            await route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({ linkToken: 'link-sandbox-oauth', expiration: '2099-01-01T00:00:00Z', requestId: 'r', environment: 'sandbox', products: ['investments', 'transactions'] }),
+            });
+        });
+        await page.route('**/api/plaid/exchange-public-token', async (route) => {
+            expect((route.request().postDataJSON() as { publicToken?: string }).publicToken).toBe('public-sandbox-e2e');
+            await route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({
+                    itemId: 'item-plaid-oauth',
+                    institution: { id: 'ins_127287', name: 'Platypus OAuth Bank' },
+                    accounts: [plaidE2EAccount({ plaidAccountId: 'plaid-growth-brokerage', name: 'Plaid Growth Brokerage', subtype: 'brokerage', currentBalance: 125430 })],
+                    duplicatePlaidAccountIds: [],
+                    accessTokenStored: true,
+                    accessTokenStorageMode: 'postgres',
+                    accessTokenStorageDurable: true,
+                    requestId: 'request-exchange-oauth',
+                }),
+            });
+        });
+        const syncRequests: unknown[] = [];
+        await page.route('**/api/plaid/sync', async (route) => {
+            syncRequests.push(route.request().postDataJSON());
+            await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { itemId: 'item-plaid-oauth', accounts: [], overLimit: [] } }) });
+        });
+        await mockPlaidLinkSdk(page, { bankRedirect: '/settings?oauth_state_id=oauth-state-e2e' });
+        await reloadAppPage(page);
+
+        const card = page.getByTestId('integrations-card');
+        await expect(card).toContainText('No accounts connected yet');
+        await card.getByRole('button', { name: /^Connect$/ }).click();
+
+        // Back from the bank: Plaid's parameter is gone and Link carried on.
+        await expect(page).toHaveURL(/\/settings#accounts$/);
+        const panel = card.getByTestId('plaid-link-panel');
+        await expect(panel).toHaveAttribute('data-state', 'review');
+        await expect(panel).toContainText('Platypus OAuth Bank');
+        await card.getByRole('button', { name: 'Connect selected' }).click();
+        await expect.poll(() => syncRequests.length).toBe(1);
+        expect(syncRequests[0]).toEqual({ itemId: 'item-plaid-oauth', plaidAccountIds: ['plaid-growth-brokerage'] });
+
+        const origin = new URL(page.url()).origin;
+        expect(linkTokenRequests).toBe(1);
+        expect(await plaidCreates(page)).toEqual([
+            { token: 'link-sandbox-oauth', receivedRedirectUri: null },
+            { token: 'link-sandbox-oauth', receivedRedirectUri: `${origin}/settings?oauth_state_id=oauth-state-e2e` },
+        ]);
+        // Nothing is left waiting on a bank.
+        expect(await pendingPlaidLinks(page)).toEqual([]);
+    });
+
+    test('an OAuth bank that sends the user back after signing in again finishes the reconnect (i47)', async ({ page }) => {
+        await page.route('**/api/plaid/connections', async (route) => {
+            await route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({
+                    data: [plaidE2EConnection({
+                        itemId: 'item-chase',
+                        institutionName: 'Chase',
+                        status: 'login_required',
+                        accounts: [{ plaidAccountId: 'acc-c1', name: 'Self-Directed', mask: '4321', type: 'investment', subtype: 'brokerage', syncStatus: 'sync_ready', portfolio: { id: 'p-c1', name: 'Chase Self-Directed' } }],
+                    })],
+                }),
+            });
+        });
+        const linkTokenBodies: unknown[] = [];
+        await page.route('**/api/plaid/link-token', async (route) => {
+            linkTokenBodies.push(route.request().postDataJSON());
+            await route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({ linkToken: 'link-sandbox-update-oauth', expiration: '2099-01-01T00:00:00Z', requestId: 'r', environment: 'sandbox', products: [] }),
+            });
+        });
+        const syncRequests: unknown[] = [];
+        await page.route('**/api/plaid/sync', async (route) => {
+            syncRequests.push(route.request().postDataJSON());
+            await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { itemId: 'item-chase', accounts: [], overLimit: [] } }) });
+        });
+        await mockPlaidLinkSdk(page, { bankRedirect: '/settings?oauth_state_id=oauth-state-update' });
+        await reloadAppPage(page);
+
+        await page.getByTestId('integrations-card').getByTestId('plaid-connection').getByRole('button', { name: 'Reconnect' }).click();
+
+        await expect.poll(() => syncRequests.length).toBe(1);
+        expect(syncRequests[0]).toEqual({ itemId: 'item-chase', reconnected: true });
+        await expect(page).toHaveURL(/\/settings#accounts$/);
+        expect(linkTokenBodies).toEqual([{ itemId: 'item-chase' }]);
+        expect((await plaidCreates(page)).map((create) => create.receivedRedirectUri?.endsWith('/settings?oauth_state_id=oauth-state-update') ?? null)).toEqual([null, true]);
+        expect(await pendingPlaidLinks(page)).toEqual([]);
+    });
+
+    test('back from a bank this browser didn\'t start a connection for: says so, and Retry starts again (i47)', async ({ page }) => {
+        // Link was started on another device or browser, or the session ended.
+        await page.route('**/api/plaid/connections', async (route) => {
+            await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: [] }) });
+        });
+        const linkTokenBodies: unknown[] = [];
+        await page.route('**/api/plaid/link-token', async (route) => {
+            linkTokenBodies.push(route.request().postData());
+            await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: 'Unable to create Plaid link token.', code: 'PLAID_LINK_TOKEN_FAILED' }) });
+        });
+        await mockPlaidLinkSdk(page);
+        await gotoAppPage(page, '/settings?oauth_state_id=from-another-browser');
+
+        const panel = page.getByTestId('integrations-card').getByTestId('plaid-link-panel');
+        await expect(panel).toHaveAttribute('data-state', 'error');
+        await expect(panel).toContainText('this browser has no record of the connection your bank sent you back for');
+        await expect(page).toHaveURL(/\/settings#accounts$/);
+        expect(await plaidCreates(page)).toEqual([]);
+
+        // An expired session says so too.
+        await page.evaluate(() => {
+            const scope = document.documentElement.getAttribute('data-storage-scope');
+            localStorage.setItem(`pm-plaid-link-pending:${scope}`, JSON.stringify({ token: { linkToken: 'link-sandbox-old', expiration: '2020-01-01T00:00:00Z' } }));
+        });
+        await gotoAppPage(page, '/settings?oauth_state_id=too-late');
+        await expect(panel).toContainText('Your bank took too long to send you back');
+        expect(await pendingPlaidLinks(page)).toEqual([]);
+
+        await panel.getByRole('button', { name: 'Retry Plaid Link' }).click();
+        await expect.poll(() => linkTokenBodies.length).toBe(1);
+        // A new connection, not a reconnect.
+        expect(linkTokenBodies[0] ?? '').not.toContain('itemId');
+        expect(await plaidCreates(page)).toEqual([]);
     });
 
     test('a connection that needs a sign-in reconnects through Link; accounts waiting are picked here; disconnecting asks first', async ({ page }) => {
@@ -391,8 +549,12 @@ test.describe('Settings page', () => {
         await gotoAppPage(page, '/settings');
         expect(await accountRowsLeft(userId)).toEqual({ users: 1, sessions: 1, portfolios: expect.any(Number), settings: expect.any(Number) });
 
-        await page.getByTestId('data-management').getByRole('button', { name: 'Delete account' }).click();
+        // The settings sections hydrate inside a Suspense boundary; retry the
+        // click until React has attached handlers.
         const dialog = page.getByRole('alertdialog');
+        await clickUntil(page.getByTestId('data-management').getByRole('button', { name: 'Delete account' }), async () => {
+            await expect(dialog).toBeVisible({ timeout: 1500 });
+        });
         const confirm = dialog.getByRole('button', { name: 'Delete account' });
         await expect(confirm).toBeDisabled();
         await dialog.getByLabel('Type DELETE to confirm').fill('delete');
@@ -419,6 +581,8 @@ test.describe('Settings page', () => {
         await expect(page.getByText('Alpha Radar Signals').first()).toBeVisible();
         await expect(page.getByTestId('alpha-radar-delivery-preferences')).toBeVisible();
         await expect(page.getByLabel('Alpha Radar delivery ticker filters')).toBeVisible();
+        // Email is its own card, kept with the account (launch item i58; email.spec.ts).
+        await expect(page.getByTestId('email-preferences')).toBeVisible();
     });
 
     test('Alpha Radar delivery preferences accept ticker filters', async ({ page }) => {
@@ -430,8 +594,9 @@ test.describe('Settings page', () => {
 
     test('deep-links via ?tab=alerts expose Alpha Radar alert configuration', async ({ page }) => {
         await gotoAppPage(page, '/settings?tab=alerts');
-
-        await expect(page.getByText('Alpha Radar overlap score ≥ 80', { exact: true }).first()).toBeVisible();
+        await expect(page.getByText('Alert Rules', { exact: true })).toBeVisible();
+        // Rules are kept with the account (launch item i57): without a database none can be made.
+        test.skip(!databaseAuthEnabled, 'alert rules are kept with the account');
 
         await clickUntil(page.getByRole('button', { name: /New Alert/ }), async () => {
             await expect(page.getByRole('dialog')).toBeVisible({ timeout: 1500 });
@@ -729,12 +894,20 @@ function plaidE2EConnection({
     };
 }
 
-/** Plaid's Link SDK, answering success as soon as Link opens. */
-async function mockPlaidLinkSdk(page: import('@playwright/test').Page) {
-    await page.addInitScript(() => {
+/**
+ * Plaid's Link SDK, answering success as soon as Link opens. With
+ * `bankRedirect`, an OAuth bank that sends the browser back there instead
+ * (launch item i47): Link succeeds once it's opened again with the address
+ * it came back to. Each Plaid.create's token and redirect address is kept
+ * in sessionStorage under `e2e-plaid-creates` (see plaidCreates).
+ */
+async function mockPlaidLinkSdk(page: import('@playwright/test').Page, { bankRedirect }: { bankRedirect?: string } = {}) {
+    await page.addInitScript((redirect) => {
         const w = window as unknown as {
             Plaid: {
                 create: (options: {
+                    token: string;
+                    receivedRedirectUri?: string;
                     onSuccess: (publicToken: string, metadata: unknown) => void;
                 }) => { open: () => void; destroy: () => void };
             };
@@ -742,6 +915,13 @@ async function mockPlaidLinkSdk(page: import('@playwright/test').Page) {
         w.Plaid = {
             create: (options) => ({
                 open: () => {
+                    const creates = JSON.parse(sessionStorage.getItem('e2e-plaid-creates') ?? '[]') as unknown[];
+                    creates.push({ token: options.token, receivedRedirectUri: options.receivedRedirectUri ?? null });
+                    sessionStorage.setItem('e2e-plaid-creates', JSON.stringify(creates));
+                    if (redirect && !options.receivedRedirectUri) {
+                        window.location.assign(redirect);
+                        return;
+                    }
                     options.onSuccess('public-sandbox-e2e', {
                         institution: { name: 'Plaid Sandbox Investments', institution_id: 'ins_109508' },
                         accounts: [
@@ -755,7 +935,17 @@ async function mockPlaidLinkSdk(page: import('@playwright/test').Page) {
                 destroy: () => undefined,
             }),
         };
-    });
+    }, bankRedirect ?? null);
+}
+
+/** Each time the page opened Plaid Link: its token, and the address a bank sent it back to. */
+async function plaidCreates(page: Page): Promise<Array<{ token: string; receivedRedirectUri: string | null }>> {
+    return page.evaluate(() => JSON.parse(sessionStorage.getItem('e2e-plaid-creates') ?? '[]'));
+}
+
+/** The Link sessions this browser keeps for a bank's redirect back. */
+async function pendingPlaidLinks(page: Page): Promise<string[]> {
+    return page.evaluate(() => Object.keys(localStorage).filter((key) => key.startsWith('pm-plaid-link-pending')));
 }
 
 function plaidE2EAccount({

@@ -4,6 +4,8 @@
  * checked against the live navigation in tests.
  */
 
+import { ADD_ACCOUNT_LINK, CONNECT_ACCOUNT_LINK } from '@/lib/portfolio/add-accounts';
+
 export interface GettingStartedStep {
     title: string;
     body: string;
@@ -11,13 +13,27 @@ export interface GettingStartedStep {
     cta: string;
 }
 
-export const GETTING_STARTED: readonly GettingStartedStep[] = [
-    {
-        title: 'Connect an account',
-        body: 'Link a brokerage so holdings, cash, and transactions come from your own data. Until then, example data is labelled “Sample”.',
-        href: '/settings#accounts',
-        cta: 'Connect an account',
-    },
+/** Step one where bank linking is set up: connect a brokerage in Settings. */
+const CONNECT_STEP: GettingStartedStep = {
+    title: 'Connect an account',
+    body: 'Link a brokerage so holdings, cash, and transactions come from your own data. Until then, example data is labelled “Sample”.',
+    href: CONNECT_ACCOUNT_LINK.href,
+    cta: CONNECT_ACCOUNT_LINK.label,
+};
+
+/**
+ * Step one without bank linking (x30): Settings would only say it isn't set
+ * up and point back at Accounts, so the step goes there.
+ */
+const ADD_STEP: GettingStartedStep = {
+    title: 'Add your accounts',
+    body: 'Add each brokerage or retirement account with the cash it holds, then import its positions from your broker’s CSV, so holdings and transactions come from your own data. Until then, example data is labelled “Sample”.',
+    href: ADD_ACCOUNT_LINK.href,
+    cta: ADD_ACCOUNT_LINK.label,
+};
+
+/** The steps after step one, the same either way. */
+const AFTER_ACCOUNTS: readonly GettingStartedStep[] = [
     {
         title: 'Start each day on Today',
         body: 'Net worth and today’s change come first, then “Needs your attention”: policy breaches, theses due for review, and the weekly review.',
@@ -44,6 +60,14 @@ export const GETTING_STARTED: readonly GettingStartedStep[] = [
     },
 ];
 
+/**
+ * The getting-started path. Step one depends on whether bank linking is set
+ * up (bankLinkingAvailable, asked on the server by the help page).
+ */
+export function gettingStarted(bankLinking: boolean): readonly GettingStartedStep[] {
+    return [bankLinking ? CONNECT_STEP : ADD_STEP, ...AFTER_ACCOUNTS];
+}
+
 export interface GlossaryTerm {
     term: string;
     definition: string;
@@ -59,7 +83,7 @@ export const GLOSSARY: readonly GlossaryTerm[] = [
     { term: 'Guardrail', definition: 'A rule checked before an order is drafted, such as an approval threshold or a concentration cap.', href: '/settings#trading' },
     { term: 'Missing data', definition: 'A policy check that can’t be evaluated yet because the holdings, trades, or classifications it needs aren’t connected.' },
     { term: 'Re-underwrite', definition: 'Re-read and update a thesis against current facts. Today asks for this when a thesis hasn’t been reviewed recently.', href: '/research' },
-    { term: 'Sample', definition: 'Example data shown so you can explore before connecting accounts. It is always labelled and can be hidden in Settings › Data.', href: '/settings#data' },
+    { term: 'Sample', definition: 'Example data shown so you can explore before adding your accounts. It is always labelled and can be hidden in Settings › Data.', href: '/settings#data' },
     { term: 'Sell discipline', definition: 'Rules that trigger a trim, review, or no-add block when a position crosses a threshold you set.', href: '/settings#risk-policy' },
     { term: 'Theme', definition: 'A cross-cutting exposure such as AI infrastructure or semiconductors, with its own cap.', href: '/portfolios/holdings' },
     { term: 'TWR', definition: 'Time-weighted return: performance that removes the effect of deposits and withdrawals.', href: '/performance' },

@@ -285,11 +285,13 @@ function companyThemeWeights(
     return [{ theme: "unknown", weight: 1, source: "unknown" }];
 }
 
+/** `totalMarketValue`: what the percentages are of, as for computeBucketAllocation. */
 export function computeThemeExposure(
     holdings: readonly ThemeExposureHolding[],
     caps: Readonly<Partial<Record<ThemeId, number>>> = DEFAULT_THEME_CAPS,
+    { totalMarketValue: total }: { totalMarketValue?: number } = {},
 ): ThemeExposure {
-    const totalMarketValue = holdings.reduce((sum, holding) => sum + safeMarketValue(holding.marketValue), 0);
+    const totalMarketValue = total ?? holdings.reduce((sum, holding) => sum + safeMarketValue(holding.marketValue), 0);
     const rowsByTheme = new Map<ThemeId, ThemeExposureRow>();
 
     for (const theme of THEME_IDS) {

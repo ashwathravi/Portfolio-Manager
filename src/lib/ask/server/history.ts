@@ -6,6 +6,11 @@
  * - The daily limit is ASK_DAILY_LIMIT questions in any 24 hours. Clearing
  *   the conversation marks its rows `cleared` rather than deleting them, so
  *   it doesn't reset the count.
+ * - A question takes its place in the limit before it's answered
+ *   (`reserveAskQuestion`), so questions asked at once can't each be
+ *   answered, by Claude at a cost (launch item i59), past the limit. Its
+ *   answer is kept after (`saveAskAnswer`); a question that couldn't be
+ *   answered gives its place back (`releaseAskQuestion`).
  * - Rows older than a day that are cleared, or past the last
  *   ASK_HISTORY_LIMIT, are deleted: the user's own when they ask or clear,
  *   and everyone's by the daily job "ask-history", so a conversation
@@ -69,6 +74,21 @@ export function buildInsertMessagesQuery(userId: string, messages: readonly AskM
         toolRuns: message.toolRuns ?? [],
         createdAt: new Date(message.ts),
     })));
+}
+
+/** Whether a question is still in the conversation: missing if given back, `cleared` if cleared. */
+export function buildAskQuestionQuery(userId: string, questionId: string, database: Executor = db) {
+    return database
+        .select({ cleared: askMessages.cleared })
+        .from(askMessages)
+        .where(and(eq(askMessages.userId, userId), eq(askMessages.id, questionId), eq(askMessages.role, "user")));
+}
+
+/** A question the user asked that couldn't be answered. */
+export function buildDeleteQuestionQuery(userId: string, questionId: string, database: Executor = db) {
+    return database
+        .delete(askMessages)
+        .where(and(eq(askMessages.userId, userId), eq(askMessages.id, questionId), eq(askMessages.role, "user")));
 }
 
 export function buildClearAskHistoryQuery(userId: string, database: Executor = db) {
@@ -160,13 +180,14 @@ export async function questionsAsked(userId: string, now: Date = new Date(), dat
 }
 
 /**
- * Keeps a question and its answer, if the user is still under the daily
- * limit (checked again under the user's lock), and prunes what's old.
- * Returns the questions asked in the last 24 hours, this one included.
+ * Keeps a question before it's answered, if the user is still under the
+ * daily limit, under the user's lock: of questions asked at once, only
+ * those under the limit get an answer. Returns the questions asked in the
+ * last 24 hours, this one included. Throws AskDailyLimitError past it.
  */
-export async function saveAskTurn(
+export async function reserveAskQuestion(
     userId: string,
-    turn: readonly [AskMessage, AskMessage],
+    question: AskMessage,
     now: Date = new Date(),
     database: Database = db,
 ): Promise<number> {
@@ -174,10 +195,34 @@ export async function saveAskTurn(
         await buildLockAskQuery(userId, tx);
         const asked = await questionsAsked(userId, now, tx);
         if (asked >= ASK_DAILY_LIMIT) throw new AskDailyLimitError();
-        await buildInsertMessagesQuery(userId, turn, tx);
-        await buildPruneAskHistoryQuery(userId, new Date(now.getTime() - ASK_LIMIT_WINDOW_MS), tx);
+        await buildInsertMessagesQuery(userId, [question], tx);
         return asked + 1;
     });
+}
+
+/**
+ * Keeps the answer to a question `reserveAskQuestion` kept, unless the
+ * conversation was cleared (or the question given back) meanwhile, and
+ * prunes what's old.
+ */
+export async function saveAskAnswer(
+    userId: string,
+    questionId: string,
+    answer: AskMessage,
+    now: Date = new Date(),
+    database: Database = db,
+): Promise<void> {
+    await database.transaction(async (tx) => {
+        await buildLockAskQuery(userId, tx);
+        const [question] = await buildAskQuestionQuery(userId, questionId, tx);
+        if (question && !question.cleared) await buildInsertMessagesQuery(userId, [answer], tx);
+        await buildPruneAskHistoryQuery(userId, new Date(now.getTime() - ASK_LIMIT_WINDOW_MS), tx);
+    });
+}
+
+/** Gives back the place of a question that couldn't be answered. */
+export async function releaseAskQuestion(userId: string, questionId: string, database: Database = db): Promise<void> {
+    await buildDeleteQuestionQuery(userId, questionId, database);
 }
 
 /** Hides the conversation now; what's already a day old goes now too, the rest by the daily job. */
