@@ -7,14 +7,15 @@ Atlas Wealth is a personal investment workspace for people who treat their own i
 ## What it does
 
 - **Today**: net worth, what needs your attention under your own risk policy, your equity curve from nightly valuations, and a weekly review of your closed trades.
-- **Portfolio**: accounts, holdings and activity, entered by hand, imported from a broker CSV, or synced from a linked account through Plaid.
+- **Portfolio**: accounts, holdings (by account, or one row per symbol across accounts) and activity, entered by hand, imported from a broker CSV, or synced from a linked account through Plaid. Money moved between your own accounts shows as one transfer, not a withdrawal and a deposit.
 - **Performance**: time-weighted returns against the S&P 500, Brinson attribution by sector, and the behaviour behind your closed trades.
-- **Research**: a watchlist, a decision journal and structured theses, saved with your account, plus Alpha Radar: changes in institutional holdings from 13F filings on SEC EDGAR.
+- **Research**: a watchlist, a decision journal and structured theses, saved with your account, plus Alpha Radar: changes in institutional holdings from 13F filings on SEC EDGAR for the filers you follow, where they meet your holdings, watchlist and theses, with each filing searchable as evidence.
 - **Trade**: an order ticket checked against your risk policy, saved as a plan with its rationale. Atlas never places trades or moves money.
-- **Ask**: questions answered from your own data (⌘K).
-- **Strategies**: a rule builder. Its strategies and backtests are examples for now.
+- **Ask**: questions answered from your own data (⌘K), written by Claude through Vercel AI Gateway when it's set up and kept only if your data backs every figure, and otherwise by a rules planner.
+- **Alerts**: rules on a symbol's close or daily move, your accounts' value or daily move, and Alpha Radar's changes, checked each weekday evening after the close and shown in the bell in the top bar. Alerts and the weekly review can also come by email, each turned on in Settings.
+- **Strategies**: rule-based strategies saved with your account and backtested over up to two years of stored daily prices, with SPY beside them.
 
-Prices are stored daily closes from Massive, not live quotes. Anything that isn't your own data carries a **Sample** tag and can be hidden in Settings. Nothing in the app is investment advice.
+Prices are stored daily closes from Massive or, during the session, delayed quotes from Finnhub, each labelled with what it is; never live quotes. Anything that isn't your own data carries a **Sample** tag and can be hidden in Settings. Nothing in the app is investment advice.
 
 ## Tech stack
 
@@ -24,8 +25,8 @@ Prices are stored daily closes from Massive, not live quotes. Anything that isn'
 - **Charts**: [Recharts](https://recharts.org/) + [Lightweight Charts](https://tradingview.github.io/lightweight-charts/)
 - **Database**: PostgreSQL with Drizzle (Supabase in production, Docker locally)
 - **Sign-in**: Auth.js with Google and database sessions, behind an invite list
-- **Hosting**: Vercel (cron, deploys from CI), Upstash Redis for shared rate limits, Sentry for errors
-- **Data**: Massive (daily prices, history, reference data), SEC EDGAR (13F filings), Plaid (linked accounts)
+- **Hosting**: Vercel (cron, deploys from CI, AI Gateway), Upstash Redis for shared rate limits, Sentry for errors, Resend for email
+- **Data**: Massive (daily prices, history, reference data), Finnhub (delayed quotes), SEC EDGAR (13F filings and the ticker directory), Plaid (linked accounts); Claude, through AI Gateway, writes Ask's answers
 - **Tests**: Node's built-in test runner (unit) and Playwright (E2E, and a smoke test after every deploy)
 
 ## Getting started

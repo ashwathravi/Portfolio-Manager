@@ -17,6 +17,7 @@ import {
     buildHeldSymbolsQuery,
     createCallPacer,
     createIngestAdapter,
+    DEFAULT_BUDGET_MS,
     historyToBars,
     ingestDailyPrices,
     MAX_REFERENCE_PER_RUN,
@@ -705,7 +706,7 @@ describe("ingestDailyPrices", () => {
         assert.equal(detail.backfillQueue, 12);
     });
 
-    test("with the default budget, never sleeps longer than a window between calls", async () => {
+    test("with the default budget, never sleeps longer than a window between calls, and makes four windows of five calls on the free plan", async () => {
         const queued = Array.from({ length: 30 }, (_, i) => `Q${i}`);
         const { store } = fakeStore({ holdings: queued, queued });
         const clock = fakeClock();
@@ -719,8 +720,8 @@ describe("ingestDailyPrices", () => {
 
         assert.equal(detail.stopped?.backfill, "budget");
         assert.ok(clock.sleeps.every((ms) => ms <= 65_000));
-        assert.ok(elapsed <= 240_000, `ran for ${elapsed} ms`);
-        assert.ok((detail.calls ?? 0) >= 15, `only ${detail.calls} calls`);
+        assert.ok(elapsed <= DEFAULT_BUDGET_MS, `ran for ${elapsed} ms`);
+        assert.equal(detail.calls, 20);
     });
 
     test("a rate limit is waited out and the call made again", async () => {
@@ -764,7 +765,7 @@ describe("ingestDailyPrices", () => {
         assert.deepEqual(marks.map(([symbol]) => symbol), ["AAA", "BBB"]);
         assert.equal(detail.stopped?.backfill, "rate-limited");
         assert.equal(detail.backfillQueue, 2);
-        assert.ok(clock.now().getTime() - Date.parse(FRIDAY_EVENING) <= 240_000, "stayed within the budget");
+        assert.ok(clock.now().getTime() - Date.parse(FRIDAY_EVENING) <= DEFAULT_BUDGET_MS, "stayed within the budget");
     });
 
     test("a rate limit that outlasts the budget during the catch-up ends the run's calls without failing", async () => {

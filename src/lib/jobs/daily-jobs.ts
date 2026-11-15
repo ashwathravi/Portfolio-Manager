@@ -3,7 +3,7 @@
  * the close (vercel.json). The quick cleanups go first so a long price
  * backfill can never crowd it out of the function's time limit. Linked
  * accounts sync next (launch item i44), within a budget of their own that
- * leaves the price job its 240 s, so tonight's prices and snapshots include
+ * leaves the price job its 220 s, so tonight's prices and snapshots include
  * what they hold. Snapshots come after the prices they are valued at (they
  * use only stored closes, so they run, and stay quick, even when the price
  * job stopped early). The price job first refreshes the ticker search's
