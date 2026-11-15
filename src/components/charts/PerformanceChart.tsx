@@ -50,10 +50,9 @@ const currencyFormatter = new Intl.NumberFormat('en-US', {
     maximumFractionDigits: 2,
 });
 
-const formatTooltipValue = (value: number | undefined) => {
-    if (value === undefined) return '';
-    return currencyFormatter.format(value);
-};
+// recharts 3.10 types a tooltip value as any ValueType, not just a number.
+const formatTooltipValue = (value: unknown) =>
+    typeof value === 'number' ? currencyFormatter.format(value) : '';
 
 // Optimized: Stable function reference.
 const formatYAxisTick = (value: number) => `$${(value / 1000).toFixed(0)}k`;

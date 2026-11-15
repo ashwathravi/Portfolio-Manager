@@ -4,7 +4,7 @@ Production runs on Vercel (project `atlas-wealth`, https://atlas-wealth-lovat.ve
 
 ## How a change reaches production
 
-1. A pull request runs `build`, `lint-and-test` and `e2e-tests`. Vercel also builds a preview of the branch, behind Vercel Authentication.
+1. A pull request runs `build`, `lint-and-test` and `e2e-tests`. Vercel builds no preview of the branch: `e2e-tests` already builds the app for production and tests it, and on the Hobby plan every deployment, previews included, counts toward 100 a day (`api-deployments-free-per-day`), which a day of busy pull requests used up, holding production deploys back.
 2. Merging to `master` runs the same checks again. When all three pass, two jobs start:
    - **`publish-image`** pushes the Docker image to GHCR (the portable fallback).
    - **`deploy-production`** (GitHub environment `production`):
@@ -15,7 +15,7 @@ Production runs on Vercel (project `atlas-wealth`, https://atlas-wealth-lovat.ve
 
 Vercel runs the build, not CI: Sensitive variables (the Sentry DSN and its source-map upload token among them) only exist inside Vercel's own builds and functions. `vercel pull` hands them over as `[SENSITIVE]` placeholders, so a build on the CI runner would ship without error monitoring.
 
-Vercel's own Git integration does not deploy `master` (`vercel.json` turns it off), so every production deploy has passed CI and has its migrations applied first.
+Vercel's own Git integration deploys nothing, `master` included (`git.deploymentEnabled: false` in `vercel.json`), so every production deploy has passed CI and has its migrations applied first, and the day's deployments go to production. A preview can still be made by hand with `vercel deploy`.
 
 ## Migrations
 
