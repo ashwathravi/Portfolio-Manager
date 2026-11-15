@@ -9,7 +9,7 @@ Every half hour, `.github/workflows/production-monitor.yml` runs `scripts/monito
 | Check | Endpoint | Fails when |
 |---|---|---|
 | The site and its database | `/api/health/ready` | No answer, an error page or a redirect (deployment protection, say), or the app can't reach its database or has none configured. |
-| The nightly jobs | `/api/health/jobs` | `expired-sessions`, `ask-history`, `plaid`, `prices`, `snapshots`, `alerts` or `email` hasn't succeeded after 22:00 UTC on a weekday by midnight UTC. Vercel Hobby starts the 22:30 cron at any minute of that hour. `prices` fails without `POLYGON_API_KEY`. |
+| The nightly jobs | `/api/health/jobs` | `expired-sessions`, `ask-history`, `plaid`, `prices`, `snapshots`, `alerts` or `email` hasn't succeeded after 22:00 UTC on a weekday by midnight UTC. Vercel Hobby starts the 22:30 cron at any minute of that hour. `prices` fails without `POLYGON_API_KEY`. A job added since the last weekday run is `pending` until its first has fallen due, and isn't reported. |
 | Alpha Radar's SEC job | `/api/health/jobs` | `alpha-radar` hasn't succeeded after 11:00 UTC by 13:00 UTC (launch item i60). It runs every day; it fails without `SEC_EDGAR_USER_AGENT` or when every filer failed (SEC refusing Atlas, say). |
 | The nightly backup | `/api/health/jobs` | The `backup` workflow hasn't succeeded after 06:00 UTC by 10:00 UTC. It's scheduled at 06:41, and GitHub sometimes starts scheduled runs late. |
 | The stored closing prices | `/api/health/jobs` | The newest close in `price_bars` is older than the trading session before the one the last due `prices` run was for, or none is stored. That means two runs in a row stored no new day, even if they succeeded: a run that is rate-limited, out of its time budget or finds the day's file not yet published stops early and still counts as a success. One session behind is allowed, because the day's file may not be out by 22:30 UTC; the next run stores it. |
@@ -33,7 +33,7 @@ The repository is public, so the issue is too. It says which check failed and wh
 
 ## `/api/health/jobs`
 
-Public, like `/api/health/ready`. It answers 200 when every scheduled job has succeeded since its last run fell due and the stored closes and snapshots are recent enough, and 503 otherwise:
+Public, like `/api/health/ready`. It answers 200 when every scheduled job has succeeded since its last run fell due (or, added since then, waits for its first) and the stored closes and snapshots are recent enough, and 503 otherwise:
 
 ```json
 {
@@ -52,12 +52,13 @@ Public, like `/api/health/ready`. It answers 200 when every scheduled job has su
 - **`ok`:** succeeded since `dueSince`, the start of the scheduled hour of its most recent run that should be done by now. A manual run counts.
 - **`failed`:** its run since then failed, or was cut off (still `running` after 15 minutes).
 - **`late`:** nothing has run since then, or it never has (`lastSucceededAt` is null).
+- **`pending`:** the job was added after its most recent run fell due, so it couldn't have run then, and nothing has run since it was added. `dueSince` is then the start of the UTC day it was added (its `addedOn`), and only runs since then count, for `ok` and `failed` too. Its first scheduled run isn't due yet. Like `ok`, it's fine: the endpoint can still answer 200, and the monitor doesn't report it. Once that run falls due, the job is assessed like any other (x35).
 - **`closes`:** `latest` is the newest Eastern trading date in `price_bars` (null when none is stored), and `oldestAllowed` the oldest it may be: one session before the session that had closed when the last due `prices` run began (Friday's run on a weekend, and the calendar's holidays skipped). `status` is `stale` when `latest` is older, or null. It is `null` when the database couldn't be read.
 - **`snapshots`:** the same, where `latest` is the newest close a successful `snapshots` run valued every portfolio it could at (null when none has).
 
 The endpoint has a 3-second statement timeout. Its answer is reused for a minute, or for 10 seconds while the database is unavailable, when `database` is `"unavailable"` (or `"not_configured"`), `jobs` is empty and `closes` and `snapshots` are null.
 
-The schedules live in `src/lib/health/job-health.ts`. Tests keep them equal to `vercel.json` and the backup workflow. The nightly jobs record their runs themselves (`src/lib/jobs/runner.ts`). The backup workflow records one row per run as its last step (`scripts/db/record-backup-run.ts`): `succeeded` only when the backup was kept and restored exactly.
+The schedules live in `src/lib/health/job-health.ts`. Tests keep them equal to `vercel.json` and the backup workflow. A job added to a schedule production already runs carries `addedOn`, the UTC date its deploy went out (`DAILY_JOBS_ADDED_ON` for the nightly jobs; `alerts` and `email`, 2026-11-14); a test lists the jobs without one, so a new job can't be left out and read late from runs before it existed. The nightly jobs record their runs themselves (`src/lib/jobs/runner.ts`). The backup workflow records one row per run as its last step (`scripts/db/record-backup-run.ts`): `succeeded` only when the backup was kept and restored exactly.
 
 ## What to do
 
@@ -95,7 +96,7 @@ An error naming `POLYGON_API_KEY` means the key is missing in Vercel: add it, th
 2. Check the cron's logs in Vercel › Settings › Cron Jobs.
 3. Run the jobs by hand from there.
 
-A single late job means the run was cut off before it. `alpha-radar` has a route of its own (`/api/cron/alpha-radar`, around 11:00 UTC): read its `error` in `job_runs`; "SEC_EDGAR_USER_AGENT is not set" means the variable is missing in Vercel, and "Every filer checked failed" usually means SEC refused the requests (its fair-access rules) or was down. A newly deployed job is late until its first scheduled run.
+A single late job means the run was cut off before it. `alpha-radar` has a route of its own (`/api/cron/alpha-radar`, around 11:00 UTC): read its `error` in `job_runs`; "SEC_EDGAR_USER_AGENT is not set" means the variable is missing in Vercel, and "Every filer checked failed" usually means SEC refused the requests (its fair-access rules) or was down. A newly deployed job is `pending`, not late, until its first scheduled run falls due, provided its `addedOn` gives the day it was deployed (`docs/deployment.md` › Scheduled jobs).
 
 **"The nightly backup failed on its last run."**
 1. Open the run: Actions › Database backup, or `detail ->> 'runUrl'` in `job_runs`.
