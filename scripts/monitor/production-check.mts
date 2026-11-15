@@ -6,9 +6,9 @@
  *
  * It asks production three things through its public health endpoints: can
  * the app reach its database (/api/health/ready), has every scheduled job,
- * the nightly backup included, succeeded on schedule, and are the stored
- * closing prices and the portfolio snapshots valued at them recent enough
- * (both /api/health/jobs).
+ * the nightly backup included, succeeded on schedule (a job still waiting for
+ * its first run is fine), and are the stored closing prices and the portfolio
+ * snapshots valued at them recent enough (both /api/health/jobs).
  * Then it keeps one GitHub issue in step with the answer: opened, mentioning
  * the repository's owner, when something fails; commented on when what fails
  * changes; closed once every check passes.
@@ -66,7 +66,7 @@ export async function checkProduction(siteUrl: string, options: CheckOptions = {
         const what = jobs.reached ? `answered HTTP ${jobs.status}${databaseNote}` : `didn't answer: ${jobs.error}`;
         return [{ key: "jobs-endpoint", short: "the job check failed", message: `${base}/api/health/jobs ${what}.` }];
     }
-    const problems = report.jobs.filter((job) => job.status !== "ok").map(jobProblem);
+    const problems = report.jobs.filter(isProblem).map(jobProblem);
     if (report.closes?.status === "stale") problems.push(closesProblem(report.closes));
     if (report.snapshots?.status === "stale") problems.push(snapshotsProblem(report.snapshots));
     return problems;
@@ -74,9 +74,17 @@ export async function checkProduction(siteUrl: string, options: CheckOptions = {
 
 interface JobReport {
     job: string;
-    status: "ok" | "late" | "failed";
+    /** "pending": added since its last run fell due, and waiting for its first (x35). */
+    status: "ok" | "pending" | "late" | "failed";
     lastSucceededAt: string | null;
     dueSince: string;
+}
+
+const JOB_STATUSES: ReadonlySet<unknown> = new Set<JobReport["status"]>(["ok", "pending", "late", "failed"]);
+
+/** A late or failed job; one that is ok or waiting for its first run isn't. */
+function isProblem(job: JobReport): job is JobReport & { status: "late" | "failed" } {
+    return job.status === "late" || job.status === "failed";
 }
 
 interface FreshnessReport {
@@ -99,7 +107,7 @@ function readJobs(answer: Answer): JobsAnswer | null {
     const valid = jobs.every((job: unknown) => {
         if (!isRecord(job)) return false;
         return typeof job.job === "string" && JOB_NAME.test(job.job)
-            && (job.status === "ok" || job.status === "late" || job.status === "failed")
+            && JOB_STATUSES.has(job.status)
             && (job.lastSucceededAt === null || (typeof job.lastSucceededAt === "string" && ISO_TIME.test(job.lastSucceededAt)))
             && typeof job.dueSince === "string" && ISO_TIME.test(job.dueSince);
     });
@@ -111,8 +119,9 @@ function readJobs(answer: Answer): JobsAnswer | null {
     const { closes, snapshots } = answer.body;
     if (closes !== undefined && !isFreshnessReport(closes)) return null;
     if (snapshots !== undefined && !isFreshnessReport(snapshots)) return null;
-    // 200 means every job is ok and the data is recent, and 503 that something isn't.
-    const allOk = report.every((job) => job.status === "ok")
+    // 200 means every job is ok (or waiting for its first run) and the data
+    // is recent, and 503 that something isn't.
+    const allOk = !report.some(isProblem)
         && [closes, snapshots].every((freshness) => freshness === undefined || freshness.status === "ok");
     return (answer.status === 200) === allOk ? { jobs: report, closes, snapshots } : null;
 }
@@ -144,7 +153,7 @@ function snapshotsProblem(snapshots: FreshnessReport): Problem {
     };
 }
 
-function jobProblem(job: JobReport): Problem {
+function jobProblem(job: JobReport & { status: "late" | "failed" }): Problem {
     const backup = job.job === "backup";
     const what = backup ? "The nightly backup" : `The nightly job "${job.job}"`;
     const name = backup ? "the backup" : `"${job.job}"`;
@@ -376,7 +385,7 @@ function readState(body: string | null): string | null {
 export function describeRun(problems: readonly Problem[], outcome: IssueOutcome, siteUrl: string): string {
     const lines = [`## Production monitor: ${siteUrl}`, ""];
     if (problems.length === 0) {
-        lines.push("Every check passes: the database answers and every scheduled job ran on time.");
+        lines.push("Every check passes: the database answers and every scheduled job that was due ran on time.");
     } else {
         lines.push(...problems.map((problem) => `- ${problem.message}`));
     }

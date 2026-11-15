@@ -2,8 +2,10 @@
  * Whether the scheduled jobs run on time (launch item i71). Every job has a
  * schedule; a job is "ok" when it has succeeded since its most recent run
  * fell due, "failed" when that run failed (or was cut off), and "late" when
- * nothing has run since. /api/health/jobs reports this publicly in coarse
- * terms, never error text, so the production monitor
+ * nothing has run since. A job added to a schedule production already ran is
+ * "pending" until its first run falls due: the slots before it was added are
+ * ones it couldn't have run in (x35). /api/health/jobs reports this publicly
+ * in coarse terms, never error text, so the production monitor
  * (.github/workflows/production-monitor.yml) or any uptime service can alert
  * when a job fails or stops running.
  *
@@ -43,6 +45,14 @@ export interface JobSchedule {
     cron: string;
     /** How long after its hour begins a run must have succeeded. */
     graceMinutes: number;
+    /**
+     * For a job added to a schedule production already ran: the UTC date
+     * (YYYY-MM-DD) the deploy that added it went out, or the next day when it
+     * went out once that day's scheduled hour had begun. Slots before then
+     * don't count, since it couldn't have run in them, and neither do runs.
+     * Left out for a job that has been in every run.
+     */
+    addedOn?: string;
 }
 
 /** vercel.json's schedule for /api/cron/daily (a test keeps them equal). */
@@ -53,6 +63,17 @@ export const BACKUP_CRON = "41 6 * * *";
 export const BACKUP_JOB = "backup";
 /** The names in src/lib/jobs/daily-jobs.ts, in order (a test keeps them equal). */
 export const DAILY_JOB_NAMES = ["expired-sessions", "ask-history", "plaid", "prices", "snapshots", "alerts", "email"] as const;
+/**
+ * The nightly jobs added after production started running the nightly
+ * route, with the date each was deployed ({@link JobSchedule.addedOn}). A job
+ * added from now on needs its date here, or it reads late from a run from
+ * before it existed: a test lists the jobs that have none.
+ */
+export const DAILY_JOBS_ADDED_ON: Readonly<Partial<Record<(typeof DAILY_JOB_NAMES)[number], string>>> = {
+    // Merged on Saturday 14 November 2026 (#185, #187), after Friday's run.
+    alerts: "2026-11-14",
+    email: "2026-11-14",
+};
 /**
  * vercel.json's schedule for /api/cron/alpha-radar (a test keeps them equal):
  * every day, after SEC has published the previous business day's filings.
@@ -66,7 +87,10 @@ const DAILY_GRACE_MINUTES = 120;
 
 export const JOB_SCHEDULES: readonly JobSchedule[] = [
     // The run takes at most five minutes (the route's maxDuration).
-    ...DAILY_JOB_NAMES.map((job) => ({ job, cron: DAILY_JOBS_CRON, graceMinutes: DAILY_GRACE_MINUTES })),
+    ...DAILY_JOB_NAMES.map((job): JobSchedule => {
+        const addedOn = DAILY_JOBS_ADDED_ON[job];
+        return { job, cron: DAILY_JOBS_CRON, graceMinutes: DAILY_GRACE_MINUTES, ...(addedOn ? { addedOn } : {}) };
+    }),
     { job: ALPHA_RADAR_JOB_NAME, cron: ALPHA_RADAR_CRON, graceMinutes: 120 },
     // About ten minutes, after a start GitHub may delay.
     { job: BACKUP_JOB, cron: BACKUP_CRON, graceMinutes: 240 },
@@ -75,14 +99,22 @@ export const JOB_SCHEDULES: readonly JobSchedule[] = [
 /** A "running" row older than this was cut off (the route stops at five minutes). */
 export const STUCK_AFTER_MS = 15 * 60_000;
 
-export type JobHealthStatus = "ok" | "late" | "failed";
+/**
+ * "pending": added since its most recent run fell due, with nothing run
+ * since; its first run isn't due yet. Like "ok", it isn't a problem.
+ */
+export type JobHealthStatus = "ok" | "pending" | "late" | "failed";
 
 export interface JobHealth {
     job: string;
     status: JobHealthStatus;
     /** When its last successful run started, or null if none has. */
     lastSucceededAt: string | null;
-    /** The start of the hour its most recent due run belongs to. */
+    /**
+     * Since when a successful run counts: the start of the hour its most
+     * recent due run belongs to, or, for a job added since then, the start of
+     * the day it was added ({@link JobSchedule.addedOn}).
+     */
     dueSince: string;
 }
 
@@ -168,12 +200,27 @@ export function lastDueSlot(schedule: JobSchedule, now: Date): Date {
     throw new Error(`No run of "${schedule.cron}" falls due in a week.`);
 }
 
+/** The start of the UTC day a job was added on, or null for a job that has been in every run. */
+export function addedAt(schedule: JobSchedule): Date | null {
+    if (schedule.addedOn === undefined) return null;
+    const day = /^\d{4}-\d{2}-\d{2}$/.test(schedule.addedOn) ? new Date(`${schedule.addedOn}T00:00:00.000Z`) : null;
+    if (!day || Number.isNaN(day.getTime()) || day.toISOString().slice(0, 10) !== schedule.addedOn) {
+        throw new Error(`Unsupported addedOn "${schedule.addedOn}" for "${schedule.job}": expected a date, YYYY-MM-DD.`);
+    }
+    return day;
+}
+
 export function assessJob(schedule: JobSchedule, summary: JobRunSummary | undefined, now: Date): JobHealth {
-    const due = lastDueSlot(schedule, now);
+    const lastDue = lastDueSlot(schedule, now);
+    const added = addedAt(schedule);
+    // Added since its last run fell due: it couldn't have run in that one, so
+    // it waits for its first, and only what ran since it was added counts.
+    const pending = added !== null && added > lastDue;
+    const due = pending ? added : lastDue;
     const lastSucceededAt = summary?.lastSucceededAt ?? null;
     const latestStartedAt = summary?.latestStartedAt ?? null;
 
-    let status: JobHealthStatus = "late";
+    let status: JobHealthStatus = pending ? "pending" : "late";
     if (lastSucceededAt && lastSucceededAt >= due) {
         status = "ok";
     } else if (latestStartedAt && latestStartedAt >= due) {
@@ -331,8 +378,10 @@ export function createJobHealthCheck({
         const closes = assessFreshness(data.latestClose, checkedAt);
         const snapshots = assessFreshness(data.snapshotsThrough, checkedAt);
         const fresh = closes.status === "ok" && snapshots.status === "ok";
+        // A job waiting for its first run isn't a problem.
+        const onSchedule = jobs.every((job) => job.status === "ok" || job.status === "pending");
         return {
-            status: jobs.every((job) => job.status === "ok") && fresh ? "ok" : "degraded",
+            status: onSchedule && fresh ? "ok" : "degraded",
             database: "ok",
             jobs,
             closes,

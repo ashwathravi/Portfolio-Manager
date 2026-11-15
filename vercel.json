@@ -4,9 +4,7 @@
     "pdx1"
   ],
   "git": {
-    "deploymentEnabled": {
-      "master": false
-    }
+    "deploymentEnabled": false
   },
   "crons": [
     {
