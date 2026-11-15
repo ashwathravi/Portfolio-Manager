@@ -8,22 +8,36 @@ import { AccountRowActions, NewAccountButton } from "./AccountControls";
  * the database; with none, the page says so and points at the ways to add
  * data instead of showing example accounts. Accounts are added, edited and
  * deleted here (launch item i41).
+ *
+ * `bankLinking` is whether Settings can connect a bank (bankLinkingAvailable,
+ * x30). Without it Settings says bank linking isn't set up and points back
+ * here, so the empty state leads with adding an account by hand and has no
+ * Connect link.
  */
-export function AccountsView({ rows, summary }: { rows: AccountRow[]; summary: AccountsSummary }) {
+export function AccountsView({ rows, summary, bankLinking }: { rows: AccountRow[]; summary: AccountsSummary; bankLinking: boolean }) {
     if (rows.length === 0) {
         return (
             <div className="pm-page" data-testid="accounts-view">
                 <section className="pm-card pm-empty-card" data-testid="accounts-empty">
                     <h2>No accounts yet</h2>
                     <p>
-                        Accounts appear here once you connect a brokerage, import positions, or add one
-                        yourself. Each account&apos;s value, cash, and positions come straight from your data.
+                        {bankLinking
+                            ? "Accounts appear here once you connect a brokerage, import positions, or add one yourself."
+                            : "Accounts appear here once you add one yourself or import positions."}{" "}
+                        Each account&apos;s value, cash, and positions come straight from your data.
                     </p>
-                    <div className="pm-empty-actions">
-                        <Link href="/settings#accounts" className="pm-btn pm-btn-primary">Connect an account</Link>
-                        <Link href="/portfolios/holdings" className="pm-btn pm-btn-ghost">Import a CSV</Link>
-                        <NewAccountButton variant="ghost" />
-                    </div>
+                    {bankLinking ? (
+                        <div className="pm-empty-actions">
+                            <Link href="/settings#accounts" className="pm-btn pm-btn-primary">Connect an account</Link>
+                            <Link href="/portfolios/holdings" className="pm-btn pm-btn-ghost">Import a CSV</Link>
+                            <NewAccountButton variant="ghost" />
+                        </div>
+                    ) : (
+                        <div className="pm-empty-actions">
+                            <NewAccountButton />
+                            <Link href="/portfolios/holdings" className="pm-btn pm-btn-ghost">Import a CSV</Link>
+                        </div>
+                    )}
                 </section>
             </div>
         );

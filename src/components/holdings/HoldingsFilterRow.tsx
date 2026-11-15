@@ -2,6 +2,7 @@
 
 import { type ChangeEvent } from "react";
 import type { Sector } from "@/lib/holdings/sector";
+import type { HoldingsRowView } from "@/lib/holdings/combine";
 import {
     POLICY_BUCKETS,
     THEME_IDS,
@@ -16,7 +17,8 @@ import {
  *
  * Left: sector chip buttons: All, then the sectors the holdings are in
  * (the page passes them, largest first).
- * Right: a single-select for the sort key.
+ * Right: one row per account position or per symbol (only when some symbol
+ * is in more than one account), then the bucket, theme and sort selects.
  *
  * Stateless — the parent holds `sectorFilter` and `sortKey`.
  */
@@ -37,6 +39,9 @@ export interface HoldingsFilterRowProps {
     onThemeChange?: (next: ThemeId | "All") => void;
     sortKey: HoldingsSortKey;
     onSortChange: (next: HoldingsSortKey) => void;
+    rowView?: HoldingsRowView;
+    /** Without it there is no choice of rows to offer. */
+    onRowViewChange?: (next: HoldingsRowView) => void;
     /** Sectors to show as chips. Caller controls order; defaults to the handoff spec. */
     sectors?: readonly (Sector | "All")[];
     className?: string;
@@ -57,6 +62,11 @@ const SORT_OPTIONS: ReadonlyArray<{ value: HoldingsSortKey; label: string }> = [
     { value: "allocationPct", label: "Allocation" },
 ];
 
+const ROW_VIEW_OPTIONS: ReadonlyArray<{ value: HoldingsRowView; label: string }> = [
+    { value: "account", label: "By account" },
+    { value: "symbol", label: "By symbol" },
+];
+
 const BUCKET_OPTIONS: readonly (PolicyBucketId | "All")[] = ["All", ...POLICY_BUCKETS];
 const THEME_OPTIONS: readonly (ThemeId | "All")[] = ["All", ...THEME_IDS];
 
@@ -69,6 +79,8 @@ export function HoldingsFilterRow({
     onThemeChange,
     sortKey,
     onSortChange,
+    rowView = "account",
+    onRowViewChange,
     sectors = DEFAULT_SECTORS,
     className,
 }: HoldingsFilterRowProps) {
@@ -93,6 +105,25 @@ export function HoldingsFilterRow({
             </div>
 
             <div className="pm-filter-select-group">
+                {onRowViewChange && (
+                    <div className="pm-chip-group" role="radiogroup" aria-label="Show holdings">
+                        {ROW_VIEW_OPTIONS.map((o) => {
+                            const active = o.value === rowView;
+                            return (
+                                <button
+                                    key={o.value}
+                                    type="button"
+                                    role="radio"
+                                    aria-checked={active}
+                                    className={`pm-chip-btn${active ? " is-active" : ""}`}
+                                    onClick={() => onRowViewChange(o.value)}
+                                >
+                                    {o.label}
+                                </button>
+                            );
+                        })}
+                    </div>
+                )}
                 {onBucketChange && (
                     <label className="pm-sort-select">
                         <span className="pm-sort-label">Bucket</span>

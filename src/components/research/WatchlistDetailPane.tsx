@@ -8,10 +8,10 @@ import type { Thesis } from "@/lib/research/thesis";
 import { WATCH_ITEM_LIMITS } from "@/lib/validators/watchlist";
 
 /**
- * Research › Watchlist detail. Shows why a ticker is on the list, the live
+ * Research › Watchlist detail. Shows why a ticker is on the list, the last
  * price against the entry the user wants, and the next steps (thesis, draft
  * order, position). Reason, target entry, and notes edit in place and save
- * when the field loses focus.
+ * when the field loses focus; a field left unchanged follows the saved value.
  */
 export function WatchlistDetailPane({
     item,
@@ -61,7 +61,7 @@ export function WatchlistDetailPane({
                     />
                 </div>
                 {livePrice == null && (
-                    <p className="pm-watch-detail-note">No live quote right now, so there is no distance to your entry.</p>
+                    <p className="pm-watch-detail-note">No price for it yet, so there is no distance to your entry.</p>
                 )}
             </section>
 
@@ -130,6 +130,16 @@ function EditableField({
     onSave: (value: string) => void;
 }) {
     const [value, setValue] = useState(initial);
+    // The saved value the text started from. When the saved value changes
+    // under the field (the stored list arrives after an example row was
+    // opened, or a refetch brings another browser's edit), a field the user
+    // hasn't changed shows it; otherwise leaving the field would save the
+    // old text over it. A field being edited keeps the user's text.
+    const [savedValue, setSavedValue] = useState(initial);
+    if (initial !== savedValue) {
+        setSavedValue(initial);
+        if (value === savedValue) setValue(initial);
+    }
     const commit = () => {
         if (value !== initial) onSave(value);
     };

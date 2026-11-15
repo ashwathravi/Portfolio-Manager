@@ -1,20 +1,20 @@
 "use client";
 
 import { ImportHoldingsDialog, type ImportAccountOption } from "./ImportHoldingsDialog";
+import { NewAccountButton } from "@/components/portfolio/AccountControls";
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { SampleGate } from "@/components/data-display/SampleGate";
 import { useAutoRefreshQuotes } from "@/lib/hooks/useAutoRefreshQuotes";
+import { describeQuotes } from "@/lib/markets/quote-label";
 import { sectorFor, type Sector } from "@/lib/holdings/sector";
 import {
     computeBucketAllocation,
     computeThemeExposure,
     employerSymbols,
-    optionCurrentValue,
+    optionNetValue,
     policyBucketLabel,
     resolvePolicyBucketAssignment,
     themeLabel,
-    type OptionRiskPosition,
     themeWeightsForSymbol,
     type PolicyBucketId,
     type PolicyBucketStatus,
@@ -29,15 +29,18 @@ import { useSettingsStore } from "@/lib/stores/settingsStore";
 import { HoldingsFullTable, type HoldingsTableRow } from "./HoldingsFullTable";
 import { HoldingsSummaryStrip } from "./HoldingsSummaryStrip";
 import { OptionsRiskLedgerCard } from "./OptionsRiskLedgerCard";
+import type { OptionThesisOption } from "./OptionPositionDialog";
+import { toOptionRiskPosition, type LoadedOptionPosition } from "@/lib/portfolio/option-positions";
 import { isTodaysQuote } from "@/lib/markets/quote-session";
 import { useEasternDate } from "@/lib/hooks/useEasternDate";
+import { combineBySymbol, hasSymbolInSeveralAccounts, type HoldingsRowView } from "@/lib/holdings/combine";
 
 /**
  * Phase 4 (AR-74) Holdings page wrapper.
  *
  * This component owns:
- *   - live-quote polling via `useAutoRefreshQuotes`
- *   - the filter + sort state
+ *   - quote polling via `useAutoRefreshQuotes`, labelled delayed or close
+ *   - the filter + sort state, and one row per account position or per symbol
  *   - the derived summary metrics
  *
  * The server page just fetches the seed + hands it here. Everything
@@ -53,6 +56,8 @@ export interface HoldingsSeed {
     /** Null when there is no price for it yet (no quote, nothing stored). */
     currentPrice: number | null;
     marketValue: number;
+    /** The account's ID; names can repeat. */
+    accountId: string;
     account: string;
     /** Approx days since the position was opened, for the "Avg holding period" cell. */
     holdingDays?: number;
@@ -66,23 +71,38 @@ export interface HoldingsSeed {
 
 export interface HoldingsPageClientProps {
     holdings: HoldingsSeed[];
-    optionPositions?: readonly OptionRiskPosition[];
-    /** True while option positions come from example data (no options feed yet). */
-    optionPositionsAreSample?: boolean;
-    /** Accounts offered as the CSV import target. */
+    /** From `?view=`: one row per account position (the default) or per symbol. */
+    initialRowView?: HoldingsRowView;
+    /** The user's option positions, for the LEAPS ledger (launch item i63). */
+    optionPositions?: readonly LoadedOptionPosition[];
+    /** The user's theses, to link an option position to. */
+    optionTheses?: readonly OptionThesisOption[];
+    /** Accounts offered as the CSV import target, and for option positions. */
     importAccounts?: readonly ImportAccountOption[];
+    /** Cash across the accounts: part of what the LEAPS ledger measures against. */
+    cashTotal?: number;
+    /**
+     * Whether Settings can connect a bank (bankLinkingAvailable, x30). Without
+     * it the empty state offers to add an account by hand instead of a
+     * Connect link to a Settings card that says bank linking isn't set up.
+     */
+    bankLinking: boolean;
 }
 
 export function HoldingsPageClient({
     holdings,
+    initialRowView = "account",
     optionPositions = [],
-    optionPositionsAreSample = false,
+    optionTheses = [],
     importAccounts = [],
+    cashTotal = 0,
+    bankLinking,
 }: HoldingsPageClientProps) {
     const [sectorFilter, setSectorFilter] = useState<Sector | "All">("All");
     const [bucketFilter, setBucketFilter] = useState<PolicyBucketId | "All">("All");
     const [themeFilter, setThemeFilter] = useState<ThemeId | "All">("All");
     const [sortKey, setSortKey] = useState<HoldingsSortKey>("marketValue");
+    const [rowView, setRowView] = useState<HoldingsRowView>(initialRowView);
 
     const symbols = useMemo(
         () => holdings.map((h) => h.symbol).filter(Boolean),
@@ -93,7 +113,7 @@ export function HoldingsPageClient({
     // The user's risk policy: their bucket choices, caps, and employer stock (launch item i54).
     const riskPolicy = useSettingsStore((s) => s.riskPolicy);
 
-    // ---- Enrich with live quote, then derive allocation + today% ----
+    // ---- Enrich with the latest quote, then derive allocation + today% ----
     const enriched = useMemo(() => {
         const employer = new Set(employerSymbols(riskPolicy));
         const withQuote = holdings.map((h) => {
@@ -143,6 +163,19 @@ export function HoldingsPageClient({
 
     const { rows, totalMV } = enriched;
 
+    // The choice of rows only matters when some symbol is in more than one account.
+    const hasSharedSymbols = useMemo(() => hasSymbolInSeveralAccounts(rows), [rows]);
+    const bySymbol = hasSharedSymbols && rowView === "symbol";
+
+    const changeRowView = (next: HoldingsRowView) => {
+        setRowView(next);
+        // Kept in the address so a reload or a shared link opens the same view.
+        const url = new URL(window.location.href);
+        if (next === "symbol") url.searchParams.set("view", "symbol");
+        else url.searchParams.delete("view");
+        window.history.replaceState(null, "", url);
+    };
+
     // The sector chips: the sectors held, largest first.
     const sectorChips = useMemo<Array<Sector | "All">>(() => {
         const bySector = new Map<Sector, number>();
@@ -190,11 +223,14 @@ export function HoldingsPageClient({
         () => computeThemeExposure(rows, riskPolicy.themeCaps),
         [rows, riskPolicy.themeCaps],
     );
-    const optionsCurrentValue = useMemo(
-        () => optionPositions.reduce((sum, position) => sum + optionCurrentValue(position), 0),
+    const optionsNetValue = useMemo(
+        // A written option's cost to buy back counts against the portfolio.
+        () => optionPositions.reduce((sum, position) => sum + optionNetValue(toOptionRiskPosition(position)), 0),
         [optionPositions],
     );
-    const totalPolicyValue = summary.marketValue + optionsCurrentValue;
+    // As policyPortfolioValue measures it for Today and Trade: holdings, cash
+    // and options together.
+    const totalPolicyValue = summary.marketValue + cashTotal + optionsNetValue;
 
     // ---- Filter + sort for the table ----
     const tableRows = useMemo<HoldingsTableRow[]>(() => {
@@ -206,7 +242,12 @@ export function HoldingsPageClient({
             }
             return true;
         });
-        const sorted = [...filtered].sort((a, b) => {
+        // Sector, bucket and themes belong to the symbol, so filtering before
+        // combining keeps or drops every account's position in it together.
+        const shown = bySymbol
+            ? combineBySymbol(filtered)
+            : filtered.map((r) => ({ ...r, accounts: [r.account], partlyAtCost: false }));
+        const sorted = [...shown].sort((a, b) => {
             switch (sortKey) {
                 case "marketValue":
                     return b.marketValue - a.marketValue;
@@ -236,25 +277,51 @@ export function HoldingsPageClient({
             totalReturnPct: r.totalReturnPct,
             allocationPct: r.allocationPct,
             account: r.account,
+            accounts: r.accounts,
+            partlyAtCost: r.partlyAtCost,
         }));
-    }, [rows, sectorFilter, bucketFilter, themeFilter, sortKey, policySummary]);
+    }, [rows, bySymbol, sectorFilter, bucketFilter, themeFilter, sortKey, policySummary]);
+
+    const ledger = (
+        <OptionsRiskLedgerCard
+            positions={optionPositions}
+            totalPortfolioValue={totalPolicyValue}
+            liquidNetWorth={totalPolicyValue}
+            accounts={importAccounts}
+            theses={optionTheses}
+        />
+    );
 
     if (rows.length === 0) {
+        // With an account already, importing its positions is the next step,
+        // so Import CSV leads, as on Today's first-run steps; before one,
+        // getting an account (connected or added by hand) does.
+        const hasAccount = importAccounts.length > 0;
+        const variant = hasAccount ? "ghost" : "primary";
+        const accountAction = bankLinking
+            ? <Link href="/settings#accounts" className={`pm-btn pm-btn-${variant}`}>Connect an account</Link>
+            : <NewAccountButton variant={variant} />;
         return (
             <div className="pm-holdings-stack">
                 <section className="pm-card pm-empty-card" data-testid="holdings-empty">
                     <h2>No holdings yet</h2>
                     <p>
-                        Connect an account, or import a positions export from your broker. Market value,
-                        unrealized gain, policy buckets, and theme exposure are all calculated from your own
-                        positions.
+                        {hasAccount
+                            ? `Import a positions export from your broker into ${importAccounts.length === 1 ? "your account" : "one of your accounts"}, or ${bankLinking ? "connect" : "add"} another account.`
+                            : `${bankLinking ? "Connect an account" : "Add an account"}, or import a positions export from your broker.`}{" "}
+                        Market value, unrealized gain, policy buckets, and theme exposure are all calculated from
+                        your own positions.
                     </p>
                     <div className="pm-empty-actions">
-                        <Link href="/settings#accounts" className="pm-btn pm-btn-primary">Connect an account</Link>
-                        <ImportHoldingsDialog accounts={importAccounts} />
+                        {!hasAccount && accountAction}
+                        <ImportHoldingsDialog accounts={importAccounts} triggerClassName={`pm-btn pm-btn-${hasAccount ? "primary" : "ghost"}`} />
+                        {hasAccount && accountAction}
                         <Link href="/portfolios/accounts" className="pm-btn pm-btn-ghost">View accounts</Link>
                     </div>
                 </section>
+                {/* With an account, the ledger is where option positions are
+                    added, stock or no stock. */}
+                {(optionPositions.length > 0 || importAccounts.length > 0) && ledger}
             </div>
         );
     }
@@ -270,22 +337,16 @@ export function HoldingsPageClient({
                 avgHoldingDays={summary.avgHoldingDays}
                 concentrationTop3={summary.concentrationTop3}
             />
+            <p className="pm-metric-note pm-price-note" data-testid="holdings-price-note">
+                {describeQuotes(Object.values(quotes), todayEt) ?? "Prices stored with your holdings"}
+            </p>
 
             <PolicyExposureOverview
                 bucketSummary={policySummary}
                 themeSummary={themeSummary}
             />
 
-            {optionPositions.length > 0 && (
-                <SampleGate>
-                    <OptionsRiskLedgerCard
-                        positions={optionPositions}
-                        totalPortfolioValue={totalPolicyValue}
-                        liquidNetWorth={totalPolicyValue}
-                        isSample={optionPositionsAreSample}
-                    />
-                </SampleGate>
-            )}
+            {ledger}
 
             <HoldingsFilterRow
                 sectors={sectorChips}
@@ -297,6 +358,8 @@ export function HoldingsPageClient({
                 onThemeChange={setThemeFilter}
                 sortKey={sortKey}
                 onSortChange={setSortKey}
+                rowView={bySymbol ? "symbol" : "account"}
+                onRowViewChange={hasSharedSymbols ? changeRowView : undefined}
             />
 
             <HoldingsFullTable rows={tableRows} />

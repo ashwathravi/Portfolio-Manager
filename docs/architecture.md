@@ -1,19 +1,45 @@
 # Architecture
 
-- Next.js App Router application with a shared shell in `src/app/layout.tsx`: fixed sidebar, top bar, theme provider, and global toaster.
-- Mixed rendering model:
-  - Server-rendered pages read from Postgres through Drizzle (`src/app/page.tsx`, `src/app/portfolios/holdings/page.tsx`).
-  - Many other feature pages are client components backed by in-file mock arrays and local React state.
-- Persistence layer is small and relational:
-  - `portfolios`
-  - `holdings`
-  - `transactions`
-  - Alpha Radar 13F research tables for tracked filers, SEC filings, parsed holdings, quarterly changes, reports, and refresh runs
-  - Relations are portfolio -> holdings and portfolio -> transactions.
-- Database access is centralized in `src/db/index.ts` using `postgres` + `drizzle-orm`. If `DATABASE_URL` is missing, the app does not fail build, but database-backed features degrade at runtime.
+How the app, its data and its jobs fit together. The reasons behind the big choices are in `docs/decisions.md`; running it in production is in `docs/deployment.md`.
+
+## Runtime
+
+- One Next.js 16 App Router application on Vercel (Node.js runtime, Fluid compute), with Postgres on Supabase, Upstash Redis for shared rate limits and Sentry for errors (`src/instrumentation.ts`, `src/instrumentation-client.ts`). The same build runs as a standalone Docker image (`Dockerfile`).
+- `src/proxy.ts` sees every request first:
+  - it gives the response a Content-Security-Policy with a fresh script nonce (`src/lib/security/content-security-policy.ts`);
+  - it sends a signed-out page request to `/login?callbackUrl=…` and answers a signed-out API call 401;
+  - it rate-limits API calls per IP and per user (`src/lib/api/rate-limit.ts`).
+
+  The sign-in page, the privacy policy, the terms and the health routes are public. Cron routes and the Plaid webhook take no session and check their own secret or signature.
+- Pages are server components that read the signed-in user's data through Drizzle (Today, Holdings, Accounts, Activity, Performance, Trade), with client components for interaction. Writes and the per-user stores (settings, watchlist, journal, theses, Ask) go through API routes under `src/app/api`, which take the user from the session (`requireSessionApiUserScope`, `src/lib/api/session-security.ts`) and nothing else.
+- Sign-in is Auth.js with Google, the Drizzle adapter and database sessions (`src/auth.ts`). The invite list and the Alpha Radar admins come from `AUTH_ALLOWED_EMAILS`, `AUTH_ALLOWED_DOMAINS` and `AUTH_ADMIN_EMAILS` (`src/lib/auth/access.ts`); `AUTH_OPEN_SIGNUP` opens sign-up to any verified Google account instead, at most `AUTH_SIGNUP_DAILY_LIMIT` new ones a day (`src/lib/auth/new-accounts.ts`), and `AUTH_BLOCKED_EMAILS` and `AUTH_BLOCKED_DOMAINS` keep people out either way (launch item i77). Local development signs in as a fixed user without Google (`AUTH_LOCAL_DEV_BYPASS`), which production refuses.
+
+## Data model
+
+`src/db/schema.ts`; migrations in `drizzle/`, applied by `scripts/migrate.ts` as the table owner. The app connects as a member of `app_runtime` (migration 0010). Every row a user owns carries their `user_id`, and foreign keys keep a child row with its parent's owner (migration 0025).
+
+| Area | Tables |
+|---|---|
+| Sign-in | `auth_users`, `auth_accounts`, `auth_sessions`, `auth_verification_tokens`, `auth_authenticators` |
+| Portfolios | `portfolios` (one per account: manual, CSV or a linked account), `holdings` (one row per symbol in each portfolio), `transactions` (with fees, currency and source) |
+| Linked accounts | `plaid_items` (the access token, encrypted with `PLAID_TOKEN_ENCRYPTION_KEY`), `plaid_accounts` (each account, whether it is synced, and the portfolio it syncs into) |
+| The user's own | `user_settings` (one versioned JSON row: preferences and the risk policy), `watchlist_items`, `journal_entries`, `theses` with `thesis_catalysts` and `thesis_evidence`, `order_plans`, `ask_messages`, `strategies` (each with its definition, discipline rules and last backtest) |
+| Market data | `securities` (the securities master: what is tracked, reference data, sector), `price_bars` (daily closes), `intraday_quotes` (delayed quotes, shared), `symbol_directory` (every listed US company's ticker and name, for ticker search) |
+| History | `portfolio_snapshots`, `portfolio_snapshot_positions` (nightly valuations) |
+| Jobs | `job_runs` (one row per run of each scheduled job, the backup included) |
+| Alpha Radar | `alpha_radar_tracked_filers`, `alpha_radar_sec_filings`, `alpha_radar_filing_holdings`, `alpha_radar_holding_changes`, `alpha_radar_reports`, `alpha_radar_semantic_chunks` |
+
+Database access goes through `src/db/index.ts` (`postgres` + `drizzle-orm`), which requires TLS for every host but localhost unless the URL says `sslmode=disable`. Without a usable `DATABASE_URL` (missing, or Vercel's `[SENSITIVE]` placeholder) the client connects to nothing: every query rejects with `DatabaseNotConfiguredError` (`src/db/unconfigured-client.ts`), and pages show their empty states. A database that is configured but unreachable shows an outage notice instead, and `/api/health/ready` answers 503.
+
+## Market data and history
+
 - Market data goes through one service, `getMarketDataService()` (`src/lib/services/market-data-service.ts`), for server pages (`loadQuotes`) and the `/api/market-data` routes alike:
   - quotes come from the Postgres price store (`StoredQuoteProvider`, `src/lib/markets/stored-quote-provider.ts`): the latest two stored closes per symbol, which the nightly ingest writes from Massive's grouped daily bars. Request paths never call Massive for prices. A symbol with no stored close is left out (a single quote is 404 `QUOTE_UNAVAILABLE`) and starts being tracked for the next ingest, while the store has fewer than 2,000 securities (`REQUESTED_TRACKING_LIMIT`). With only one stored close a quote's `change` and `changePercent` are null, and `isTodaysQuote` (`src/lib/markets/quote-session.ts`) decides whether a change is today's move. Without `DATABASE_URL`, quotes reject with `MarketDataNotConfiguredError`.
-  - history, fundamentals and search go to `PolygonMassiveAdapter` on the free Massive Basic plan; without `POLYGON_API_KEY` those reject with `MarketDataNotConfiguredError` (routes answer 503). The ingest also needs the key.
+  - delayed intraday quotes (`DelayedQuoteProvider`, `src/lib/markets/delayed-quote-provider.ts`, launch item i33): from the opening bell until the ingest has stored the day's close, a tracked US stock's close is replaced by a Finnhub quote from today's session (`FINNHUB_API_KEY`). The newest quote per symbol is kept in `intraday_quotes` (`src/lib/markets/intraday-quotes.ts`), shared by every instance: a symbol is fetched again only once its last claim has left the 77-second budget window, a symbol Finnhub doesn't know every ten minutes, and a quote fetched after the closing prints is final for the day. An instance claims what it fetches under an advisory lock, so the claims in the window are the app's calls and stay under 50: the window is Finnhub's minute plus the longest a batch takes to go out (eight calls at a time, each cut off at 2 seconds) plus clock slack. Every quote has a `kind`, `close` or `delayed` (with the time it was quoted), and pages label it (`src/lib/markets/quote-label.ts`); `isRealtime` is always false. Anything that goes wrong (no key, the budget spent, a 429, a quote from before today's open, a previous close more than 2% from the stored one, as on a split day the ingest hasn't seen) leaves the close.
+  - history (`/api/market-data/history` and the legacy `historical`, which every sparkline on Holdings and Today and each thesis chart asks for its symbol) comes from the price store's daily bars too (`StoredQuoteProvider.getHistoricalPrices`, x09): the range's window (`rangeToDates`: 1D and 5D the newest one and five stored sessions, the others calendar days back from today, MAX two years), stamped with midnight New York like Massive's bars, so a page of sparklines is a page of database reads. The store answers once the symbol's two-year backfill has run (`securities.history_start_date` set), whatever it holds: a recent listing's short history, or nothing at all for a symbol the backfill found nothing for (a fund Massive's stocks feed doesn't price, a delisted ticker), so those never ask Massive again. Massive is asked, within the shared budget below, for a symbol the store doesn't track (a thesis on a ticker past the tracking limit) and for one whose backfill is pending (a dozen or so a weekday run, held symbols and benchmarks first, so a new symbol can wait several nights; a stock that split waits again) when the daily bars stored since it was tracked don't cover the range from its first session (5D: five sessions), so a few days are never drawn as a month (`storedHistoryAnswer`). A store that can't be read is an error, never a reason to ask Massive. Without a database history goes to Massive as before.
+  - fundamentals, and history the store can't answer yet, go to `PolygonMassiveAdapter` on the free Massive Basic plan; without `POLYGON_API_KEY` those reject with `MarketDataNotConfiguredError` (routes answer 503). The ingest also needs the key.
+  - strategies (`/api/strategies`, launch item i55) are saved per user in `strategies` (`src/lib/strategies/store.ts`): a definition (entry rules glued by AND/OR, up to 25 tickers, guardrails), discipline rules, and the last backtest with the definition it ran on. Saving one tracks its tickers in the price store, so the nightly job backfills their history. `POST /api/strategies/[id]/backtest` runs the engine (`src/lib/strategies/backtest.ts`) over the stored daily bars and SPY: rules use what daily bars can compute (Close, SMA, EMA, RSI, Mom, ADV; `indicators.ts`), read at a check day's close and traded at the next open, long only, sized by max position, with a stop through the session and no fees. A crossing rule holds while the cross stays true. The result is plain numbers, a seeded Monte Carlo resample of daily returns, and a verdict with its reason. The examples stay in the client, labelled Sample, with illustrative backtests; a copy saved to the account backtests for real.
+  - ticker search (`/api/market-data/search`, launch item i35) never calls Massive when there is a database: it reads `symbol_directory` (`src/lib/markets/symbol-directory.ts`), every listed US company's ticker, name and venue from SEC EDGAR's `company_tickers_exchange.json`, which the nightly price job replaces first thing (one request, no key; a file with fewer than 5,000 usable tickers, or a failed fetch, keeps the old directory). Class shares are written BRK.B; preferreds, warrants and units are left out. SEC's file has few ETFs, so a search also looks at the benchmark ETFs and at the signed-in user's own holdings (by their directory name when they have one, since a holding imported without a description is named by its ticker), and at nothing else in the price store, whose tracked symbols would hint at what other users hold. Matches rank as the ticker itself, tickers starting with the query, names starting with it, a word starting with it, then names containing it; then the user's holdings, listed before OTC, larger companies first (SEC's file lists them by size, and each row keeps its place), shorter tickers. The pickers (`TickerSearchInput`: Research › Watchlist, Activity › Add transaction) and ⌘K show them; Enter takes a match only when it's highlighted, which happens by itself only for the exact ticker typed, so a ticker missing from the directory can still be typed. While the next search is on its way, the last matches stay up only if they still fit what's typed, so Enter in ⌘K never opens a match for an earlier query. The proxy leaves the route to its own session check, which limits it once per search (60 a minute per user); without a database the route falls back to Massive's search behind the same check.
   - every Massive request, from a route or the nightly ingest, first takes a slot from one budget of 5 calls in any rolling minute (`src/lib/providers/massive-quota.ts`, a sliding log shared by every deployment), kept in Upstash Redis when it is configured (per process otherwise). A route that finds it spent answers 429 without calling Massive; the ingest waits.
   - the securities master (`src/lib/markets/security-profile.ts`, launch item i34): the nightly price job fetches each tracked symbol's ticker reference data (a few a night, held first, every 90 days) into `securities` (name, type, SIC code, sector, industry). Sectors come from the SIC code (funds, which have none, from their names); Holdings and Today read names and sectors from there (`getSecurityProfiles`), and the old ticker → sector map in `src/lib/holdings/sector.ts` only covers symbols not fetched yet. The ticker → policy-bucket map in `src/lib/risk-policy/buckets.ts` stays: which bucket a holding belongs in is the user's policy, not reference data.
   - valuation snapshots (`src/lib/portfolio/valuation-snapshots.ts`): after the prices, the nightly `snapshots` job records each portfolio's value at the newest stored close, with its positions, in `portfolio_snapshots` / `portfolio_snapshot_positions`. A day is written only if the portfolio hasn't changed since its close (imports bump `portfolios.updated_at`), so the history is what was really held. `listUserSnapshots` reads a user's own snapshots.
@@ -21,12 +47,25 @@
   - returns from that history (`src/lib/performance/holdings-returns.ts`, loaded by `return-history.ts` for Performance › Returns): each step from one snapshot date to the next prices what was held at the first close with stored, split-adjusted closes at both ends, over the accounts' total value (cash earns nothing), and the steps chain into a time-weighted return. A step only prices what was already held, so money moving in or out, including transfers between the user's own accounts, is never a gain or a loss and needs no list of flows. All accounts together combine, by value, the accounts with a snapshot at each step's start. Benchmarks are the SPY, QQQ, IWM and DIA closes on the same dates, offered only when every date has one. Both sides are price returns: dividends aren't included.
   - an in-memory cache in front (`src/lib/cache`); pages keep their stored prices whenever quotes are unavailable.
   - a quote's change counts as today's move only for today's Eastern session (`isTodaysQuote`); earlier closes price positions without a "today" change.
-- Schwab integration is server-side:
-  - OAuth callback route exchanges auth code for tokens
-  - order route validates an app-level order payload and maps it to Schwab's order format
-  - tokens are not persisted yet.
-- Client-only durable state is limited to the settings store in Zustand with `persist`; only appearance, notifications, and tags are written to local storage.
-- Initial database content is loaded from mock data via `scripts/seed.ts`.
+
+## Linked accounts
+
+Plaid Link runs in the browser; the server exchanges the public token and stores the access token encrypted in `plaid_items` (`src/lib/plaid`). The user picks which accounts to sync, and each one syncs into its own portfolio: holdings are replaced, transactions upserted by Plaid's id. Syncs run on demand (Settings › Sync now), nightly (the `plaid` job) and when Plaid's webhook (`/api/plaid/webhook`, ES256-signed) reports new data. A connection that needs the user to sign in again reconnects through Link's update mode. Production has no Plaid settings yet: linking real accounts waits for Plaid's approval (launch items i09, i67).
+
+## Scheduled jobs and operations
+
+- Vercel Cron calls `GET /api/cron/daily` once a weekday (`vercel.json`), with `CRON_SECRET` as its bearer token. The route runs `expired-sessions`, `ask-history`, `plaid`, `prices`, `snapshots`, `alerts` and `email` in order (`src/lib/jobs/daily-jobs.ts`), one run at a time, and records each in `job_runs` (`src/lib/jobs/runner.ts`). The jobs that call another service (Plaid, Massive, Resend) each stop at a budget, and a test checks their worst cases together fit the route's five minutes (`docs/deployment.md` › Scheduled jobs).
+- `GET /api/cron/alpha-radar` runs `alpha-radar` every morning (launch item i60, `src/lib/alpha-radar/daily-refresh.ts`): every enabled tracked filer's new 13F filings from SEC, parsed into holdings, changes and a report. Filers are shared and only admins add them; each user follows the ones they want (`alpha_radar_filer_follows`), and Today's Alpha Radar card shows those.
+- Health: `/api/health` (the process, and the commit it runs), `/api/health/ready` (the database) and `/api/health/jobs` (each scheduled job, the backup included, on time or not, and whether the stored closes and snapshots are recent; `src/lib/health/job-health.ts`). The production monitor reads the last two every half hour (`docs/monitoring.md`); every deploy ends with a smoke test of the live site (`docs/deployment.md`).
+- Email (launch item i58, `src/lib/email`): the nightly `email` job, after `alerts`, sends each user who turned them on (`email_preferences`, Settings' Email card through `/api/email/preferences`) their unread alerts and, after the week's last market close (Friday's, or Thursday's when Friday is a holiday), the weekly review built by `src/lib/reviews` from their trade journal, through Resend's API with one `fetch` (`resend.ts`). Each email is claimed before it's sent and has an idempotency key, so Resend sends it once in 24 hours; an alert email's key is stored on its alerts (`email_batch`), so one whose outcome isn't known goes again later with the same alerts under the same key, and one Resend refuses frees its alerts. Unsubscribing needs no session: a mail app's one-click POST to `/api/email/unsubscribe`, or the button on `/unsubscribe`, with the random token from the link.
+- The nightly backup is a GitHub workflow, not a job here (`docs/backups.md`); it records its run in `job_runs`.
+
+## Integrations kept off
+
+- Schwab's OAuth and order routes (`src/app/api/schwab`, `src/lib/api/schwab`) exist but answer 404 unless `SCHWAB_INTEGRATION_ENABLED=1`, which production never sets. Their tokens aren't stored. Atlas places no orders (`docs/decisions.md`).
+
+## Alpha Radar
+
 - Alpha Radar v1 stays inside the Next.js application:
   - SEC EDGAR ingestion and 13F parsing live under `src/lib/sec`.
   - Diff, memo, refresh orchestration, repositories, and seed filers live under `src/lib/alpha-radar`.
@@ -61,7 +100,7 @@ Contract ownership:
 | `portfolio-diff-agent` | `compute-quarterly-diff` | `src/lib/alpha-radar` | `computeQuarterlyHoldingChanges` |
 | `semantic-search-agent` | `semantic-search` | `src/lib/alpha-radar/memory` | No v1 adapter; start with disabled/keyword fallback before pgvector |
 | `thesis-agent` | `generate-thesis-draft` | `src/lib/alpha-radar/thesis` | `generateAlphaRadarMemo` |
-| `notifier-agent` | `notify-material-change` | `src/lib/alerts` | `evaluateAlphaRadarAlerts` |
+| `notifier-agent` | `notify-material-change` | `src/lib/alerts` | `planAlertFirings`, run by the nightly `alerts` job (`src/lib/alerts/nightly.ts`) |
 | `ui-query-service` | `read-ui-index` | `src/lib/api/alpha-radar` | `src/lib/api/alpha-radar/queries.ts` |
 
 Shared job semantics:
@@ -87,7 +126,7 @@ Semantic memory:
 - `src/lib/alpha-radar/memory-repository.ts` owns persistence and exposes a repository contract with Drizzle and in-memory implementations.
 - `alpha_radar_semantic_chunks` stores the source kind/id, tracked filer, filing/report references, report period, title, text body, citation JSON, metadata JSON, keyword JSON, optional embedding JSON, provider/model/dimensions, and content hash.
 - Migration `0004_alpha_radar_semantic_memory.sql` enables pgvector only if the extension is available; it does not require pgvector for the table to exist. Keyword and metadata GIN indexes keep fallback search usable in local/dev environments.
-- Research renders a small evidence-memory search against live semantic memory when populated and falls back to local report chunks otherwise. Ask Ledger routes Alpha Radar/13F evidence questions to the same deterministic semantic-memory search surface.
+- Research renders a small evidence-memory search against live semantic memory when populated and falls back to local report chunks otherwise. Ask Ledger routes Alpha Radar/13F evidence questions to the same deterministic semantic-memory search surface. With `ASK_MODEL` set, Claude calls Ask's tools through AI Gateway and writes the answer (`src/lib/ask/server/claude.ts`, launch item i59); the rules planner (`src/lib/ask/planner.ts`) answers without it, when the gateway fails, and when Claude writes a figure no tool returned (`src/lib/ask/server/figures.ts`).
 
 Clone tracking:
 
@@ -120,7 +159,7 @@ Scheduled orchestration and delivery:
 - `src/lib/alpha-radar/scheduler.ts` implements the AR-131 scheduler boundary without adding a separate worker stack. It plans weekly, quarterly, and ad hoc Alpha Radar refreshes with deterministic schedule-window idempotency keys.
 - The default refresh pipeline queues ingestion, parser, diff, thesis, and notifier operations. Scheduling does not perform SEC calls directly; it only creates downstream job references that a future worker or cron runner can execute through the AR-125 contracts.
 - Quarterly windows respect the 13F availability lag instead of assuming quarter-end data is immediately tradable. Run history summaries collapse repeated failures into one actionable in-app status so retries do not spam duplicate alerts.
-- Delivery planning supports in-app, email, Slack, and Telegram channel preferences. The approved v2 implementation delivers in-app and leaves external channels adapter-gated until AR-133 locks provider credentials, destinations, and cost controls.
+- Delivery planning supports in-app, Slack, and Telegram channel preferences. The approved v2 implementation delivers in-app and leaves Slack and Telegram adapter-gated until AR-133 locks provider credentials, destinations, and cost controls. Alpha Radar alerts reach email with the user's other alerts (launch item i58), not through a channel of their own.
 - Settings persist `alphaRadarDelivery` preferences for scheduled updates, failure summaries, channel toggles, and ticker filters. Research renders scheduled run visibility so users can see due jobs, last run status, and delivery mode.
 
 Backtesting:

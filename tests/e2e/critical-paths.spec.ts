@@ -1,25 +1,25 @@
 import { test, expect } from '@playwright/test';
 import { clickUntil, gotoAppPage, reloadAppPage } from './helpers/app';
-import { signInAsFreshUser } from './helpers/users';
+import { databaseAuthEnabled, signInAsFreshUser } from './helpers/users';
 
 /**
  * Critical user-path E2E tests (AR-33).
  *
  * These cover end-to-end journeys that involve state mutation and cross-page
  * propagation, not just page-level rendering checks. They exercise:
- *   1. alert rule creation + zustand persist across reload
+ *   1. alert rule creation, kept with the account across reload
  *   2. preferences change → propagates to dashboard's LiveDataIndicator (AR-36)
  *   3. theme switch → html.dark class applied + persists
  *   4. multi-page navigation journey without breaking data
  */
 
 test.describe('Critical user paths', () => {
-    test('user creates an alert rule and it persists across reload', async ({ page }) => {
+    test('user creates an alert rule and it persists across reload', async ({ context, page }) => {
+        // Rules are kept with the account (launch item i57); this changes a copy of user A's.
+        test.skip(!databaseAuthEnabled, 'alert rules are kept with the account');
+        await signInAsFreshUser(context);
         await gotoAppPage(page, '/settings?tab=alerts');
-
-        // Seed rules should render up front. Use exact match + .first() because the
-        // rule name also appears in sr-only labels on the edit/delete buttons.
-        await expect(page.getByText('AAPL above $200', { exact: true }).first()).toBeVisible();
+        await expect(page.getByText('No alerts yet')).toBeVisible();
 
         // Open the "New Alert" dialog.
         await clickUntil(page.getByRole('button', { name: /New Alert/ }), async () => {
@@ -42,7 +42,7 @@ test.describe('Critical user paths', () => {
         await expect(page.getByRole('dialog')).not.toBeVisible();
         await expect(page.getByText(uniqueName, { exact: true }).first()).toBeVisible();
 
-        // Reload — zustand persist (localStorage) should restore the rule.
+        // Reload: the account has the rule.
         await reloadAppPage(page);
         await expect(page.getByText(uniqueName, { exact: true }).first()).toBeVisible();
     });

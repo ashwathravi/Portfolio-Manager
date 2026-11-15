@@ -2,6 +2,7 @@ import type { NextConfig } from "next";
 import { withSentryConfig } from "@sentry/nextjs/config";
 import { LEGACY_REDIRECTS } from "./src/lib/navigation";
 import { sentryBuildOptions } from "./src/lib/observability/sentry-build";
+import { ROBOTS_DIRECTIVES } from "./src/lib/security/search-engines";
 
 const nextConfig: NextConfig = {
   // Only set by the E2E "database down" server, which runs next to the main
@@ -50,6 +51,10 @@ const nextConfig: NextConfig = {
           {
             key: 'X-Permitted-Cross-Domain-Policies',
             value: 'none'
+          },
+          {
+            key: 'X-Robots-Tag',
+            value: ROBOTS_DIRECTIVES
           }
           // Content-Security-Policy is set per request by src/proxy.ts,
           // with a fresh script nonce each time.

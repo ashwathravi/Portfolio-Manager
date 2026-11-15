@@ -1,5 +1,6 @@
 import { storageScopeFor, userStorageKey } from '@/lib/storage/user-scope';
 import { tickerSchema } from '@/lib/validators/market-data';
+import { WATCH_ITEM_LIMITS } from '@/lib/validators/watchlist';
 
 /**
  * Watchlist — tickers the user is waiting on, with why and at what price.
@@ -65,7 +66,8 @@ export function addToWatchlist(
     const item: WatchItem = {
         id: `w-${ticker.toLowerCase()}-${opts.now.toString(36)}`,
         ticker,
-        companyName: opts.companyName?.trim() ?? '',
+        // A picked search match brings its name (launch item i35), cut to what the account keeps.
+        companyName: opts.companyName?.trim().slice(0, WATCH_ITEM_LIMITS.companyName) ?? '',
         reason: opts.reason?.trim() ?? '',
         notes: '',
         targetEntry: null,

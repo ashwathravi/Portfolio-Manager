@@ -18,7 +18,7 @@ export interface TodayHeroHolding {
 
 /**
  * Today's hero: the money. Net worth and today's change from the user's
- * own holdings (live quotes when available), with invested / cash /
+ * own holdings (delayed quotes or closes, labelled), with invested / cash /
  * positions beneath. No illustrative sparklines or hardcoded deltas —
  * the old stat row showed "+1.2% vs last month" regardless of data.
  * Without any positions it is the first-run card (FirstRunCard): the
@@ -28,11 +28,14 @@ export function TodayHero({
     holdings,
     cashTotal,
     accounts,
+    bankLinking,
 }: {
     holdings: TodayHeroHolding[];
     cashTotal: number;
     /** The user's accounts, for the first-run steps and the CSV import. */
     accounts: readonly ImportAccountOption[];
+    /** Whether the first-run steps may offer to connect a bank (x30). */
+    bankLinking: boolean;
 }) {
     const symbols = useMemo(() => holdings.map((h) => h.symbol).filter(Boolean), [holdings]);
     const { quotes, isFetching, isError, refreshMs, refetch, lastUpdatedAt } = useAutoRefreshQuotes(symbols);
@@ -76,12 +79,13 @@ export function TodayHero({
                 refreshMs={refreshMs}
                 lastUpdatedAt={lastUpdatedAt}
                 onRefresh={() => void refetch()}
+                quotes={quotes}
             />
         </div>
     );
     const changePct = netWorth - change > 0 ? (change / (netWorth - change)) * 100 : 0;
 
-    if (holdings.length === 0) return <FirstRunCard accounts={accounts} cashTotal={cashTotal} />;
+    if (holdings.length === 0) return <FirstRunCard accounts={accounts} cashTotal={cashTotal} bankLinking={bankLinking} />;
 
     return (
         <section className="pm-card pm-today-hero" data-testid="today-hero" aria-label="Net worth">
@@ -104,7 +108,7 @@ export function TodayHero({
                     ) : live ? (
                         "Prices as of the last close"
                     ) : (
-                        "Today's change appears when live quotes arrive"
+                        "Today's change appears once prices arrive"
                     )}
                 </p>
             </div>

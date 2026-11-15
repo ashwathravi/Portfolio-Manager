@@ -24,12 +24,16 @@ import { requirePageUserId } from '@/lib/auth/request-user';
 import { loadQuotes } from '@/lib/services/market-data-service';
 import { buildDashboardPortfoliosQuery, buildUserTransactionsQuery } from '@/lib/portfolio-repository';
 import { toActivityRows, type TransactionRowInput } from '@/lib/portfolio/activity';
+import { toOptionRiskPosition, type LoadedOptionPosition } from '@/lib/portfolio/option-positions';
+import { loadOptionPositions } from '@/lib/portfolio/option-positions-store';
 import { toTodayActivity } from '@/lib/today/rows';
 import { getSecurityProfiles } from '@/lib/markets/price-store';
 import { holdingName, loadSecurityProfiles } from '@/lib/markets/security-profile';
 import { isDatabaseConfigured } from '@/db/connection-options';
 import { loadTradeJournalForPage } from '@/lib/journal/server';
 import { inPatternWindow } from '@/lib/patterns/generate';
+import { hasTrackedFilers } from '@/lib/alpha-radar/follows';
+import { bankLinkingAvailable } from '@/lib/plaid/availability';
 
 /**
  * Today (/).
@@ -43,7 +47,9 @@ import { inPatternWindow } from '@/lib/patterns/generate';
  *      recent activity — all from the database.
  *   5. The weekly review and pattern feed from the user's closed trades
  *      (launch item i51), once they have some.
- *   6. Review & research — example-data cards, labelled and hideable.
+ *   6. Alpha Radar from the filers the user follows (launch item i60), once
+ *      Atlas tracks any; until then it's one of the examples.
+ *   7. Review & research — example-data cards, labelled and hideable.
  *
  * Every figure in 1–4 comes from the user's portfolios and transactions;
  * the risk policy is the user's saved one, evaluated on their holdings,
@@ -76,7 +82,7 @@ export default async function Today() {
   // Warm quotes for the first paint; the hero keeps polling client-side.
   // Without market data the stored prices stand.
   const heldSymbols = allPortfolios.flatMap((p) => p.holdings.map((h) => h.symbol));
-  const [liveQuotes, profiles, theses, riskPolicy, { journal }] = await Promise.all([
+  const [liveQuotes, profiles, theses, riskPolicy, { journal }, alphaRadarLive, optionPositions] = await Promise.all([
     loadQuotes(heldSymbols),
     // Company names from the securities master (launch item i34).
     loadSecurityProfiles(heldSymbols, getSecurityProfiles),
@@ -91,6 +97,20 @@ export default async function Today() {
     // Closed trades for the weekly review and patterns; without them (or
     // when they can't be read) the example ones stand in.
     loadTradeJournalForPage(userId, { accounts: allPortfolios, activity }),
+    // Filers to follow (launch item i60); without any, Alpha Radar stays an example.
+    isDatabaseConfigured()
+      ? hasTrackedFilers().catch((e) => {
+        console.warn('Today: tracked filers check failed — Alpha Radar shows examples.', e);
+        return false;
+      })
+      : false,
+    // The option positions the user holds, for the options checks (launch item i63).
+    isDatabaseConfigured()
+      ? loadOptionPositions(userId, { quotes: loadQuotes }).catch((e): LoadedOptionPosition[] => {
+        console.warn('Today: option positions fetch failed — the options checks see none.', e);
+        return [];
+      })
+      : [],
   ]);
   const closedTrades = journal && journal.entries.length > 0 ? journal.entries : undefined;
   const patternTrades = closedTrades && inPatternWindow(closedTrades, new Date());
@@ -133,10 +153,13 @@ export default async function Today() {
     profiles,
     activity,
     theses,
+    options: optionPositions.map(toOptionRiskPosition),
     asOf: new Date(),
   });
   // Measured as of now: the trading-activity window ends today, not at the last trade.
   const riskPolicySummary = evaluateRiskPolicy(policyPortfolio, riskPolicy, { asOf: new Date() });
+  // Stocks or options: something for the policy to check.
+  const hasPolicyPositions = allHoldings.length > 0 || policyPortfolio.options.length > 0;
 
   return (
     <div className="pm-dashboard-stack p-6">
@@ -147,15 +170,18 @@ export default async function Today() {
           holdings={heroHoldings}
           cashTotal={cashTotal}
           accounts={allPortfolios.map((p) => ({ id: p.id, name: p.name }))}
+          // Decided here, on the server: the first-run steps offer to connect
+          // a bank only where Settings can (x30).
+          bankLinking={bankLinkingAvailable()}
         />
-        {/* Policy checks only mean something once there are holdings to check. */}
+        {/* Policy checks only mean something once there are positions to check. */}
         <TodayTriage
-          policyActions={allHoldings.length > 0 ? riskPolicySummary.nextActions : []}
+          policyActions={hasPolicyPositions ? riskPolicySummary.nextActions : []}
           reviewEntries={closedTrades}
         />
       </div>
 
-      {allHoldings.length > 0 && <PolicyStrip summary={riskPolicySummary} portfolio={policyPortfolio} />}
+      {hasPolicyPositions && <PolicyStrip summary={riskPolicySummary} portfolio={policyPortfolio} />}
 
       <Suspense fallback={null}>
         <TodayEquityCurve userId={userId} />
@@ -183,14 +209,14 @@ export default async function Today() {
         </section>
       )}
 
+      {alphaRadarLive && <AlphaRadarDashboardCard following />}
+
       <SampleGate>
         <section className="pm-today-examples" aria-labelledby="pm-today-examples-head" data-testid="today-examples">
           <header className="pm-today-section-head">
             <h2 id="pm-today-examples-head" className="pm-today-section-title">Review &amp; research</h2>
             <SampleDataNotice>
-              {closedTrades
-                ? 'The theses and Alpha Radar below use example data.'
-                : 'The weekly review, patterns, theses, and Alpha Radar below use example data.'}
+              {exampleNotice(Boolean(closedTrades), !alphaRadarLive)}
             </SampleDataNotice>
           </header>
           {!closedTrades && (
@@ -202,10 +228,17 @@ export default async function Today() {
             {!closedTrades && <PatternFeed />}
             <TodayTheses limit={4} />
           </div>
-          <AlphaRadarDashboardCard />
+          {!alphaRadarLive && <AlphaRadarDashboardCard />}
         </section>
       </SampleGate>
     </div>
   );
+}
+
+/** Which of the cards below the notice use example data. */
+function exampleNotice(closedTrades: boolean, alphaRadarExample: boolean): string {
+  const cards = [...(closedTrades ? [] : ['weekly review', 'patterns']), 'theses', ...(alphaRadarExample ? ['Alpha Radar'] : [])];
+  const list = cards.length === 1 ? cards[0] : `${cards.slice(0, -1).join(', ')}${cards.length > 2 ? ',' : ''} and ${cards.at(-1)}`;
+  return `The ${list} below use example data.`;
 }
 

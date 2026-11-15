@@ -2,25 +2,31 @@
  * AR-114 — Weekly review types.
  *
  * A weekly review is a short, auto-generated summary of the user's
- * trading activity between Monday 00:00 local and Friday 16:00 local
- * (US-Eastern once live brokerage data carries tz info — local for
- * the seed-journal era). The shape is serialisable; everything but
- * the id is derived from the journal + adherence rules.
+ * trading activity in one New York calendar week, Monday 00:00 ET up to
+ * the next Monday 00:00 ET (src/lib/reviews/weeks.ts). The shape is
+ * serialisable; everything but the id is derived from the journal +
+ * adherence rules.
  */
 
 export interface WeekBounds {
-    /** ISO date for the week's Monday at 00:00 local time. */
+    /** The week's Monday at 00:00 ET, as an ISO instant: the first
+     *  moment a trade with a time counts in it. */
     weekStart: string;
-    /** ISO date for the week's Friday at 16:00 local time. Closes
-     *  before the weekend so "This week" includes the Friday bell. */
+    /** The next Monday at 00:00 ET: the first moment that counts in the
+     *  week after, not in this one. Weeks meet, so a trade made on a
+     *  Friday evening or a weekend is in exactly one. */
     weekEnd: string;
+    /** When the week's last session closed (the NYSE calendar: usually
+     *  Friday 4:00 PM ET, Thursday's close when Friday is a holiday). The
+     *  week's review is ready from then. */
+    closesAt: string;
     /** Stable key, e.g. `"wk:2026-04-20"` — the Monday date in
      *  `YYYY-MM-DD` form. Used as the localStorage map key and as
      *  the review id. Avoids the ISO-week pitfalls around year
      *  boundaries (W52/W53/W01 etc.) by just using the Monday date. */
     id: string;
-    /** `YYYY-MM-DD` of the week's Monday and Friday: the days a trade
-     *  stored with a date and no time (launch item i51) counts on. */
+    /** `YYYY-MM-DD` of the week's Monday and Sunday, Eastern: the days a
+     *  trade stored with a date and no time (launch item i51) counts on. */
     firstDay: string;
     lastDay: string;
 }

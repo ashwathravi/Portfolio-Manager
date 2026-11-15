@@ -1,8 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { gotoAppPage, reloadAppPage } from './helpers/app';
-import { signInAsFreshUser } from './helpers/users';
-
-const databaseAuthEnabled = Boolean(process.env.CI || process.env.E2E_DATABASE_AUTH === '1');
+import { databaseAuthEnabled, signInAsFreshUser, signInAsNewUser } from './helpers/users';
 // User B's account and transaction, which no one else may touch.
 const OTHER_USERS_ACCOUNT = '00000000-0000-4000-8000-000000000009';
 const OTHER_USERS_TRANSACTION = '00000000-0000-4000-8000-000000000209';
@@ -30,13 +28,35 @@ test.describe('Portfolio › Activity', () => {
         await expect(page.getByText('Fidelity Individual')).toHaveCount(0);
     });
 
-    test('without an account, adding transactions points at adding one first', async ({ page }) => {
+    test('regression (x30): without an account, adding transactions starts with adding one by hand, not a Connect link that loops', async ({ context, page }) => {
+        // E2E runs without Plaid's keys, as production does until they're
+        // set: Settings says bank linking isn't set up and points back at
+        // Accounts, so "Connect an account" went round in a circle. With a
+        // database, a user with no accounts yet (fixture user A has some).
+        if (await signInAsNewUser(context)) await gotoAppPage(page, '/portfolios/activity');
         const empty = page.getByTestId('activity-empty');
-        test.skip(!(await empty.isVisible()), 'this database has transactions');
-        const addFirst = empty.getByRole('link', { name: 'Add an account first' });
-        const add = empty.getByRole('button', { name: 'Add transaction' });
-        await expect(addFirst.or(add)).toBeVisible();
-        if (await addFirst.isVisible()) await expect(addFirst).toHaveAttribute('href', '/portfolios/accounts');
+        await expect(empty).toContainText('They go in an account, so add one first.');
+        await expect(empty).not.toContainText('connected accounts');
+        await expect(empty.getByRole('link', { name: 'Connect an account' })).toHaveCount(0);
+        await expect(empty.locator('a[href^="/settings"]')).toHaveCount(0);
+        await expect(empty.getByRole('button', { name: 'New account' })).toHaveClass(/pm-btn-primary/);
+    });
+
+    test('x30: a new user adds an account from the empty state, then adding transactions leads', async ({ context, page }) => {
+        test.skip(!databaseAuthEnabled, 'requires the database-auth E2E mode');
+        await signInAsNewUser(context);
+        await gotoAppPage(page, '/portfolios/activity');
+        const empty = page.getByTestId('activity-empty');
+        await empty.getByRole('button', { name: 'New account' }).click();
+        const dialog = page.getByRole('dialog');
+        await dialog.getByLabel('Name').fill('Brokerage');
+        await dialog.getByRole('button', { name: 'Add account' }).click();
+        await expect(dialog).toBeHidden();
+        // No transactions yet: the empty state stays, now with an account to add them to.
+        await expect(empty.getByRole('button', { name: 'Add transaction' })).toHaveClass(/pm-btn-primary/);
+        await expect(empty.getByRole('button', { name: 'Import CSV' })).toBeEnabled();
+        await expect(empty.getByRole('button', { name: 'New account' })).toHaveCount(0);
+        await expect(empty).not.toContainText('add one first');
     });
 
     test('when transactions exist, side filters narrow the table', async ({ page }) => {
@@ -91,6 +111,33 @@ test.describe('Portfolio › Activity — recording transactions', () => {
         await expect(activityRow(page, 'Starter position')).toContainText('CRM');
     });
 
+    test('the symbol can be found by company name (i35)', async ({ page }) => {
+        await page.getByRole('button', { name: 'Add transaction' }).click();
+        const dialog = page.getByRole('dialog');
+        const symbol = dialog.getByLabel('Symbol');
+        await symbol.fill('micro');
+        // The user holds MSFT: the match says so.
+        const option = dialog.getByRole('option', { name: /MSFT\s*MICROSOFT CORP\s*In your accounts/ });
+        await option.click();
+        await expect(symbol).toHaveValue('MSFT');
+        await expect(dialog.getByRole('listbox', { name: 'Matching tickers' })).toBeHidden();
+
+        // Escape closes the suggestions, not the dialog.
+        await symbol.fill('apple');
+        await expect(dialog.getByRole('option', { name: /AAPL/ })).toBeVisible();
+        await symbol.press('Escape');
+        await expect(dialog.getByRole('listbox', { name: 'Matching tickers' })).toBeHidden();
+        await expect(dialog).toBeVisible();
+        await symbol.fill('MSFT');
+
+        await dialog.getByLabel('Quantity').fill('2');
+        await dialog.getByLabel('Price ($)').fill('400');
+        await dialog.getByLabel('Note (optional)').fill('Picked from search');
+        await dialog.getByRole('button', { name: 'Add buy' }).click();
+        await expect(dialog).toBeHidden();
+        await expect(activityRow(page, 'Picked from search')).toContainText('MSFT');
+    });
+
     test('a deposit takes an amount, and a buy without a price is explained', async ({ page }) => {
         await page.getByRole('button', { name: 'Add transaction' }).click();
         const dialog = page.getByRole('dialog');
@@ -107,6 +154,43 @@ test.describe('Portfolio › Activity — recording transactions', () => {
         await expect(dialog).toBeHidden();
         await expect(activityRow(page, 'Monthly saving')).toContainText('DEPOSIT');
         await expect(activityRow(page, 'Monthly saving')).toContainText('$2,000');
+    });
+
+    test('money moved between two accounts is a transfer, not money in or out (launch item i80)', async ({ page }) => {
+        const addCash = async (type: 'DEPOSIT' | 'WITHDRAWAL', account: string, date: string, amount: string, note: string) => {
+            await page.getByRole('button', { name: 'Add transaction' }).click();
+            const dialog = page.getByRole('dialog');
+            await dialog.getByLabel('Type').selectOption(type);
+            await dialog.getByLabel('Account').selectOption({ label: account });
+            await dialog.getByLabel('Date').fill(date);
+            await dialog.getByLabel('Amount ($)').fill(amount);
+            await dialog.getByLabel('Note (optional)').fill(note);
+            await dialog.getByRole('button', { name: `Add ${type.toLowerCase()}` }).click();
+            await expect(dialog).toBeHidden();
+            await expect(activityRow(page, note)).toHaveCount(1);
+        };
+        await addCash('WITHDRAWAL', 'Main Portfolio', '2026-03-02', '2,500', 'Moving to growth');
+        await addCash('DEPOSIT', 'Growth Portfolio', '2026-03-04', '2,500', 'Arrived from main');
+        await addCash('DEPOSIT', 'Main Portfolio', '2026-03-05', '1,000', 'Paycheck');
+
+        await expect(activityRow(page, 'Moving to growth')).toContainText('TRANSFER');
+        await expect(activityRow(page, 'Moving to growth')).toContainText('Main Portfolio to Growth Portfolio');
+        await expect(activityRow(page, 'Arrived from main')).toContainText('TRANSFER');
+        await expect(activityRow(page, 'Arrived from main')).toContainText('Growth Portfolio from Main Portfolio');
+        await expect(activityRow(page, 'Paycheck')).toContainText('DEPOSIT');
+        // Across all accounts only the paycheck came in.
+        const net = page.getByTestId('activity-net-deposits');
+        await expect(net).toHaveText('+$1,000');
+        // For Main Portfolio alone, the transfer went out of it.
+        await page.getByRole('combobox', { name: 'Account' }).selectOption('Main Portfolio');
+        await expect(net).toHaveText('−$1,500');
+
+        // Today lists it once, as a transfer.
+        await gotoAppPage(page, '/');
+        const recent = page.getByRole('region', { name: 'Recent activity' });
+        await expect(recent.getByText('Main Portfolio to Growth Portfolio', { exact: false })).toHaveCount(1);
+        await expect(recent.getByText('Transfer', { exact: true })).toHaveCount(1);
+        await expect(recent.getByText('Withdrawal', { exact: true })).toHaveCount(0);
     });
 
     test('a broker CSV imports once: importing it again adds nothing', async ({ page }) => {

@@ -4,6 +4,7 @@ import {
     alphaRadarQueryKeys,
     fetchAlphaRadarFilers,
     fetchAlphaRadarHoldings,
+    fetchAlphaRadarReports,
     refreshAlphaRadarFiler,
     searchAlphaRadarMemory,
 } from './queries';
@@ -26,6 +27,23 @@ describe('alphaRadarQueryKeys', () => {
             ['alpha-radar', 'filers', 'filer-1', 'holdings', 'latest', '2025-Q4'],
         );
     });
+
+    test('keys every filer\'s changes under one key, which watchlist and thesis saves mark stale (i61)', () => {
+        assert.deepStrictEqual(alphaRadarQueryKeys.changes('filer-1'), ['alpha-radar', 'changes', 'filer-1', 'latest']);
+        assert.deepStrictEqual(alphaRadarQueryKeys.changes('filer-1').slice(0, 2), [...alphaRadarQueryKeys.allChanges()]);
+    });
+
+    test('keys reports from several filers by the filers, in any order', () => {
+        assert.deepStrictEqual(alphaRadarQueryKeys.reports(), ['alpha-radar', 'reports', 'all', 'latest']);
+        assert.deepStrictEqual(
+            alphaRadarQueryKeys.reports(undefined, undefined, ['filer-2', 'filer-1']),
+            ['alpha-radar', 'reports', 'all', 'latest', 'filers', 'filer-1,filer-2'],
+        );
+        assert.deepStrictEqual(
+            alphaRadarQueryKeys.reports(undefined, undefined, ['filer-1', 'filer-2']),
+            alphaRadarQueryKeys.reports(undefined, undefined, ['filer-2', 'filer-1']),
+        );
+    });
 });
 
 describe('Alpha Radar API fetchers', () => {
@@ -34,6 +52,12 @@ describe('Alpha Radar API fetchers', () => {
 
         assert.strictEqual(calls[0].url, '/api/alpha-radar/filers');
         assert.strictEqual(filers[0].name, 'Berkshire Hathaway Inc');
+    });
+
+    test('asks for the reports of the filers followed by ID', async () => {
+        await fetchAlphaRadarReports({ trackedFilerIds: ['filer-1', 'filer-2'] });
+
+        assert.strictEqual(calls[0].url, '/api/alpha-radar/reports?trackedFilerIds=filer-1%2Cfiler-2');
     });
 
     test('encodes holdings route parameters', async () => {

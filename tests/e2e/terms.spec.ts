@@ -18,7 +18,8 @@ test.describe('Terms of Service', () => {
     await expect(page).toHaveTitle('Terms of Service | Atlas Wealth');
     await expect(page.getByRole('heading', { level: 1 })).toHaveCount(1);
     await expect(page.getByRole('heading', { level: 1, name: 'Terms of Service' })).toBeVisible();
-    await expect(page.getByText(/^Last updated /)).toBeVisible();
+    // The page's LAST_UPDATED, which moves whenever its text changes.
+    await expect(page.getByText('Last updated November 14, 2026', { exact: true })).toBeVisible();
     await expect(page.getByRole('navigation', { name: 'Main navigation' })).toHaveCount(0);
     await expect(page.getByTestId('app-footer')).toHaveCount(0);
   });
@@ -49,6 +50,9 @@ test.describe('Terms of Service', () => {
       await expect(advice).toContainText(surface);
     }
     await expect(advice).toContainText('We are not a registered investment adviser, broker-dealer or financial planner');
+    // Launch item i59: an answer Claude writes can be wrong.
+    await expect(advice).toContainText('Ask’s answers can be written by Claude, an AI model, and Ask says so under its question box when they are.');
+    await expect(advice).toContainText('check an answer against your own records before relying on it');
   });
 
   test('says Atlas never places trades or moves money, and drafted orders are plans', async ({ page }) => {
@@ -58,13 +62,15 @@ test.describe('Terms of Service', () => {
     await expect(trades).toContainText('Accounts you link through Plaid are read-only to us');
   });
 
-  test('credits its data sources and says prices are closes, not live quotes', async ({ page }) => {
+  test('credits its data sources and says prices are closes or delayed quotes, never live', async ({ page }) => {
     const data = page.getByRole('region', { name: 'Market data and accuracy' });
     await expect(data.getByRole('link', { name: 'Massive' })).toHaveAttribute('href', 'https://massive.com');
+    await expect(data.getByRole('link', { name: 'Finnhub' })).toHaveAttribute('href', 'https://finnhub.io');
     await expect(data.getByRole('link', { name: 'SEC EDGAR' })).toHaveAttribute('href', 'https://www.sec.gov/edgar');
     await expect(data.getByRole('link', { name: 'Plaid End User Privacy Policy' }))
       .toHaveAttribute('href', 'https://plaid.com/legal/#end-user-privacy-policy');
-    await expect(data).toContainText('the latest closing prices we’ve stored, not live quotes');
+    // Launch item i33: during the trading day a price can be a delayed quote.
+    await expect(data).toContainText('They are never live quotes: each is either the latest closing price we’ve stored or, during the trading day, a quote delayed by a minute or more, and says which it is and when it’s from.');
     await expect(data).toContainText('Check the figures that matter with your broker or the source before you act on them.');
   });
 

@@ -10,7 +10,9 @@ import { databaseAuthEnabled, signInAsFreshUser, signInAsNewUser } from './helpe
  *   Top bar ............... title "Today", greeting · date · market state,
  *                           "New order" → /execution
  *   Hero .................. net worth + today's change from real holdings
- *                           (empty state with "Connect an account" when none)
+ *                           (first-run steps when none: add an account by
+ *                           hand, and "Connect an account" only where bank
+ *                           linking is set up)
  *   Needs your attention .. ranked triage list (policy, theses, review)
  *   Risk policy strip ..... one line; full checks behind a disclosure
  *                           (only when there are holdings)
@@ -68,9 +70,22 @@ test.describe('Today page', () => {
         await expect(page.locator('.pm-grid-stats')).toHaveCount(0);
     });
 
-    test('empty book: the hero offers to connect an account; no policy or holdings cards', async ({ page }) => {
+    test('regression (x30): without bank linking, an empty book offers to add an account by hand, not a Connect link that loops; no policy or holdings cards', async ({ page }) => {
         test.skip(await hasHoldings(page), 'database has holdings');
-        await expect(page.getByTestId('today-hero').getByRole('link', { name: 'Connect an account' })).toHaveAttribute('href', '/settings#accounts');
+        // E2E runs without Plaid's keys, as production does until they're
+        // set. Settings then says bank linking isn't set up and points back
+        // at Accounts, so "Connect an account" went round in a circle.
+        const hero = page.getByTestId('today-hero');
+        await expect(hero.getByRole('button', { name: 'New account' })).toBeVisible();
+        await expect(hero.getByRole('link', { name: 'Connect an account' })).toHaveCount(0);
+        await expect(hero.locator('a[href^="/settings"]')).toHaveCount(0);
+        // Nor anywhere else on the page: the example section's notice led
+        // there too, and leads to Accounts instead.
+        await expect(page.locator('a[href="/settings#accounts"]')).toHaveCount(0);
+        const notice = page.getByTestId('today-examples').getByTestId('sample-data-notice');
+        if (await notice.count()) {
+            await expect(notice.getByRole('link', { name: 'Add an account' })).toHaveAttribute('href', '/portfolios/accounts');
+        }
         await expect(page.getByTestId('policy-strip')).toHaveCount(0);
         await expect(page.getByText('$10,050')).toHaveCount(0);
     });
@@ -504,7 +519,7 @@ test.describe('Today watchlist', () => {
 
     test('successful route-shaped quotes render price and change; missing symbols keep dashes', async ({ page }) => {
         await page.route('**/api/market-data/quotes**', (route) => route.fulfill({ status: 200, json: { data: [
-            { symbol: 'COIN', price: 123.45, change: -2.5, changePercent: -1.98, timestamp: new Date().toISOString(), isRealtime: false },
+            { symbol: 'COIN', price: 123.45, change: -2.5, changePercent: -1.98, timestamp: new Date().toISOString(), kind: 'close', isRealtime: false },
         ] } }));
         await gotoAppPage(page, '/');
         const card = page.getByTestId('today-watchlist');
@@ -519,7 +534,7 @@ test.describe('Today watchlist', () => {
     test('regression: an earlier session\'s close shows its price but not its move', async ({ page }) => {
         const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
         await page.route('**/api/market-data/quotes**', (route) => route.fulfill({ status: 200, json: { data: [
-            { symbol: 'COIN', price: 123.45, change: -2.5, changePercent: -1.98, timestamp: threeDaysAgo, isRealtime: false },
+            { symbol: 'COIN', price: 123.45, change: -2.5, changePercent: -1.98, timestamp: threeDaysAgo, kind: 'close', isRealtime: false },
         ] } }));
         await gotoAppPage(page, '/');
         const coin = page.getByTestId('today-watchlist').locator('li').filter({ has: page.getByRole('link', { name: /COIN/ }) });
@@ -543,7 +558,7 @@ test.describe('Today › Top holdings', () => {
     });
 
     const aapl = (overrides: Record<string, unknown>) => ({
-        data: [{ symbol: 'AAPL', price: 190, change: 2, changePercent: 1.06, timestamp: new Date().toISOString(), isRealtime: false, ...overrides }],
+        data: [{ symbol: 'AAPL', price: 190, change: 2, changePercent: 1.06, timestamp: new Date().toISOString(), kind: 'close', isRealtime: false, ...overrides }],
     });
     const aaplToday = (page: import('@playwright/test').Page) =>
         page.getByRole('region', { name: 'Top holdings' }).locator('tbody tr').filter({ hasText: 'AAPL' }).getByTestId('top-holding-today');
@@ -571,10 +586,46 @@ test.describe('Today › Top holdings', () => {
 
 test.describe('Today › Net worth hero', () => {
     const HELD = ['AAPL', 'MSFT', 'NVDA', 'GOOGL', 'TSLA', 'AMZN'];
-    const quote = (symbol: string) => ({ symbol, price: 100, change: 1, changePercent: 1, timestamp: new Date().toISOString(), isRealtime: false });
+    const quote = (symbol: string) => ({ symbol, price: 100, change: 1, changePercent: 1, timestamp: new Date().toISOString(), kind: 'close', isRealtime: false });
 
     test.beforeEach(async ({ page }) => {
         await page.route('**/api/market-data/historical**', (route) => route.fulfill({ status: 200, json: { data: [] } }));
+    });
+
+    // Launch item i33: Atlas has no real-time feed, so the line under the
+    // hero says what the prices are and never calls them live.
+    const etClock = (at: Date) => new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit' }).format(at);
+
+    test('with holdings: delayed quotes are labelled with the oldest one\'s time, and move today\'s change', async ({ page }) => {
+        const quotedAt = new Date();
+        const older = new Date(quotedAt.getTime() - 60_000);
+        await page.route('**/api/market-data/quotes**', (route) => route.fulfill({ status: 200, json: { data: HELD.map((symbol, i) => ({
+            ...quote(symbol), kind: 'delayed', timestamp: (i === 1 ? older : quotedAt).toISOString(),
+        })) } }));
+        await gotoAppPage(page, '/');
+        test.skip(!(await hasHoldings(page)), 'no holdings in this database');
+        const freshness = page.getByTestId('price-freshness');
+        await expect(freshness).toContainText(new RegExp(`Delayed quotes, as of (\\w{3} \\d{1,2} )?${etClock(older)} ET`));
+        await expect(freshness).not.toContainText(/live/i);
+        await expect(page.getByTestId('today-change')).toHaveText(/today$/);
+    });
+
+    test('with holdings: closes are labelled with their session, and a mix says how many are delayed', async ({ page }) => {
+        const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
+        await page.route('**/api/market-data/quotes**', (route) => route.fulfill({ status: 200, json: { data: HELD.map((symbol) => ({
+            ...quote(symbol), timestamp: threeDaysAgo,
+        })) } }));
+        await gotoAppPage(page, '/');
+        test.skip(!(await hasHoldings(page)), 'no holdings in this database');
+        await expect(page.getByTestId('price-freshness')).toContainText(/Closing prices from [A-Z][a-z]{2} \d{1,2}/);
+        await expect(page.getByTestId('today-change')).toHaveText('Prices as of the last close');
+
+        await page.unroute('**/api/market-data/quotes**');
+        await page.route('**/api/market-data/quotes**', (route) => route.fulfill({ status: 200, json: { data: HELD.map((symbol, i) => ({
+            ...quote(symbol), ...(i === 0 ? { kind: 'delayed' } : { timestamp: threeDaysAgo }),
+        })) } }));
+        await gotoAppPage(page, '/');
+        await expect(page.getByTestId('price-freshness')).toContainText(`Delayed quotes for 1 of ${HELD.length}, last closes for the rest`);
     });
 
     test('with holdings: every position moved today, so the headline is the portfolio\'s move', async ({ page }) => {
@@ -593,6 +644,11 @@ test.describe('Today › Net worth hero', () => {
         await page.route('**/api/market-data/quotes**', (route) => route.fulfill({ status: 200, json: { data: HELD.map(quote) } }));
         const netWorth = async () => {
             await gotoAppPage(page, '/');
+            // The page arrives valued at the prices stored with the holdings
+            // (E2E has no market data), and the hero swaps in the quotes above
+            // when they land. Read the total once the line under it describes
+            // them: a load read before they landed was off by the difference.
+            await expect(page.getByTestId('price-freshness')).toContainText('Closing prices');
             const text = await page.getByTestId('today-networth').textContent();
             return Number((text ?? '').replace(/[$,]/g, ''));
         };
@@ -617,6 +673,35 @@ test.describe('Today › Net worth hero', () => {
     });
 });
 
+// Launch item i63: Today's checks count the option positions the user holds.
+test.describe('Today › option positions in the risk policy', () => {
+    test.skip(!(process.env.CI || process.env.E2E_DATABASE_AUTH === '1'), 'needs the database-auth E2E mode');
+
+    test('regression: an account of cash and options gets the policy checks, with the options in them', async ({ context, page }) => {
+        await signInAsNewUser(context);
+        await gotoAppPage(page, '/');
+        const created = await page.request.post('/api/portfolios', { data: { name: 'Options only', cashBalance: 10_000 } });
+        const { id: portfolioId } = (await created.json()).data;
+        // $5,000 of premium in $15,000: far over the 5% options cap.
+        const added = await page.request.post('/api/portfolio/options', {
+            data: { portfolioId, position: { underlying: 'SPY', contractType: 'call', strike: 550, expiry: '2027-12-17', quantity: 1, premium: 50 } },
+        });
+        expect(added.status()).toBe(201);
+
+        await reloadAppPage(page);
+        const strip = page.getByTestId('policy-strip');
+        await expect(strip).toBeVisible();
+        await expect(page.getByTestId('today-triage-item').filter({ hasText: /option/i }).first()).toBeVisible();
+        await expect(async () => {
+            if ((await strip.getAttribute('open')) === null) await strip.locator('summary').click();
+            await expect(page.getByTestId('risk-policy-dashboard')).toBeVisible({ timeout: 1_500 });
+        }).toPass({ timeout: 15_000 });
+        const options = page.locator('[data-testid="risk-policy-dimension"][data-policy-id="speculative_options_exposure"]');
+        await expect(options).toHaveAttribute('data-status', 'breached');
+        await expect(options).toContainText('$5,000');
+    });
+});
+
 // Launch item i43: a new user's Today walks them to an account with positions.
 test.describe('Today › First run', () => {
     test.skip(!(process.env.CI || process.env.E2E_DATABASE_AUTH === '1'), 'needs the database-auth E2E mode');
@@ -633,7 +718,10 @@ test.describe('Today › First run', () => {
         await expect(steps(page)).toHaveCount(2);
         await expect(steps(page).nth(0)).toHaveAttribute('data-done', 'false');
         await expect(steps(page).nth(0)).toContainText('Add an account');
-        await expect(page.getByTestId('today-hero').getByRole('link', { name: 'Connect an account' })).toHaveAttribute('href', '/settings#accounts');
+        // Without bank linking (E2E has no Plaid keys, x30) the account is
+        // added by hand; no step sends the user to Settings to connect one.
+        const connect = page.getByTestId('today-hero').getByRole('link', { name: 'Connect an account' });
+        await expect(connect).toHaveCount(0);
 
         // 1. An account, with its cash.
         await firstRun(page).getByRole('button', { name: 'New account' }).click();
@@ -643,6 +731,8 @@ test.describe('Today › First run', () => {
         await dialog.getByRole('button', { name: 'Add account' }).click();
         await expect(steps(page).nth(0)).toHaveAttribute('data-done', 'true');
         await expect(steps(page).nth(0)).toContainText('1 account, $1,000.00 in cash.');
+        await expect(steps(page).nth(1).getByRole('button', { name: 'Import CSV' })).toBeVisible();
+        await expect(connect).toHaveCount(0);
 
         // 2. Positions from a broker's CSV, into that account.
         await firstRun(page).getByRole('button', { name: 'Import CSV' }).click();
@@ -678,6 +768,13 @@ test.describe('Today › First run', () => {
         await examples.getByRole('button', { name: 'Show example data' }).click();
         await expect(page.getByTestId('today-examples')).toBeVisible();
         await expect(examples).toHaveCount(0);
+
+        // Regression (x30): the examples' notice offered "Connect an account",
+        // a link to the Settings card that says bank linking isn't set up
+        // (E2E has no Plaid keys, as production until they're set).
+        const notice = page.getByTestId('today-examples').getByTestId('sample-data-notice');
+        await expect(notice.getByRole('link', { name: 'Add an account' })).toHaveAttribute('href', '/portfolios/accounts');
+        await expect(page.locator('a[href="/settings#accounts"]')).toHaveCount(0);
     });
 
     test('regression: the page arrives with the stored setting, so examples never flash in or out as it loads', async ({ context, page }) => {

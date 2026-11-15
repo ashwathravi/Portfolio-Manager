@@ -27,7 +27,7 @@ describe("trade ticket loads", () => {
                 },
                 { id: "a", name: "IRA", cashBalance: null, holdings: [{ symbol: "AAPL", quantity: 5, avgCost: 100, currentPrice: 170 }] },
             ],
-            quotes: { IBM: { price: 205, timestamp: "2026-10-26T20:00:00.000Z" } },
+            quotes: { IBM: { price: 205, timestamp: "2026-10-26T20:00:00.000Z", kind: "close" } },
         });
         assert.deepEqual(ticket.accounts, [
             { id: "a", name: "IRA", cash: 0, holdings: [{ symbol: "AAPL", quantity: 5, avgCost: 100 }] },

@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type ConsoleMessage, type Page } from '@playwright/test';
 
 // Launch item i72: the post-deploy smoke test. The deploy job runs it against
 // the live site once it serves the new commit (playwright.production.config.ts);
@@ -6,17 +6,52 @@ import { expect, test, type Page } from '@playwright/test';
 // (playwright.config.ts), so it stays true to the app. Signed out and
 // read-only: it never signs in, writes nothing and runs no job.
 
-const SCHEDULED_JOBS = ['expired-sessions', 'ask-history', 'plaid', 'prices', 'snapshots', 'backup'];
+const SCHEDULED_JOBS = ['expired-sessions', 'ask-history', 'plaid', 'prices', 'snapshots', 'alerts', 'email', 'alpha-radar', 'backup'];
 
 function isLocal(baseURL: string | undefined): boolean {
     return /^(localhost|127\.0\.0\.1|\[::1\])$/.test(new URL(baseURL ?? 'http://localhost').hostname);
 }
 
+/**
+ * Where upgrade-insecure-requests sends this site's requests when it is served
+ * over plain http on a loopback host, as the local production build is in E2E:
+ * the same host and port over https, where nothing answers. Undefined for any
+ * other origin, the live site included, so there nothing is let through.
+ */
+function upgradedLocalOrigin(origin: string): string | undefined {
+    const url = new URL(origin);
+    if (url.protocol !== 'http:' || !isLocal(origin)) return undefined;
+    url.protocol = 'https:';
+    return url.origin;
+}
+
+/**
+ * The error Chrome logs when a request it upgraded to https reaches the local
+ * http build. The policy's upgrade-insecure-requests also upgrades redirects:
+ * a signed-out prefetch of / is sent to /login, which Chrome asks for over
+ * https. Chrome logs no URL in the text; the message's location is the request.
+ */
+function isFailedUpgrade(message: ConsoleMessage, upgradedOrigin: string): boolean {
+    return message.text() === 'Failed to load resource: net::ERR_SSL_PROTOCOL_ERROR'
+        && originOf(message.location().url) === upgradedOrigin;
+}
+
+function originOf(url: string): string | undefined {
+    try {
+        return new URL(url).origin;
+    } catch {
+        return undefined;
+    }
+}
+
 /** Console errors, uncaught errors, CSP violations and failed requests to this site. */
 function watchForProblems(page: Page, origin: string): string[] {
     const problems: string[] = [];
+    const upgradedOrigin = upgradedLocalOrigin(origin);
     page.on('console', (message) => {
-        if (message.type() === 'error') problems.push(`console: ${message.text()}`);
+        if (message.type() !== 'error') return;
+        if (upgradedOrigin && isFailedUpgrade(message, upgradedOrigin)) return;
+        problems.push(`console: ${message.text()} (${message.location().url})`);
     });
     page.on('pageerror', (error) => problems.push(`page error: ${String(error)}`));
     page.on('response', (response) => {
@@ -62,6 +97,13 @@ test.describe('After a production deploy', () => {
         expect(body.status).toBe(response.status() === 200 ? 'ok' : 'degraded');
         expect(body.jobs.map((job: { job: string }) => job.job)).toEqual(SCHEDULED_JOBS);
         for (const job of body.jobs) expect(['ok', 'late', 'failed']).toContain(job.status);
+        // And whether the stored closes and the snapshots are recent enough
+        // (none at all is stale).
+        for (const freshness of [body.closes, body.snapshots]) {
+            expect(['ok', 'stale']).toContain(freshness.status);
+            expect(freshness.latest === null || /^\d{4}-\d{2}-\d{2}$/.test(freshness.latest)).toBe(true);
+            expect(freshness.oldestAllowed).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+        }
     });
 
     test('sends a signed-out visitor to sign in, with sign-in configured', async ({ page }) => {
@@ -101,6 +143,8 @@ test.describe('After a production deploy', () => {
         { path: '/login', heading: 'Sign in' },
         { path: '/privacy', heading: 'Privacy Policy' },
         { path: '/terms', heading: 'Terms of Service' },
+        // Where every email's footer links (launch item i58); without a token it only says so.
+        { path: '/unsubscribe', heading: 'Unsubscribe' },
     ]) {
         test(`${path} loads cleanly, with its security headers`, async ({ page, baseURL }) => {
             const problems = watchForProblems(page, new URL(baseURL!).origin);
@@ -119,9 +163,15 @@ test.describe('After a production deploy', () => {
             expect(scriptSrc).toContain("'strict-dynamic'");
             expect(scriptSrc).not.toContain("'unsafe-inline'");
             expect(policy).toContain("frame-ancestors 'none'");
+            // On every origin, the local http build included: watchForProblems
+            // lets through only the upgrade failure it causes there.
+            expect(policy.split('; ')).toContain('upgrade-insecure-requests');
             expect(headers['strict-transport-security']).toMatch(/max-age=\d+/);
             expect(headers['x-frame-options']).toBe('DENY');
             expect(headers['x-content-type-options']).toBe('nosniff');
+            // Kept out of search results during the beta (launch item i74).
+            expect(headers['x-robots-tag']).toBe('noindex, nofollow');
+            await expect(page.locator('meta[name="robots"]')).toHaveAttribute('content', 'noindex, nofollow');
 
             await expect(page.getByRole('heading', { level: 1 })).toHaveText(heading);
             // Hydrated (src/components/layout/AppFrame.tsx), so a hydration
@@ -133,6 +183,19 @@ test.describe('After a production deploy', () => {
             expect(problems).toEqual([]);
         });
     }
+
+    test('robots.txt lets crawlers in to read the noindex', async ({ request }) => {
+        // Not the sign-in page: a disallowed page is never fetched, so its
+        // noindex would never be seen.
+        const response = await request.get('/robots.txt', { maxRedirects: 0 });
+        expect(response.status()).toBe(200);
+        expect(response.headers()['content-type']).toContain('text/plain');
+        expect(response.headers()['x-robots-tag']).toBe('noindex, nofollow');
+        const lines = (await response.text()).split('\n').map((line) => line.trim().toLowerCase());
+        expect(lines).toContain('user-agent: *');
+        expect(lines).toContain('allow: /');
+        expect(lines.filter((line) => line.startsWith('disallow:'))).toEqual([]);
+    });
 
     test('the sign-in page fits a phone', async ({ page }) => {
         await page.setViewportSize({ width: 390, height: 844 });
@@ -153,7 +216,9 @@ test.describe('After a production deploy', () => {
 
         // Without the cron secret the nightly jobs never run: 401, or 503
         // while CRON_SECRET isn't set.
-        const cron = await request.get('/api/cron/daily');
-        expect([401, 503]).toContain(cron.status());
+        for (const path of ['/api/cron/daily', '/api/cron/alpha-radar']) {
+            const cron = await request.get(path);
+            expect([401, 503], path).toContain(cron.status());
+        }
     });
 });

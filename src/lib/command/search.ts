@@ -1,9 +1,13 @@
+import { searchTextAsTicker, tickerMatchHint } from '@/lib/markets/ticker-search';
 import { ALL_DESTINATIONS, type NavDestination } from '@/lib/navigation';
 import { tickerSchema } from '@/lib/validators/market-data';
+import type { TickerMatch } from '@/types/market-data';
 
 /**
  * ⌘K command palette search. One box for the three things people reach
- * for: jump to a page, open a ticker or thesis, or ask a question.
+ * for: jump to a page, open a ticker or thesis, or ask a question. Tickers
+ * come from ticker search (launch item i35), by symbol or company name; a
+ * ticker-shaped query can still be opened when search doesn't know it.
  */
 
 export type CommandGroup = 'Ask' | 'Go to' | 'Symbols' | 'Theses';
@@ -24,6 +28,10 @@ export interface CommandThesis {
     title: string;
     status: string;
 }
+
+/** Search matches shown before the typed ticker's own items, so those always fit. */
+const MAX_SYMBOL_MATCHES = 5;
+const GROUP_LIMITS: Partial<Record<CommandGroup, number>> = { Symbols: MAX_SYMBOL_MATCHES + 2 };
 
 const QUESTION_START = /^(what|how|which|why|where|when|who|am|is|are|do|does|did|should|can|show|list)\b/i;
 
@@ -63,7 +71,44 @@ function destinationItems(tokens: string[]): CommandItem[] {
     return out.sort((a, b) => b.score - a.score || a.order - b.order).map((x) => x.item);
 }
 
-export function searchCommands(query: string, ctx: { theses?: readonly CommandThesis[] } = {}, limitPerGroup = 6): CommandItem[] {
+const openSymbol = (symbol: string, label: string, hint: string): CommandItem => ({
+    id: `symbol:${symbol}`, group: 'Symbols', label, hint, href: `/portfolios/detail/${encodeURIComponent(symbol)}`,
+});
+const draftOrder = (symbol: string): CommandItem => ({
+    id: `order:${symbol}`, group: 'Symbols', label: `Draft an order for ${symbol}`, hint: 'Trade', href: `/execution?symbol=${encodeURIComponent(symbol)}`,
+});
+
+/**
+ * The ticker typed, if search found it, with a draft order; then the other
+ * matches; then, for a ticker-shaped query search didn't find, that ticker
+ * as typed, so one missing from the directory can still be opened. Beside
+ * matches, only a query that looks like a real ticker gets those (five
+ * letters at most, or a class or pair like BRK.B or BTC-USD): "berkshire"
+ * found BRK.B, and "Open BERKSHIRE" is noise.
+ */
+function symbolItems(q: string, matches: readonly TickerMatch[]): CommandItem[] {
+    const typed = searchTextAsTicker(q);
+    const exact = matches.find((m) => m.symbol === typed);
+    const items: CommandItem[] = [];
+    if (exact) {
+        items.push(openSymbol(exact.symbol, `${exact.symbol} — ${exact.name}`, tickerMatchHint(exact) ?? 'Position, quote, and thesis'), draftOrder(exact.symbol));
+    }
+    for (const match of matches.filter((m) => m !== exact).slice(0, MAX_SYMBOL_MATCHES)) {
+        items.push(openSymbol(match.symbol, `${match.symbol} — ${match.name}`, tickerMatchHint(match) ?? 'Symbol'));
+    }
+    const symbol = q.toUpperCase();
+    const plausible = matches.length === 0 || /^[A-Z]{1,5}$|[.-]/.test(symbol);
+    if (!exact && plausible && !q.includes(' ') && symbol.length <= 10 && tickerSchema.safeParse(symbol).success) {
+        items.push(openSymbol(symbol, `Open ${symbol}`, 'Position, quote, and thesis'), draftOrder(symbol));
+    }
+    return items;
+}
+
+export function searchCommands(
+    query: string,
+    ctx: { theses?: readonly CommandThesis[]; symbols?: readonly TickerMatch[] } = {},
+    limitPerGroup = 6,
+): CommandItem[] {
     const q = query.trim();
     const tokens = q.toLowerCase().split(/\s+/).filter(Boolean);
     const groups: Record<CommandGroup, CommandItem[]> = { Ask: [], 'Go to': [], Symbols: [], Theses: [] };
@@ -84,13 +129,7 @@ export function searchCommands(query: string, ctx: { theses?: readonly CommandTh
                 href: `/research/thesis/${encodeURIComponent(t.ticker)}`,
             }));
 
-        const symbol = q.toUpperCase();
-        if (!q.includes(' ') && symbol.length <= 10 && tickerSchema.safeParse(symbol).success) {
-            groups.Symbols = [
-                { id: `symbol:${symbol}`, group: 'Symbols', label: `Open ${symbol}`, hint: 'Position, quote, and thesis', href: `/portfolios/detail/${encodeURIComponent(symbol)}` },
-                { id: `order:${symbol}`, group: 'Symbols', label: `Draft an order for ${symbol}`, hint: 'Trade', href: `/execution?symbol=${encodeURIComponent(symbol)}` },
-            ];
-        }
+        groups.Symbols = symbolItems(q, ctx.symbols ?? []);
 
         groups.Ask = [{ id: 'ask', group: 'Ask', label: `Ask: “${q}”`, hint: 'Ask Ledger answers from your book, journal, and performance', ask: q }];
     }
@@ -98,5 +137,5 @@ export function searchCommands(query: string, ctx: { theses?: readonly CommandTh
     const order: CommandGroup[] = !q || looksLikeQuestion(q)
         ? ['Ask', 'Theses', 'Symbols', 'Go to']
         : ['Go to', 'Symbols', 'Theses', 'Ask'];
-    return order.flatMap((g) => groups[g].slice(0, limitPerGroup));
+    return order.flatMap((g) => groups[g].slice(0, GROUP_LIMITS[g] ?? limitPerGroup));
 }

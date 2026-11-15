@@ -16,6 +16,7 @@ import {
     type ActivitySide,
     type MoneyAmount,
 } from "@/lib/portfolio/activity";
+import { NewAccountButton } from "./AccountControls";
 import { AddTransactionDialog, type TransactionAccountOption } from "./AddTransactionDialog";
 import { ImportTransactionsDialog } from "./ImportTransactionsDialog";
 
@@ -24,7 +25,13 @@ import { ImportTransactionsDialog } from "./ImportTransactionsDialog";
  * hardcoded list. Rows come from the transactions table; the churn and
  * tax-friction callout (kept from the trade log) runs on the same rows.
  * Transactions are added by hand or from a broker's CSV, and deleted here
- * (launch item i40).
+ * (launch item i40). A withdrawal and deposit that moved money between two
+ * of the user's accounts show as a transfer (launch item i80).
+ *
+ * `bankLinking` is whether Settings can connect a bank (bankLinkingAvailable,
+ * x30). Without it Settings says bank linking isn't set up and points back
+ * at Accounts, so the empty state has no Connect link: it leads with adding
+ * transactions, or with New account when there is no account to add them to.
  */
 
 const SIDES: ReadonlyArray<{ key: "ALL" | ActivitySide; label: string }> = [
@@ -34,9 +41,9 @@ const SIDES: ReadonlyArray<{ key: "ALL" | ActivitySide; label: string }> = [
 ];
 
 /** A total per currency, "$1,200 + 300 CAD"; nothing is $0. */
-function formatTotals(totals: readonly MoneyAmount[]): string {
+function formatTotals(totals: readonly MoneyAmount[], { signed = false } = {}): string {
     if (totals.length === 0) return formatUsd(0, { decimals: 0 });
-    return totals.map((t) => formatMoney(t.amount, t.currency, { decimals: 0 })).join(" + ");
+    return totals.map((t) => formatMoney(t.amount, t.currency, { decimals: 0, signed })).join(" + ");
 }
 
 /** Adding and importing need an account to put the transactions in. */
@@ -78,10 +85,13 @@ function DeleteTransactionButton({ row }: { row: ActivityRow }) {
 export function ActivityPageClient({
     rows,
     accountOptions = [],
+    bankLinking,
 }: {
     rows: ActivityRow[];
     /** The user's accounts, to add or import transactions into. */
     accountOptions?: readonly TransactionAccountOption[];
+    /** Whether Settings can connect a bank (x30). */
+    bankLinking: boolean;
 }) {
     const [query, setQuery] = useState("");
     const [side, setSide] = useState<"ALL" | ActivitySide>("ALL");
@@ -108,14 +118,24 @@ export function ActivityPageClient({
             <div className="pm-page" data-testid="activity-view">
                 <section className="pm-card pm-empty-card" data-testid="activity-empty">
                     <h2>No transactions yet</h2>
-                    <p>
-                        Buys, sells, dividends, and transfers from your connected accounts show up here,
-                        along with a churn and tax-friction check on repeat trading. You can also add them
-                        yourself or import your broker&apos;s activity CSV.
-                    </p>
+                    {bankLinking ? (
+                        <p>
+                            Buys, sells, dividends, and transfers from your connected accounts show up here,
+                            along with a churn and tax-friction check on repeat trading. You can also add them
+                            yourself or import your broker&apos;s activity CSV.
+                        </p>
+                    ) : (
+                        <p>
+                            Add buys, sells, dividends, and transfers yourself or import your broker&apos;s
+                            activity CSV, and they show up here, along with a churn and tax-friction check on
+                            repeat trading.{accountOptions.length === 0 && " They go in an account, so add one first."}
+                        </p>
+                    )}
                     <div className="pm-empty-actions">
-                        <Link href="/settings#accounts" className="pm-btn pm-btn-primary">Connect an account</Link>
-                        <AddControls accounts={accountOptions} />
+                        {bankLinking && <Link href="/settings#accounts" className="pm-btn pm-btn-primary">Connect an account</Link>}
+                        {!bankLinking && accountOptions.length === 0
+                            ? <NewAccountButton />
+                            : <AddControls accounts={accountOptions} />}
                     </div>
                 </section>
             </div>
@@ -152,6 +172,10 @@ export function ActivityPageClient({
                     <div><dt>Transactions</dt><dd>{summary.count}</dd></div>
                     <div><dt>Bought</dt><dd data-testid="activity-bought">{formatTotals(summary.bought)}</dd></div>
                     <div><dt>Sold</dt><dd data-testid="activity-sold">{formatTotals(summary.sold)}</dd></div>
+                    <div>
+                        <dt title="Deposits less withdrawals. Money moved between two of the accounts shown isn't counted.">Net deposits</dt>
+                        <dd data-testid="activity-net-deposits">{formatTotals(summary.netDeposits, { signed: true })}</dd>
+                    </div>
                     <div><dt>Accounts</dt><dd>{summary.accounts}</dd></div>
                 </dl>
 
@@ -253,12 +277,19 @@ export function ActivityPageClient({
                                                 "—"
                                             )}
                                         </td>
-                                        <td><span className="pm-side" data-side={r.side}>{r.side}</span></td>
+                                        <td><span className="pm-side" data-side={r.transfer ? "TRANSFER" : r.side}>{r.transfer ? "TRANSFER" : r.side}</span></td>
                                         <td className="num">{formatQty(r.quantity)}</td>
                                         <td className="num">{r.price === null ? "—" : formatMoney(r.price, r.currency)}</td>
                                         <td className="num">{formatMoney(r.value, r.currency)}</td>
                                         <td className="num">{r.fees == null ? "—" : formatMoney(r.fees, r.currency)}</td>
-                                        <td>{r.account}</td>
+                                        <td>
+                                            {r.account}
+                                            {r.transfer && (
+                                                <span className="pm-card-subtitle">
+                                                    {" "}{r.transfer.direction === "out" ? "to" : "from"} {r.transfer.otherAccount}
+                                                </span>
+                                            )}
+                                        </td>
                                         <td className="pm-card-subtitle">{r.notes ?? ""}</td>
                                         <td><DeleteTransactionButton row={r} /></td>
                                     </tr>

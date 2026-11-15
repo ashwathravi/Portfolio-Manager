@@ -95,6 +95,25 @@ describe('generateAlphaRadarMemo', () => {
         assert.ok(overlap.changeIds.length > 0);
     });
 
+    test('regression (i61): a shared report, whose changes carry no user overlap, claims none', () => {
+        const shared = sampleChanges().map((change) => ({
+            ...change,
+            userRelevance: { portfolio: false, watchlist: false, thesis: false, reasons: [], matchedTickers: [], matchedCusips: [] },
+        }));
+        const report = generateAlphaRadarMemo({
+            trackedFilerId: TRACKED_FILER_ID,
+            filingId: CURRENT_FILING_ID,
+            filerName: 'Berkshire Hathaway',
+            reportPeriod: '2025-Q4',
+            sourceFilingIds: [CURRENT_FILING_ID],
+            changes: shared,
+        });
+
+        assert.strictEqual(alphaRadarReportSchema.safeParse(report).success, true);
+        assert.strictEqual(report.sections.some((section) => section.kind === 'overlap'), false);
+        assert.doesNotMatch(report.markdown, /No direct overlap|Portfolio Manager overlap|overlap with Portfolio Manager/);
+    });
+
     test('handles no-change reports deterministically', () => {
         const unchanged = computeQuarterlyHoldingChanges({
             trackedFilerId: TRACKED_FILER_ID,

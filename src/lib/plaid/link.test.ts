@@ -7,6 +7,7 @@ import {
     plaidAccountFingerprint,
     plaidAccountToConnectedAccount,
     plaidBaseUrl,
+    resolvePlaidEnvironment,
     sanitizePlaidExchangeForClient,
 } from "./link";
 import type { PlaidFetch } from "./link";
@@ -56,6 +57,32 @@ describe("Plaid Link helpers", () => {
         assert.strictEqual(token.linkToken, "link-sandbox-update");
         assert.deepStrictEqual(token.products, []);
         assert.ok(!JSON.stringify(token).includes("access-sandbox-item"));
+    });
+
+    test("gives Link the redirect URI for OAuth banks, a new connection's and a reconnect's alike", async () => {
+        // Launch item i47: Plaid sends the user back there after the bank's sign-in.
+        for (const accessToken of [undefined, "access-sandbox-item"]) {
+            await createPlaidLinkToken({
+                credentials,
+                clientUserId: "user-1",
+                accessToken,
+                redirectUri: "https://atlas.example.com/settings",
+                fetchImpl: mockPlaidFetch((_url, body) => {
+                    assert.strictEqual(body.redirect_uri, "https://atlas.example.com/settings");
+                    return { link_token: "link-sandbox-oauth", expiration: "2026-11-01T04:00:00Z", request_id: "request-oauth" };
+                }),
+            });
+        }
+    });
+
+    test("PLAID_ENV is production only when it says so; Development is retired", () => {
+        // Launch item i47: Plaid shut development.plaid.com down in 2024.
+        assert.strictEqual(resolvePlaidEnvironment("production"), "production");
+        assert.strictEqual(resolvePlaidEnvironment(" production\n"), "production");
+        assert.strictEqual(resolvePlaidEnvironment("sandbox"), "sandbox");
+        assert.strictEqual(resolvePlaidEnvironment("development"), "sandbox");
+        assert.strictEqual(resolvePlaidEnvironment(undefined), "sandbox");
+        assert.strictEqual(plaidBaseUrl(resolvePlaidEnvironment("development")), "https://sandbox.plaid.com");
     });
 
     test("the same account through another connection has the same fingerprint, whatever its IDs", () => {

@@ -1,13 +1,14 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { ContactLink, LegalDocument, type LegalSearchParams } from "@/components/legal/LegalDocument";
+import { isOpenSignup } from "@/lib/auth/access";
 
 export const metadata: Metadata = {
     title: "Terms of Service | Atlas Wealth",
     description: "The terms for using Atlas Wealth, including why nothing in it is investment advice.",
 };
 
-const LAST_UPDATED = "October 27, 2026";
+const LAST_UPDATED = "November 14, 2026";
 const PLAID_PRIVACY_URL = "https://plaid.com/legal/#end-user-privacy-policy";
 
 export default function TermsPage({ searchParams }: { searchParams: LegalSearchParams }) {
@@ -21,7 +22,7 @@ export default function TermsPage({ searchParams }: { searchParams: LegalSearchP
                 <>
                     <p>
                         These terms cover your use of Atlas Wealth, a personal investment tracking app currently
-                        in an invite-only beta. &ldquo;We&rdquo; means the person who runs Atlas Wealth, and
+                        in {isOpenSignup() ? "a public" : "an invite-only"} beta. &ldquo;We&rdquo; means the person who runs Atlas Wealth, and
                         &ldquo;you&rdquo; means you. By signing in you agree to these terms.
                     </p>
                     <p>
@@ -35,7 +36,11 @@ export default function TermsPage({ searchParams }: { searchParams: LegalSearchP
             <section aria-labelledby="terms-using">
                 <h2 id="terms-using">Using Atlas Wealth</h2>
                 <ul>
-                    <li>During the beta you need an invitation and a Google account to sign in.</li>
+                    <li>
+                        {isOpenSignup()
+                            ? "You need a Google account to sign in. We may close an account that abuses Atlas Wealth or the services it relies on."
+                            : "During the beta you need an invitation and a Google account to sign in."}
+                    </li>
                     <li>You must be at least 18.</li>
                     <li>
                         Your account is for you alone. Keep your Google account secure: anyone who can sign in
@@ -56,6 +61,11 @@ export default function TermsPage({ searchParams }: { searchParams: LegalSearchP
                     attention, the risk-policy and guardrail checks, the checks on orders you draft on Trade,
                     Ask&rsquo;s answers, Alpha Radar&rsquo;s summaries of SEC filings, strategies and
                     backtests, and anything labelled Sample, which is an illustration and not about your money.
+                </p>
+                <p>
+                    Ask&rsquo;s answers can be written by Claude, an AI model, and Ask says so under its question
+                    box when they are. An AI model can get things wrong: check an answer against your own
+                    records before relying on it.
                 </p>
                 <p>
                     We are not a registered investment adviser, broker-dealer or financial planner, and we
@@ -81,8 +91,11 @@ export default function TermsPage({ searchParams }: { searchParams: LegalSearchP
                     <li>
                         <strong>Prices</strong> come from{" "}
                         <a href="https://massive.com" target="_blank" rel="noreferrer">Massive</a> (formerly
-                        Polygon.io). They are the latest closing prices we&rsquo;ve stored, not live quotes, so
-                        a price can be a day or more old, or missing.
+                        Polygon.io) and{" "}
+                        <a href="https://finnhub.io" target="_blank" rel="noreferrer">Finnhub</a>. They are never
+                        live quotes: each is either the latest closing price we&rsquo;ve stored or, during the
+                        trading day, a quote delayed by a minute or more, and says which it is and when it&rsquo;s
+                        from. A price can be a day or more old, or missing.
                     </li>
                     <li>
                         <strong>Filings</strong> come from{" "}

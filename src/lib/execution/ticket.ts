@@ -6,6 +6,7 @@
  */
 
 import { getEasternParts } from "@/lib/markets/market-hours";
+import { describeQuote, formatSessionDate } from "@/lib/markets/quote-label";
 import type { PreTradeRiskPolicyImpact } from "@/lib/risk-policy";
 import type { Order, OrderInstrumentType, OrderOptionDetails, OrderPlanInput, OrderSide, OrderType, TimeInForce } from "@/types/execution";
 import type { Quote } from "@/types/market-data";
@@ -27,12 +28,15 @@ export interface TicketAccount {
 
 /**
  * A ticker's last price: a session's close from the price store, with its
- * Eastern date, or, before the store has one, the price stored with the
- * user's holding (no date). Never a live quote.
+ * Eastern date; during the session a delayed quote, with the time it was
+ * quoted (launch item i33); or, before the store has either, the price
+ * stored with the user's holding (no date). Never a live quote.
  */
 export interface TicketPrice {
     price: number;
     closeDate?: string;
+    /** ISO time of a delayed quote. */
+    quotedAt?: string;
 }
 
 export interface TradeTicketData {
@@ -50,25 +54,24 @@ export const EMPTY_TRADE_TICKET: TradeTicketData = { accounts: [], prices: {}, o
 /** An option contract covers 100 shares. */
 export const OPTION_CONTRACT_MULTIPLIER = 100;
 
-/** A quote from the price store as a ticket price; undefined without a positive price. */
-export function ticketPriceFromQuote(quote: Pick<Quote, "price" | "timestamp">): TicketPrice | undefined {
+/** A quote as a ticket price; undefined without a positive price. */
+export function ticketPriceFromQuote(quote: Pick<Quote, "price" | "timestamp" | "kind">): TicketPrice | undefined {
     if (!(Number.isFinite(quote.price) && quote.price > 0)) return undefined;
     const at = new Date(quote.timestamp);
-    return Number.isNaN(at.getTime()) ? { price: quote.price } : { price: quote.price, closeDate: getEasternParts(at).date };
+    if (Number.isNaN(at.getTime())) return { price: quote.price };
+    return quote.kind === "delayed"
+        ? { price: quote.price, quotedAt: at.toISOString() }
+        : { price: quote.price, closeDate: getEasternParts(at).date };
 }
-
-const MONTH_DAY = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
-const MONTH_DAY_YEAR = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
 
 /** Where the ticket's price comes from, in a few words; `today` is the Eastern date. */
 export function describeTicketPrice(price: TicketPrice | undefined, today: string): string {
     if (!price) return "No price yet";
+    if (price.quotedAt) return describeQuote({ kind: "delayed", timestamp: price.quotedAt }, today);
     if (!price.closeDate) return "Price stored with your holding";
     if (price.closeDate === today) return "Today's close";
-    const date = new Date(`${price.closeDate}T00:00:00Z`);
-    if (Number.isNaN(date.getTime())) return "Last close";
-    const format = price.closeDate.slice(0, 4) === today.slice(0, 4) ? MONTH_DAY : MONTH_DAY_YEAR;
-    return `Last close, ${format.format(date)}`;
+    if (Number.isNaN(new Date(`${price.closeDate}T00:00:00Z`).getTime())) return "Last close";
+    return `Last close, ${formatSessionDate(price.closeDate, today)}`;
 }
 
 /** What an account holds of a ticker; nothing when it holds none. */

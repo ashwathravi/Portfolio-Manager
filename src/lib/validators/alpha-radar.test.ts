@@ -8,6 +8,7 @@ import {
     alphaRadarMemorySearchQuerySchema,
     alphaRadarReportSchema,
     alphaRadarRefreshRequestSchema,
+    alphaRadarTrackedFilerIdsSchema,
     alphaRadarSecFilingBatchSchema,
     alphaRadarTrackedFilerListSchema,
     alphaRadarTrackedFilerSchema,
@@ -264,6 +265,20 @@ describe('Alpha Radar API bounds', () => {
         assert.strictEqual(alphaRadarListLimitSchema.safeParse('250').success, true);
         assert.strictEqual(alphaRadarListLimitSchema.safeParse('251').success, false);
         assert.strictEqual(alphaRadarListLimitSchema.safeParse('0').success, false);
+    });
+
+    test('takes a comma-separated list of 1 to 100 filer IDs for reports', () => {
+        const second = '00000000-0000-4000-8000-000000000002';
+        const parsed = alphaRadarTrackedFilerIdsSchema.safeParse(`${FILER_ID},${second}`);
+        assert.strictEqual(parsed.success, true);
+        if (parsed.success) assert.deepStrictEqual(parsed.data, [FILER_ID, second]);
+
+        const hundred = Array.from({ length: 100 }, () => FILER_ID).join(',');
+        assert.strictEqual(alphaRadarTrackedFilerIdsSchema.safeParse(hundred).success, true);
+        assert.strictEqual(alphaRadarTrackedFilerIdsSchema.safeParse(`${hundred},${FILER_ID}`).success, false);
+        for (const bad of ['', 'berkshire-hathaway', `${FILER_ID},`, `${FILER_ID}, ${second}`]) {
+            assert.strictEqual(alphaRadarTrackedFilerIdsSchema.safeParse(bad).success, false, bad);
+        }
     });
 
     test('bounds refresh filing limits', () => {

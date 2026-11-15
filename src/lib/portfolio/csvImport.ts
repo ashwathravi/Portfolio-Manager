@@ -1,4 +1,5 @@
 import { normalizeTicker } from '@/lib/research/watchlist';
+import { describeOptionContract, OPTION_POSITION_MULTIPLIER, optionContractTicker, parseOptionContract, type OptionContract } from './option-positions';
 
 /**
  * Holdings CSV import — the "Import CSV" path from the design review's
@@ -11,6 +12,13 @@ import { normalizeTicker } from '@/lib/research/watchlist';
  * quotes with $ and thousands separators, and append cash and total rows.
  * Anything that is not a clean position becomes a listed error, never a
  * silently guessed number.
+ *
+ * Option rows (launch item i63) go to the LEAPS ledger: a symbol in one of
+ * the ways brokers write a contract (parseOptionContract), or a row the
+ * file marks as an option whose description names one. Quantity is in
+ * contracts, negative for a written position; the premium is per share, as
+ * brokers quote it: the total cost basis ÷ (100 × contracts), or else the
+ * average cost, read as per share.
  */
 
 export const MAX_IMPORT_ROWS = 1000;
@@ -29,8 +37,17 @@ export interface ParseIssue {
     message: string;
 }
 
+/** An option position read from the file: the contract, how many, and the premium per share. */
+export interface OptionImportRow extends OptionContract {
+    /** Contracts; negative for a written position. */
+    quantity: number;
+    premium: number;
+}
+
 export interface ParseResult {
     rows: ImportRow[];
+    /** The file's option positions, for the LEAPS ledger. */
+    options: OptionImportRow[];
     issues: ParseIssue[];
     /** Cash, total, and blank rows ignored on purpose. */
     skipped: number;
@@ -47,6 +64,7 @@ const HEADER_ALIASES: Record<'symbol' | 'quantity' | 'avgCost' | 'costBasis' | '
 
 // The ** suffix is an explicit broker core-position marker, not a ticker.
 const CORE_POSITION = /^(spaxx|fdrxx|core)\*\*$/i;
+const OPTION_ASSET_TYPE = /^(option|options|equity option|equity options|call|put|listed option)s?$/i;
 const SUMMARY_SYMBOL = /^(pending|pending activity|account total|total|--)$/i;
 
 export function normalizeHeader(h: string): string {
@@ -218,6 +236,7 @@ export function parseHoldingsCsv(text: string): ParseResult {
     if (headerIndex < 0) {
         return {
             rows: [],
+            options: [],
             issues: [{ line: 1, message: 'No header row with a Symbol and a Quantity column was found.' }],
             skipped: 0,
         };
@@ -234,12 +253,14 @@ export function parseHoldingsCsv(text: string): ParseResult {
     if (col.avgCost < 0 && col.costBasis < 0) {
         return {
             rows: [],
+            options: [],
             issues: [{ line: records[headerIndex].line, message: 'Add an Average cost or a Cost basis column so gains can be calculated.' }],
             skipped: 0,
         };
     }
 
     const merged = new Map<string, ImportRow>();
+    const options = new Map<string, OptionImportRow>();
     for (const record of records.slice(headerIndex + 1)) {
         const lineNo = record.line;
         if (record.error) {
@@ -258,6 +279,36 @@ export function parseHoldingsCsv(text: string): ParseResult {
         }
         if (isCashRow(cells, col)) {
             skipped++;
+            continue;
+        }
+        const contract = optionContractOf(rawSymbol, cells, col);
+        if (contract) {
+            const option = readOptionRow(contract, cells, col, lineNo, issues);
+            if (!option) continue;
+            const key = optionContractTicker(option);
+            const prev = options.get(key);
+            if (prev && Math.sign(prev.quantity) !== Math.sign(option.quantity)) {
+                // Bought and written lots of one contract have no single
+                // premium that doesn't depend on which closed which.
+                issues.push({ line: lineNo, message: `${describeOptionContract(option)}: bought and written lots of one contract. Enter it as one net position.` });
+            } else if (prev) {
+                // Two lots of one contract, the same way round: combined at the weighted premium.
+                const quantity = prev.quantity + option.quantity;
+                options.set(key, {
+                    ...prev,
+                    quantity,
+                    premium: (prev.premium * Math.abs(prev.quantity) + option.premium * Math.abs(option.quantity))
+                        / (Math.abs(prev.quantity) + Math.abs(option.quantity)),
+                });
+            } else if (options.size >= MAX_OPTION_IMPORT_ROWS) {
+                issues.push({ line: lineNo, message: `Only the first ${MAX_OPTION_IMPORT_ROWS} option positions can be imported at once.` });
+            } else {
+                options.set(key, option);
+            }
+            continue;
+        }
+        if (OPTION_ASSET_TYPE.test(normalizeHeader(cells[col.assetType] ?? ''))) {
+            issues.push({ line: lineNo, message: `“${rawSymbol}” is an option Atlas can't read the contract of. Add it on Holdings instead.` });
             continue;
         }
         const symbol = normalizeTicker(rawSymbol.replace(/\*+$/, ''));
@@ -305,7 +356,47 @@ export function parseHoldingsCsv(text: string): ParseResult {
         quantity: round(r.quantity, 6),
         avgCost: round(r.avgCost, 4),
     }));
-    return { rows, issues, skipped };
+    const optionRows = [...options.values()].map((o) => ({ ...o, quantity: round(o.quantity, 6), premium: round(o.premium, 4) }));
+    return { rows, options: optionRows, issues, skipped };
+}
+
+/** What the import API takes in one go (OPTION_POSITION_LIMITS.importRows). */
+export const MAX_OPTION_IMPORT_ROWS = 500;
+
+/**
+ * The contract a row holds: its symbol read as one, or, when the file says
+ * the row is an option, its description.
+ */
+function optionContractOf(rawSymbol: string, cells: string[], col: { name: number; assetType: number }): OptionContract | null {
+    const fromSymbol = parseOptionContract(rawSymbol);
+    if (fromSymbol) return fromSymbol;
+    if (!OPTION_ASSET_TYPE.test(normalizeHeader(cells[col.assetType] ?? ''))) return null;
+    return col.name >= 0 ? parseOptionContract(cells[col.name] ?? '') : null;
+}
+
+function readOptionRow(
+    contract: OptionContract,
+    cells: string[],
+    col: { quantity: number; avgCost: number; costBasis: number },
+    line: number,
+    issues: ParseIssue[],
+): OptionImportRow | null {
+    const label = `${contract.underlying} ${contract.expiry} ${contract.strike} ${contract.contractType}`;
+    const quantity = parseNumber(cells[col.quantity]);
+    if (quantity == null || quantity === 0 || !Number.isInteger(quantity)) {
+        issues.push({ line, message: `${label}: contracts must be a whole number other than 0.` });
+        return null;
+    }
+    // The total cost first: brokers differ on whether an option's average
+    // cost is per share or per contract, but not on what the total is.
+    const basis = col.costBasis >= 0 ? parseNumber(cells[col.costBasis]) : null;
+    let premium = basis != null ? Math.abs(basis) / (Math.abs(quantity) * OPTION_POSITION_MULTIPLIER) : null;
+    if (premium == null && col.avgCost >= 0) premium = parseNumber(cells[col.avgCost]);
+    if (premium == null || premium < 0) {
+        issues.push({ line, message: `${label}: missing or invalid cost.` });
+        return null;
+    }
+    return { ...contract, quantity, premium };
 }
 
 function round(n: number, places: number): number {

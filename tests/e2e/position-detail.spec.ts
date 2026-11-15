@@ -32,11 +32,26 @@ test.describe('Position detail', () => {
         test.skip((await price.textContent())?.includes('Quote unavailable') ?? true, 'no stored closes without a database');
         await expect(price).toContainText('$205.00');
         await expect(price).toContainText('+2.50% today');
+        // Launch item i33: what the price is.
+        await expect(page.getByTestId('position-price-note')).toHaveText('Today\'s close');
 
         // Left open past midnight ET: the price stays, the label goes.
         await page.clock.fastForward('24:00:00');
         await expect(price).not.toContainText('today');
         await expect(price).toContainText('$205.00');
+        await expect(page.getByTestId('position-price-note')).toHaveText(/^Last close, [A-Z][a-z]{2} \d{1,2}(, \d{4})?$/);
+    });
+
+    test('an earlier close is labelled with its session, and a stored price as the holding\'s', async ({ page }) => {
+        // SPY's newest fixture close is October 1, 2026; E2E has no delayed quotes.
+        await gotoAppPage(page, '/portfolios/detail/SPY');
+        const price = page.getByTestId('position-price');
+        test.skip((await price.textContent())?.includes('Quote unavailable') ?? true, 'no stored closes without a database');
+        await expect(page.getByTestId('position-price-note')).toHaveText(/^Last close, Oct 1(, 2026)?$/);
+
+        // NVDA has no stored close: its price is the one stored with the holding.
+        await gotoAppPage(page, '/portfolios/detail/NVDA');
+        await expect(page.getByTestId('position-price-note')).toHaveText('Price stored with your holding');
     });
 
     test('offers a draft order prefilled with the symbol', async ({ page }) => {

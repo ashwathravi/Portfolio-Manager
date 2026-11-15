@@ -1,27 +1,21 @@
 "use client";
 
-import type { Strategy } from "@/lib/strategies/strategy";
+import { summarizeRules, type Strategy } from "@/lib/strategies/strategy";
 
 /**
- * Phase 6 (AR-80) Strategy selection card.
+ * Strategy selection card (AR-80).
  *
  * Purely presentational — parent owns which strategy is selected and passes
- * the `selected` flag in. Renders the top-row cards on the Strategy builder
- * page. Each card shows:
- *   - status pill (active / paused / backtesting)
- *   - shortId (S-001) in mono
- *   - strategy name + one-line description
- *   - optional rolling 30-day adherence score (AR-111)
- *   - total return + rolling adherence (Sharpe, drawdown, and win rate
- *     live in the backtest panel; the card is a compact switcher)
+ * the `selected` flag in. Each card shows:
+ *   - the strategy's name, its rule and ticker counts
+ *   - its last backtest's return, or that it hasn't been backtested
+ *     (never a zero standing in for a result that doesn't exist)
+ *   - for the examples, a rolling 30-day adherence score (AR-111) from
+ *     the example journal
  *
  * The selected card gets an accent border + ambient shadow so the user
  * always knows which strategy the rule builder + backtest surface below
  * is currently reflecting.
- *
- * When a strategy is still in the `backtesting` status its stats are zero
- * — we render em-dashes instead of "0.00%" so the card doesn't lie about
- * a result that hasn't been computed yet.
  */
 
 export interface StrategyCardProps {
@@ -36,25 +30,11 @@ export interface StrategyCardProps {
     adherenceTier?: 'top' | 'good' | 'ok' | 'low' | null;
 }
 
-const STATUS_LABEL: Record<Strategy["status"], string> = {
-    active: "Active",
-    paused: "Paused",
-    backtesting: "Backtesting",
-};
-
-const STATUS_CLASS: Record<Strategy["status"], string> = {
-    active: "pm-strategy-status-active",
-    paused: "pm-strategy-status-paused",
-    backtesting: "pm-strategy-status-backtesting",
-};
-
 function formatSignedPct(pct: number): string {
-    if (pct === 0) return "—";
+    if (pct === 0) return "0.00%";
     const sign = pct > 0 ? "+" : "−";
     return `${sign}${Math.abs(pct).toFixed(2)}%`;
 }
-
-
 
 export function StrategyCard({
     strategy,
@@ -63,15 +43,9 @@ export function StrategyCard({
     adherenceScore = null,
     adherenceTier = null,
 }: StrategyCardProps) {
-    const { stats, status } = strategy;
-    const hasRun = status !== "backtesting";
-
-    const returnTone =
-        hasRun && stats.totalReturnPct > 0
-            ? "pm-num-pos"
-            : hasRun && stats.totalReturnPct < 0
-                ? "pm-num-neg"
-                : "";
+    const totalReturn = strategy.backtest?.stats.totalReturnPct ?? null;
+    const returnTone = totalReturn === null || totalReturn === 0 ? "" : totalReturn > 0 ? "pm-num-pos" : "pm-num-neg";
+    const tickers = strategy.symbols.length;
 
     return (
         <button
@@ -79,20 +53,24 @@ export function StrategyCard({
             className={`pm-strategy-card${selected ? " is-selected" : ""}`}
             aria-pressed={selected}
             onClick={onSelect}
-            title={strategy.description}
+            title={strategy.description || undefined}
         >
             <span className="pm-strategy-card-top">
-                <span className={`pm-strategy-status ${STATUS_CLASS[status]}`}>
-                    {status === "active" && <span className="pm-live-dot" aria-hidden="true" />}
-                    {STATUS_LABEL[status]}
+                <span className="pm-strategy-shortid">
+                    {summarizeRules(strategy)} · {tickers} ticker{tickers === 1 ? "" : "s"}
                 </span>
-                <span className="pm-strategy-shortid">{strategy.shortId}</span>
             </span>
             <span className="pm-strategy-name">{strategy.name}</span>
             <span className="pm-strategy-card-meta">
-                <span className={`pm-strategy-return num ${returnTone}`} aria-label="Total return">
-                    {formatSignedPct(stats.totalReturnPct)}
-                </span>
+                {totalReturn === null ? (
+                    <span className="pm-strategy-return pm-strategy-return-none" data-testid="strategy-card-return">
+                        Not backtested
+                    </span>
+                ) : (
+                    <span className={`pm-strategy-return num ${returnTone}`} aria-label="Backtest return" data-testid="strategy-card-return">
+                        {formatSignedPct(totalReturn)}
+                    </span>
+                )}
                 {adherenceScore != null && (
                     <span
                         className="pm-strategy-adherence"

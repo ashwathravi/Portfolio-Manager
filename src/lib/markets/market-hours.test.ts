@@ -13,6 +13,7 @@ import {
     marketStateLabel,
     nextTradingDay,
     previousTradingDay,
+    sessionSoFar,
 } from "./market-hours";
 
 /**
@@ -278,6 +279,53 @@ describe("isMarketOpen with the calendar", () => {
     });
 });
 
+// The audit (x23) found the open/closed badge wrong on NYSE holidays; every
+// question the app asks of the market (the badge and Today's subtitle, the
+// session so far that delayed quotes and "today's" P&L use, the session the
+// nightly prices job stores) goes through this calendar. Pinned at the dates
+// it named, at 10:00 AM ET and after a regular close.
+describe("the audit's dates (x23)", () => {
+    const at = (date: string, minutes: number) => easternDateTime(date, minutes);
+    const tenAm = 10 * 60;
+    const evening = 18 * 60;
+
+    for (const [date, before] of [
+        ["2026-04-03", "2026-04-02"], // Good Friday, from the Easter computation
+        ["2027-06-18", "2027-06-17"], // Juneteenth (Saturday) observed on the Friday
+        ["2027-12-24", "2027-12-23"], // Christmas (Saturday) observed on the Friday
+        ["2027-07-05", "2027-07-02"], // Independence Day (Sunday) observed on the Monday
+    ] as const) {
+        test(`${date} is closed all day, and its last session is ${before}`, () => {
+            assert.strictEqual(getMarketDay(date).isTradingDay, false);
+            assert.strictEqual(isMarketOpen(at(date, tenAm)), false);
+            assert.strictEqual(marketStateLabel(at(date, tenAm)), "Markets closed");
+            assert.strictEqual(sessionSoFar(at(date, tenAm)), null);
+            assert.strictEqual(lastCompletedSession(at(date, evening)), before);
+        });
+    }
+
+    test("2027-12-31 trades: a Saturday New Year's Day 2028 isn't observed on it", () => {
+        assert.strictEqual(isMarketOpen(at("2027-12-31", tenAm)), true);
+        assert.strictEqual(marketStateLabel(at("2027-12-31", tenAm)), "Markets open");
+        assert.strictEqual(lastCompletedSession(at("2027-12-31", evening)), "2027-12-31");
+        assert.strictEqual(nextTradingDay("2027-12-31"), "2028-01-03");
+    });
+
+    test("2026-11-27 closes at 1:00 PM ET, and its session is complete from then", () => {
+        assert.strictEqual(isMarketOpen(at("2026-11-27", 12 * 60 + 59)), true);
+        assert.strictEqual(isMarketOpen(at("2026-11-27", 13 * 60)), false);
+        assert.strictEqual(lastCompletedSession(at("2026-11-27", 13 * 60 - 1)), "2026-11-25");
+        assert.strictEqual(lastCompletedSession(at("2026-11-27", 13 * 60)), "2026-11-27");
+    });
+
+    test("the other early closes in 2025-2027 end at 1:00 PM ET too", () => {
+        for (const date of ["2025-07-03", "2025-11-28", "2025-12-24", "2026-12-24", "2027-11-26"]) {
+            assert.strictEqual(isMarketOpen(at(date, 12 * 60 + 59)), true, date);
+            assert.strictEqual(isMarketOpen(at(date, 13 * 60)), false, date);
+        }
+    });
+});
+
 describe("lastCompletedSession", () => {
     test("is the previous trading day before today's close", () => {
         // Tue 2026-09-08 19:00 UTC = 3:00 PM EDT; Monday was Labor Day.
@@ -340,5 +388,27 @@ describe("easternDateTime", () => {
         assert.throws(() => easternDateTime("2026-07-02", 24 * 60), RangeError);
         assert.throws(() => easternDateTime("2026-07-02", 90.5), RangeError);
         assert.throws(() => easternDateTime("2026-02-30", 600), RangeError);
+    });
+});
+
+describe("sessionSoFar", () => {
+    test("is null before the open, then today's session from 9:30 AM ET through the evening", () => {
+        assert.strictEqual(sessionSoFar(new Date("2026-11-02T14:29:00Z")), null); // 9:29 AM EST
+        const open = sessionSoFar(new Date("2026-11-02T14:30:00Z"));
+        assert.deepStrictEqual(
+            open && { date: open.date, openAt: open.openAt.toISOString(), closeAt: open.closeAt.toISOString() },
+            { date: "2026-11-02", openAt: "2026-11-02T14:30:00.000Z", closeAt: "2026-11-02T21:00:00.000Z" },
+        );
+        // After the bell it is still today's session, until midnight ET.
+        assert.strictEqual(sessionSoFar(new Date("2026-11-03T04:59:00Z"))?.date, "2026-11-02");
+    });
+
+    test("ends at 1:00 PM ET on an early close", () => {
+        assert.strictEqual(sessionSoFar(new Date("2026-11-27T16:00:00Z"))?.closeAt.toISOString(), "2026-11-27T18:00:00.000Z");
+    });
+
+    test("is null on weekends and holidays", () => {
+        assert.strictEqual(sessionSoFar(new Date("2026-10-31T16:00:00Z")), null); // Saturday
+        assert.strictEqual(sessionSoFar(new Date("2026-11-26T16:00:00Z")), null); // Thanksgiving
     });
 });

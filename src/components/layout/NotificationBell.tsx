@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { Bell, BellRing, Check, CheckCheck, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -10,8 +11,9 @@ import {
     DropdownMenuSeparator,
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { useAlertsStore, selectUnacknowledgedCount } from "@/lib/stores/alertsStore";
 import { describeRule } from "@/lib/alerts/evaluator";
+import { alertLinkLabel } from "@/lib/alerts/metrics";
+import { useAlertFeed, useClearAlerts, useMarkAlertsRead } from "@/lib/alerts/queries";
 import { cn } from "@/lib/utils";
 
 function formatRelative(isoTime: string): string {
@@ -22,18 +24,27 @@ function formatRelative(isoTime: string): string {
     return `${Math.floor(ms / 86_400_000)}d ago`;
 }
 
+/**
+ * The alerts the user's rules raised, kept with the account and evaluated
+ * each weekday evening after the close (launch item i57).
+ */
 export function NotificationBell() {
-    const triggers = useAlertsStore((s) => s.triggers);
-    const unacknowledged = useAlertsStore(selectUnacknowledgedCount);
-    const acknowledgeTrigger = useAlertsStore((s) => s.acknowledgeTrigger);
-    const acknowledgeAll = useAlertsStore((s) => s.acknowledgeAll);
-    const clearTriggers = useAlertsStore((s) => s.clearTriggers);
+    const [open, setOpen] = useState(false);
+    const feed = useAlertFeed();
+    const markRead = useMarkAlertsRead();
+    const clear = useClearAlerts();
+
+    const triggers = feed.data?.notifications ?? [];
+    const unacknowledged = feed.data?.unread ?? 0;
+    const acknowledgeTrigger = (id: string) => markRead.mutate({ ids: [id] });
+    const acknowledgeAll = () => markRead.mutate({ all: true });
+    const clearTriggers = () => clear.mutate(undefined);
 
     const recent = triggers.slice(0, 20);
     const hasUnread = unacknowledged > 0;
 
     return (
-        <DropdownMenu>
+        <DropdownMenu open={open} onOpenChange={setOpen}>
             <DropdownMenuTrigger asChild>
                 <Button
                     variant="ghost"
@@ -88,7 +99,7 @@ export function NotificationBell() {
                         <Bell className="h-8 w-8 text-muted-foreground/40 mb-2" />
                         <p className="text-sm font-medium text-muted-foreground">No alerts yet</p>
                         <p className="text-xs text-muted-foreground/70 mt-1">
-                            Triggered alerts will show up here.
+                            Your rules are checked each weekday evening after the close. What they find shows up here.
                         </p>
                     </div>
                 ) : (
@@ -110,7 +121,7 @@ export function NotificationBell() {
                                 />
                                 <div className="flex-1 min-w-0">
                                     <p className="text-sm font-medium truncate">{trigger.ruleName}</p>
-                                    <p className="text-xs text-muted-foreground font-mono">
+                                    <p className="text-xs text-muted-foreground">
                                         {trigger.message ?? `${describeRule(trigger)} → ${formatObservedValue(trigger.metric, trigger.observedValue)}`}
                                     </p>
                                     <p className="text-[11px] text-muted-foreground/70 mt-0.5">
@@ -119,9 +130,13 @@ export function NotificationBell() {
                                     {trigger.href && (
                                         <Link
                                             href={trigger.href}
+                                            onClick={() => {
+                                                if (!trigger.acknowledged) acknowledgeTrigger(trigger.id);
+                                                setOpen(false);
+                                            }}
                                             className="mt-1 inline-flex text-[11px] font-medium text-primary hover:underline"
                                         >
-                                            View source report
+                                            {alertLinkLabel(trigger.metric, trigger.symbol)}
                                         </Link>
                                     )}
                                 </div>
@@ -144,7 +159,7 @@ export function NotificationBell() {
                 <DropdownMenuSeparator className="m-0" />
                 <div className="p-2">
                     <Button variant="ghost" size="sm" className="w-full justify-start" asChild>
-                        <Link href="/settings?tab=alerts">Manage alert rules →</Link>
+                        <Link href="/settings?tab=alerts" onClick={() => setOpen(false)}>Manage alert rules →</Link>
                     </Button>
                 </div>
             </DropdownMenuContent>

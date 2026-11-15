@@ -18,7 +18,10 @@ import { databaseAuthEnabled, signInAsFreshUser } from './helpers/users';
  *     against a daily limit; another account never sees it. Without one,
  *     this browser keeps it under `pm-ask-v1`
  *   - Sidebar nav item + Beta pill are visible
- *   - Under the question box: answers are not investment advice (i64)
+ *   - Under the question box: answers are not investment advice (i64),
+ *     and, when Claude writes them, that they're Claude's and can be wrong
+ *     (i59). The E2E servers have no ASK_MODEL, so the rules answer here;
+ *     Claude's answers are unit-tested over a mock model.
  *
  * Tests that ask sign in as a fresh user (a copy of fixture user A): the
  * conversation is kept per user on the server.
@@ -77,8 +80,43 @@ test.describe('Ask Ledger — ⌘K command palette', () => {
     test('a ticker opens its position detail', async ({ page }) => {
         await page.keyboard.press(`${modifier()}+KeyK`);
         await page.getByLabel('Search or jump to').last().fill('nvda');
-        await page.getByTestId('command-item').filter({ hasText: 'Open NVDA' }).click();
+        // With a database, ticker search finds the user's own NVDA by name (launch item i35).
+        const item = page.getByTestId('command-item').filter({ hasText: databaseAuthEnabled ? /NVDA — NVIDIA Corp.*In your accounts/ : 'Open NVDA' });
+        await item.click();
         await expect(page).toHaveURL(/\/portfolios\/detail\/NVDA$/);
+    });
+
+    test('a company name finds its ticker (i35)', async ({ page }) => {
+        test.skip(!databaseAuthEnabled, 'ticker search reads the symbol directory in the database');
+        await page.keyboard.press(`${modifier()}+KeyK`);
+        await page.getByLabel('Search or jump to').last().fill('berkshire');
+        const item = page.getByTestId('command-item').filter({ hasText: 'BRK.B — BERKSHIRE HATHAWAY INC' });
+        await expect(item).toContainText('NYSE');
+        await item.click();
+        await expect(page).toHaveURL(/\/portfolios\/detail\/BRK\.B$/);
+    });
+
+    test('regression: Enter opens what is typed, not a match left from the last search (i35)', async ({ page }) => {
+        test.skip(!databaseAuthEnabled, 'ticker search reads the symbol directory in the database');
+        // Hold the second search back, as a slow network would.
+        let release = () => {};
+        const held = new Promise<void>((resolve) => { release = resolve; });
+        await page.route(/\/api\/market-data\/search\?query=msft/, async (route) => {
+            await held;
+            await route.continue().catch(() => {});
+        });
+
+        await page.keyboard.press(`${modifier()}+KeyK`);
+        const input = page.getByLabel('Search or jump to').last();
+        await input.fill('apple');
+        await expect(page.getByTestId('command-item').filter({ hasText: 'AAPL —' })).toBeVisible();
+
+        await input.fill('msft');
+        await expect(page.getByTestId('command-item').filter({ hasText: 'Open MSFT' })).toBeVisible();
+        await expect(page.getByTestId('command-item').filter({ hasText: 'AAPL —' })).toHaveCount(0);
+        await page.keyboard.press('Enter');
+        await expect(page).toHaveURL(/\/portfolios\/detail\/MSFT$/);
+        release();
     });
 
     test('a question is handed to Ask Ledger and answered', async ({ page }) => {
@@ -131,6 +169,29 @@ test.describe('Ask Ledger — dedicated /ask page', () => {
         // The empty state's worked example is labelled as one.
         await expect(page.getByTestId('ask-example')).toContainText('Example');
         await expect(sheet.getByTestId('ask-note')).toHaveText('Answers are information, not investment advice.');
+    });
+
+    test('the note says so when Claude writes the answers (launch item i59)', async ({ page }) => {
+        // Without ASK_MODEL the rules answer, and the server says so.
+        const asked = await page.request.post('/api/ask', { data: { question: 'How much cash is unassigned to jobs?' } });
+        expect((await asked.json()).data.writer).toBe('rules');
+        expect((await (await page.request.get('/api/ask')).json()).data.writer).toBe('rules');
+
+        await page.route('**/api/ask', async (route) => {
+            const response = await route.fetch();
+            const body = await response.json();
+            await route.fulfill({ response, json: body.data ? { ...body, data: { ...body.data, writer: 'claude' } } : body });
+        });
+        await page.goto('/ask');
+        // Without a database only the answer says who wrote it; with one, the conversation too.
+        const answered = page.waitForResponse((response) => response.url().endsWith('/api/ask') && response.request().method() === 'POST');
+        await ask(page, 'Am I overexposed to AI?');
+        await answered;
+        await expect(page.getByTestId('ask-msg-user').last()).toContainText('Am I overexposed to AI?');
+        await expect(page.getByTestId('ask-pending')).toHaveCount(0);
+        await expect(page.getByTestId('ask-note')).toHaveText(
+            'Answers are written by Claude, an AI model, from your data, and can be wrong. They are information, not investment advice.',
+        );
     });
 
     test('a P&L question is answered from closed trades', async ({ page }) => {

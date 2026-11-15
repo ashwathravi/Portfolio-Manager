@@ -31,7 +31,7 @@ export async function GET(request: NextRequest) {
 
   const parsedRange = historyRangeSchema.safeParse(range.toUpperCase());
   if (!parsedRange.success) {
-    return apiError('Invalid range. Valid values: 1D, 5D, 1M, 3M, 6M, 1Y, 5Y, MAX', 'INVALID_RANGE', 400);
+    return apiError(`Invalid range. Valid values: ${historyRangeSchema.options.join(', ')}`, 'INVALID_RANGE', 400);
   }
 
   try {

@@ -3,8 +3,11 @@ import assert from 'node:assert';
 import {
     fetchQuotes,
     fetchHistorical,
+    fetchTickerMatches,
+    normalizeTickerSearch,
     quotesQueryKey,
     historicalQueryKey,
+    tickerSearchQueryKey,
 } from './queries.ts';
 
 type FetchCall = { url: string; init?: RequestInit };
@@ -57,7 +60,7 @@ describe('historicalQueryKey', () => {
     test('treats different timeframes as different keys', () => {
         assert.notDeepStrictEqual(
             historicalQueryKey('AAPL', '1D'),
-            historicalQueryKey('AAPL', '1H'),
+            historicalQueryKey('AAPL', '1M'),
         );
     });
 });
@@ -96,7 +99,7 @@ describe('fetchQuotes', () => {
     });
 
     test('indexes the actual route envelope by normalized symbol without losing quote metadata', async () => {
-        const quote = { symbol: ' aapl ', price: 100, change: -1, changePercent: -1, timestamp: '2026-10-03T18:11:00.000Z', isRealtime: false };
+        const quote = { symbol: ' aapl ', price: 100, change: -1, changePercent: -1, timestamp: '2026-10-03T18:11:00.000Z', kind: 'close', isRealtime: false };
         mockFetch({ ok: true, json: { data: [quote] } });
         assert.deepStrictEqual(await fetchQuotes(['AAPL', 'MSFT']), { AAPL: { ...quote, symbol: 'AAPL' } });
     });
@@ -114,7 +117,7 @@ describe('fetchQuotes', () => {
     });
 
     test('drops malformed and zero-priced entries and keeps the valid quotes in the batch', async () => {
-        const msft = { symbol: 'MSFT', price: 500, change: 2, changePercent: 0.4, timestamp: '2026-10-03T18:11:00.000Z', isRealtime: false };
+        const msft = { symbol: 'MSFT', price: 500, change: 2, changePercent: 0.4, timestamp: '2026-10-03T18:11:00.000Z', kind: 'close', isRealtime: false };
         mockFetch({
             ok: true,
             json: { data: [null, { symbol: 'AAPL' }, { ...msft, symbol: 'SPY', price: Number.NaN }, { ...msft, symbol: 'QQQ', price: 0 }, msft] },
@@ -123,12 +126,22 @@ describe('fetchQuotes', () => {
     });
 
     test('keeps a quote whose change is unknown, but not one with half a change', async () => {
-        const first = { symbol: 'NEWCO', price: 25, change: null, changePercent: null, timestamp: '2026-10-16T20:00:00.000Z', isRealtime: false };
+        const first = { symbol: 'NEWCO', price: 25, change: null, changePercent: null, timestamp: '2026-10-16T20:00:00.000Z', kind: 'close', isRealtime: false };
         mockFetch({
             ok: true,
             json: { data: [first, { ...first, symbol: 'HALF', change: 1 }, { ...first, symbol: 'TEXT', change: '1', changePercent: '1' }] },
         });
         assert.deepStrictEqual(await fetchQuotes(['NEWCO', 'HALF', 'TEXT']), { NEWCO: first });
+    });
+
+    test('keeps closes and delayed quotes, and drops a price that doesn\'t say which it is (i33)', async () => {
+        const close = { symbol: 'AAPL', price: 100, change: 1, changePercent: 1, timestamp: '2026-10-30T20:00:00.000Z', kind: 'close', isRealtime: false };
+        const delayed = { ...close, symbol: 'MSFT', kind: 'delayed', timestamp: '2026-11-02T15:42:00.000Z' };
+        mockFetch({
+            ok: true,
+            json: { data: [close, delayed, { ...close, symbol: 'NOKIND', kind: undefined }, { ...close, symbol: 'LIVE', kind: 'live' }] },
+        });
+        assert.deepStrictEqual(await fetchQuotes(['AAPL', 'MSFT', 'NOKIND', 'LIVE']), { AAPL: close, MSFT: delayed });
     });
 
 });
@@ -184,5 +197,34 @@ describe('fetchHistorical', () => {
             fetchHistorical('AAPL', '1D'),
             /Failed to fetch historical data \(500\)/,
         );
+    });
+});
+
+describe('ticker search (launch item i35)', () => {
+    afterEach(() => {
+        globalThis.fetch = originalFetch;
+    });
+
+    test('searches share a cache entry however the text is spaced or cased', () => {
+        assert.strictEqual(normalizeTickerSearch('  Apple   INC '), 'apple inc');
+        assert.deepStrictEqual(tickerSearchQueryKey('Apple'), tickerSearchQueryKey(' apple '));
+        assert.strictEqual(normalizeTickerSearch('x'.repeat(100)).length, 80);
+    });
+
+    test('sends the normalized text and keeps only well-formed matches', async () => {
+        const apple = { symbol: 'AAPL', name: 'Apple Inc.', exchange: 'Nasdaq', held: true };
+        mockFetch({
+            ok: true,
+            json: { data: [apple, { symbol: '', name: 'Blank', exchange: null, held: false }, { symbol: 'X', name: 'No held flag', exchange: null }, null] },
+        });
+        assert.deepStrictEqual(await fetchTickerMatches('  Apple  & Co '), [apple]);
+        assert.strictEqual(calls[0].url, '/api/market-data/search?query=apple%20%26%20co');
+    });
+
+    test('a refused search is an error the picker shows as no matches', async () => {
+        mockFetch({ ok: false, status: 503, json: { error: 'Market data is not configured.' } });
+        await assert.rejects(fetchTickerMatches('apple'), /Market data is not configured/);
+        mockFetch({ ok: true, json: { results: [] } });
+        await assert.rejects(fetchTickerMatches('apple'), /Invalid search response/);
     });
 });

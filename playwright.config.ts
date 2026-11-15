@@ -15,6 +15,7 @@ const databaseAuthEnabled = Boolean(process.env.CI || process.env.E2E_DATABASE_A
 // that mode and the two outage servers always run `next dev`.
 const productionBuild = databaseAuthEnabled && process.env.E2E_DEV_SERVER !== '1';
 const PRODUCTION_DIST_DIR = '.next/e2e-production';
+const ALPHA_RADAR_LIVE_SPEC = /alpha-radar-live\.spec\.ts$/;
 const authServerEnv: Record<string, string> = databaseAuthEnabled
     ? {
         AUTH_SECRET: process.env.E2E_AUTH_SECRET ?? 'e2e-only-auth-secret-change-outside-tests',
@@ -50,11 +51,22 @@ const noSharedRedis = {
     UPSTASH_REDIS_REST_TOKEN: '',
 };
 
-// No market-data key either, so test runs never spend the free plan's 5 calls
-// a minute and always see the not-configured state: stored prices on pages,
-// 503 from /api/market-data (tests stub those routes where they need quotes).
+// No market-data keys either, so test runs never spend the free plans' calls
+// and always see the not-configured state: stored prices on pages, 503 from
+// /api/market-data (tests stub those routes where they need quotes), and
+// closes rather than delayed Finnhub quotes during market hours. No SEC user
+// agent, so nothing asks SEC: an Alpha Radar refresh answers 503.
 const noMarketData = {
     POLYGON_API_KEY: '',
+    FINNHUB_API_KEY: '',
+    SEC_EDGAR_USER_AGENT: '',
+};
+
+// No Resend key or sender, so a test run never sends email (launch item
+// i58) and Settings always says this server doesn't send yet.
+const noEmail = {
+    RESEND_API_KEY: '',
+    EMAIL_FROM: '',
 };
 
 // No cron secret, so /api/cron/* always refuses (503) and a test run never
@@ -63,11 +75,32 @@ const noCronSecret = {
     CRON_SECRET: '',
 };
 
+// No Plaid keys, so nothing reaches Plaid and Settings always shows bank
+// linking as not set up, as production does until its keys are added (x30).
+// Tests that exercise Link stub the /api/plaid routes and the Link SDK.
+const noPlaid = {
+    PLAID_CLIENT_ID: '',
+    PLAID_SECRET: '',
+};
+
 // No Sentry DSN, so the SDK never starts and a test run's errors never reach
 // the production project (and no build uploads source maps).
 const noSentry = {
     NEXT_PUBLIC_SENTRY_DSN: '',
     SENTRY_AUTH_TOKEN: '',
+};
+
+// No Ask model, embedding model or AI Gateway credentials, so Ask's answers
+// always come from the rules planner, Alpha Radar's evidence is searched by
+// keyword, and a test run never sends a question or a filing to a model
+// (launch items i59 and i62). Claude's answers are covered by unit tests over
+// a mock model (src/lib/ask/server/claude.test.ts), and so are embeddings
+// (src/lib/alpha-radar/embeddings.test.ts).
+const noAskModel = {
+    ASK_MODEL: '',
+    ALPHA_RADAR_EMBEDDING_MODEL: '',
+    AI_GATEWAY_API_KEY: '',
+    VERCEL_OIDC_TOKEN: '',
 };
 
 // The outage servers run `next dev` from an empty build directory every run.
@@ -114,7 +147,25 @@ export default defineConfig({
         {
             name: 'chromium',
             use: { ...devices['Desktop Chrome'] },
+            testIgnore: ALPHA_RADAR_LIVE_SPEC,
+            ...(databaseAuthEnabled ? { teardown: 'alpha-radar-live' } : {}),
         },
+        // Alpha Radar with a tracked filer in the database (launch item i60).
+        // Filers are shared by every user, and the other specs expect none
+        // (the examples), so these run after them, one at a time: as the
+        // main project's teardown, which runs whether or not its tests
+        // passed (a dependency would be skipped after a failure, and would
+        // pull in the whole main project for a run of this spec alone). It
+        // also runs after a run of a single other spec. Only with database
+        // sessions.
+        ...(databaseAuthEnabled
+            ? [{
+                name: 'alpha-radar-live',
+                testMatch: ALPHA_RADAR_LIVE_SPEC,
+                fullyParallel: false,
+                use: { ...devices['Desktop Chrome'] },
+            }]
+            : []),
         // The post-deploy smoke test (tests/production, launch item i72),
         // here against the local server so it stays true to the app. Signed
         // out, as on the live site, so only with database sessions: the local
@@ -143,7 +194,10 @@ export default defineConfig({
                 ...noSharedRedis,
                 ...noMarketData,
                 ...noCronSecret,
+                ...noEmail,
+                ...noPlaid,
                 ...noSentry,
+                ...noAskModel,
             },
             url: 'http://localhost:3000',
             // Never reuse a running server: it may be connected to a real
@@ -170,7 +224,10 @@ export default defineConfig({
                 ...noSharedRedis,
                 ...noMarketData,
                 ...noCronSecret,
+                ...noEmail,
+                ...noPlaid,
                 ...noSentry,
+                ...noAskModel,
             },
             url: 'http://localhost:3100/api/health',
             // Never reuse a running server: it may be connected to a real
@@ -203,7 +260,10 @@ export default defineConfig({
                 ...noSharedRedis,
                 ...noMarketData,
                 ...noCronSecret,
+                ...noEmail,
+                ...noPlaid,
                 ...noSentry,
+                ...noAskModel,
             },
             url: 'http://localhost:3200/api/health',
             // Never reuse a running server: it may be connected to a real

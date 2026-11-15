@@ -4,11 +4,14 @@
  *
  * TTL rules (from spec AR-47):
  *   Quotes        →  30 seconds
- *   Historical    →  24 hours
+ *   Historical    →  24 hours; 10 minutes while the answer doesn't reach
+ *                    the last completed session yet (not published, or empty)
  *   Fundamentals  →  24 hours
  *   Search        →   5 minutes
  *
- * Key format: `{type}:{symbol}` — e.g. `quote:AAPL`, `history:AAPL:1M`
+ * Key format: `{type}:{symbol}` — e.g. `quote:AAPL`. History also names the
+ * last completed session its range ends at (x22), e.g.
+ * `history:AAPL:1D:2026-11-13`, so a new session is a new answer.
  *
  * The cache backend is injected via the CacheProvider interface so it can be
  * swapped (InMemoryCache → Redis, etc.) without touching this class.
@@ -24,6 +27,8 @@ import type {
   SymbolResult,
 } from '@/types/market-data';
 
+import { getEasternParts, lastCompletedSession } from '@/lib/markets/market-hours';
+
 import type { CacheProvider } from './cache-provider';
 
 // ---------------------------------------------------------------------------
@@ -32,6 +37,13 @@ import type { CacheProvider } from './cache-provider';
 
 const TTL_QUOTE = 30;
 const TTL_HISTORICAL = 24 * 60 * 60; // 24 hours
+/**
+ * History whose newest bar is older than the last completed session: the
+ * nightly ingest stores a session's bars after the close (x09), as Massive
+ * publishes them some time after it, so it is asked for again soon (the
+ * adapter's quotes wait as long for an unpublished day).
+ */
+const TTL_HISTORICAL_PENDING = 10 * 60; // 10 minutes
 const TTL_FUNDAMENTALS = 24 * 60 * 60; // 24 hours
 const TTL_SEARCH = 5 * 60; // 5 minutes
 
@@ -44,9 +56,21 @@ export interface CachedMarketDataProviderOptions {
   ttl?: {
     quote?: number;
     historical?: number;
+    /** History that doesn't reach the last completed session yet. */
+    historicalPending?: number;
     fundamentals?: number;
     search?: number;
   };
+  /** Clock that picks the last completed session for history keys. Default: the system clock */
+  now?: () => Date;
+}
+
+/** Whether the newest of `bars` is `session`'s (or later), in Eastern dates. */
+function reachesSession(bars: readonly OHLC[], session: string): boolean {
+  const newest = bars.at(-1);
+  if (!newest) return false;
+  const time = new Date(newest.timestamp);
+  return !Number.isNaN(time.getTime()) && getEasternParts(time).date >= session;
 }
 
 // ---------------------------------------------------------------------------
@@ -59,8 +83,10 @@ export class CachedMarketDataProvider implements MarketDataProvider {
   private readonly inflight = new Map<string, Promise<unknown>>();
   private readonly ttlQuote: number;
   private readonly ttlHistorical: number;
+  private readonly ttlHistoricalPending: number;
   private readonly ttlFundamentals: number;
   private readonly ttlSearch: number;
+  private readonly now: () => Date;
 
   constructor(
     inner: MarketDataProvider,
@@ -71,8 +97,10 @@ export class CachedMarketDataProvider implements MarketDataProvider {
     this.cache = cache;
     this.ttlQuote = options.ttl?.quote ?? TTL_QUOTE;
     this.ttlHistorical = options.ttl?.historical ?? TTL_HISTORICAL;
+    this.ttlHistoricalPending = Math.min(this.ttlHistorical, options.ttl?.historicalPending ?? TTL_HISTORICAL_PENDING);
     this.ttlFundamentals = options.ttl?.fundamentals ?? TTL_FUNDAMENTALS;
     this.ttlSearch = options.ttl?.search ?? TTL_SEARCH;
+    this.now = options.now ?? (() => new Date());
   }
 
   // -----------------------------------------------------------------------
@@ -168,9 +196,21 @@ export class CachedMarketDataProvider implements MarketDataProvider {
       .filter((quote): quote is Quote => quote !== undefined);
   }
 
+  /**
+   * Every range ends at the last completed session (x22: 1D and 5D are the
+   * last sessions, day ranges end today), so the key names that session: once
+   * a newer one closes the range is asked for again, rather than answered
+   * with the session before for the rest of a day. Until its bar is
+   * published the answer is kept for minutes only.
+   */
   async getHistoricalPrices(symbol: string, range: string): Promise<OHLC[]> {
-    const key = `history:${symbol.toUpperCase()}:${range.toUpperCase()}`;
-    return this.getOrFetch(key, this.ttlHistorical, () => this.inner.getHistoricalPrices(symbol, range));
+    const session = lastCompletedSession(this.now());
+    const key = `history:${symbol.toUpperCase()}:${range.toUpperCase()}:${session}`;
+    return this.getOrFetch(
+      key,
+      (bars) => (reachesSession(bars, session) ? this.ttlHistorical : this.ttlHistoricalPending),
+      () => this.inner.getHistoricalPrices(symbol, range),
+    );
   }
 
   async getFundamentals(symbol: string): Promise<Fundamentals> {
@@ -183,7 +223,7 @@ export class CachedMarketDataProvider implements MarketDataProvider {
     return this.getOrFetch(key, this.ttlSearch, () => this.inner.searchSymbol(query));
   }
 
-  private getOrFetch<T>(key: string, ttlSeconds: number, load: () => Promise<T>): Promise<T> {
+  private getOrFetch<T>(key: string, ttlSeconds: number | ((result: T) => number), load: () => Promise<T>): Promise<T> {
     const cached = this.cache.get<T>(key);
     if (cached !== undefined) return Promise.resolve(cached);
 
@@ -192,7 +232,7 @@ export class CachedMarketDataProvider implements MarketDataProvider {
 
     const pending = load()
       .then((result) => {
-        this.cache.set(key, result, ttlSeconds);
+        this.cache.set(key, result, typeof ttlSeconds === 'function' ? ttlSeconds(result) : ttlSeconds);
         return result;
       })
       .finally(() => {

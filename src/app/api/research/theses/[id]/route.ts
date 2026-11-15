@@ -8,7 +8,7 @@
  * than one the thesis already has from the same page is ignored.
  *
  * Body: { thesis: Thesis (its id must match the path), order: { session, seq } }
- * Responses: 204; 400 INVALID_THESIS; 413
+ * Responses: 204; 400 INVALID_THESIS; 409 THESIS_LIMIT; 413
  */
 
 import { NextResponse } from 'next/server';
@@ -16,6 +16,8 @@ import { NextResponse } from 'next/server';
 import { readJsonBody } from '@/lib/api/body';
 import { apiError, internalServerError } from '@/lib/api/security';
 import { requireSessionApiUserScope } from '@/lib/api/session-security';
+import { RecordLimitError } from '@/lib/limits/records';
+import { recordLimitResponse } from '@/lib/limits/records-server';
 import { saveThesis } from '@/lib/research/server/theses';
 import { THESIS_PUT_MAX_BYTES, thesisPutSchema } from '@/lib/validators/thesis';
 
@@ -44,6 +46,7 @@ export async function PUT(request: Request, { params }: Params) {
         await saveThesis(auth.context.userId, parsed.data.thesis, parsed.data.order);
         return new NextResponse(null, { status: 204 });
     } catch (err) {
+        if (err instanceof RecordLimitError) return recordLimitResponse(err);
         return internalServerError(err, 'Unable to save the thesis.', 'THESIS_SAVE_FAILED');
     }
 }

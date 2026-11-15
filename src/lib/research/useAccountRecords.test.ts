@@ -92,4 +92,30 @@ describe('accountWriterFor', () => {
         assert.equal(client.getQueryState(key)?.isInvalidated, true);
         assert.deepEqual(client.getQueryData(key), { items: ['kept'] });
     });
+
+    test('regression (i61): a saved write marks the queries that read these records stale, and only a saved one', async () => {
+        // Alpha Radar's changes are ranked with the watchlist: adding a
+        // ticker and going back to them showed the old ranking.
+        const client = new QueryClient();
+        const dependent = ['alpha-radar', 'changes', 'filer-1', 'latest'];
+        const unrelated = ['alpha-radar', 'filers'];
+        let fail = false;
+        const writer = accountWriterFor<Stored, Write>(client, {
+            ...options(async () => { if (fail) throw new Error('offline'); }, ['research', 'dependents']),
+            dependents: [['alpha-radar', 'changes']],
+        }, () => {});
+
+        client.setQueryData(dependent, []);
+        client.setQueryData(unrelated, []);
+        fail = true;
+        writer.write('a', { kind: 'put', item: 'lost' });
+        await flush();
+        assert.equal(client.getQueryState(dependent)?.isInvalidated, false);
+
+        fail = false;
+        writer.write('b', { kind: 'put', item: 'CB' });
+        await flush();
+        assert.equal(client.getQueryState(dependent)?.isInvalidated, true);
+        assert.equal(client.getQueryState(unrelated)?.isInvalidated, false);
+    });
 });
