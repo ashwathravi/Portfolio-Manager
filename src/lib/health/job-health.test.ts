@@ -85,6 +85,16 @@ describe("the schedules match what runs the jobs", () => {
         assert.deepEqual(Object.keys(DAILY_JOBS_ADDED_ON), ["alerts", "email"]);
         for (const schedule of JOB_SCHEDULES) assert.doesNotThrow(() => addedAt(schedule), schedule.job);
     });
+
+    test("no job's added date is more than a day ahead (x35)", () => {
+        // A date too far ahead (a typo, or a guess at a deploy that slipped)
+        // would keep the job pending past runs that failed or never happened.
+        const tomorrow = Date.now() + 24 * 60 * 60_000;
+        for (const schedule of JOB_SCHEDULES) {
+            const added = addedAt(schedule);
+            if (added) assert.ok(added.getTime() <= tomorrow, `${schedule.job}: addedOn ${schedule.addedOn} is in the future`);
+        }
+    });
 });
 
 describe("addedAt", () => {

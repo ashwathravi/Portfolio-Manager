@@ -305,6 +305,9 @@ test.describe('Scheduled job health', () => {
                     expect(Object.keys(job).sort()).toEqual(['dueSince', 'job', 'lastSucceededAt', 'status']);
                     expect(job.lastSucceededAt).toBeNull();
                     if (job.status === 'pending') {
+                        // Only the jobs with an added date (DAILY_JOBS_ADDED_ON)
+                        // can be waiting for their first run.
+                        expect(['alerts', 'email']).toContain(job.job);
                         // Since the start of the UTC day it was added, after
                         // its last due run, so less than a week ago.
                         expect(job.dueSince).toMatch(/T00:00:00\.000Z$/);

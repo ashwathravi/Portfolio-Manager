@@ -425,8 +425,8 @@ describe('createGitHub', () => {
 test('describeRun summarises the checks and the issue', () => {
     assert.equal(
         describeRun([], { action: 'closed', number: 40 }, SITE),
-        `## Production monitor: ${SITE}\n\nEvery check passes: the database answers and every scheduled job ran on time.\n\nClosed issue #40.`,
+        `## Production monitor: ${SITE}\n\nEvery check passes: the database answers and every scheduled job that was due ran on time.\n\nClosed issue #40.`,
     );
     assert.equal(describeRun([down], { action: 'unchanged', number: 40 }, SITE), `## Production monitor: ${SITE}\n\n- ${down.message}\n\nAlready open: issue #40.`);
-    assert.equal(describeRun([], { action: 'none' }, SITE), `## Production monitor: ${SITE}\n\nEvery check passes: the database answers and every scheduled job ran on time.`);
+    assert.equal(describeRun([], { action: 'none' }, SITE), `## Production monitor: ${SITE}\n\nEvery check passes: the database answers and every scheduled job that was due ran on time.`);
 });

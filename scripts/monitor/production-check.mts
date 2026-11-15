@@ -385,7 +385,7 @@ function readState(body: string | null): string | null {
 export function describeRun(problems: readonly Problem[], outcome: IssueOutcome, siteUrl: string): string {
     const lines = [`## Production monitor: ${siteUrl}`, ""];
     if (problems.length === 0) {
-        lines.push("Every check passes: the database answers and every scheduled job ran on time.");
+        lines.push("Every check passes: the database answers and every scheduled job that was due ran on time.");
     } else {
         lines.push(...problems.map((problem) => `- ${problem.message}`));
     }
