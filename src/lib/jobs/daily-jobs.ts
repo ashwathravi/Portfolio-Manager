@@ -3,15 +3,20 @@
  * the close (vercel.json). The quick cleanups go first so a long price
  * backfill can never crowd it out of the function's time limit. Linked
  * accounts sync next (launch item i44), within a budget of their own that
- * leaves the price job its 240 s, so tonight's prices and snapshots include
+ * leaves the price job its 220 s, so tonight's prices and snapshots include
  * what they hold. Snapshots come after the prices they are valued at (they
  * use only stored closes, so they run, and stay quick, even when the price
  * job stopped early). The price job first refreshes the ticker search's
  * symbol directory from SEC (launch item i35): one quick request, taken out
  * of the price budget, and run even before a market data key is set. Without
- * that key the price job then fails, so job health reports it.
+ * that key the price job then fails, so job health reports it. Alerts go
+ * after them, on the closes and holdings the jobs before them stored
+ * (launch item i57), and then the emails that carry them, with the weekly
+ * review after Friday's close (launch item i58).
  */
 
+import { evaluateAlertRules } from "@/lib/alerts/nightly";
+import { sendScheduledEmails } from "@/lib/email/nightly";
 import { pruneAskHistory } from "@/lib/ask/server/history";
 import { DEFAULT_BUDGET_MS, ingestDailyPrices } from "@/lib/markets/price-ingest";
 import { refreshSymbolDirectory } from "@/lib/markets/symbol-directory";
@@ -43,4 +48,6 @@ export const DAILY_JOBS: readonly ScheduledJob[] = [
     { name: "plaid", run: () => syncAllPlaidItems() },
     { name: "prices", run: () => refreshMarketData() },
     { name: "snapshots", run: () => recordValuationSnapshots() },
+    { name: "alerts", run: async () => ({ ...(await evaluateAlertRules()) }) },
+    { name: "email", run: async () => ({ ...(await sendScheduledEmails()) }) },
 ];

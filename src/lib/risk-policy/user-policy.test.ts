@@ -45,6 +45,7 @@ const PORTFOLIO: PolicyPortfolio = {
     cashTotal: 10_000,
     trades: [],
     theses: [],
+    options: [],
 };
 
 describe("policyHoldings", () => {
@@ -110,6 +111,28 @@ describe("riskPolicyInput / evaluateRiskPolicy", () => {
     test("what the holdings and cash are worth together", () => {
         assert.equal(policyPortfolioValue(PORTFOLIO), 110_000);
         assert.equal(policyPortfolioValue(EMPTY_POLICY_PORTFOLIO), 0);
+    });
+
+    test("the user's option positions (launch item i63): in the checks and the portfolio's worth", () => {
+        const call = {
+            id: "o1", underlying: "AAPL", contractType: "call" as const, strike: 250, expiry: "2027-01-15",
+            quantity: 3, premiumPaid: 18.2, currentPremium: 21.4,
+        };
+        const portfolio = { ...PORTFOLIO, options: [call] };
+        assert.deepEqual(riskPolicyInput(portfolio, POLICY).optionPositions, [call]);
+        // 3 contracts × 100 × $21.40.
+        assert.equal(policyPortfolioValue(portfolio), 110_000 + 6_420);
+        const speculative = evaluateRiskPolicy(portfolio, POLICY).dimensions.find((d) => d.id === "speculative_options_exposure")!;
+        assert.match(speculative.explanation, /Options premium at risk is \$5,460/);
+    });
+
+    test("regression: a written option counts against the portfolio's worth, not for it", () => {
+        const written = {
+            id: "o2", underlying: "AAPL", contractType: "call" as const, strike: 250, expiry: "2027-01-15",
+            quantity: -1, premiumPaid: 12, currentPremium: 10,
+        };
+        const cashOnly = { ...EMPTY_POLICY_PORTFOLIO, cashTotal: 10_000, options: [written] };
+        assert.equal(policyPortfolioValue(cashOnly), 9_000);
     });
 });
 

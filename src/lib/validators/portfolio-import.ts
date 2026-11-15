@@ -2,12 +2,14 @@ import { z } from 'zod';
 import { safeText } from './common';
 import { tickerSchema } from './market-data';
 import { MAX_IMPORT_ROWS } from '@/lib/portfolio/csvImport';
+import { optionImportRowsSchema } from './option-position';
 
 /**
  * POST /api/portfolio/import body. Rows arrive already parsed by the client
  * (so the user previews exactly what is sent) and are re-validated here.
  * Exactly one destination: an existing account the user owns, or a name for
- * a new one.
+ * a new one. `options` are the file's option rows (launch item i63), for the
+ * LEAPS ledger.
  */
 export const importRowSchema = z.object({
     symbol: tickerSchema,
@@ -18,13 +20,14 @@ export const importRowSchema = z.object({
 
 export const portfolioImportSchema = z
     .object({
-        portfolioId: z.uuid('Unknown account').optional(),
+        portfolioId: z.guid('Unknown account').optional(),
         newPortfolioName: safeText.trim().min(1, 'Name the new account').max(80, 'Account name is too long').optional(),
         rows: z
             .array(importRowSchema)
-            .min(1, 'Nothing to import')
             .max(MAX_IMPORT_ROWS, `Import at most ${MAX_IMPORT_ROWS} positions at once`),
+        options: optionImportRowsSchema.default([]),
     })
+    .refine((b) => b.rows.length + b.options.length > 0, { message: 'Nothing to import', path: ['rows'] })
     .refine((b) => Boolean(b.portfolioId) !== Boolean(b.newPortfolioName), {
         message: 'Choose an existing account or name a new one',
         path: ['portfolioId'],

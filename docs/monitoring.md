@@ -9,7 +9,7 @@ Every half hour, `.github/workflows/production-monitor.yml` runs `scripts/monito
 | Check | Endpoint | Fails when |
 |---|---|---|
 | The site and its database | `/api/health/ready` | No answer, an error page or a redirect (deployment protection, say), or the app can't reach its database or has none configured. |
-| The nightly jobs | `/api/health/jobs` | `expired-sessions`, `ask-history`, `plaid`, `prices` or `snapshots` hasn't succeeded after 22:00 UTC on a weekday by midnight UTC. Vercel Hobby starts the 22:30 cron at any minute of that hour. `prices` fails without `POLYGON_API_KEY`. |
+| The nightly jobs | `/api/health/jobs` | `expired-sessions`, `ask-history`, `plaid`, `prices`, `snapshots`, `alerts` or `email` hasn't succeeded after 22:00 UTC on a weekday by midnight UTC. Vercel Hobby starts the 22:30 cron at any minute of that hour. `prices` fails without `POLYGON_API_KEY`. |
 | Alpha Radar's SEC job | `/api/health/jobs` | `alpha-radar` hasn't succeeded after 11:00 UTC by 13:00 UTC (launch item i60). It runs every day; it fails without `SEC_EDGAR_USER_AGENT` or when every filer failed (SEC refusing Atlas, say). |
 | The nightly backup | `/api/health/jobs` | The `backup` workflow hasn't succeeded after 06:00 UTC by 10:00 UTC. It's scheduled at 06:41, and GitHub sometimes starts scheduled runs late. |
 | The stored closing prices | `/api/health/jobs` | The newest close in `price_bars` is older than the trading session before the one the last due `prices` run was for, or none is stored. That means two runs in a row stored no new day, even if they succeeded: a run that is rate-limited, out of its time budget or finds the day's file not yet published stops early and still counts as a success. One session behind is allowed, because the day's file may not be out by 22:30 UTC; the next run stores it. |
@@ -25,7 +25,7 @@ When a check fails, the monitor opens **one issue**, created by `github-actions`
 - When what fails changes, it comments on that issue.
 - Once every check passes again, it closes the issue.
 
-While the same things keep failing, it stays quiet. Make sure github.com › Settings › Notifications emails you about @mentions.
+The workflow passes the owner's login to the script as `MONITOR_MENTION`; without it the issue mentions nobody. While the same things keep failing, the monitor stays quiet. Make sure github.com › Settings › Notifications emails you about @mentions.
 
 The workflow run itself fails only when the monitor couldn't check, or couldn't open or update the issue. GitHub then emails whoever last changed the workflow's schedule.
 
@@ -140,3 +140,5 @@ node --input-type=module -e "import { checkProduction } from './scripts/monitor/
 ```
 
 An empty list means every check passes.
+
+`scripts/monitor/run.mts`, which the workflow runs, also needs `GITHUB_TOKEN` and `GITHUB_REPOSITORY` to open and update the issue, and `GITHUB_RUN_ID`, `GITHUB_SERVER_URL` and `GITHUB_STEP_SUMMARY` for the link to the run and its summary. The workflow passes `GITHUB_TOKEN` (from `github.token`; Actions doesn't put the token in the environment itself), and Actions sets the others.

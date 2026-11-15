@@ -28,11 +28,14 @@ export function TodayHero({
     holdings,
     cashTotal,
     accounts,
+    bankLinking,
 }: {
     holdings: TodayHeroHolding[];
     cashTotal: number;
     /** The user's accounts, for the first-run steps and the CSV import. */
     accounts: readonly ImportAccountOption[];
+    /** Whether the first-run steps may offer to connect a bank (x30). */
+    bankLinking: boolean;
 }) {
     const symbols = useMemo(() => holdings.map((h) => h.symbol).filter(Boolean), [holdings]);
     const { quotes, isFetching, isError, refreshMs, refetch, lastUpdatedAt } = useAutoRefreshQuotes(symbols);
@@ -82,7 +85,7 @@ export function TodayHero({
     );
     const changePct = netWorth - change > 0 ? (change / (netWorth - change)) * 100 : 0;
 
-    if (holdings.length === 0) return <FirstRunCard accounts={accounts} cashTotal={cashTotal} />;
+    if (holdings.length === 0) return <FirstRunCard accounts={accounts} cashTotal={cashTotal} bankLinking={bankLinking} />;
 
     return (
         <section className="pm-card pm-today-hero" data-testid="today-hero" aria-label="Net worth">

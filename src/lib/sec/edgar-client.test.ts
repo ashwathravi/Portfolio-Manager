@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, test } from 'node:test';
 import assert from 'node:assert';
 import { configuredSecUserAgent, SecEdgarClient, type SecEdgarClientOptions, type SecFetch } from './edgar-client';
@@ -116,93 +117,94 @@ describe('SecEdgarClient', () => {
         assert.strictEqual(filings[1].filingType, '13F-HR/A');
     });
 
-    test('discovers a separate 13F information table attachment from the filing archive index', async () => {
+    // As SEC files a 13F today (launch item i62): the primary document is the
+    // cover page, rendered through an XSL directory, and the information
+    // table is an attachment named by number.
+    const ARCHIVE = 'https://www.sec.gov/Archives/edgar/data/1067983/000119312526352200';
+    const HEADERS_URL = `${ARCHIVE}/0001193125-26-352200-index-headers.html`;
+    const INDEX_URL = `${ARCHIVE}/index.json`;
+    const HEADERS = readFileSync('src/lib/sec/fixtures/berkshire-2026q2-index-headers.html', 'utf8');
+
+    function realSubmissions() {
+        return submissionsResponse({
+            accessionNumber: ['0001193125-26-352200'],
+            filingDate: ['2026-08-14'],
+            reportDate: ['2026-06-30'],
+            acceptanceDateTime: ['2026-08-14T16:05:04.000Z'],
+            form: ['13F-HR'],
+            primaryDocument: ['xslForm13F_X02/primary_doc.xml'],
+            primaryDocDescription: [''],
+        });
+    }
+
+    function archiveItems(...names: string[]) {
+        return {
+            directory: {
+                item: [
+                    { name: '0001193125-26-352200-index-headers.html', type: 'text.gif' },
+                    { name: '0001193125-26-352200.txt', type: 'text.gif' },
+                    ...names.map((name) => ({ name, type: 'text.gif' })),
+                ],
+            },
+        };
+    }
+
+    async function discover(routes: Record<string, () => Response>, options: Partial<SecEdgarClientOptions> = {}) {
         const requests: string[] = [];
         const fetcher: SecFetch = async (url) => {
             requests.push(url);
-            if (url === 'https://data.sec.gov/submissions/CIK0001067983.json') {
-                return jsonResponse(submissionsResponse({
-                    accessionNumber: ['0000950123-26-000001'],
-                    filingDate: ['2026-02-14'],
-                    reportDate: ['2025-12-31'],
-                    acceptanceDateTime: ['2026-02-14T20:12:05.000'],
-                    form: ['13F-HR'],
-                    primaryDocument: ['form13f.htm'],
-                    primaryDocDescription: ['13F-HR'],
-                }));
-            }
-
-            if (url === 'https://www.sec.gov/Archives/edgar/data/1067983/000095012326000001/index.json') {
-                return jsonResponse({
-                    directory: {
-                        item: [
-                            { name: 'form13f.htm', type: '13F-HR' },
-                            { name: 'primary_doc.xml', type: 'XML' },
-                            { name: 'form13fInfoTable.xml', type: 'INFORMATION TABLE' },
-                        ],
-                    },
-                });
-            }
-
-            return jsonResponse({ message: 'unexpected url' }, { status: 404 });
+            if (url === 'https://data.sec.gov/submissions/CIK0001067983.json') return jsonResponse(realSubmissions());
+            return routes[url]?.() ?? jsonResponse({ message: 'missing' }, { status: 404 });
         };
+        const filings = await clientFor(fetcher, undefined, options).fetchRecent13FFilings({ trackedFilerId: TRACKED_FILER_ID, cik: '1067983' });
+        return { requests, filings };
+    }
 
-        const client = clientFor(fetcher);
-        const filings = await client.fetchRecent13FFilings({
-            trackedFilerId: TRACKED_FILER_ID,
-            cik: '1067983',
-        });
+    test('regression: the cover page is not the information table; the attachment SEC types as one is', async () => {
+        const { requests, filings } = await discover({ [HEADERS_URL]: () => new Response(HEADERS) });
 
-        assert.deepStrictEqual(requests, [
-            'https://data.sec.gov/submissions/CIK0001067983.json',
-            'https://www.sec.gov/Archives/edgar/data/1067983/000095012326000001/index.json',
-        ]);
-        assert.strictEqual(filings.length, 1);
-        assert.strictEqual(
-            filings[0].primaryDocumentUrl,
-            'https://www.sec.gov/Archives/edgar/data/1067983/000095012326000001/form13f.htm',
-        );
-        assert.strictEqual(
-            filings[0].informationTableUrl,
-            'https://www.sec.gov/Archives/edgar/data/1067983/000095012326000001/form13fInfoTable.xml',
-        );
+        assert.deepStrictEqual(requests, ['https://data.sec.gov/submissions/CIK0001067983.json', HEADERS_URL]);
+        assert.strictEqual(filings[0].primaryDocumentUrl, `${ARCHIVE}/xslForm13F_X02/primary_doc.xml`);
+        assert.strictEqual(filings[0].informationTableUrl, `${ARCHIVE}/56757.xml`);
     });
 
-    test('keeps filing metadata when optional information table attachment discovery is unavailable', async () => {
-        const requests: string[] = [];
-        const fetcher: SecFetch = async (url) => {
-            requests.push(url);
-            if (url === 'https://data.sec.gov/submissions/CIK0001067983.json') {
-                return jsonResponse(submissionsResponse({
-                    accessionNumber: ['0000950123-26-000001'],
-                    filingDate: ['2026-02-14'],
-                    reportDate: ['2025-12-31'],
-                    acceptanceDateTime: ['2026-02-14T20:12:05.000'],
-                    form: ['13F-HR'],
-                    primaryDocument: ['form13f.htm'],
-                    primaryDocDescription: ['13F-HR'],
-                }));
-            }
+    test('without the header index, the one XML attachment besides the cover page is the table', async () => {
+        const { requests, filings } = await discover({ [INDEX_URL]: () => jsonResponse(archiveItems('56757.xml', 'primary_doc.xml')) });
 
-            return jsonResponse({ message: 'missing index' }, { status: 404 });
-        };
+        assert.deepStrictEqual(requests, ['https://data.sec.gov/submissions/CIK0001067983.json', HEADERS_URL, INDEX_URL]);
+        assert.strictEqual(filings[0].informationTableUrl, `${ARCHIVE}/56757.xml`);
+    });
 
-        const client = clientFor(fetcher);
-        const filings = await client.fetchRecent13FFilings({
-            trackedFilerId: TRACKED_FILER_ID,
-            cik: '0001067983',
-        });
+    test('an attachment named as the table wins over other XML files; two unnamed ones are no answer', async () => {
+        const named = await discover({ [INDEX_URL]: () => jsonResponse(archiveItems('exhibit.xml', 'form13fInfoTable.xml', 'primary_doc.xml')) });
+        assert.strictEqual(named.filings[0].informationTableUrl, `${ARCHIVE}/form13fInfoTable.xml`);
 
-        assert.deepStrictEqual(requests, [
-            'https://data.sec.gov/submissions/CIK0001067983.json',
-            'https://www.sec.gov/Archives/edgar/data/1067983/000095012326000001/index.json',
-        ]);
+        const unclear = await discover({ [INDEX_URL]: () => jsonResponse(archiveItems('1.xml', '2.xml', 'primary_doc.xml')) });
+        assert.strictEqual(unclear.filings[0].informationTableUrl, undefined);
+    });
+
+    test('keeps filing metadata when neither index says where the table is', async () => {
+        const { requests, filings } = await discover({});
+
+        assert.deepStrictEqual(requests, ['https://data.sec.gov/submissions/CIK0001067983.json', HEADERS_URL, INDEX_URL]);
         assert.strictEqual(filings.length, 1);
-        assert.strictEqual(
-            filings[0].primaryDocumentUrl,
-            'https://www.sec.gov/Archives/edgar/data/1067983/000095012326000001/form13f.htm',
-        );
+        assert.strictEqual(filings[0].primaryDocumentUrl, `${ARCHIVE}/xslForm13F_X02/primary_doc.xml`);
         assert.strictEqual(filings[0].informationTableUrl, undefined);
+    });
+
+    test('a header index naming a file outside the filing is not followed', async () => {
+        const outside = HEADERS.replace('&lt;FILENAME&gt;56757.xml', '&lt;FILENAME&gt;../../other/56757.xml');
+        const { filings } = await discover({ [HEADERS_URL]: () => new Response(outside) });
+
+        assert.strictEqual(filings[0].informationTableUrl, undefined);
+    });
+
+    test('a run that is stopped while looking for the table fails, rather than storing the filing without it', async () => {
+        const controller = new AbortController();
+        await assert.rejects(
+            discover({ [HEADERS_URL]: () => { controller.abort(); throw new Error('aborted'); } }, { signal: controller.signal, maxRetries: 0 }),
+            (error: unknown) => error instanceof SecEdgarError && error.code === 'network',
+        );
     });
 
     test('resolves configured numeric CIKs without making a network request', async () => {

@@ -295,6 +295,94 @@ export const transactions = pgTable("transactions", {
 })).enableRLS();
 
 // ---------------------------------------------------------------------------
+// Option positions (launch item i63)
+// ---------------------------------------------------------------------------
+
+/**
+ * Option contracts the user holds, entered by hand or imported from a
+ * broker's positions CSV, for the LEAPS ledger and the options checks of
+ * the risk policy. Kept apart from holdings: they aren't in net worth,
+ * returns or the nightly valuations. One row per contract an account
+ * holds; it goes with its account.
+ */
+export const optionPositions = pgTable("option_positions", {
+    id: uuid("id").default(sql`gen_random_uuid()`).primaryKey(),
+    userId: text("user_id")
+        .notNull()
+        .references(() => authUsers.id, { onDelete: "cascade" }),
+    // Its account, which must be the same user's (option_positions_portfolio_owner_fk).
+    portfolioId: uuid("portfolio_id").notNull(),
+    // Massive's ticker for the contract (O:AAPL270115C00250000): its closes
+    // are kept under it in option_marks.
+    contract: text("contract").notNull(),
+    underlying: text("underlying").notNull(),
+    contractType: text("contract_type").notNull(),
+    strike: numeric("strike").notNull(),
+    expiry: date("expiry", { mode: "string" }).notNull(),
+    // Contracts; negative for a written (short) position.
+    quantity: numeric("quantity").notNull(),
+    // Per share, as brokers quote it: paid, or received for a short.
+    premium: numeric("premium").notNull(),
+    multiplier: integer("multiplier").notNull().default(100),
+    openedAt: date("opened_at", { mode: "string" }),
+    // The user's own price per share and the day it's from, used while no
+    // newer close is stored.
+    userMark: numeric("user_mark"),
+    userMarkDate: date("user_mark_date", { mode: "string" }),
+    // One of the user's theses (theses.id); a deleted one reads as none.
+    thesisId: text("thesis_id"),
+    // What must be true by expiry, and the exit, roll or expire rule.
+    expiryTest: text("expiry_test").notNull().default(""),
+    exitRule: text("exit_rule").notNull().default(""),
+    // "manual" or "csv".
+    source: text("source").notNull().default("manual"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => ({
+    userIdIdx: index("option_positions_user_id_idx").on(table.userId),
+    contractIdx: index("option_positions_contract_idx").on(table.contract),
+    portfolioContractIdx: uniqueIndex("option_positions_portfolio_contract_idx").on(table.portfolioId, table.contract),
+    portfolioOwner: foreignKey({
+        name: "option_positions_portfolio_owner_fk",
+        columns: [table.portfolioId, table.userId],
+        foreignColumns: [portfolios.id, portfolios.userId],
+    }).onDelete("cascade"),
+    contractTypeCheck: check("option_positions_contract_type_check", sql`${table.contractType} in ('call', 'put')`),
+    strikeCheck: check("option_positions_strike_check", sql`${table.strike} > 0`),
+    quantityCheck: check("option_positions_quantity_check", sql`${table.quantity} <> 0`),
+    premiumCheck: check("option_positions_premium_check", sql`${table.premium} >= 0`),
+    multiplierCheck: check("option_positions_multiplier_check", sql`${table.multiplier} > 0`),
+    userMarkCheck: check(
+        "option_positions_user_mark_check",
+        sql`(${table.userMark} is null) = (${table.userMarkDate} is null) and (${table.userMark} is null or ${table.userMark} >= 0)`,
+    ),
+    sourceCheck: check("option_positions_source_check", sql`${table.source} in ('manual', 'csv')`),
+    serverOnlyNoClientAccess: serverOnlyNoClientAccessPolicy(),
+    appRuntimeAccess: appRuntimeAccessPolicy(),
+})).enableRLS();
+
+/**
+ * The newest end-of-day close of each contract anyone holds (launch item
+ * i63), from Massive where its plan includes options. Shared, like
+ * price_bars: a contract costs one call a night however many hold it, and
+ * a row says nothing about who does.
+ */
+export const optionMarks = pgTable("option_marks", {
+    contract: text("contract").primaryKey(),
+    // Null until a close is found: a contract that hasn't traded has none.
+    close: doublePrecision("close"),
+    closeDate: date("close_date", { mode: "string" }),
+    // The session the nightly job last asked about, so it asks once a session.
+    checkedSession: date("checked_session", { mode: "string" }).notNull(),
+    checkedAt: timestamp("checked_at").notNull(),
+    // Which provider answered, e.g. "massive".
+    source: text("source").notNull(),
+}, () => ({
+    serverOnlyNoClientAccess: serverOnlyNoClientAccessPolicy(),
+    appRuntimeAccess: appRuntimeAccessPolicy(),
+})).enableRLS();
+
+// ---------------------------------------------------------------------------
 // Alpha Radar — 13F research domain
 // ---------------------------------------------------------------------------
 export const alphaRadarTrackedFilers = pgTable("alpha_radar_tracked_filers", {
@@ -982,6 +1070,124 @@ export const askMessages = pgTable("ask_messages", {
     pk: primaryKey({ columns: [table.userId, table.id], name: "ask_messages_pkey" }),
     userCreatedAt: index("ask_messages_user_created_at_idx").on(table.userId, table.createdAt),
     roleCheck: check("ask_messages_role_check", sql`${table.role} in ('user', 'assistant')`),
+    serverOnlyNoClientAccess: serverOnlyNoClientAccessPolicy(),
+    appRuntimeAccess: appRuntimeAccessPolicy(),
+})).enableRLS();
+
+// ---------------------------------------------------------------------------
+// Alerts (launch item i57)
+// ---------------------------------------------------------------------------
+
+/**
+ * The user's alert rules, evaluated by the nightly "alerts" job after the
+ * day's closes are stored (src/lib/alerts/nightly.ts).
+ */
+export const alertRules = pgTable("alert_rules", {
+    id: uuid("id").default(sql`gen_random_uuid()`).primaryKey(),
+    userId: text("user_id")
+        .notNull()
+        .references(() => authUsers.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    metric: text("metric").notNull(),
+    // The ticker of a price or daily-change rule; null for every other metric.
+    symbol: text("symbol"),
+    comparator: text("comparator").notNull(),
+    // Dollars, a fraction (0.05 = 5%), or an Alpha Radar score out of 100.
+    threshold: doublePrecision("threshold").notNull(),
+    rearm: text("rearm").notNull(),
+    enabled: boolean("enabled").notNull().default(true),
+    note: text("note"),
+    lastTriggeredAt: timestamp("last_triggered_at"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => ({
+    userCreatedIdx: index("alert_rules_user_created_idx").on(table.userId, table.createdAt),
+    // Lets a notification's foreign key name the rule and its owner together.
+    idUser: unique("alert_rules_id_user_key").on(table.id, table.userId),
+    metricCheck: check("alert_rules_metric_check", sql`${table.metric} in ('price', 'price_change_pct', 'portfolio_value', 'portfolio_day_change_pct', 'alpha_radar_new_position', 'alpha_radar_exit', 'alpha_radar_large_add', 'alpha_radar_large_trim', 'alpha_radar_user_overlap')`),
+    symbolCheck: check("alert_rules_symbol_check", sql`(${table.metric} in ('price', 'price_change_pct')) = (${table.symbol} is not null)`),
+    comparatorCheck: check("alert_rules_comparator_check", sql`${table.comparator} in ('gte', 'lte', 'gt', 'lt', 'eq')`),
+    rearmCheck: check("alert_rules_rearm_check", sql`${table.rearm} in ('once', 'always', 'daily')`),
+    serverOnlyNoClientAccess: serverOnlyNoClientAccessPolicy(),
+    appRuntimeAccess: appRuntimeAccessPolicy(),
+})).enableRLS();
+
+/**
+ * What the user's rules found: the in-app notification feed. `occurrence`
+ * names what fired a rule (a session's date, or an Alpha Radar change and
+ * its filing), so a job that runs twice records it once. Clearing the feed
+ * marks the rows `cleared` and erases their text rather than deleting them,
+ * so a rerun can't raise them again; rows go after 180 days or with their
+ * rule.
+ */
+export const alertNotifications = pgTable("alert_notifications", {
+    id: uuid("id").default(sql`gen_random_uuid()`).primaryKey(),
+    userId: text("user_id")
+        .notNull()
+        .references(() => authUsers.id, { onDelete: "cascade" }),
+    // Its rule, which must be the same user's (alert_notifications_rule_owner_fk).
+    ruleId: uuid("rule_id").notNull(),
+    occurrence: text("occurrence").notNull(),
+    // The rule as it was when it fired, so an edit doesn't rewrite the past.
+    ruleName: text("rule_name").notNull(),
+    metric: text("metric").notNull(),
+    symbol: text("symbol"),
+    comparator: text("comparator").notNull(),
+    threshold: doublePrecision("threshold").notNull(),
+    observedValue: doublePrecision("observed_value").notNull(),
+    message: text("message").notNull(),
+    href: text("href"),
+    triggeredAt: timestamp("triggered_at").defaultNow().notNull(),
+    readAt: timestamp("read_at"),
+    cleared: boolean("cleared").notNull().default(false),
+    // When the nightly email job sent it (launch item i58); null until then.
+    emailedAt: timestamp("emailed_at"),
+    // When a run took it to email; a claim this old that never became
+    // emailed_at was cut off, and a later run takes it again.
+    emailClaimedAt: timestamp("email_claimed_at"),
+    // The email it was put in: the idempotency key Resend sends it under.
+    // Kept while that email may have gone without the job hearing so, so a
+    // later run sends the same alerts under the same key, and alerts raised
+    // since go in an email of their own.
+    emailBatch: text("email_batch"),
+}, (table) => ({
+    userTriggeredIdx: index("alert_notifications_user_triggered_idx").on(table.userId, table.triggeredAt),
+    pendingEmailBatchIdx: index("alert_notifications_pending_email_batch_idx")
+        .on(table.emailBatch)
+        .where(sql`${table.emailBatch} is not null and ${table.emailedAt} is null`),
+    ruleOccurrence: uniqueIndex("alert_notifications_rule_occurrence_idx").on(table.ruleId, table.occurrence),
+    ruleOwner: foreignKey({
+        name: "alert_notifications_rule_owner_fk",
+        columns: [table.ruleId, table.userId],
+        foreignColumns: [alertRules.id, alertRules.userId],
+    }).onDelete("cascade"),
+    serverOnlyNoClientAccess: serverOnlyNoClientAccessPolicy(),
+    appRuntimeAccess: appRuntimeAccessPolicy(),
+})).enableRLS();
+
+/**
+ * Which emails the user asked for (launch item i58), and the token their
+ * unsubscribe links carry. Kept out of user_settings, which a browser
+ * writes back whole: a tab still holding the old settings could otherwise
+ * turn an email back on after a one-click unsubscribe. No row means no
+ * email.
+ */
+export const emailPreferences = pgTable("email_preferences", {
+    userId: text("user_id")
+        .primaryKey()
+        .references(() => authUsers.id, { onDelete: "cascade" }),
+    alerts: boolean("alerts").notNull().default(false),
+    weeklyReview: boolean("weekly_review").notNull().default(false),
+    // When alert emails were last turned on: alerts raised before then aren't emailed.
+    alertsSince: timestamp("alerts_since"),
+    // The last week (wk:YYYY-MM-DD) whose review email was sent, or skipped for want of trades.
+    weeklyReviewWeek: text("weekly_review_week"),
+    // When a run took this user's review to send; as email_claimed_at.
+    weeklyReviewClaimedAt: timestamp("weekly_review_claimed_at"),
+    // Random, unguessable; it can only turn emails off.
+    unsubscribeToken: text("unsubscribe_token").notNull().unique(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, () => ({
     serverOnlyNoClientAccess: serverOnlyNoClientAccessPolicy(),
     appRuntimeAccess: appRuntimeAccessPolicy(),
 })).enableRLS();

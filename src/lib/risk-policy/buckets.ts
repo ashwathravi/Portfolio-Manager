@@ -247,11 +247,17 @@ export function resolvePolicyBucketAssignment(
     return { bucket: "unassigned", source: "missing" };
 }
 
+/**
+ * `totalMarketValue` is what the percentages are of: the holdings' sum
+ * unless given, as Today gives it when written options count against the
+ * portfolio (launch item i63).
+ */
 export function computeBucketAllocation(
     holdings: readonly PolicyClassifiableHolding[],
     policies: readonly PolicyBucketPolicy[] = DEFAULT_BUCKET_POLICIES,
+    { totalMarketValue: total }: { totalMarketValue?: number } = {},
 ): PolicyBucketAllocation {
-    const totalMarketValue = holdings.reduce((sum, holding) => sum + safeMarketValue(holding.marketValue), 0);
+    const totalMarketValue = total ?? holdings.reduce((sum, holding) => sum + safeMarketValue(holding.marketValue), 0);
     const policyByBucket = new Map(policies.map((policy) => [policy.bucket, policy]));
     const rowsByBucket = new Map<PolicyBucketId, PolicyBucketAllocationRow>();
 

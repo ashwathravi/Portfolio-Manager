@@ -6,10 +6,11 @@
  * Basic has no snapshot (live quote) endpoints, so a quote here is the latest
  * session's closing price from the market-wide grouped daily bars, with the
  * change measured against the session before (two calls price every symbol;
- * bars are cached per date in this process). The app itself reads quotes
- * from the Postgres price store (StoredQuoteProvider) so request paths never
- * spend the shared rate limit; the nightly ingest (i32) fills that store
- * through getDailyBars.
+ * bars are cached per date in this process). The app itself reads quotes,
+ * and the history it has stored (x09), from the Postgres price store
+ * (StoredQuoteProvider) so request paths don't spend the shared rate limit
+ * on them; the nightly ingest (i32) fills that store through getDailyBars
+ * and getDailyHistory.
  *
  * Environment variables:
  *   POLYGON_API_KEY  — API key appended to every request. Without one the
@@ -20,6 +21,7 @@
 
 import {
   easternDateTime,
+  getEasternParts,
   getMarketDay,
   lastCompletedSession,
   previousTradingDay,
@@ -228,52 +230,87 @@ const MAX_CACHED_DAYS = 4;
 
 const NYSE_CLOSE_MINUTES = 16 * 60;
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+/** Massive's option ticker: O:, the root, YYMMDD, C or P, the strike × 1000 in eight digits. */
+const OPTION_CONTRACT = /^O:[A-Z0-9]{1,6}\d{6}[CP]\d{8}$/;
 
 // ---------------------------------------------------------------------------
 // Range helpers
 // ---------------------------------------------------------------------------
 
 /**
- * Translate a human-readable range key into { from, to } date strings
- * (YYYY-MM-DD) suitable for the Polygon aggregates endpoint.
+ * How far back Basic's daily history goes: two years. MAX asks for all of
+ * it, and no range asks for more (x22): there is no 5Y, since Massive can't
+ * serve one on this plan and its two years would only repeat MAX.
  */
-function rangeToDates(range: string, now: Date): { from: string; to: string } {
-  const to = formatDate(now);
+export const PLAN_HISTORY_DAYS = 730;
 
-  const map: Record<string, number> = {
-    '1W': 7,
-    '1M': 30,
-    '3M': 90,
-    '6M': 180,
-    '1Y': 365,
-    '2Y': 730,
-    '5Y': 1825,
-    YTD: 0, // handled separately
-  };
+/** Calendar days each range reaches back from today's Eastern date. */
+const RANGE_DAYS: Record<string, number> = {
+  '1W': 7,
+  '1M': 30,
+  '3M': 90,
+  '6M': 180,
+  '1Y': 365,
+  '2Y': PLAN_HISTORY_DAYS,
+  MAX: PLAN_HISTORY_DAYS,
+};
 
-  if (range.toUpperCase() === 'YTD') {
-    const jan1 = new Date(now.getFullYear(), 0, 1);
-    return { from: formatDate(jan1), to };
-  }
+/**
+ * Ranges counted in sessions. Basic has no intraday bars, so 1D and 5D are
+ * the last one and five sessions' daily bars.
+ */
+const RANGE_SESSIONS: Record<string, number> = {
+  '1D': 1,
+  '5D': 5,
+};
 
-  const days = map[range.toUpperCase()];
-  if (days === undefined) {
-    // Fallback: treat as 1Y
-    const from = new Date(now);
-    from.setDate(from.getDate() - 365);
-    return { from: formatDate(from), to };
-  }
+/**
+ * Extra sessions (a week's) a session range asks for, so it still has enough
+ * bars while the last session isn't published yet (Massive publishes after
+ * the close) or a symbol didn't trade on one.
+ */
+const SESSION_RANGE_SLACK = 5;
 
-  const from = new Date(now);
-  from.setDate(from.getDate() - days);
-  return { from: formatDate(from), to };
+export interface HistoryWindow {
+  /** First and last Eastern dates to ask for, YYYY-MM-DD. */
+  from: string;
+  to: string;
+  /** For a session range, how many of the newest bars it keeps. */
+  sessions?: number;
 }
 
-function formatDate(d: Date): string {
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  return `${yyyy}-${mm}-${dd}`;
+/**
+ * The dates a history range covers (x22): the window asked of the aggregates
+ * endpoint, in Eastern dates from the market calendar. Every range the
+ * history routes accept has one; anything else is refused rather than
+ * answered with some other window.
+ */
+export function rangeToDates(range: string, now: Date): HistoryWindow {
+  const key = range.toUpperCase();
+  const today = getEasternParts(now).date;
+
+  const sessions = RANGE_SESSIONS[key];
+  if (sessions !== undefined) {
+    const through = lastCompletedSession(now);
+    let from = through;
+    for (let i = 0; i < sessions - 1 + SESSION_RANGE_SLACK; i++) from = previousTradingDay(from);
+    return { from, to: through, sessions };
+  }
+
+  if (key === 'YTD') return { from: `${today.slice(0, 4)}-01-01`, to: today };
+
+  const days = RANGE_DAYS[key];
+  if (days === undefined) {
+    throw new Error(`PolygonMassiveAdapter: Unknown history range "${range}".`);
+  }
+  return { from: minusDays(today, days), to: today };
+}
+
+/** A calendar date `days` before `date`, both YYYY-MM-DD. */
+function minusDays(date: string, days: number): string {
+  const day = new Date(`${date}T00:00:00Z`);
+  day.setUTCDate(day.getUTCDate() - days);
+  return day.toISOString().slice(0, 10);
 }
 
 // ---------------------------------------------------------------------------
@@ -420,7 +457,7 @@ export class PolygonMassiveAdapter implements MarketDataProvider {
   async getDailyHistory(symbol: string, range: string): Promise<{ bars: OHLC[]; unreadable: number }> {
     this.assertConfigured();
     const sym = validateSymbol(symbol);
-    const { from, to } = rangeToDates(range, this.now());
+    const { from, to, sessions } = rangeToDates(range, this.now());
     const url =
       `${this.baseUrl}/v2/aggs/ticker/` +
       `${encodeURIComponent(sym.toUpperCase())}/range/1/day/${from}/${to}` +
@@ -428,8 +465,10 @@ export class PolygonMassiveAdapter implements MarketDataProvider {
 
     const data = await this.fetchWithRetry<PolygonAggsResponse>(url);
 
+    // Oldest first: a session range (1D, 5D) keeps its newest sessions.
+    const allRows = data.results ?? [];
+    const rows = sessions === undefined ? allRows : allRows.slice(-sessions);
     // Filter out bars with missing essential OHLC fields
-    const rows = data.results ?? [];
     const validBars = rows.filter(
       (bar) =>
         bar &&
@@ -441,6 +480,24 @@ export class PolygonMassiveAdapter implements MarketDataProvider {
     );
 
     return { bars: validBars.map((bar) => this.mapAggToOHLC(bar)), unreadable: rows.length - validBars.length };
+  }
+
+  /**
+   * An option contract's newest daily close from `from` to `to` (Eastern
+   * dates), and the trading day it's from; null when it didn't trade in
+   * that window (launch item i63). `contract` is Massive's ticker,
+   * O:AAPL270115C00250000. A plan without options data answers 403.
+   */
+  async getLatestOptionClose(contract: string, from: string, to: string): Promise<{ date: string; close: number } | null> {
+    this.assertConfigured();
+    if (!OPTION_CONTRACT.test(contract)) throw new Error(`PolygonMassiveAdapter: ${contract} is not an option contract ticker.`);
+    const url =
+      `${this.baseUrl}/v2/aggs/ticker/${encodeURIComponent(contract)}/range/1/day/${from}/${to}` +
+      `?adjusted=true&sort=desc&limit=10&apiKey=${this.apiKey}`;
+    const data = await this.fetchWithRetry<PolygonAggsResponse>(url);
+    const bar = (data.results ?? []).find((b) => b && Number.isFinite(b.t) && Number.isFinite(b.c) && b.c >= 0);
+    if (!bar) return null;
+    return { date: getEasternParts(new Date(bar.t)).date, close: bar.c };
   }
 
   async getFundamentals(symbol: string): Promise<Fundamentals> {

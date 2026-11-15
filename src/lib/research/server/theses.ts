@@ -7,13 +7,15 @@
  * replaced in the same transaction. As for the watchlist and journal, a
  * deleted thesis stays as a `dismissed` row with its text cleared (and no
  * catalysts or evidence), and a save from a page is ignored if the thesis
- * already has a later one from that page.
+ * already has a later one from that page. A user keeps at most
+ * RECORD_LIMITS.theses live theses (launch item i77).
  */
 
 import { and, asc, desc, eq, or, sql } from "drizzle-orm";
 
 import { db } from "@/db";
 import { theses, thesisCatalysts, thesisEvidence } from "@/db/schema";
+import { withinRecordLimit } from "@/lib/limits/records-server";
 import type { WriteOrder } from "@/lib/validators/research-ids";
 import type { ThesisInput } from "@/lib/validators/thesis";
 
@@ -196,7 +198,8 @@ export function buildSaveThesisQuery(userId: string, thesis: ThesisInput, order:
 /**
  * Saves one thesis with its catalysts and evidence, in one transaction.
  * Returns false when the write was older than the thesis's last one from
- * the same page, and so changed nothing.
+ * the same page, and so changed nothing. Throws RecordLimitError when it
+ * would add a thesis past the limit.
  */
 export async function saveThesis(
     userId: string,
@@ -204,7 +207,7 @@ export async function saveThesis(
     order: WriteOrder,
     { now = new Date(), database = db }: { now?: Date; database?: Database } = {},
 ): Promise<boolean> {
-    return database.transaction(async (tx) => {
+    return database.transaction((tx) => withinRecordLimit(tx, "theses", userId, async () => {
         const saved = await buildSaveThesisQuery(userId, thesis, order, now, tx);
         if (saved.length === 0) return false;
         const ofThesis = (table: typeof thesisCatalysts | typeof thesisEvidence) =>
@@ -214,7 +217,7 @@ export async function saveThesis(
         await insertChildren(tx, thesisCatalysts, catalystRows(userId, thesis));
         await insertChildren(tx, thesisEvidence, evidenceRows(userId, thesis));
         return true;
-    });
+    }));
 }
 
 /**
@@ -244,10 +247,11 @@ export async function importTheses(
     { now = new Date(), database = db }: { now?: Date; database?: Database } = {},
 ): Promise<void> {
     if (batch.items.length === 0) return;
-    await database.transaction(async (tx) => {
+    // Refused whole (RecordLimitError) when it would take the theses past the limit.
+    await database.transaction((tx) => withinRecordLimit(tx, "theses", userId, async () => {
         const inserted = new Set((await buildImportThesesQuery(userId, batch, now, tx)).map((row) => row.id));
         const added = batch.items.filter((thesis) => inserted.has(thesis.id));
         await insertChildren(tx, thesisCatalysts, added.flatMap((thesis) => catalystRows(userId, thesis)));
         await insertChildren(tx, thesisEvidence, added.flatMap((thesis) => evidenceRows(userId, thesis)));
-    });
+    }));
 }

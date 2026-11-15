@@ -247,4 +247,74 @@ test.describe('Watchlist in the account', () => {
             await expect(list(page).getByRole('button', { name: /AMD/ })).toBeVisible({ timeout: 1_000 });
         }).toPass({ timeout: 10_000 });
     });
+
+    test('a list at its limit refuses a new ticker and says why; an edit still saves (launch item i77)', async ({ context, page }) => {
+        await signInAsFreshUser(context);
+        await openWatchlist(page);
+        const item = (i: number) => ({
+            id: `w-cap-${i}`, ticker: `C${i}`, companyName: '', reason: '', notes: '', targetEntry: null, addedAt: '2026-11-14', dismissed: false,
+        });
+        const filled = await page.request.post('/api/research/watchlist/import', { data: { items: Array.from({ length: 500 }, (_, i) => item(i)) } });
+        expect(filled.status()).toBe(204);
+
+        const order = { session: 'e2e-limit-test', seq: 1 };
+        const another = await page.request.put('/api/research/watchlist/w-cap-new', { data: { item: { ...item(500), id: 'w-cap-new' }, order } });
+        expect(another.status()).toBe(409);
+        expect(await another.json()).toMatchObject({
+            code: 'WATCHLIST_LIMIT',
+            error: 'Your watchlist holds at most 500 tickers. Remove one to add another.',
+        });
+        const edited = await page.request.put('/api/research/watchlist/w-cap-0', { data: { item: { ...item(0), reason: 'Still editable' }, order: { ...order, seq: 2 } } });
+        expect(edited.status()).toBe(204);
+        // An import of one more is refused whole.
+        const imported = await page.request.post('/api/research/watchlist/import', { data: { items: [{ ...item(500), id: 'w-cap-import' }] } });
+        expect(imported.status()).toBe(409);
+        expect((await imported.json()).code).toBe('WATCHLIST_LIMIT');
+
+        // On the page: the add is undone and the message says why.
+        await openWatchlist(page);
+        const add = page.getByLabel('Add ticker to watchlist');
+        await expect(async () => {
+            await add.fill('nvda');
+            await expect(add).toHaveValue('NVDA', { timeout: 1_000 });
+        }).toPass({ timeout: 10_000 });
+        const refused = page.waitForResponse((response) =>
+            response.url().includes('/api/research/watchlist/') && response.request().method() === 'PUT' && response.status() === 409);
+        await page.getByRole('button', { name: 'Add', exact: true }).click();
+        await refused;
+        await expect(page.getByText('Your watchlist holds at most 500 tickers. Remove one to add another.')).toBeVisible();
+        await expect(list(page).getByRole('button', { name: /NVDA/ })).toHaveCount(0);
+    });
+
+    test("regression: a browser's list the account has no room for is explained and kept in the browser (launch item i77)", async ({ context, page }) => {
+        const scope = await signInAsFreshUser(context);
+        const filled = await page.request.post('/api/research/watchlist/import', {
+            data: {
+                items: Array.from({ length: 500 }, (_, i) => ({
+                    id: `w-full-${i}`, ticker: `F${i}`, companyName: '', reason: '', notes: '', targetEntry: null, addedAt: '2026-11-14', dismissed: false,
+                })),
+            },
+        });
+        expect(filled.status()).toBe(204);
+        // As the browser-only version saved it: one ticker the account doesn't have.
+        const browserList = JSON.stringify({
+            version: 1,
+            items: [{ id: 'w-amzn-full', ticker: 'AMZN', companyName: 'Amazon.com, Inc.', reason: 'AWS margins', notes: '', targetEntry: 150, addedAt: '2026-10-01' }],
+        });
+        await page.addInitScript(({ key, value }) => {
+            if (window.sessionStorage.getItem('__pm_test_full_watchlist')) return;
+            window.sessionStorage.setItem('__pm_test_full_watchlist', '1');
+            window.localStorage.setItem(key, value);
+        }, { key: userKey(WATCHLIST_KEY, scope), value: browserList });
+
+        const refused = page.waitForResponse((response) =>
+            response.url().endsWith('/api/research/watchlist/import') && response.status() === 409);
+        await gotoAppPage(page, '/research?tab=watchlist');
+        await refused;
+
+        await expect(page.getByText("Some tickers saved in this browser weren't added to your account: your watchlist holds at most 500. They stay in this browser and move over on a later visit once there's room.")).toBeVisible();
+        // The account's list still loads, and the browser keeps its copy for a later visit.
+        await expect(list(page).getByRole('button', { name: /F0\b/ }).first()).toBeAttached();
+        expect(await page.evaluate((key) => window.localStorage.getItem(key), userKey(WATCHLIST_KEY, scope))).toContain('w-amzn-full');
+    });
 });

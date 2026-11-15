@@ -354,4 +354,57 @@ describe("pre-trade risk policy evaluator", () => {
         assert.equal(buildRiskPolicyExceptions(result.failedChecks, "NVDA", "short").length, 0);
         assert.ok(buildRiskPolicyExceptions(result.failedChecks, "NVDA", "Documented exception for test.").length > 0);
     });
+
+    test("regression: options held count in the theme checks, as on Today (launch item i63)", () => {
+        // $80,000 cash and $20,000 of NVDA calls, a 10% semiconductor cap,
+        // and a $5,000 NVDA stock buy: 9% to 11.25% of semiconductors.
+        const calls = {
+            id: "nvda-calls", underlying: "NVDA", contractType: "call" as const, strike: 150, expiry: "2027-01-15",
+            quantity: 4, premiumPaid: 40, currentPremium: 50,
+        };
+        const evaluate = (existingOptionPositions: (typeof calls)[]) => evaluatePreTradeRiskPolicy({
+            holdings: [],
+            portfolioValue: 100_000,
+            trade: { ticker: "NVDA", side: "buy", quantity: 10, price: 500 },
+            themeCaps: { semiconductors: 10 },
+            existingOptionPositions,
+            asOf: "2026-11-05",
+        });
+        const semis = evaluate([calls]).checks.find((check) => check.label === "Semiconductors cap");
+        assert.equal(semis?.status, "fail");
+        assert.equal(semis?.currentPct, 9);
+        assert.equal(semis?.postPct, 11.25);
+        // A written call is a liability, not exposure the checks count.
+        const written = evaluate([{ ...calls, quantity: -4 }]).checks.find((check) => check.label === "Semiconductors cap");
+        assert.equal(written?.status, "pass");
+        assert.equal(written?.currentPct, 0);
+    });
+
+    test("regression: options on the employer's stock count as employer-linked wealth, as the stock does", () => {
+        // Codex's finding on PR #192: GOOG named as the employer, $50,000 of
+        // GOOG calls in a $100,000 portfolio, a 10% employer-linked cap, and
+        // a $1,000 GOOG stock buy. The calls were left out, so the check read
+        // 0.2% after the trade and passed; it is 10.2%, past the cap.
+        const calls = {
+            id: "goog-calls", underlying: "GOOG", contractType: "call" as const, strike: 180, expiry: "2027-01-15",
+            quantity: 10, premiumPaid: 40, currentPremium: 50,
+        };
+        const evaluate = (employerSymbols: string[]) => evaluatePreTradeRiskPolicy({
+            holdings: [],
+            portfolioValue: 100_000,
+            trade: { ticker: "GOOG", side: "buy", quantity: 10, price: 100, linkedThesisId: "seed-goog", thesisUpdatedAt: "2026-11-01" },
+            themeCaps: { employer_linked_wealth: 10 },
+            employerSymbols,
+            existingOptionPositions: [calls],
+            asOf: "2026-11-14",
+        });
+        const employer = evaluate(["GOOG"]).checks.find((check) => check.ruleType === "employer_stock_allocation");
+        assert.ok(employer);
+        assert.equal(employer.currentPct, 10);
+        assert.equal(employer.postPct, 10.2);
+        assert.equal(employer.status, "fail");
+        assert.equal(employer.decision, "override_required");
+        // Not the employer's: no employer-linked weighting for the calls or the buy.
+        assert.equal(evaluate([]).checks.some((check) => check.ruleType === "employer_stock_allocation"), false);
+    });
 });

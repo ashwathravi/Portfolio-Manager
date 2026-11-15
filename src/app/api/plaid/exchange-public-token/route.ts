@@ -3,12 +3,12 @@ import { readJsonBody } from "@/lib/api/body";
 import { apiError, internalServerError, logApiEvent } from "@/lib/api/security";
 import { requestIdFrom } from "@/lib/observability/request-id";
 import { requireSessionApiUserScope } from "@/lib/api/session-security";
+import { plaidLinking } from "@/lib/plaid/availability";
 import {
     discoveredPlaidAccountFingerprint,
     exchangePlaidPublicToken,
     PlaidApiError,
     postPlaid,
-    resolvePlaidEnvironment,
     sanitizePlaidExchangeForClient,
 } from "@/lib/plaid/link";
 import { MAX_PLAID_CONNECTIONS_PER_USER, plaidConnectionLimitMessage } from "@/lib/plaid/connections";
@@ -19,6 +19,12 @@ import { PLAID_EXCHANGE_MAX_BYTES, plaidLinkMetadataSchema } from "@/lib/validat
 
 export const dynamic = "force-dynamic";
 
+/**
+ * POST /api/plaid/exchange-public-token: trades the public token Plaid Link
+ * gave the browser for a connection kept server-side, and lists its accounts
+ * for the review. A body over PLAID_EXCHANGE_MAX_BYTES is 413; without
+ * Plaid's keys it answers 503 PLAID_NOT_CONFIGURED (x30).
+ */
 export async function POST(request: Request) {
     const auth = await requireSessionApiUserScope(request);
     if (!auth.ok) return auth.response;
@@ -28,6 +34,9 @@ export async function POST(request: Request) {
         if (!read.ok && read.reason === "too-large") {
             return apiError("Request is too large.", "PLAID_EXCHANGE_TOO_LARGE", 413);
         }
+        const plaid = plaidLinking();
+        if (!plaid.ok) return apiError(plaid.message, plaid.code, 503);
+        const { credentials, environment } = plaid.config;
         const body: Record<string, unknown> = read.ok && read.value && typeof read.value === "object" && !Array.isArray(read.value)
             ? read.value as Record<string, unknown>
             : {};
@@ -46,8 +55,6 @@ export async function POST(request: Request) {
             requestId: requestIdFrom(request.headers),
             userScoped: true,
         });
-        const credentials = plaidCredentialsFromEnv();
-        const environment = resolvePlaidEnvironment(process.env.PLAID_ENV);
         const exchange = await exchangePlaidPublicToken({
             credentials,
             environment,
@@ -125,19 +132,6 @@ export async function POST(request: Request) {
     } catch (error) {
         return internalServerError(error, "Unable to exchange Plaid public token.", "PLAID_PUBLIC_TOKEN_EXCHANGE_FAILED");
     }
-}
-
-function plaidCredentialsFromEnv() {
-    return {
-        clientId: readRequiredEnv("PLAID_CLIENT_ID"),
-        secret: readRequiredEnv("PLAID_SECRET"),
-    };
-}
-
-function readRequiredEnv(name: string): string {
-    const value = process.env[name]?.trim();
-    if (!value) throw new Error(`${name} is required`);
-    return value;
 }
 
 function readListEnv(name: string, fallback: string[]): string[] {

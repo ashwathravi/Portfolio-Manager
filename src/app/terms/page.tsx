@@ -8,7 +8,7 @@ export const metadata: Metadata = {
     description: "The terms for using Atlas Wealth, including why nothing in it is investment advice.",
 };
 
-const LAST_UPDATED = "November 2, 2026";
+const LAST_UPDATED = "November 14, 2026";
 const PLAID_PRIVACY_URL = "https://plaid.com/legal/#end-user-privacy-policy";
 
 export default function TermsPage({ searchParams }: { searchParams: LegalSearchParams }) {
@@ -61,6 +61,11 @@ export default function TermsPage({ searchParams }: { searchParams: LegalSearchP
                     attention, the risk-policy and guardrail checks, the checks on orders you draft on Trade,
                     Ask&rsquo;s answers, Alpha Radar&rsquo;s summaries of SEC filings, strategies and
                     backtests, and anything labelled Sample, which is an illustration and not about your money.
+                </p>
+                <p>
+                    Ask&rsquo;s answers can be written by Claude, an AI model, and Ask says so under its question
+                    box when they are. An AI model can get things wrong: check an answer against your own
+                    records before relying on it.
                 </p>
                 <p>
                     We are not a registered investment adviser, broker-dealer or financial planner, and we

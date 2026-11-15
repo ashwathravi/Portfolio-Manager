@@ -315,7 +315,8 @@ export interface AlphaRadarSemanticSearchPayload {
 }
 
 export interface AlphaRadarSemanticSearchResult {
-    provider: 'pgvector' | 'keyword-fallback' | 'disabled';
+    /** embeddings: keyword matches ranked with the chunks most similar to the query; keyword-fallback: keywords alone. */
+    provider: 'embeddings' | 'keyword-fallback' | 'disabled';
     matches: AlphaRadarSemanticContextSnippet[];
 }
 

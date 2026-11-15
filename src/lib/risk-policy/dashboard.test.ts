@@ -195,6 +195,47 @@ describe("computeRiskPolicyDashboard", () => {
         assert.match(speculative.nextAction, /RIVN/);
     });
 
+    test("regression: a written option is a liability, not a speculative holding that adds to the portfolio", () => {
+        const written = {
+            id: "aapl-written-call",
+            underlying: "AAPL",
+            contractType: "call" as const,
+            strike: 250,
+            expiry: "2027-01-15",
+            quantity: -1,
+            premiumPaid: 12,
+            currentPremium: 10,
+        };
+        const summary = computeRiskPolicyDashboard({
+            holdings: [],
+            cashTotal: 10_000,
+            optionPositions: [written],
+            asOf: new Date("2026-11-05T00:00:00.000Z"),
+        });
+        // $10,000 cash less the $1,000 it would cost to buy the contract back.
+        assert.strictEqual(summary.totalMarketValue, 9_000);
+        const speculative = summary.dimensions.find((dimension) => dimension.id === "speculative_options_exposure");
+        assert.strictEqual(speculative?.currentValueUsd, 0);
+    });
+
+    test("regression: bucket and theme percentages are of the portfolio net of written options too", () => {
+        const written = {
+            id: "aapl-written-call", underlying: "AAPL", contractType: "call" as const, strike: 250, expiry: "2027-01-15",
+            quantity: -5, premiumPaid: 12, currentPremium: 10,
+        };
+        // $4,000 special situation and $6,000 cash, less $5,000 to buy the calls back: $5,000.
+        const summary = computeRiskPolicyDashboard({
+            holdings: [{ id: "spin", symbol: "SPIN", marketValue: 4_000, policyBucket: "special_situation" }],
+            cashTotal: 6_000,
+            optionPositions: [written],
+            asOf: new Date("2026-11-05T00:00:00.000Z"),
+        });
+        assert.strictEqual(summary.totalMarketValue, 5_000);
+        const special = summary.dimensions.find((dimension) => dimension.id === "special_situation_exposure");
+        assert.strictEqual(special?.currentPct, 80);
+        assert.strictEqual(special?.status, "breached");
+    });
+
     test("passes persisted sell-discipline rules into the dashboard summary", () => {
         const summary = computeRiskPolicyDashboard({
             holdings: [

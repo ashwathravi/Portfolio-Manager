@@ -207,6 +207,23 @@ test.describe('Settings page', () => {
         expect(syncRequests[1]).toEqual({ itemId: 'item-plaid-sandbox-investments' });
     });
 
+    test('regression (x30): without Plaid\'s keys the card says bank linking isn\'t set up, with no Connect button that fails', async ({ page }) => {
+        // E2E servers run without Plaid's keys (playwright.config.ts), as
+        // production did: Link's routes threw on the missing variable (500).
+        const card = page.getByTestId('integrations-card');
+        const notSetUp = card.getByTestId('plaid-not-set-up');
+        await expect(notSetUp).toContainText("Bank linking isn't set up yet.");
+        await expect(notSetUp.getByRole('link', { name: 'Accounts' })).toHaveAttribute('href', '/portfolios/accounts');
+        await expect(card.getByRole('button', { name: /^Connect$/ })).toHaveCount(0);
+        await expect(card).not.toContainText('No accounts connected yet');
+
+        for (const [path, data] of [['/api/plaid/link-token', {}], ['/api/plaid/exchange-public-token', { publicToken: 'public-sandbox-e2e' }]] as const) {
+            const response = await page.request.post(path, { data });
+            expect(response.status(), path).toBe(503);
+            expect(await response.json()).toEqual({ error: "Bank linking isn't set up yet.", code: 'PLAID_NOT_CONFIGURED' });
+        }
+    });
+
     test('the Plaid token exchange reads at most 64 KB (i69)', async ({ page }) => {
         // Refused before anything reaches Plaid, which E2E never calls anyway.
         const response = await page.request.post('/api/plaid/exchange-public-token', {
@@ -532,8 +549,12 @@ test.describe('Settings page', () => {
         await gotoAppPage(page, '/settings');
         expect(await accountRowsLeft(userId)).toEqual({ users: 1, sessions: 1, portfolios: expect.any(Number), settings: expect.any(Number) });
 
-        await page.getByTestId('data-management').getByRole('button', { name: 'Delete account' }).click();
+        // The settings sections hydrate inside a Suspense boundary; retry the
+        // click until React has attached handlers.
         const dialog = page.getByRole('alertdialog');
+        await clickUntil(page.getByTestId('data-management').getByRole('button', { name: 'Delete account' }), async () => {
+            await expect(dialog).toBeVisible({ timeout: 1500 });
+        });
         const confirm = dialog.getByRole('button', { name: 'Delete account' });
         await expect(confirm).toBeDisabled();
         await dialog.getByLabel('Type DELETE to confirm').fill('delete');
@@ -560,6 +581,8 @@ test.describe('Settings page', () => {
         await expect(page.getByText('Alpha Radar Signals').first()).toBeVisible();
         await expect(page.getByTestId('alpha-radar-delivery-preferences')).toBeVisible();
         await expect(page.getByLabel('Alpha Radar delivery ticker filters')).toBeVisible();
+        // Email is its own card, kept with the account (launch item i58; email.spec.ts).
+        await expect(page.getByTestId('email-preferences')).toBeVisible();
     });
 
     test('Alpha Radar delivery preferences accept ticker filters', async ({ page }) => {
@@ -571,8 +594,9 @@ test.describe('Settings page', () => {
 
     test('deep-links via ?tab=alerts expose Alpha Radar alert configuration', async ({ page }) => {
         await gotoAppPage(page, '/settings?tab=alerts');
-
-        await expect(page.getByText('Alpha Radar overlap score ≥ 80', { exact: true }).first()).toBeVisible();
+        await expect(page.getByText('Alert Rules', { exact: true })).toBeVisible();
+        // Rules are kept with the account (launch item i57): without a database none can be made.
+        test.skip(!databaseAuthEnabled, 'alert rules are kept with the account');
 
         await clickUntil(page.getByRole('button', { name: /New Alert/ }), async () => {
             await expect(page.getByRole('dialog')).toBeVisible({ timeout: 1500 });

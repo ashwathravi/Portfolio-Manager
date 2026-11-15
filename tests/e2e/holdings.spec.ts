@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
-import { gotoAppPage } from './helpers/app';
-import { signInAsFreshUser } from './helpers/users';
+import { gotoAppPage, reloadAppPage } from './helpers/app';
+import { databaseAuthEnabled, signInAsFreshUser, signInAsNewUser } from './helpers/users';
 
 /**
  * Portfolio › Holdings (/portfolios/holdings).
@@ -9,8 +9,8 @@ import { signInAsFreshUser } from './helpers/users';
  * single empty state (no zero-filled KPI tiles, and no option ledger
  * measured against nothing). With positions, it shows the summary strip,
  * policy/theme exposure, the filter row, and the full table; the LEAPS
- * ledger runs on example positions until an options feed exists, so it
- * carries a Sample tag.
+ * ledger holds the user's own option positions (launch item i63), never
+ * example ones.
  */
 
 async function hasHoldings(page: Page): Promise<boolean> {
@@ -43,8 +43,42 @@ test.describe('Portfolio › Holdings', () => {
         test.skip(await hasHoldings(page), 'database has holdings');
         await expect(page.getByTestId('options-risk-ledger')).toHaveCount(0);
         await expect(page.getByText('185.7%')).toHaveCount(0);
+    });
+
+    test('regression (x30): without bank linking, the empty state adds an account by hand instead of a Connect link that loops', async ({ context, page }) => {
+        // E2E runs without Plaid's keys, as production does until they're
+        // set: Settings says bank linking isn't set up and points back at
+        // Accounts, so "Connect an account" went round in a circle. With a
+        // database, a user with no positions yet (fixture user A has some).
+        if (await signInAsNewUser(context)) await gotoAppPage(page, '/portfolios/holdings');
         const empty = page.getByTestId('holdings-empty');
-        await expect(empty.getByRole('link', { name: 'Connect an account' })).toHaveAttribute('href', '/settings#accounts');
+        await expect(empty).toContainText('Add an account, or import a positions export from your broker.');
+        await expect(empty.getByRole('link', { name: 'Connect an account' })).toHaveCount(0);
+        await expect(empty.locator('a[href^="/settings"]')).toHaveCount(0);
+        await expect(empty.getByRole('button', { name: 'New account' })).toHaveClass(/pm-btn-primary/);
+        await expect(empty.getByRole('button', { name: 'Import CSV' })).toHaveClass(/pm-btn-ghost/);
+        await expect(empty.getByRole('link', { name: 'View accounts' })).toHaveAttribute('href', '/portfolios/accounts');
+    });
+
+    test('x30: a new user adds an account by hand from the empty state', async ({ context, page }) => {
+        test.skip(!databaseAuthEnabled, 'requires the database-auth E2E mode');
+        await signInAsNewUser(context);
+        await gotoAppPage(page, '/portfolios/holdings');
+        const empty = page.getByTestId('holdings-empty');
+        await empty.getByRole('button', { name: 'New account' }).click();
+        const dialog = page.getByRole('dialog');
+        await dialog.getByLabel('Name').fill('Brokerage');
+        await dialog.getByRole('button', { name: 'Add account' }).click();
+        await expect(dialog).toBeHidden();
+        expect((await (await page.request.get('/api/portfolios/count')).json()).count).toBe(1);
+        // Still no positions: the empty state stays, now with an account to import into.
+        await expect(empty).toBeVisible();
+        // Regression: it still led with New account, steering a user with an
+        // account toward a second one. Importing into it is the next step.
+        await expect(empty).toContainText('Import a positions export from your broker into your account, or add another account.');
+        await expect(empty.getByRole('button', { name: 'Import CSV' })).toHaveClass(/pm-btn-primary/);
+        await expect(empty.getByRole('button', { name: 'New account' })).toHaveClass(/pm-btn-ghost/);
+        await expect(empty.locator('a[href^="/settings"]')).toHaveCount(0);
     });
 
     test('regression: no dead links to retired routes', async ({ page }) => {
@@ -78,13 +112,222 @@ test.describe('Portfolio › Holdings', () => {
         await expect(table.getByText('Amazon.Com Inc', { exact: true })).toBeVisible();
     });
 
-    test('with holdings: the LEAPS ledger is tagged as sample data', async ({ page }) => {
+    test('regression: with holdings, the LEAPS ledger holds no example contracts', async ({ page }) => {
         test.skip(!(await hasHoldings(page)), 'no holdings in this database');
         const ledger = page.getByTestId('options-risk-ledger');
         await expect(ledger).toContainText('LEAPS and option premium at risk');
-        await expect(ledger.getByTestId('sample-tag')).toBeVisible();
+        await expect(ledger.getByTestId('sample-tag')).toHaveCount(0);
+        // Fixture user A holds no options.
+        await expect(ledger.getByTestId('options-ledger-empty')).toHaveText('No option positions yet.');
+        await expect(ledger.getByTestId('options-risk-row')).toHaveCount(0);
+        await expect(ledger.getByRole('button', { name: 'Add option' })).toBeEnabled();
+        await expect(ledger.getByTestId('options-ledger-note')).toContainText("aren't counted in net worth or returns yet");
     });
 });
+
+/** Launch item i63: the LEAPS ledger from the user's own option positions. */
+test.describe('Holdings › LEAPS ledger from your option positions', () => {
+    test.skip(!databaseAuthEnabled, 'option positions are saved in the database');
+
+    // Each test adds positions: a user of its own.
+    test.beforeEach(async ({ context, page }) => {
+        await signInAsFreshUser(context);
+        await gotoAppPage(page, '/portfolios/holdings');
+    });
+
+    async function addOption(page: Page, fields: { underlying: string; strike: string; expiry: string; contracts: string; premium: string; exitRule?: string }) {
+        const ledger = page.getByTestId('options-risk-ledger');
+        const dialog = page.getByTestId('option-position-dialog');
+        await expect(async () => {
+            await ledger.getByRole('button', { name: 'Add option' }).click();
+            await expect(dialog).toBeVisible({ timeout: 1_000 });
+        }).toPass({ timeout: 10_000 });
+        await dialog.getByRole('combobox', { name: 'Account', exact: true }).selectOption({ label: 'Main Portfolio' });
+        await dialog.getByRole('textbox', { name: 'Underlying', exact: true }).fill(fields.underlying);
+        await dialog.getByRole('textbox', { name: 'Strike ($)', exact: true }).fill(fields.strike);
+        await dialog.getByRole('textbox', { name: 'Expiry', exact: true }).fill(fields.expiry);
+        await dialog.getByRole('textbox', { name: 'Contracts', exact: true }).fill(fields.contracts);
+        await dialog.getByRole('textbox', { name: 'Premium paid / share ($)', exact: true }).fill(fields.premium);
+        if (fields.exitRule) await dialog.getByRole('textbox', { name: 'Exit, roll or expire rule (optional)', exact: true }).fill(fields.exitRule);
+        await dialog.getByRole('button', { name: 'Add position' }).click();
+        await expect(dialog).toBeHidden();
+    }
+
+    test('a position added by hand is valued at cost, survives a reload, takes a price of your own, and is deleted after asking', async ({ page }) => {
+        await addOption(page, { underlying: 'AAPL', strike: '250', expiry: '2027-01-15', contracts: '3', premium: '18.20', exitRule: 'Exit if the premium halves.' });
+        const ledger = page.getByTestId('options-risk-ledger');
+        const row = ledger.getByTestId('options-risk-row');
+        await expect(row).toHaveCount(1);
+        await expect(row).toContainText('AAPL 2027-01-15 250C');
+        await expect(row).toContainText('3 long CALL contracts · Main Portfolio');
+        await expect(row.getByTestId('option-mark-source')).toHaveText('At cost: no price yet');
+        // 3 contracts × 100 × $18.20.
+        await expect(row).toContainText('$5,460');
+        await expect(row).toContainText('Exit if the premium halves.');
+        await expect(ledger.getByTestId('options-ledger-empty')).toHaveCount(0);
+
+        await reloadAppPage(page);
+        await expect(row).toHaveCount(1);
+
+        const dialog = page.getByTestId('option-position-dialog');
+        await row.getByRole('button', { name: 'Edit AAPL Jan 15 2027 250 call' }).click();
+        await expect(dialog.getByRole('textbox', { name: 'Strike ($)', exact: true })).toHaveValue('250');
+        await expect(dialog.getByRole('textbox', { name: 'Contracts', exact: true })).toHaveValue('3');
+        await dialog.getByRole('textbox', { name: 'Your price / share ($, optional)', exact: true }).fill('21.40');
+        await dialog.getByRole('button', { name: 'Save' }).click();
+        await expect(dialog).toBeHidden();
+        await expect(row.getByTestId('option-mark-source')).toHaveText(/^Your price [A-Z][a-z]{2} \d{1,2}$/);
+        await expect(row).toContainText('$21.40');
+        await expect(row).toContainText('$6,420');
+
+        const asked: string[] = [];
+        page.once('dialog', (confirm) => {
+            asked.push(confirm.message());
+            void confirm.accept();
+        });
+        await row.getByRole('button', { name: 'Delete AAPL Jan 15 2027 250 call' }).click();
+        await expect(ledger.getByTestId('options-ledger-empty')).toBeVisible();
+        expect(asked).toEqual(["Delete AAPL Jan 15 2027 250 call from Main Portfolio? This can't be undone."]);
+        await reloadAppPage(page);
+        await expect(ledger.getByTestId('options-risk-row')).toHaveCount(0);
+    });
+
+    test('a contract with a stored close is marked at it', async ({ page }) => {
+        await addOption(page, { underlying: 'NVDA', strike: '150', expiry: '2027-01-15', contracts: '2', premium: '25' });
+        const row = page.getByTestId('options-risk-ledger').getByTestId('options-risk-row');
+        // The fixture close for O:NVDA270115C00150000.
+        await expect(row.getByTestId('option-mark-source')).toHaveText('Close Oct 1');
+        await expect(row).toContainText('$31.25');
+        await expect(row).toContainText('$6,250');
+    });
+
+    test('a bad entry is explained in the form', async ({ page }) => {
+        await addOption(page, { underlying: 'AAPL', strike: '250', expiry: '2027-01-15', contracts: '1', premium: '10' });
+        const dialog = page.getByTestId('option-position-dialog');
+        await page.getByTestId('options-risk-ledger').getByRole('button', { name: 'Add option' }).click();
+        await dialog.getByRole('textbox', { name: 'Underlying', exact: true }).fill('AAPL');
+        await dialog.getByRole('textbox', { name: 'Strike ($)', exact: true }).fill('0');
+        await dialog.getByRole('button', { name: 'Add position' }).click();
+        await expect(dialog.getByTestId('option-form-error')).toHaveText('Enter a strike above 0.');
+        // The same contract twice in one account: the server says to edit it.
+        await dialog.getByRole('combobox', { name: 'Account', exact: true }).selectOption({ label: 'Main Portfolio' });
+        await dialog.getByRole('textbox', { name: 'Strike ($)', exact: true }).fill('250');
+        await dialog.getByRole('textbox', { name: 'Expiry', exact: true }).fill('2027-01-15');
+        await dialog.getByRole('textbox', { name: 'Contracts', exact: true }).fill('2');
+        await dialog.getByRole('textbox', { name: 'Premium paid / share ($)', exact: true }).fill('12');
+        await dialog.getByRole('button', { name: 'Add position' }).click();
+        await expect(dialog.getByTestId('option-form-error')).toHaveText('That account already holds this contract. Edit it instead.');
+    });
+
+    test("a broker CSV's option rows go to the ledger with its stocks", async ({ page }) => {
+        await openImport(page, [
+            '"Symbol","Description","Quantity","Cost Basis","Security Type"',
+            '"KO","COCA COLA CO","4","$240.00","Equity"',
+            '"AAPL 01/15/2027 250.00 C","CALL APPLE INC $250 EXP 01/15/27","3","$5,460.00","Option"',
+        ].join('\n'));
+        const preview = page.getByTestId('import-preview');
+        await expect(preview).toContainText('1 position and 1 option position ready');
+        const options = preview.getByRole('table', { name: 'Option positions to import' });
+        await expect(options.locator('tbody tr')).toHaveText([/AAPL Jan 15 2027 250 call\s*3\s*\$18\.20\s*\$5,460\.00/]);
+        await page.getByTestId('import-dialog').getByRole('combobox').selectOption({ label: 'Main Portfolio' });
+        await page.getByRole('button', { name: 'Import 2 positions' }).click();
+        await expect(page.getByText('Option positions: 1 new, 0 updated.', { exact: false })).toBeVisible();
+
+        const row = page.getByTestId('options-risk-ledger').getByTestId('options-risk-row');
+        await expect(row).toContainText('AAPL 2027-01-15 250C');
+        await expect(row).toContainText('3 long CALL contracts · Main Portfolio');
+    });
+
+    test('the API changes only your own option positions', async ({ page, playwright }) => {
+        const created = await page.request.post('/api/portfolios', { data: { name: 'Options account' } });
+        expect(created.status()).toBe(201);
+        const { id: portfolioId } = (await created.json()).data;
+        const position = { underlying: 'AAPL', contractType: 'call', strike: 250, expiry: '2027-01-15', quantity: 3, premium: 18.2 };
+
+        const added = await page.request.post('/api/portfolio/options', { data: { portfolioId, position } });
+        expect(added.status()).toBe(201);
+        const { id } = (await added.json()).data;
+        const again = await page.request.post('/api/portfolio/options', { data: { portfolioId, position } });
+        expect([again.status(), (await again.json()).code]).toEqual([409, 'OPTION_POSITION_EXISTS']);
+
+        const invalid = await page.request.post('/api/portfolio/options', { data: { portfolioId, position: { ...position, strike: 0 } } });
+        expect([invalid.status(), (await invalid.json()).error]).toEqual([400, 'Enter a strike above 0, to at most three decimals']);
+        expect((await page.request.post('/api/portfolio/options', { data: { portfolioId, position, userId: 'someone-else' } })).status()).toBe(400);
+        const tooLarge = await page.request.post('/api/portfolio/options', {
+            headers: { 'content-type': 'application/json' },
+            data: JSON.stringify({ portfolioId, position, pad: 'x'.repeat(16 * 1024) }),
+        });
+        expect(tooLarge.status()).toBe(413);
+
+        // Another user's account is not found, and nothing is written.
+        const theirs = await page.request.post('/api/portfolio/options', { data: { portfolioId: OTHER_USERS_ACCOUNT, position } });
+        expect([theirs.status(), (await theirs.json()).code]).toEqual([404, 'PORTFOLIO_NOT_FOUND']);
+        const moved = await page.request.put(`/api/portfolio/options/${id}`, { data: { portfolioId: OTHER_USERS_ACCOUNT, position } });
+        expect(moved.status()).toBe(404);
+
+        expect((await page.request.put(`/api/portfolio/options/${id}`, { data: { portfolioId, position: { ...position, quantity: 5 } } })).status()).toBe(200);
+        for (const response of [
+            await page.request.put(`/api/portfolio/options/${UNKNOWN_ID}`, { data: { portfolioId, position } }),
+            await page.request.delete(`/api/portfolio/options/${UNKNOWN_ID}`),
+            await page.request.delete('/api/portfolio/options/not-a-uuid'),
+        ]) {
+            expect([response.status(), (await response.json()).code]).toEqual([404, 'OPTION_POSITION_NOT_FOUND']);
+        }
+
+        const anonymous = await playwright.request.newContext({ baseURL: 'http://localhost:3000', storageState: { cookies: [], origins: [] } });
+        expect((await anonymous.post('/api/portfolio/options', { data: { portfolioId, position } })).status()).toBe(401);
+        expect((await anonymous.put(`/api/portfolio/options/${id}`, { data: { portfolioId, position } })).status()).toBe(401);
+        expect((await anonymous.delete(`/api/portfolio/options/${id}`)).status()).toBe(401);
+        await anonymous.dispose();
+
+        expect((await page.request.delete(`/api/portfolio/options/${id}`)).status()).toBe(204);
+        expect((await page.request.delete(`/api/portfolio/options/${id}`)).status()).toBe(404);
+    });
+});
+
+test.describe('Holdings › LEAPS ledger before any position', () => {
+    test.skip(!databaseAuthEnabled, 'option positions are saved in the database');
+
+    test('regression: an account with no stocks or options can still add its first option', async ({ context, page }) => {
+        await signInAsNewUser(context, { firstSignIn: true });
+        await gotoAppPage(page, '/portfolios/holdings');
+        // No account: nowhere to put an option, so no ledger.
+        await expect(page.getByTestId('holdings-empty')).toBeVisible();
+        await expect(page.getByTestId('options-risk-ledger')).toHaveCount(0);
+
+        expect((await page.request.post('/api/portfolios', { data: { name: 'Options only', cashBalance: 10_000 } })).status()).toBe(201);
+        await reloadAppPage(page);
+        await expect(page.getByTestId('holdings-empty')).toBeVisible();
+        const ledger = page.getByTestId('options-risk-ledger');
+        await expect(ledger.getByTestId('options-ledger-empty')).toHaveText('No option positions yet.');
+        // Nothing measured against an empty book.
+        await expect(ledger.getByLabel('Options exposure summary')).toHaveCount(0);
+
+        const dialog = page.getByTestId('option-position-dialog');
+        await expect(async () => {
+            await ledger.getByRole('button', { name: 'Add option' }).click();
+            await expect(dialog).toBeVisible({ timeout: 1_000 });
+        }).toPass({ timeout: 10_000 });
+        await expect(dialog.getByRole('combobox', { name: 'Account', exact: true })).toHaveValue(/.+/);
+        await dialog.getByRole('textbox', { name: 'Underlying', exact: true }).fill('SPY');
+        await dialog.getByRole('textbox', { name: 'Strike ($)', exact: true }).fill('550');
+        await dialog.getByRole('textbox', { name: 'Expiry', exact: true }).fill('2027-12-17');
+        await dialog.getByRole('textbox', { name: 'Contracts', exact: true }).fill('1');
+        await dialog.getByRole('textbox', { name: 'Premium paid / share ($)', exact: true }).fill('10');
+        await dialog.getByRole('button', { name: 'Add position' }).click();
+        await expect(dialog).toBeHidden();
+        const row = ledger.getByTestId('options-risk-row');
+        await expect(row).toContainText('SPY 2027-12-17 550C');
+        await expect(row).toContainText('1 long CALL contract · Options only');
+        // Regression: measured against cash and options together, as Today
+        // and Trade measure it: $1,000 of premium in $11,000, not 100%.
+        await expect(row).toContainText('9.1%');
+        await expect(ledger.getByLabel('Options exposure summary')).toContainText('9.1%');
+    });
+});
+
+const OTHER_USERS_ACCOUNT = '00000000-0000-4000-8000-000000000009';
+const UNKNOWN_ID = '00000000-0000-4000-8000-0000000006ff';
 
 test.describe('Holdings sparklines', () => {
     test('with holdings: no price history shows a dash, never an invented trend line', async ({ page }) => {
@@ -142,6 +385,89 @@ test.describe('Holdings today P&L', () => {
         test.skip(!(await hasHoldings(page)), 'no holdings in this database');
         await expect(todayPnL(page)).toHaveText('$0');
         await expect(aaplToday(page)).toHaveText('—');
+    });
+});
+
+test.describe('Holdings › By symbol', () => {
+    // Launch item i79: one row per symbol across accounts, next to one row per
+    // account position.
+    const dbMode = Boolean(process.env.CI || process.env.E2E_DATABASE_AUTH === '1');
+    const table = (page: Page) => page.getByTestId('holdings-table');
+    const rowsFor = (page: Page, symbol: string) =>
+        table(page).locator('tbody tr').filter({ has: page.getByText(symbol, { exact: true }) });
+    const rowChoice = (page: Page) => page.getByRole('radiogroup', { name: 'Show holdings' });
+
+    test.beforeEach(async ({ page }) => {
+        test.skip(!dbMode, 'needs the seeded E2E database');
+        await page.route('**/api/market-data/historical**', (route) => route.fulfill({ status: 200, json: { data: [] } }));
+        // One quote for AAPL in every account.
+        await page.route('**/api/market-data/quotes**', (route) => route.fulfill({ status: 200, json: {
+            data: [{ symbol: 'AAPL', price: 190, change: 2, changePercent: 1.06, timestamp: new Date().toISOString(), kind: 'delayed', isRealtime: false }],
+        } }));
+    });
+
+    test('a symbol in two accounts is one row, with the shares added up and the cost blended', async ({ context, page }) => {
+        await signInAsFreshUser(context);
+        await gotoAppPage(page, '/portfolios/holdings');
+        // The fixture holds 500 AAPL at $165.30 in Main Portfolio; 100 more at $200 elsewhere.
+        const res = await page.request.post('/api/portfolio/import', {
+            data: { newPortfolioName: 'Roth IRA', rows: [{ symbol: 'AAPL', name: 'Apple Inc.', quantity: 100, avgCost: 200 }] },
+        });
+        expect(res.status()).toBe(200);
+
+        await gotoAppPage(page, '/portfolios/holdings');
+        await expect(rowChoice(page).getByRole('radio', { name: 'By account' })).toHaveAttribute('aria-checked', 'true');
+        await expect(rowsFor(page, 'AAPL')).toHaveCount(2);
+
+        await rowChoice(page).getByRole('radio', { name: 'By symbol' }).click();
+        await expect(rowsFor(page, 'AAPL')).toHaveCount(1);
+        const aapl = rowsFor(page, 'AAPL');
+        await expect(aapl.getByRole('cell').nth(3)).toHaveText('600');
+        // (500 × $165.30 + 100 × $200) / 600 shares.
+        await expect(aapl.getByRole('cell').nth(4)).toHaveText('$171.08');
+        await expect(aapl.getByRole('cell').nth(5)).toHaveText('$190.00');
+        await expect(aapl.getByTestId('holding-value')).toHaveText('$114,000');
+        await expect(aapl.getByTestId('holding-today')).toHaveText('+1.06%');
+        await expect(aapl.getByRole('cell').nth(8)).toHaveText('+11.06%');
+        const accounts = aapl.getByRole('link', { name: '2 accounts: Main Portfolio, Roth IRA' });
+        await expect(accounts).toHaveAttribute('href', '/portfolios/detail/AAPL');
+        // A symbol in one account still names it.
+        await expect(rowsFor(page, 'MSFT').locator('.pm-account-pill')).toHaveText('Main Portfolio');
+        // Today P&L is the same either way: $2 a share on 600 shares.
+        await expect(page.locator('.pm-summary-cell').filter({ hasText: 'Today P&L' }).locator('.pm-summary-value')).toHaveText('+$1,200');
+
+        // Kept in the address, so a reload opens the same view.
+        await expect(page).toHaveURL(/[?&]view=symbol(&|$)/);
+        await reloadAppPage(page);
+        await expect(rowChoice(page).getByRole('radio', { name: 'By symbol' })).toHaveAttribute('aria-checked', 'true');
+        await expect(rowsFor(page, 'AAPL')).toHaveCount(1);
+
+        await rowChoice(page).getByRole('radio', { name: 'By account' }).click();
+        await expect(rowsFor(page, 'AAPL')).toHaveCount(2);
+        await expect(page).not.toHaveURL(/view=/);
+
+        // The choice fits a phone without the page scrolling sideways (loaded
+        // at that width, as the phone layout checks in smoke.spec.ts are).
+        await page.setViewportSize({ width: 390, height: 844 });
+        await reloadAppPage(page);
+        await expect(rowChoice(page)).toBeVisible();
+        const overflow = await page.evaluate(() => {
+            const main = document.querySelector('main');
+            return {
+                doc: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+                main: main ? main.scrollWidth - main.clientWidth : 0,
+            };
+        });
+        expect(overflow.doc).toBeLessThanOrEqual(1);
+        expect(overflow.main).toBeLessThanOrEqual(1);
+    });
+
+    test('without a symbol in more than one account there is no choice of rows', async ({ context, page }) => {
+        await signInAsFreshUser(context);
+        await gotoAppPage(page, '/portfolios/holdings?view=symbol');
+        await expect(rowsFor(page, 'AAPL')).toHaveCount(1);
+        await expect(rowChoice(page)).toHaveCount(0);
+        await expect(rowsFor(page, 'AAPL').locator('.pm-account-pill')).toHaveText('Main Portfolio');
     });
 });
 

@@ -6,7 +6,7 @@ import { expect, test, type ConsoleMessage, type Page } from '@playwright/test';
 // (playwright.config.ts), so it stays true to the app. Signed out and
 // read-only: it never signs in, writes nothing and runs no job.
 
-const SCHEDULED_JOBS = ['expired-sessions', 'ask-history', 'plaid', 'prices', 'snapshots', 'alpha-radar', 'backup'];
+const SCHEDULED_JOBS = ['expired-sessions', 'ask-history', 'plaid', 'prices', 'snapshots', 'alerts', 'email', 'alpha-radar', 'backup'];
 
 function isLocal(baseURL: string | undefined): boolean {
     return /^(localhost|127\.0\.0\.1|\[::1\])$/.test(new URL(baseURL ?? 'http://localhost').hostname);
@@ -51,7 +51,7 @@ function watchForProblems(page: Page, origin: string): string[] {
     page.on('console', (message) => {
         if (message.type() !== 'error') return;
         if (upgradedOrigin && isFailedUpgrade(message, upgradedOrigin)) return;
-        problems.push(`console: ${message.text()}`);
+        problems.push(`console: ${message.text()} (${message.location().url})`);
     });
     page.on('pageerror', (error) => problems.push(`page error: ${String(error)}`));
     page.on('response', (response) => {
@@ -143,6 +143,8 @@ test.describe('After a production deploy', () => {
         { path: '/login', heading: 'Sign in' },
         { path: '/privacy', heading: 'Privacy Policy' },
         { path: '/terms', heading: 'Terms of Service' },
+        // Where every email's footer links (launch item i58); without a token it only says so.
+        { path: '/unsubscribe', heading: 'Unsubscribe' },
     ]) {
         test(`${path} loads cleanly, with its security headers`, async ({ page, baseURL }) => {
             const problems = watchForProblems(page, new URL(baseURL!).origin);

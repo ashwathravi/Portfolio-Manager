@@ -99,4 +99,12 @@ describe("risk policy / theme exposure engine", () => {
         assert.equal(themeLabel("ai_infrastructure"), "AI infrastructure");
         assert.equal(themeLabel("bonds_treasuries_cash_equivalent"), "Bonds/treasuries/cash equivalent");
     });
+
+    test("percentages of a total given, such as the portfolio net of written options", () => {
+        const exposure = computeThemeExposure([{ id: "nvda", symbol: "NVDA", marketValue: 4_000 }], undefined, { totalMarketValue: 5_000 });
+        assert.strictEqual(exposure.totalMarketValue, 5_000);
+        const semis = exposure.rows.find((row) => row.theme === "semiconductors");
+        // 45% of $4,000 in $5,000.
+        assert.strictEqual(semis?.percentOfPortfolio, 36);
+    });
 });

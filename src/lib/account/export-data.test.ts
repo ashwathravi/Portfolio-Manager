@@ -5,11 +5,11 @@ import { holdingsCsvRows, transactionsCsvRows, type AccountExport, type Exported
 
 const account = (name: string, fields: Partial<ExportedAccount> = {}): ExportedAccount => ({
     id: name, name, description: null, source: 'manual', cashBalance: 0, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
-    holdings: [], transactions: [], valuationHistory: [], orderPlans: [], ...fields,
+    holdings: [], optionPositions: [], transactions: [], valuationHistory: [], orderPlans: [], ...fields,
 });
 const exported = (accounts: ExportedAccount[]): AccountExport => ({
     format: 'atlas-wealth-export', version: 1, exportedAt: '2026-10-26T18:00:00.000Z', profile: { name: null, email: null }, settings: null,
-    accounts, linkedConnections: [], watchlist: [], journal: [], theses: [], askHistory: [], strategies: [], alphaRadarFollows: [],
+    accounts, linkedConnections: [], watchlist: [], journal: [], theses: [], askHistory: [], strategies: [], alphaRadarFollows: [], alertRules: [], alerts: [], emailPreferences: null,
 });
 const trade = (date: string, symbol: string) => ({ date, type: 'BUY', symbol, quantity: 2, price: 10.5, amount: 21, fees: null, currency: 'USD', notes: null, source: 'csv' });
 

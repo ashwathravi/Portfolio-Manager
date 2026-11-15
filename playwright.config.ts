@@ -62,10 +62,25 @@ const noMarketData = {
     SEC_EDGAR_USER_AGENT: '',
 };
 
+// No Resend key or sender, so a test run never sends email (launch item
+// i58) and Settings always says this server doesn't send yet.
+const noEmail = {
+    RESEND_API_KEY: '',
+    EMAIL_FROM: '',
+};
+
 // No cron secret, so /api/cron/* always refuses (503) and a test run never
 // runs the scheduled jobs, whatever .env.local holds.
 const noCronSecret = {
     CRON_SECRET: '',
+};
+
+// No Plaid keys, so nothing reaches Plaid and Settings always shows bank
+// linking as not set up, as production does until its keys are added (x30).
+// Tests that exercise Link stub the /api/plaid routes and the Link SDK.
+const noPlaid = {
+    PLAID_CLIENT_ID: '',
+    PLAID_SECRET: '',
 };
 
 // No Sentry DSN, so the SDK never starts and a test run's errors never reach
@@ -73,6 +88,19 @@ const noCronSecret = {
 const noSentry = {
     NEXT_PUBLIC_SENTRY_DSN: '',
     SENTRY_AUTH_TOKEN: '',
+};
+
+// No Ask model, embedding model or AI Gateway credentials, so Ask's answers
+// always come from the rules planner, Alpha Radar's evidence is searched by
+// keyword, and a test run never sends a question or a filing to a model
+// (launch items i59 and i62). Claude's answers are covered by unit tests over
+// a mock model (src/lib/ask/server/claude.test.ts), and so are embeddings
+// (src/lib/alpha-radar/embeddings.test.ts).
+const noAskModel = {
+    ASK_MODEL: '',
+    ALPHA_RADAR_EMBEDDING_MODEL: '',
+    AI_GATEWAY_API_KEY: '',
+    VERCEL_OIDC_TOKEN: '',
 };
 
 // The outage servers run `next dev` from an empty build directory every run.
@@ -166,7 +194,10 @@ export default defineConfig({
                 ...noSharedRedis,
                 ...noMarketData,
                 ...noCronSecret,
+                ...noEmail,
+                ...noPlaid,
                 ...noSentry,
+                ...noAskModel,
             },
             url: 'http://localhost:3000',
             // Never reuse a running server: it may be connected to a real
@@ -193,7 +224,10 @@ export default defineConfig({
                 ...noSharedRedis,
                 ...noMarketData,
                 ...noCronSecret,
+                ...noEmail,
+                ...noPlaid,
                 ...noSentry,
+                ...noAskModel,
             },
             url: 'http://localhost:3100/api/health',
             // Never reuse a running server: it may be connected to a real
@@ -226,7 +260,10 @@ export default defineConfig({
                 ...noSharedRedis,
                 ...noMarketData,
                 ...noCronSecret,
+                ...noEmail,
+                ...noPlaid,
                 ...noSentry,
+                ...noAskModel,
             },
             url: 'http://localhost:3200/api/health',
             // Never reuse a running server: it may be connected to a real

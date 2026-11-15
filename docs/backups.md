@@ -31,6 +31,8 @@ Not in a backup:
 
 ## How a night's run works
 
+The job runs on `ubuntu-24.04`, not `ubuntu-latest`, so the runner image only changes when the workflow moves it: change both jobs' `runs-on` in one pull request, whose rehearsal (below) installs the tools on the new image. It starts by installing the PostgreSQL 17 client and age (`scripts/db/install-backup-tools.sh`; `install-backup-tools.test.ts` runs it with npm test, against stand-ins for apt). apt gives up on a download stuck for 30 seconds and retries it, and the whole install is tried three times, 30 seconds apart. If all three fail (a package mirror down for longer), nothing was dumped and the run is recorded as failed: run it again once the mirror answers, with `gh run rerun <run id> --failed` or `gh workflow run database-backup.yml`.
+
 1. **Dump** (`scripts/db/backup.ts`, as the table owner through the `production` environment's `DATABASE_MIGRATION_URL`; GitHub lists each run as a deployment to `production`). One read-only, repeatable-read transaction exports its snapshot, counts every table in it, and both `pg_dump`s run on that snapshot. The counts are therefore exactly what the dumps hold, while the app keeps writing.
 2. **Encrypt** the three files to every public key in the repository variable `BACKUP_AGE_RECIPIENTS`, then upload the result as the artifact.
 3. **Restore** (`scripts/db/restore.ts`) into a scratch Postgres 17 in the same job. It rebuilds the schema with this checkout's migrations, exactly the ones the backup had applied, then loads the data in one transaction with foreign keys checked. Finally it compares every table's rows and the migrations with the manifest. The run fails on any difference; the backup from step 2 is kept either way.

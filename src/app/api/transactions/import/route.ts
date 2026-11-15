@@ -8,8 +8,9 @@
  *
  * Body:     { portfolioId, rows: Transaction[] }
  * Response: 200 { data: { inserted, duplicates } }; 400 INVALID_TRANSACTION_IMPORT;
- *           404 PORTFOLIO_NOT_FOUND; 413; 429 DAILY_QUOTA_REACHED (the day's CSV
- *           imports, shared with holdings)
+ *           404 PORTFOLIO_NOT_FOUND; 409 TRANSACTION_LIMIT (it would take the user's
+ *           accounts past their limit, launch item i77: nothing imported); 413;
+ *           429 DAILY_QUOTA_REACHED (the day's CSV imports, shared with holdings)
  */
 
 import { NextResponse } from 'next/server';
@@ -19,6 +20,8 @@ import { consumeDailyQuota } from '@/lib/api/daily-quota';
 import { apiError, internalServerError, logApiEvent } from '@/lib/api/security';
 import { requestIdFrom } from '@/lib/observability/request-id';
 import { requireSessionApiUserScope } from '@/lib/api/session-security';
+import { RecordLimitError } from '@/lib/limits/records';
+import { recordLimitResponse } from '@/lib/limits/records-server';
 import { AccountNotFoundError, importTransactions } from '@/lib/portfolio/transactionsWrite';
 import { transactionImportSchema } from '@/lib/validators/transaction';
 
@@ -60,6 +63,7 @@ export async function POST(request: Request) {
         return NextResponse.json({ data });
     } catch (err) {
         if (err instanceof AccountNotFoundError) return apiError('Account not found', 'PORTFOLIO_NOT_FOUND', 404);
+        if (err instanceof RecordLimitError) return recordLimitResponse(err);
         return internalServerError(err, 'Unable to import the transactions.', 'TRANSACTION_IMPORT_FAILED');
     }
 }
