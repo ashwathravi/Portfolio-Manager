@@ -147,7 +147,8 @@ async function HoldingsContent({ rowView }: { rowView: HoldingsRowView }) {
                 // connect a bank only where Settings can (x30).
                 bankLinking={bankLinkingAvailable()}
             />
-            <div className="pm-holdings-stack">
+            {/* Its own class: tests and styles find the one holdings stack by its class. */}
+            <div className="pm-manual-holdings-stack">
                 <ManualHoldingsCard
                     accounts={accounts.map(({ id, name }) => ({ id, name }))}
                     rows={manual.map((m) => ({ ...m, account: accounts.find((a) => a.id === m.portfolioId)?.name ?? "" }))}

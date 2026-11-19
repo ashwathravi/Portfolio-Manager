@@ -705,7 +705,7 @@ test.describe('POST /api/portfolio/import', () => {
         await gotoAppPage(page, '/portfolios/holdings');
         const res = await page.request.post('/api/portfolio/import', {
             headers: { 'content-type': 'application/json' },
-            data: JSON.stringify({ newPortfolioName: 'x', rows: [], pad: 'x'.repeat(300 * 1024) }),
+            data: JSON.stringify({ newPortfolioName: 'x', rows: [], pad: 'x'.repeat(400 * 1024) }),
         });
         expect(res.status()).toBe(413);
     });

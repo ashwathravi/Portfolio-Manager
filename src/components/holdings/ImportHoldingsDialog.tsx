@@ -134,14 +134,14 @@ export function ImportHoldingsDialog({
                 setSubmitting(false);
                 return;
             }
-            type Counts = { insert: number; update: number; unchanged: number; options: { insert: number; update: number; unchanged: number } };
+            type Counts = { insert: number; update: number; unchanged: number; options?: { insert: number; update: number; unchanged: number } };
             const results: Counts[] = multiAccount ? body.data.accounts : [body.data];
             const sum = (pick: (c: Counts) => number) => results.reduce((n, c) => n + pick(c), 0);
             const d = {
                 insert: sum((c) => c.insert),
                 update: sum((c) => c.update),
                 unchanged: sum((c) => c.unchanged),
-                options: { insert: sum((c) => c.options.insert), update: sum((c) => c.options.update), unchanged: sum((c) => c.options.unchanged) },
+                options: { insert: sum((c) => c.options?.insert ?? 0), update: sum((c) => c.options?.update ?? 0), unchanged: sum((c) => c.options?.unchanged ?? 0) },
             };
             const across = multiAccount ? ` across ${groups.length} account${groups.length === 1 ? "" : "s"}` : "";
             const optionsNote = options.length > 0
