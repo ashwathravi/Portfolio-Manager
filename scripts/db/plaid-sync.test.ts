@@ -281,7 +281,7 @@ describe('Plaid sync into portfolios', { skip: !DATABASE_URL && 'SCRIPTS_TEST_DA
         assert.deepEqual(result.accounts.map(({ name, created, positions, cashUsd, transactionsAdded, transactionsUpdated, transactionsSkipped, transactionsPending }) =>
             ({ name, created, positions, cashUsd, transactionsAdded, transactionsUpdated, transactionsSkipped, transactionsPending })), [{
             name: 'Fidelity Individual', created: true, positions: 1, cashUsd: 250,
-            transactionsAdded: 2, transactionsUpdated: 0, transactionsSkipped: { 'not-recorded': 1 }, transactionsPending: false,
+            transactionsAdded: 3, transactionsUpdated: 0, transactionsSkipped: {}, transactionsPending: false,
         }]);
         // The first sync asks for two years.
         assert.equal(first.requests.find((r) => r.endpoint === '/investments/transactions/get')?.body.start_date, '2024-10-25');
@@ -297,6 +297,8 @@ describe('Plaid sync into portfolios', { skip: !DATABASE_URL && 'SCRIPTS_TEST_DA
         assert.deepEqual((await activity()).map((r) => ({ ...r })), [
             { external_id: 'plaid:txn_buy', type: 'BUY', symbol: 'AAPL', quantity: 10, price: 80, amount: 800.05, fees: 0.05, source: 'plaid' },
             { external_id: 'plaid:txn_div', type: 'DIVIDEND', symbol: 'MSFT', quantity: null, price: null, amount: 7.5, fees: null, source: 'plaid' },
+            // Shares moved in from another broker: a record, with no cash and no price.
+            { external_id: 'plaid:txn_xfer', type: 'TRANSFER_IN', symbol: 'VTI', quantity: 3, price: null, amount: 0, fees: null, source: 'plaid' },
         ]);
         const [account] = await sql<{ synced: boolean; status: string }[]>`
             SELECT last_synced_at = ${NOW.toISOString()}::timestamp AS synced, sync_status AS status FROM plaid_accounts WHERE plaid_account_id = 'acc_brokerage'`;
@@ -324,7 +326,7 @@ describe('Plaid sync into portfolios', { skip: !DATABASE_URL && 'SCRIPTS_TEST_DA
         assert.deepEqual({ ...renamed }, { name: 'My brokerage', cash: 75 });
         // Holdings are what the institution reports now: the hand-added one is gone.
         assert.deepEqual((await held()).map((r) => [r.symbol, r.quantity, r.avg, r.price]), [['AAPL', 12, 83.333333, 110], ['VTI', 3, 250, 250]]);
-        assert.deepEqual((await activity()).map((r) => [r.external_id, r.price]), [['plaid:txn_buy', 80.5], ['plaid:txn_div', null], ['plaid:txn_sell', 110]]);
+        assert.deepEqual((await activity()).map((r) => [r.external_id, r.price]), [['plaid:txn_buy', 80.5], ['plaid:txn_div', null], ['plaid:txn_sell', 110], ['plaid:txn_xfer', null]]);
     });
 
     test('history that isn\'t ready yet: positions now, two years of transactions next time', async () => {

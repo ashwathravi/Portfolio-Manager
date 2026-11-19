@@ -555,7 +555,7 @@ describe('email kept with the account, and the nightly email job', { skip: !DATA
             assert.equal(email.to, 'u-1@example.test');
             assert.equal(email.subject, 'Your weekly review: Oct 26–30');
             assert.equal(email.category, 'weekly_review');
-            assert.ok(email.text.includes('Realized P&L: +$300 (+0.30% of net worth · 2 closed trades)'));
+            assert.ok(email.text.includes('Realized P&L: +$300 (+0.30% of portfolio value · 2 closed trades)'));
             assert.ok(email.text.includes('Not counted: trades in NVDA'));
             assert.equal(email.headers['List-Unsubscribe'], `<https://atlas.example.test/api/email/unsubscribe?token=${await tokenOf('u-1')}&list=weekly_review>`);
 
