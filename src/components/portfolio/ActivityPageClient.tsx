@@ -7,6 +7,7 @@ import { Download, Repeat2, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { exportToCsv } from "@/lib/exportCsv";
 import { formatMoney, formatQty, formatShortDate, formatUsd } from "@/lib/format";
+import { SHARE_MOVE_TYPES, type TransactionType } from "@/lib/portfolio/transactions";
 import {
     activityAccounts,
     activityChurn,
@@ -281,7 +282,8 @@ export function ActivityPageClient({
                                         <td><span className="pm-side" data-side={r.transfer ? "TRANSFER" : r.side}>{r.transfer ? "TRANSFER" : sideLabel(r.side).toUpperCase()}</span></td>
                                         <td className="num">{formatQty(r.quantity)}</td>
                                         <td className="num">{r.price === null ? "—" : formatMoney(r.price, r.currency)}</td>
-                                        <td className="num">{formatMoney(r.value, r.currency)}</td>
+                                        {/* Shares moved with no price that day have no value to show, not $0. */}
+                                        <td className="num">{SHARE_MOVE_TYPES.has(r.side as TransactionType) && r.price === null ? "—" : formatMoney(r.value, r.currency)}</td>
                                         <td className="num">{r.fees == null ? "—" : formatMoney(r.fees, r.currency)}</td>
                                         <td>
                                             {r.account}

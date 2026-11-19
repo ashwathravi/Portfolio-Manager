@@ -72,8 +72,8 @@ const ACTIONS: ReadonlyArray<[RegExp, TransactionType]> = [
     // cash patterns: "Transfer of securities in" is shares, not a deposit.
     // Not when the action says it was sold: "Sell RSU" is a sale.
     [/^(?!.*\b(sell|sold|sale)\b).*\b(vest(ed|ing)?|rsu|restricted stock|(shares?|stock) released?|released shares)\b/i, 'VEST'],
-    [/\b((securities|shares|stock|acat|acat) (transfer(red)? )?(in|received)|(securities|shares|stock) transfer(red)? in|transfer of (securities|shares|stock)(?! out\b)( in)?|acat in|receive (securities|shares)|shares in)\b/i, 'TRANSFER_IN'],
-    [/\b((securities|shares|stock|acat|acat) (transfer(red)? )?(out|delivered)|(securities|shares|stock) transfer(red)? out|transfer of (securities|shares|stock) out|acat out|deliver (securities|shares)|shares out)\b/i, 'TRANSFER_OUT'],
+    [/\b((securities|shares|stock|acats?) (transfer(red)? )?(in|received)|(securities|shares|stock) transfer(red)? in|transfer of (securities|shares|stock)(?! out\b)( in)?|acats? in|receive (securities|shares)|shares in)\b/i, 'TRANSFER_IN'],
+    [/\b((securities|shares|stock|acats?) (transfer(red)? )?(out|delivered)|(securities|shares|stock) transfer(red)? out|transfer of (securities|shares|stock) out|acats? out|deliver (securities|shares)|shares out)\b/i, 'TRANSFER_OUT'],
     [/\breinvest(ed)?\s+(dividend|div)\b/i, 'DIVIDEND'],
     [/\breinvest/i, 'BUY'],
     [/\b(buy|bought|purchase)\b/i, 'BUY'],
