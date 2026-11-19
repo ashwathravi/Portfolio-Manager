@@ -1,6 +1,6 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert';
-import { portfolioImportSchema } from './portfolio-import';
+import { MAX_IMPORT_ACCOUNTS, portfolioImportSchema, portfolioMultiImportSchema } from './portfolio-import';
 
 const row = { symbol: 'NVDA', name: 'NVIDIA', quantity: 10, avgCost: 450 };
 const ID = '0b9d3c1e-6a3c-4c7e-9f3a-2f4d8a1b2c3d';
@@ -68,5 +68,32 @@ describe('portfolioImportSchema', () => {
         assert.strictEqual(firstMessage({ portfolioId: ID, rows: [row, row] }), 'Each symbol can appear only once');
         const many = Array.from({ length: 1001 }, (_, i) => ({ ...row, symbol: `T${i}` }));
         assert.strictEqual(firstMessage({ portfolioId: ID, rows: many }), 'Import at most 1000 positions at once');
+    });
+});
+
+describe('portfolioMultiImportSchema', () => {
+    const multiMessage = (input: unknown) => {
+        const r = portfolioMultiImportSchema.safeParse(input);
+        return r.success ? null : r.error.issues[0].message;
+    };
+
+    test("accepts each of a file's accounts into an existing account or a new one", () => {
+        const r = portfolioMultiImportSchema.safeParse({
+            accounts: [{ portfolioId: ID, rows: [row] }, { newPortfolioName: 'Roth IRA', rows: [row] }],
+        });
+        assert.strictEqual(r.success, true);
+    });
+
+    test('refuses two groups into one account, an empty or oversized list, and anything else in the body', () => {
+        assert.strictEqual(
+            multiMessage({ accounts: [{ portfolioId: ID, rows: [row] }, { portfolioId: ID, rows: [{ ...row, symbol: 'AAPL' }] }] }),
+            'Two accounts in the file go to the same Atlas account. Choose a different one for each.',
+        );
+        assert.strictEqual(multiMessage({ accounts: [] }), 'Nothing to import');
+        const many = Array.from({ length: MAX_IMPORT_ACCOUNTS + 1 }, (_, i) => ({ newPortfolioName: `A${i}`, rows: [row] }));
+        assert.strictEqual(multiMessage({ accounts: many }), `Import at most ${MAX_IMPORT_ACCOUNTS} accounts at once`);
+        assert.strictEqual(portfolioMultiImportSchema.safeParse({ accounts: [{ portfolioId: ID, rows: [row] }], userId: 'x' }).success, false);
+        // Each group keeps the one-account rules.
+        assert.strictEqual(multiMessage({ accounts: [{ rows: [row] }] }), 'Choose an existing account or name a new one');
     });
 });

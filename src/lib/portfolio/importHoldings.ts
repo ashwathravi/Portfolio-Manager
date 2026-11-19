@@ -43,91 +43,119 @@ export interface ImportResult {
  */
 export async function importHoldings(
     userId: string,
-    body: Omit<PortfolioImportBody, 'options'> & Partial<Pick<PortfolioImportBody, 'options'>>,
+    body: ImportBody,
     prices: Readonly<Record<string, number>> = {},
     database: typeof db = db,
 ): Promise<ImportResult> {
-    const quote = (symbol: string): number | null => {
+    return database.transaction((tx) => importInto(tx, userId, body, quoteFrom(prices)));
+}
+
+type Transaction = Parameters<Parameters<typeof db['transaction']>[0]>[0];
+type ImportBody = Omit<PortfolioImportBody, 'options'> & Partial<Pick<PortfolioImportBody, 'options'>>;
+
+function quoteFrom(prices: Readonly<Record<string, number>>) {
+    return (symbol: string): number | null => {
         const price = prices[symbol.toUpperCase()];
         return Number.isFinite(price) && price > 0 ? price : null;
     };
+}
+
+/**
+ * A positions export covering several accounts (a Fidelity or Monarch
+ * export): each group as `importHoldings` imports one, all in one
+ * transaction, so a refused group (another user's account, a duplicate new
+ * name, the account limit) writes nothing for any of them.
+ */
+export async function importHoldingsToAccounts(
+    userId: string,
+    groups: readonly ImportBody[],
+    prices: Readonly<Record<string, number>> = {},
+    database: typeof db = db,
+): Promise<ImportResult[]> {
+    const quote = quoteFrom(prices);
     return database.transaction(async (tx) => {
-        let portfolioId: string;
-        let createdPortfolio = false;
-
-        if (body.portfolioId) {
-            // FOR UPDATE serializes concurrent imports into the same account:
-            // the second waits, then sees the first one's rows and updates them
-            // rather than tripping the unique (portfolio, symbol) key.
-            const [owned] = await tx
-                .select({ id: portfolios.id })
-                .from(portfolios)
-                .where(and(eq(portfolios.id, body.portfolioId), eq(portfolios.userId, userId)))
-                .limit(1)
-                .for('update');
-            if (!owned) throw new ImportAccessError();
-            portfolioId = owned.id;
-        } else {
-            await checkAccountName(tx, userId, body.newPortfolioName!, null);
-            const [created] = await tx
-                .insert(portfolios)
-                .values({ userId, name: body.newPortfolioName!, description: 'Imported from CSV' })
-                .returning({ id: portfolios.id });
-            portfolioId = created.id;
-            createdPortfolio = true;
-        }
-
-        const existing = await tx
-            .select({ id: holdings.id, symbol: holdings.symbol, quantity: holdings.quantity, avgCost: holdings.avgCost })
-            .from(holdings)
-            .where(eq(holdings.portfolioId, portfolioId));
-
-        const plan = planHoldingsImport(
-            existing.map((h) => ({ id: h.id, symbol: h.symbol, quantity: Number(h.quantity), avgCost: Number(h.avgCost) })),
-            body.rows,
-        );
-
-        const now = new Date();
-        const inserts = plan.flatMap((p) => (p.kind === 'insert' ? [p.row] : []));
-        if (inserts.length > 0) {
-            await tx.insert(holdings).values(
-                inserts.map((r) => ({
-                    portfolioId,
-                    symbol: r.symbol,
-                    name: r.name || r.symbol,
-                    quantity: String(r.quantity),
-                    avgCost: String(r.avgCost),
-                    currentPrice: quote(r.symbol),
-                    marketValue: null,
-                })),
-            );
-        }
-        for (const p of plan) {
-            if (p.kind !== 'update') continue;
-            const price = quote(p.row.symbol);
-            await tx
-                .update(holdings)
-                .set({
-                    quantity: String(p.row.quantity),
-                    avgCost: String(p.row.avgCost),
-                    // Snapshot fields were computed for the old quantity: keep
-                    // the stored price unless there's a newer one, and leave
-                    // the value to readers.
-                    ...(price != null ? { currentPrice: price } : {}),
-                    marketValue: null,
-                    allocation: null,
-                    ...(p.row.name ? { name: p.row.name } : {}),
-                    updatedAt: now,
-                })
-                .where(and(eq(holdings.id, p.id), eq(holdings.portfolioId, portfolioId)));
-        }
-
-        const summary = summarizePlan(plan);
-        const options = await importOptionRows(tx, userId, portfolioId, body.options ?? [], now);
-        if (summary.insert + summary.update + options.insert + options.update > 0) {
-            await tx.update(portfolios).set({ updatedAt: now }).where(eq(portfolios.id, portfolioId));
-        }
-
-        return { portfolioId, createdPortfolio, ...summary, options };
+        const results: ImportResult[] = [];
+        for (const group of groups) results.push(await importInto(tx, userId, group, quote));
+        return results;
     });
+}
+
+async function importInto(tx: Transaction, userId: string, body: ImportBody, quote: (symbol: string) => number | null): Promise<ImportResult> {
+    let portfolioId: string;
+    let createdPortfolio = false;
+
+    if (body.portfolioId) {
+        // FOR UPDATE serializes concurrent imports into the same account:
+        // the second waits, then sees the first one's rows and updates them
+        // rather than tripping the unique (portfolio, symbol) key.
+        const [owned] = await tx
+            .select({ id: portfolios.id })
+            .from(portfolios)
+            .where(and(eq(portfolios.id, body.portfolioId), eq(portfolios.userId, userId)))
+            .limit(1)
+            .for('update');
+        if (!owned) throw new ImportAccessError();
+        portfolioId = owned.id;
+    } else {
+        await checkAccountName(tx, userId, body.newPortfolioName!, null);
+        const [created] = await tx
+            .insert(portfolios)
+            .values({ userId, name: body.newPortfolioName!, description: 'Imported from CSV' })
+            .returning({ id: portfolios.id });
+        portfolioId = created.id;
+        createdPortfolio = true;
+    }
+
+    const existing = await tx
+        .select({ id: holdings.id, symbol: holdings.symbol, quantity: holdings.quantity, avgCost: holdings.avgCost })
+        .from(holdings)
+        .where(eq(holdings.portfolioId, portfolioId));
+
+    const plan = planHoldingsImport(
+        existing.map((h) => ({ id: h.id, symbol: h.symbol, quantity: Number(h.quantity), avgCost: Number(h.avgCost) })),
+        body.rows,
+    );
+
+    const now = new Date();
+    const inserts = plan.flatMap((p) => (p.kind === 'insert' ? [p.row] : []));
+    if (inserts.length > 0) {
+        await tx.insert(holdings).values(
+            inserts.map((r) => ({
+                portfolioId,
+                symbol: r.symbol,
+                name: r.name || r.symbol,
+                quantity: String(r.quantity),
+                avgCost: String(r.avgCost),
+                currentPrice: quote(r.symbol),
+                marketValue: null,
+            })),
+        );
+    }
+    for (const p of plan) {
+        if (p.kind !== 'update') continue;
+        const price = quote(p.row.symbol);
+        await tx
+            .update(holdings)
+            .set({
+                quantity: String(p.row.quantity),
+                avgCost: String(p.row.avgCost),
+                // Snapshot fields were computed for the old quantity: keep
+                // the stored price unless there's a newer one, and leave
+                // the value to readers.
+                ...(price != null ? { currentPrice: price } : {}),
+                marketValue: null,
+                allocation: null,
+                ...(p.row.name ? { name: p.row.name } : {}),
+                updatedAt: now,
+            })
+            .where(and(eq(holdings.id, p.id), eq(holdings.portfolioId, portfolioId)));
+    }
+
+    const summary = summarizePlan(plan);
+    const options = await importOptionRows(tx, userId, portfolioId, body.options ?? [], now);
+    if (summary.insert + summary.update + options.insert + options.update > 0) {
+        await tx.update(portfolios).set({ updatedAt: now }).where(eq(portfolios.id, portfolioId));
+    }
+
+    return { portfolioId, createdPortfolio, ...summary, options };
 }

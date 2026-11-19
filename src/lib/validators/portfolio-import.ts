@@ -38,3 +38,30 @@ export const portfolioImportSchema = z
     });
 
 export type PortfolioImportBody = z.infer<typeof portfolioImportSchema>;
+
+/** How many accounts one multi-account import may write. */
+export const MAX_IMPORT_ACCOUNTS = 50;
+
+/**
+ * POST /api/portfolio/import with `accounts`: a positions export covering
+ * several accounts, each group going to an account the user owns or a new
+ * one, all written together or none. Positions across the groups share the
+ * one-file limit.
+ */
+export const portfolioMultiImportSchema = z
+    .object({
+        accounts: z.array(portfolioImportSchema)
+            .min(1, 'Nothing to import')
+            .max(MAX_IMPORT_ACCOUNTS, `Import at most ${MAX_IMPORT_ACCOUNTS} accounts at once`),
+    })
+    .strict()
+    .refine((b) => b.accounts.reduce((n, a) => n + a.rows.length, 0) <= MAX_IMPORT_ROWS, {
+        message: `Import at most ${MAX_IMPORT_ROWS} positions at once`,
+        path: ['accounts'],
+    })
+    .refine((b) => {
+        const ids = b.accounts.flatMap((a) => (a.portfolioId ? [a.portfolioId] : []));
+        return new Set(ids).size === ids.length;
+    }, { message: 'Two accounts in the file go to the same Atlas account. Choose a different one for each.', path: ['accounts'] });
+
+export type PortfolioMultiImportBody = z.infer<typeof portfolioMultiImportSchema>;

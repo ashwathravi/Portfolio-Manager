@@ -548,6 +548,29 @@ test.describe('Holdings › Import CSV', () => {
         await expect(page.getByTestId('import-dialog').locator('select option:checked')).toHaveText('New account…');
     });
 
+    test('a file covering several accounts previews each one and sends each to its own account', async ({ page }) => {
+        let sent: { accounts?: { newPortfolioName?: string; portfolioId?: string; rows: { symbol: string }[] }[] } | undefined;
+        await page.route('**/api/portfolio/import', async (route) => {
+            sent = route.request().postDataJSON();
+            const result = { portfolioId: 'x', createdPortfolio: true, insert: 1, update: 0, unchanged: 0, options: { insert: 0, update: 0, unchanged: 0 } };
+            await route.fulfill({ status: 200, json: { data: { accounts: [result, result] } } });
+        });
+        await gotoAppPage(page, '/portfolios/holdings');
+        await openImport(page, 'Account Name,Symbol,Description,Quantity,Average Cost\nRoth IRA Test,VTI,VANGUARD TOTAL,10,200\nHSA Test,AAPL,APPLE INC,5,150\n');
+        const preview = page.getByTestId('import-preview');
+        await expect(preview).toContainText('2 positions in 2 accounts ready');
+        const targets = page.getByTestId('import-account-target');
+        await expect(targets).toHaveCount(2);
+        await expect(targets.nth(0)).toContainText('Roth IRA Test (1 position)');
+        await expect(page.getByLabel('New account name for HSA Test')).toHaveValue('HSA Test');
+        await page.getByRole('button', { name: 'Import 2 positions' }).click();
+        await expect(page.getByText('Imported 2 positions across 2 accounts', { exact: false })).toBeVisible();
+        expect(sent?.accounts?.map((a) => [a.newPortfolioName, a.rows.map((r) => r.symbol)])).toEqual([
+            ['Roth IRA Test', ['VTI']],
+            ['HSA Test', ['AAPL']],
+        ]);
+    });
+
     test('previews what was read, flags rows it could not read, and skips totals', async ({ page }) => {
         await gotoAppPage(page, '/portfolios/holdings');
         await openImport(page);
