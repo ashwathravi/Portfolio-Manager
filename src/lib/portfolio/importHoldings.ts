@@ -4,7 +4,7 @@ import { db } from '@/db';
 import { holdings, portfolios } from '@/db/schema';
 import type { PortfolioImportBody } from '@/lib/validators/portfolio-import';
 import { planHoldingsImport, summarizePlan } from './csvImport';
-import { checkAccountName } from './manage';
+import { buildLockUserAccountsQuery, checkAccountName } from './manage';
 import { importOptionRows, type OptionImportResult } from './option-positions-store';
 
 export class ImportAccessError extends Error {
@@ -74,6 +74,11 @@ export async function importHoldingsToAccounts(
 ): Promise<ImportResult[]> {
     const quote = quoteFrom(prices);
     return database.transaction(async (tx) => {
+        // A batch that creates an account takes the user's account-write
+        // lock first, as a Plaid sync does, before any account's rows: taken
+        // midway (by the new account's name check) it would wait on a sync
+        // holding it while the sync waits on rows this import already locked.
+        if (groups.some((g) => !g.portfolioId)) await buildLockUserAccountsQuery(userId, tx);
         const results: ImportResult[] = [];
         for (const group of groups) results.push(await importInto(tx, userId, group, quote));
         return results;

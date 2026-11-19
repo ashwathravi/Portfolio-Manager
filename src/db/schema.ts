@@ -399,7 +399,9 @@ export const manualHoldings = pgTable("manual_holdings", {
     costBasis: numeric("cost_basis"),
     valueAsOf: date("value_as_of", { mode: "string" }).notNull(),
     // "manual", or "plaid": a linked account's holding with no ticker,
-    // whose value each sync replaces; externalId is Plaid's security_id.
+    // whose value each sync replaces; externalId is the account it was
+    // synced into and Plaid's security_id (institutionValuedKey), kept when
+    // the user edits or moves it.
     source: text("source").notNull().default("manual"),
     externalId: text("external_id"),
     createdAt: timestamp("created_at").defaultNow().notNull(),

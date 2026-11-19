@@ -347,6 +347,23 @@ describe('parseHoldingsCsv › files covering several accounts', () => {
         assert.deepStrictEqual(r.rows.map((x) => x.account), ['Individual ••2222', 'Individual ••4444', 'Z55556666']);
     });
 
+    test('regression: long names that share 80 characters stay distinct accounts, keeping their number', () => {
+        const long = 'Joint Tenants With Rights Of Survivorship Brokerage Account For The Family Trust Of';
+        const csv = [
+            'Account Number,Account Name,Symbol,Quantity,Cost Basis Total',
+            `X11112222,${long},AAPL,1,$100`,
+            `Y33334444,${long},MSFT,1,$300`,
+            `Z55556666,${long} Alice,GOOG,1,$150`,
+            `Z77778888,${long} Bob,NVDA,1,$150`,
+        ].join('\n');
+        const r = parseHoldingsCsv(csv);
+        assert.equal(new Set(r.accounts).size, 4, r.accounts.join(' | '));
+        for (const label of r.accounts) assert.ok(label.length <= 80, label);
+        assert.ok(r.accounts[0].endsWith('••2222'), r.accounts[0]);
+        assert.ok(r.accounts[1].endsWith('••4444'), r.accounts[1]);
+        assert.deepStrictEqual(groupImportByAccount(r).map((g) => g.rows.map((x) => x.symbol)), [['AAPL'], ['MSFT'], ['GOOG'], ['NVDA']]);
+    });
+
     test('a row without an account, in a file that has the column, is listed', () => {
         const csv = ['Account,Symbol,Quantity,Average Cost', 'Brokerage,AAPL,1,$100', ',MSFT,1,$300'].join('\n');
         const r = parseHoldingsCsv(csv);

@@ -23,6 +23,7 @@ describe('transactionTypeFor', () => {
             ['RSU Vest', 'VEST'], ['Restricted Stock Vesting', 'VEST'], ['Shares Released', 'VEST'], ['Stock Release', 'VEST'],
             ['Shares In', 'TRANSFER_IN'], ['Securities Transferred In', 'TRANSFER_IN'], ['ACAT In', 'TRANSFER_IN'], ['Transfer of Securities', 'TRANSFER_IN'],
             ['Shares Out', 'TRANSFER_OUT'], ['Securities Transferred Out', 'TRANSFER_OUT'], ['ACAT Out', 'TRANSFER_OUT'],
+            ['Transfer of Securities Out', 'TRANSFER_OUT'], ['Transfer of Shares Out', 'TRANSFER_OUT'], ['Transfer of Stock Out', 'TRANSFER_OUT'], ['Transfer of Securities In', 'TRANSFER_IN'],
             // Cash transfers stay cash; an investment isn't a vest.
             ['Transfer In', 'DEPOSIT'], ['Transfer Out', 'WITHDRAWAL'], ['Investment Income', null],
         ];

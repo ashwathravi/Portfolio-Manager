@@ -407,6 +407,8 @@ export function parseHoldingsCsv(text: string): ParseResult {
  * number when the file gives no name. At most 80 characters, as account
  * names are.
  */
+const ACCOUNT_LABEL_MAX = 80;
+
 function accountLabels(order: readonly string[], names: ReadonlyMap<string, string>): Map<string, string> {
     const count = new Map<string, number>();
     for (const key of order) {
@@ -414,11 +416,18 @@ function accountLabels(order: readonly string[], names: ReadonlyMap<string, stri
         count.set(name.toLowerCase(), (count.get(name.toLowerCase()) ?? 0) + 1);
     }
     const labels = new Map<string, string>();
+    const taken = new Set<string>();
+    // Shortened from the name, never the suffix, and numbered when still
+    // alike: each label is an account's identity in the import.
+    const fit = (name: string, suffix: string) => `${name.slice(0, ACCOUNT_LABEL_MAX - suffix.length).trimEnd()}${suffix}`;
     for (const key of order) {
         const name = names.get(key) || key;
         const shared = (count.get(name.toLowerCase()) ?? 0) > 1 && names.get(key);
-        const label = shared ? `${name} ••${key.replace(/\s+/g, '').slice(-4)}` : name;
-        labels.set(key, label.slice(0, 80));
+        const suffix = shared ? ` ••${key.replace(/\s+/g, '').slice(-4)}` : '';
+        let label = fit(name, suffix);
+        for (let n = 2; taken.has(label.toLowerCase()); n++) label = fit(name, `${suffix} (${n})`);
+        taken.add(label.toLowerCase());
+        labels.set(key, label);
     }
     return labels;
 }

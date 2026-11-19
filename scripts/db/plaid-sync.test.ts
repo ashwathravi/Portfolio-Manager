@@ -8,6 +8,7 @@ import postgres from 'postgres';
 import * as schema from '../../src/db/schema';
 import type { PlaidFetch } from '../../src/lib/plaid/link';
 import { deletePortfolio } from '../../src/lib/portfolio/manage';
+import { updateManualHolding } from '../../src/lib/portfolio/manual-holdings';
 import { MAX_PLAID_CONNECTIONS_PER_USER, PlaidTokenUnavailableError, disconnectPlaidItem, handlePlaidWebhook, listPlaidConnections } from '../../src/lib/plaid/connections';
 import { createDrizzlePlaidTokenRegistryStore, resetPlaidTokenVaultForTests, setPlaidTokenRegistryStoreForTests, storePlaidConnection } from '../../src/lib/plaid/server-token-vault';
 import { PlaidItemNotFoundError, connectedAccountFingerprints, refreshPlaidItem, selectPlaidAccounts, syncAllPlaidItems, syncPlaidItem } from '../../src/lib/plaid/sync';
@@ -266,6 +267,50 @@ describe('Plaid sync into portfolios', { skip: !DATABASE_URL && 'SCRIPTS_TEST_DA
         await syncAllPlaidItems({ config: CONFIG, budgetMs: 60_000, database, fetchImpl: plaid.fetchImpl, getAccessToken: async () => 'access-sandbox-1', clock: () => NOW.getTime() });
         const order = plaid.requests.filter((r) => r.endpoint === '/investments/holdings/get').map((r) => (r.body.options as { account_ids: string[] }).account_ids[0]);
         assert.ok(order.indexOf('acc_rot_a') < order.indexOf('acc_rot_b'), order.join(','));
+    });
+
+    test('a fund with no ticker: kept per account, its new value alone is a price, and an edit takes over only its own account\'s', async () => {
+        await linkedUser('u-fund', 'item-fund', [['acc_fx', 'Brokerage', 'investment'], ['acc_fy', 'IRA', 'investment']]);
+        await selectPlaidAccounts('u-fund', 'item-fund', ['acc_fx', 'acc_fy'], database);
+        const FUND = { security_id: 'sec_fund', ticker_symbol: null, name: 'Stable Value Fund', type: 'mutual fund', cusip: '123456789' };
+        const plaidWith = (price: number) => fakePlaid({
+            '/investments/holdings/get': (body) => ({
+                json: {
+                    holdings: (body.options as { account_ids: string[] }).account_ids.flatMap((account) => [
+                        { account_id: account, security_id: 'sec_aapl', quantity: 1, institution_price: 100, institution_value: 100, cost_basis: 90, iso_currency_code: 'USD' },
+                        { account_id: account, security_id: 'sec_fund', quantity: 10, institution_price: price, institution_value: 10 * price, cost_basis: 100, iso_currency_code: 'USD' },
+                    ]),
+                    securities: [...SECURITIES, FUND],
+                },
+            }),
+            '/investments/transactions/get': transactionsOf('acc_fx', []),
+        });
+        const fund = () => sql<{ account: string; source: string; value: number; external: string }[]>`
+            SELECT p.external_account_id AS account, m.source, m.value::float AS value, m.external_id AS external
+            FROM manual_holdings m JOIN portfolios p ON p.id = m.portfolio_id WHERE m.user_id = 'u-fund' ORDER BY p.external_account_id`;
+        const lastChange = async () => (await sql<{ at: string }[]>`SELECT max(updated_at)::text AS at FROM portfolios WHERE user_id = 'u-fund'`)[0].at;
+
+        await syncPlaidItem('u-fund', 'item-fund', deps(plaidWith(11).fetchImpl));
+        const first = await fund();
+        assert.deepEqual(first.map((r) => [r.account, r.source, r.value]), [['acc_fx', 'plaid', 110], ['acc_fy', 'plaid', 110]]);
+        assert.notEqual(first[0].external, first[1].external);
+
+        // The next day's sync: only the fund's value moved. The value is
+        // new, but the accounts' last change stays, so the nightly valuation
+        // still records the session.
+        const changedAt = await lastChange();
+        await syncPlaidItem('u-fund', 'item-fund', deps(plaidWith(12).fetchImpl, new Date('2026-10-26T22:30:00.000Z')));
+        assert.deepEqual((await fund()).map((r) => r.value), [120, 120]);
+        assert.equal(await lastChange(), changedAt);
+
+        // The user values the first account's fund by hand. The IRA's, the
+        // same security, still syncs, and the edited one isn't added back.
+        const [{ id, portfolio }] = await sql<{ id: string; portfolio: string }[]>`
+            SELECT m.id, m.portfolio_id AS portfolio FROM manual_holdings m JOIN portfolios p ON p.id = m.portfolio_id
+            WHERE p.external_account_id = 'acc_fx'`;
+        assert.ok(await updateManualHolding('u-fund', id, portfolio, { name: 'Stable Value Fund', identifier: null, quantity: 10, value: 150, costBasis: 100, valueAsOf: '2026-10-27' }, { database }));
+        await syncPlaidItem('u-fund', 'item-fund', deps(plaidWith(13).fetchImpl, new Date('2026-10-27T22:30:00.000Z')));
+        assert.deepEqual((await fund()).map((r) => [r.account, r.source, r.value]), [['acc_fx', 'manual', 150], ['acc_fy', 'plaid', 130]]);
     });
 
     test('a sync makes the portfolio, replaces its holdings and cash, and upserts its transactions', async () => {

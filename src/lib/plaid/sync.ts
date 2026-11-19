@@ -408,6 +408,14 @@ export async function writeAccountSync(input: AccountSyncWrite, database: Databa
  * removed to match. One the user edited became theirs (source "manual")
  * and is left alone. True when anything changed.
  */
+/**
+ * A synced holding's key: Plaid's security ID within the account it is
+ * held in, so one security held in two linked accounts is two holdings.
+ */
+export function institutionValuedKey(portfolioId: string, securityId: string): string {
+    return `${portfolioId}:${securityId}`;
+}
+
 async function replaceInstitutionValued(
     tx: Executor,
     userId: string,
@@ -419,14 +427,15 @@ async function replaceInstitutionValued(
         .select({
             id: manualHoldings.id,
             externalId: manualHoldings.externalId,
-            value: manualHoldings.value,
             quantity: manualHoldings.quantity,
             costBasis: manualHoldings.costBasis,
         })
         .from(manualHoldings)
         .where(and(eq(manualHoldings.portfolioId, portfolioId), eq(manualHoldings.userId, userId), eq(manualHoldings.source, "plaid")));
     const byExternal = new Map(existing.map((row) => [row.externalId, row]));
-    // One the user edited is theirs now, wherever they put it.
+    // One the user edited is theirs now, wherever they put it. It keeps the
+    // key of the account it came from, so the same security in another
+    // linked account still syncs.
     const taken = new Set((await tx
         .select({ externalId: manualHoldings.externalId })
         .from(manualHoldings)
@@ -434,9 +443,14 @@ async function replaceInstitutionValued(
         .map((row) => row.externalId));
     const asOf = now.toISOString().slice(0, 10);
     const sameNumber = (stored: string | null, next: number | null) => (stored == null ? next == null : next != null && Number(stored) === next);
+    // A holding added, gone, or with another quantity or cost is a change
+    // to the account. A new value alone is a price, as a quote is for a
+    // ticker: it doesn't move the account's last change, which would keep
+    // the nightly valuation from recording the session it closed.
     let changed = false;
     for (const row of rows) {
-        if (taken.has(row.externalId)) continue;
+        const key = institutionValuedKey(portfolioId, row.externalId);
+        if (taken.has(key)) continue;
         const values = {
             name: row.name,
             identifier: row.identifier,
@@ -446,17 +460,14 @@ async function replaceInstitutionValued(
             valueAsOf: asOf,
             updatedAt: now,
         };
-        const before = byExternal.get(row.externalId);
-        byExternal.delete(row.externalId);
+        const before = byExternal.get(key);
+        byExternal.delete(key);
         if (!before) {
-            await tx.insert(manualHoldings).values({ userId, portfolioId, ...values, source: "plaid", externalId: row.externalId, createdAt: now });
-            changed = true;
-        } else if (!sameNumber(before.value, row.value) || !sameNumber(before.quantity, row.quantity) || !sameNumber(before.costBasis, row.costBasis)) {
-            await tx.update(manualHoldings).set(values).where(eq(manualHoldings.id, before.id));
+            await tx.insert(manualHoldings).values({ userId, portfolioId, ...values, source: "plaid", externalId: key, createdAt: now });
             changed = true;
         } else {
-            // The same value again: only the day it's as of moves.
-            await tx.update(manualHoldings).set({ valueAsOf: asOf, name: row.name, identifier: row.identifier }).where(eq(manualHoldings.id, before.id));
+            await tx.update(manualHoldings).set(values).where(eq(manualHoldings.id, before.id));
+            if (!sameNumber(before.quantity, row.quantity) || !sameNumber(before.costBasis, row.costBasis)) changed = true;
         }
     }
     const gone = [...byExternal.values()].map((row) => row.id);
