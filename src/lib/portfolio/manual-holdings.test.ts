@@ -35,6 +35,9 @@ function fakeDatabase(selects: unknown[][]) {
         return result;
     };
     const tx = {
+        execute: async () => {
+            writes.push({ op: "lock" });
+        },
         select: () => chain(answers.shift() ?? []),
         insert: () => ({
             values: (values: unknown) => {
@@ -110,41 +113,43 @@ describe("writing holdings valued by hand", () => {
     test("adding into another user's account is not found, and nothing is written", async () => {
         const { database, writes } = fakeDatabase([[]]);
         await assert.rejects(addManualHolding(USER, OTHER_ACCOUNT, INPUT, { database }), AccountNotFoundError);
-        assert.deepEqual(writes, []);
+        assert.deepEqual(writes, [{ op: "lock" }]);
     });
 
     test("adding into the user's account saves it as theirs and marks the account changed", async () => {
         const now = new Date("2026-11-19T12:00:00.000Z");
         const { database, writes } = fakeDatabase([[{ id: ACCOUNT }]]);
         assert.equal(await addManualHolding(USER, ACCOUNT, INPUT, { database, now }), "m-new");
-        assert.deepEqual(writes.map((w) => w.op), ["insert", "update"]);
-        assert.deepEqual(writes[0].values, {
+        // Under the account-write lock a Plaid sync takes, so neither
+        // overwrites the other (the Codex finding on PR #216).
+        assert.deepEqual(writes.map((w) => w.op), ["lock", "insert", "update"]);
+        assert.deepEqual(writes[1].values, {
             userId: USER, portfolioId: ACCOUNT, name: INPUT.name, identifier: INPUT.identifier, quantity: "10", value: "1500", costBasis: null,
             valueAsOf: INPUT.valueAsOf, source: "manual", createdAt: now, updatedAt: now,
         });
-        assert.deepEqual(writes[1].values, { updatedAt: now });
+        assert.deepEqual(writes[2].values, { updatedAt: now });
     });
 
     test("editing a holding the user doesn't have is false, and nothing is written", async () => {
         const { database, writes } = fakeDatabase([[{ id: ACCOUNT }], []]);
         assert.equal(await updateManualHolding(USER, "m-missing", ACCOUNT, INPUT, { database }), false);
-        assert.deepEqual(writes, []);
+        assert.deepEqual(writes, [{ op: "lock" }]);
     });
 
     test("moving a holding to another account marks both accounts changed", async () => {
         const { database, writes } = fakeDatabase([[{ id: OTHER_ACCOUNT }], [{ portfolioId: ACCOUNT }]]);
         assert.equal(await updateManualHolding(USER, "m-1", OTHER_ACCOUNT, INPUT, { database }), true);
-        assert.deepEqual(writes.map((w) => w.op), ["update", "update", "update"]);
-        assert.equal((writes[0].values as { source: string }).source, "manual");
+        assert.deepEqual(writes.map((w) => w.op), ["lock", "update", "update", "update"]);
+        assert.equal((writes[1].values as { source: string }).source, "manual");
     });
 
     test("deleting one the user doesn't have is false; deleting theirs marks its account changed", async () => {
         const missing = fakeDatabase([[]]);
         assert.equal(await deleteManualHolding(USER, "m-missing", { database: missing.database }), false);
-        assert.deepEqual(missing.writes.map((w) => w.op), ["delete"]);
+        assert.deepEqual(missing.writes.map((w) => w.op), ["lock", "delete"]);
 
         const held = fakeDatabase([[{ portfolioId: ACCOUNT }]]);
         assert.equal(await deleteManualHolding(USER, "m-1", { database: held.database }), true);
-        assert.deepEqual(held.writes.map((w) => w.op), ["delete", "update"]);
+        assert.deepEqual(held.writes.map((w) => w.op), ["lock", "delete", "update"]);
     });
 });

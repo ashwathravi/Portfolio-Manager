@@ -26,6 +26,8 @@ describe('transactionTypeFor', () => {
             ['Transfer of Securities Out', 'TRANSFER_OUT'], ['Transfer of Shares Out', 'TRANSFER_OUT'], ['Transfer of Stock Out', 'TRANSFER_OUT'], ['Transfer of Securities In', 'TRANSFER_IN'],
             // Cash transfers stay cash; an investment isn't a vest.
             ['Transfer In', 'DEPOSIT'], ['Transfer Out', 'WITHDRAWAL'], ['Investment Income', null],
+            // A sale of vested stock is a sale.
+            ['Restricted Stock Sale', 'SELL'], ['Sell RSU', 'SELL'], ['RSU Shares Sold', 'SELL'],
         ];
         for (const [action, type] of cases) assert.equal(transactionTypeFor(action), type, action);
     });
@@ -141,6 +143,10 @@ describe('parseTransactionsCsv', () => {
     test('needs a date and an action column, and a way to value each row', () => {
         assert.match(parseTransactionsCsv('Symbol,Quantity\nAAPL,1').issues[0].message, /No header row with a Date and an Action/);
         assert.match(parseTransactionsCsv('Date,Action,Symbol\n2026-03-05,Buy,AAPL').issues[0].message, /Add an Amount column/);
+        // Share moves need only a quantity: no value column is required.
+        const moves = parseTransactionsCsv('Date,Action,Symbol,Quantity\n2026-03-05,RSU Vest,AAPL,10\n2026-03-06,Shares Out,AAPL,4\n2026-03-07,Buy,AAPL,1');
+        assert.deepEqual(moves.rows.map((r) => [r.type, r.quantity, r.price]), [['VEST', 10, null], ['TRANSFER_OUT', 4, null]]);
+        assert.deepEqual(moves.issues.map((i) => i.line), [4]);
     });
 
     test('cleans notes of what the API refuses, and keeps other currencies', () => {

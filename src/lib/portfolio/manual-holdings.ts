@@ -10,6 +10,7 @@ import { and, asc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { manualHoldings, portfolios } from "@/db/schema";
 import type { ManualHoldingInput } from "@/lib/validators/manual-holding";
+import { buildLockUserAccountsQuery } from "./manage";
 import { AccountNotFoundError } from "./transactionsWrite";
 
 type Database = typeof db;
@@ -109,6 +110,9 @@ export async function addManualHolding(
     { database = db, now = new Date() }: { database?: Database; now?: Date } = {},
 ): Promise<string> {
     return database.transaction(async (tx) => {
+        // A Plaid sync writes an account's synced holdings under this lock:
+        // an edit waits for it, so neither overwrites the other.
+        await buildLockUserAccountsQuery(userId, tx);
         await ownedAccount(tx, userId, portfolioId);
         const [inserted] = await tx
             .insert(manualHoldings)
@@ -134,6 +138,7 @@ export async function updateManualHolding(
     { database = db, now = new Date() }: { database?: Database; now?: Date } = {},
 ): Promise<boolean> {
     return database.transaction(async (tx) => {
+        await buildLockUserAccountsQuery(userId, tx);
         await ownedAccount(tx, userId, portfolioId);
         const [before] = await tx
             .select({ portfolioId: manualHoldings.portfolioId })
@@ -154,6 +159,7 @@ export async function updateManualHolding(
 /** False when the user has no holding with that ID. */
 export async function deleteManualHolding(userId: string, id: string, { database = db, now = new Date() }: { database?: Database; now?: Date } = {}): Promise<boolean> {
     return database.transaction(async (tx) => {
+        await buildLockUserAccountsQuery(userId, tx);
         const [deleted] = await tx
             .delete(manualHoldings)
             .where(and(eq(manualHoldings.id, id), eq(manualHoldings.userId, userId)))

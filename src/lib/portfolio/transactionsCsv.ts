@@ -70,7 +70,8 @@ function findColumn(headers: string[], key: Column): number {
 const ACTIONS: ReadonlyArray<[RegExp, TransactionType]> = [
     // Equity compensation and shares moved between brokers come before the
     // cash patterns: "Transfer of securities in" is shares, not a deposit.
-    [/\b(vest(ed|ing)?|rsu|restricted stock|(shares?|stock) released?|released shares)\b/i, 'VEST'],
+    // Not when the action says it was sold: "Sell RSU" is a sale.
+    [/^(?!.*\b(sell|sold|sale)\b).*\b(vest(ed|ing)?|rsu|restricted stock|(shares?|stock) released?|released shares)\b/i, 'VEST'],
     [/\b((securities|shares|stock|acat|acat) (transfer(red)? )?(in|received)|(securities|shares|stock) transfer(red)? in|transfer of (securities|shares|stock)(?! out\b)( in)?|acat in|receive (securities|shares)|shares in)\b/i, 'TRANSFER_IN'],
     [/\b((securities|shares|stock|acat|acat) (transfer(red)? )?(out|delivered)|(securities|shares|stock) transfer(red)? out|transfer of (securities|shares|stock) out|acat out|deliver (securities|shares)|shares out)\b/i, 'TRANSFER_OUT'],
     [/\breinvest(ed)?\s+(dividend|div)\b/i, 'DIVIDEND'],
@@ -131,7 +132,10 @@ export function parseTransactionsCsv(text: string): TransactionParseResult {
     const col = Object.fromEntries((Object.keys(HEADER_ALIASES) as Column[]).map((key) => [key, findColumn(headers, key)])) as Record<Column, number>;
     // Commission and fees can be columns of their own: they add up.
     const feeColumns = headers.flatMap((h, i) => ((HEADER_ALIASES.fees as readonly string[]).includes(h) ? [i] : []));
-    if (col.amount < 0 && col.gross < 0 && (col.quantity < 0 || col.price < 0)) {
+    // Without a value column only share moves (a vest, shares in or out),
+    // which need just a quantity, can import: a buy or sell row without a
+    // price is listed on its own line.
+    if (col.amount < 0 && col.gross < 0 && col.quantity < 0) {
         return {
             rows: [],
             issues: [{ line: records[headerIndex].line, message: 'Add an Amount column, or Quantity and Price columns, so each transaction has a value.' }],
