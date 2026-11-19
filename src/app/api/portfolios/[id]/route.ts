@@ -1,12 +1,12 @@
 /**
- * PATCH  /api/portfolios/[id]  renames an account or changes its description or cash
+ * PATCH  /api/portfolios/[id]  renames an account or changes its description, cash, type, institution or tax treatment
  * DELETE /api/portfolios/[id]  deletes it, with its holdings, transactions and history
  *
  * Launch item i41. Only the signed-in user's own accounts: any other ID is
  * a 404, as if it didn't exist.
  *
- * PATCH body: { name?, description?, cashBalance? } (at least one)
- * Responses:  PATCH 200 { data: { id, name, description, cashBalance } }; DELETE 204;
+ * PATCH body: { name?, description?, cashBalance?, accountType?, institution?, taxTreatment? } (at least one; null clears the last three)
+ * Responses:  PATCH 200 { data: { id, name, description, cashBalance, accountType, institution, taxTreatment } }; DELETE 204;
  *             400 INVALID_PORTFOLIO; 404 PORTFOLIO_NOT_FOUND;
  *             409 DUPLICATE_ACCOUNT_NAME (a rename to another account's name, ignoring case)
  */

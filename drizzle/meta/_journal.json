@@ -239,6 +239,13 @@
       "when": 1794696292308,
       "tag": "0033_option_positions",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1795127799678,
+      "tag": "0034_account_kinds",
+      "breakpoints": true
     }
   ]
 }

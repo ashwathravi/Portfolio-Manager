@@ -4,8 +4,8 @@
  * Creates an account for the signed-in user (launch item i41): a name, and
  * optionally a description and a starting cash balance.
  *
- * Body:     { name, description?, cashBalance? }
- * Response: 201 { data: { id, name, description, cashBalance } }; 400 INVALID_PORTFOLIO;
+ * Body:     { name, description?, cashBalance?, accountType?, institution?, taxTreatment? }
+ * Response: 201 { data: { id, name, description, cashBalance, accountType, institution, taxTreatment } }; 400 INVALID_PORTFOLIO;
  *           409 DUPLICATE_ACCOUNT_NAME (another account has the name, ignoring case)
  *           or ACCOUNT_LIMIT (the user has MAX_ACCOUNTS_PER_USER already)
  */

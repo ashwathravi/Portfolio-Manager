@@ -223,10 +223,22 @@ export const portfolios = pgTable("portfolios", {
     // linked account's holdings and cash, and upserts its transactions.
     source: text("source").default("manual").notNull(),
     externalAccountId: text("external_account_id"),
+    // What kind of account it is, where it's held, and how it's taxed
+    // (src/lib/portfolio/account-kinds.ts). Optional: null is "not said",
+    // never a guess.
+    accountType: text("account_type"),
+    institution: text("institution"),
+    taxTreatment: text("tax_treatment"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (table) => ({
     userIdIdx: index("portfolios_user_id_idx").on(table.userId),
+    accountTypeCheck: check(
+        "portfolios_account_type_check",
+        sql`${table.accountType} in ('brokerage', '401k', '403b', 'traditional_ira', 'roth_ira', 'sep_ira', 'pension', '529', 'hsa', 'equity_comp', 'crypto', 'other')`,
+    ),
+    taxTreatmentCheck: check("portfolios_tax_treatment_check", sql`${table.taxTreatment} in ('taxable', 'tax_deferred', 'tax_free')`),
+    institutionCheck: check("portfolios_institution_check", sql`char_length(${table.institution}) between 1 and 80`),
     userExternalAccountIdx: uniqueIndex("portfolios_user_source_external_account_idx")
         .on(table.userId, table.source, table.externalAccountId)
         .where(sql`${table.externalAccountId} is not null`),

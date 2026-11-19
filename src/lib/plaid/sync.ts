@@ -22,6 +22,7 @@ import {
     sameAccountName,
 } from "@/lib/portfolio/manage";
 import { transactionValues } from "@/lib/portfolio/transactionsWrite";
+import { accountTypeForPlaid, INSTITUTION_MAX_LENGTH, taxTreatmentForPlaid } from "@/lib/portfolio/account-kinds";
 import { PORTFOLIO_LIMITS } from "@/lib/validators/portfolio";
 import type { TransactionRow } from "@/lib/validators/transaction";
 
@@ -214,6 +215,7 @@ interface SyncTarget {
     plaidAccountId: string;
     name: string;
     mask: string | null;
+    subtype: string;
     lastSyncedAt: Date | null;
 }
 
@@ -230,6 +232,7 @@ async function loadSyncTargets(userId: string, itemId: string, database: Databas
             plaidAccountId: plaidAccounts.plaidAccountId,
             name: plaidAccounts.name,
             mask: plaidAccounts.mask,
+            subtype: plaidAccounts.subtype,
             lastSyncedAt: plaidAccounts.lastSyncedAt,
         })
         .from(plaidAccounts)
@@ -256,9 +259,27 @@ export interface AccountSyncWrite {
     mask: string | null;
     description: string;
     holdings: Pick<AccountHoldings, "positions" | "cashUsd">;
+    /**
+     * What kind of account Plaid says it is, and where it's held
+     * (linkedAccountKind). A new portfolio takes them; an existing one fills
+     * in only what it has none of, so the user's own choice stands.
+     */
+    kind?: LinkedAccountKind;
     /** Null when Plaid's history isn't ready yet: transactions wait for the next sync. */
     transactions: readonly (TransactionRow & { externalId: string })[] | null;
     now: Date;
+}
+
+export interface LinkedAccountKind {
+    accountType: string | null;
+    institution: string | null;
+    taxTreatment: string | null;
+}
+
+/** A linked account's kind from Plaid's subtype, and its institution from the connection. */
+export function linkedAccountKind(subtype: string | null, institutionName: string | null): LinkedAccountKind {
+    const institution = institutionName?.trim().slice(0, INSTITUTION_MAX_LENGTH) || null;
+    return { accountType: accountTypeForPlaid(subtype), institution, taxTreatment: taxTreatmentForPlaid(subtype) };
 }
 
 export interface AccountSyncWritten {
@@ -314,6 +335,21 @@ export async function writeAccountSync(input: AccountSyncWrite, database: Databa
                     .set({ cashBalance: input.holdings.cashUsd, updatedAt: input.now })
                     .where(and(eq(portfolios.id, existing.id), eq(portfolios.userId, input.userId)));
             }
+            if (input.kind) {
+                // Not a financial change: updated_at stays where it was.
+                await tx
+                    .update(portfolios)
+                    .set({
+                        accountType: sql`coalesce(${portfolios.accountType}, ${input.kind.accountType})`,
+                        institution: sql`coalesce(${portfolios.institution}, ${input.kind.institution})`,
+                        taxTreatment: sql`coalesce(${portfolios.taxTreatment}, ${input.kind.taxTreatment})`,
+                    })
+                    .where(and(
+                        eq(portfolios.id, existing.id),
+                        eq(portfolios.userId, input.userId),
+                        sql`(${portfolios.accountType} is null or ${portfolios.institution} is null or ${portfolios.taxTreatment} is null)`,
+                    ));
+            }
             portfolio = { id: existing.id, name: existing.name, created: false };
         } else {
             const accounts = await buildUserAccountNamesQuery(input.userId, tx);
@@ -327,6 +363,7 @@ export async function writeAccountSync(input: AccountSyncWrite, database: Databa
                     cashBalance: input.holdings.cashUsd,
                     source: "plaid",
                     externalAccountId: input.plaidAccountId,
+                    ...(input.kind ?? {}),
                     updatedAt: input.now,
                 })
                 .returning({ id: portfolios.id, name: portfolios.name });
@@ -528,6 +565,7 @@ export async function syncPlaidItem(userId: string, itemId: string, deps: SyncDe
                     mask: account.mask,
                     description: linkedPortfolioDescription(item.institutionName, account.mask),
                     holdings: held,
+                    kind: linkedAccountKind(account.subtype, item.institutionName),
                     transactions: activity?.rows ?? null,
                     now,
                 }, database);
