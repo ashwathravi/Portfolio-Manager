@@ -70,8 +70,9 @@ function findColumn(headers: string[], key: Column): number {
 const ACTIONS: ReadonlyArray<[RegExp, TransactionType]> = [
     // Equity compensation and shares moved between brokers come before the
     // cash patterns: "Transfer of securities in" is shares, not a deposit.
-    // Not when the action says it was sold: "Sell RSU" is a sale.
-    [/^(?!.*\b(sell|sold|sale)\b).*\b(vest(ed|ing)?|rsu|restricted stock|(shares?|stock) released?|released shares)\b/i, 'VEST'],
+    // Not when the action says it was sold or moved: "Sell RSU" is a sale,
+    // "RSU Shares Out" a transfer.
+    [/^(?!.*\b(sell|sold|sale|out|in|transfer(red)?|deliver(ed)?|received)\b).*\b(vest(ed|ing)?|rsu|restricted stock|(shares?|stock) released?|released shares)\b/i, 'VEST'],
     [/\b((securities|shares|stock|acats?) (transfer(red)? )?(in|received)|(securities|shares|stock) transfer(red)? in|transfer of (securities|shares|stock)(?! out\b)( in)?|acats? in|receive (securities|shares)|shares in)\b/i, 'TRANSFER_IN'],
     [/\b((securities|shares|stock|acats?) (transfer(red)? )?(out|delivered)|(securities|shares|stock) transfer(red)? out|transfer of (securities|shares|stock) out|acats? out|deliver (securities|shares)|shares out)\b/i, 'TRANSFER_OUT'],
     [/\breinvest(ed)?\s+(dividend|div)\b/i, 'DIVIDEND'],

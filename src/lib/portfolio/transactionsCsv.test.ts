@@ -29,6 +29,8 @@ describe('transactionTypeFor', () => {
             ['Transfer In', 'DEPOSIT'], ['Transfer Out', 'WITHDRAWAL'], ['Investment Income', null],
             // A sale of vested stock is a sale.
             ['Restricted Stock Sale', 'SELL'], ['Sell RSU', 'SELL'], ['RSU Shares Sold', 'SELL'],
+            // Restricted stock moved between brokers keeps its direction.
+            ['RSU Shares Out', 'TRANSFER_OUT'], ['Transfer of Securities Out - Restricted Stock', 'TRANSFER_OUT'], ['RSU Shares In', 'TRANSFER_IN'],
         ];
         for (const [action, type] of cases) assert.equal(transactionTypeFor(action), type, action);
     });
