@@ -13,6 +13,7 @@ import {
     filterActivity,
     summarizeActivity,
     type ActivityRow,
+    sideLabel,
     type ActivitySide,
     type MoneyAmount,
 } from "@/lib/portfolio/activity";
@@ -63,7 +64,7 @@ function AddControls({ accounts }: { accounts: readonly TransactionAccountOption
 
 function DeleteTransactionButton({ row }: { row: ActivityRow }) {
     const router = useRouter();
-    const label = `${row.side.charAt(0)}${row.side.slice(1).toLowerCase()}${row.symbol ? ` ${row.symbol}` : ""} on ${formatShortDate(row.date)}`;
+    const label = `${sideLabel(row.side)}${row.symbol ? ` ${row.symbol}` : ""} on ${formatShortDate(row.date)}`;
     const remove = async () => {
         if (!window.confirm(`Delete ${label}? This can't be undone.`)) return;
         try {
@@ -277,7 +278,7 @@ export function ActivityPageClient({
                                                 "—"
                                             )}
                                         </td>
-                                        <td><span className="pm-side" data-side={r.transfer ? "TRANSFER" : r.side}>{r.transfer ? "TRANSFER" : r.side}</span></td>
+                                        <td><span className="pm-side" data-side={r.transfer ? "TRANSFER" : r.side}>{r.transfer ? "TRANSFER" : sideLabel(r.side).toUpperCase()}</span></td>
                                         <td className="num">{formatQty(r.quantity)}</td>
                                         <td className="num">{r.price === null ? "—" : formatMoney(r.price, r.currency)}</td>
                                         <td className="num">{formatMoney(r.value, r.currency)}</td>

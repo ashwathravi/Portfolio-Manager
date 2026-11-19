@@ -310,15 +310,39 @@ export type MappedTransaction =
     | { row: TransactionRow & { externalId: string } }
     | { skipped: TransactionSkipReason };
 
-/** Atlas's type for a Plaid type and subtype; null for what it doesn't record. */
-export function transactionTypeForPlaid(type: string, subtype: string | null | undefined): TransactionRow["type"] | null {
+/**
+ * Plaid's transfer subtypes that move shares into or out of the account
+ * without a trade: an RSU vest arrives as one, shares moved from another
+ * broker as another. Corporate actions (a split, a merger, a spin-off) and
+ * option exercises change what a position is, not whether shares arrived,
+ * and aren't recorded.
+ */
+const SHARE_TRANSFER_SUBTYPES: ReadonlySet<string> = new Set(["transfer", "send", "request", "stock distribution"]);
+
+/** A transfer's description that says it is equity compensation vesting. */
+const VEST_NOTE = /\b(vest(ed|ing)?|rsu|restricted stock|(shares?|stock) released?|released shares)\b/i;
+
+/**
+ * Atlas's type for a Plaid type and subtype; null for what it doesn't
+ * record. A share transfer's direction comes from its quantity (positive
+ * is shares in) and whether it is a vest from its description.
+ */
+export function transactionTypeForPlaid(
+    type: string,
+    subtype: string | null | undefined,
+    { quantity = null, name = null }: { quantity?: number | null; name?: string | null } = {},
+): TransactionRow["type"] | null {
     const t = type.trim().toLowerCase();
+    const sub = (subtype ?? "").trim().toLowerCase();
     if (t === "buy") return "BUY";
     if (t === "sell") return "SELL";
     if (t === "fee") return "FEE";
-    // A cancel, and a transfer of shares in or out (no cash moved; the
-    // holdings say what's held), aren't recorded.
-    if (t === "cash") return CASH_SUBTYPES[(subtype ?? "").trim().toLowerCase()] ?? null;
+    if (t === "cash") return CASH_SUBTYPES[sub] ?? null;
+    if (t === "transfer" && SHARE_TRANSFER_SUBTYPES.has(sub) && quantity != null && quantity !== 0) {
+        if (quantity < 0) return "TRANSFER_OUT";
+        return VEST_NOTE.test(name ?? "") ? "VEST" : "TRANSFER_IN";
+    }
+    // A cancel, a corporate action, and a transfer with no shares aren't recorded.
     return null;
 }
 
@@ -329,31 +353,36 @@ function noteOf(raw: string | null | undefined): string | null {
 }
 
 export function mapPlaidTransaction(transaction: PlaidInvestmentTransaction, security: PlaidSecurity | undefined): MappedTransaction {
-    const type = transactionTypeForPlaid(transaction.type, transaction.subtype);
+    const type = transactionTypeForPlaid(transaction.type, transaction.subtype, { quantity: transaction.quantity, name: transaction.name });
     if (!type) return { skipped: "not-recorded" };
     // Kept in its currency (CAD, EUR); an unofficial one (a coin) isn't a currency.
     if (transaction.unofficial_currency_code) return { skipped: "other-currency" };
 
     const trade = type === "BUY" || type === "SELL";
+    const moved = type === "VEST" || type === "TRANSFER_IN" || type === "TRANSFER_OUT";
     // A cash equivalent with a ticker (a money market sweep, SPAXX) is cash
     // in the holdings: buying or selling it moves cash within the account,
     // not into a position, but its dividends are income from that fund.
     const sweep = security?.is_cash_equivalent === true && security.type !== "cash";
-    if (sweep && trade) return { skipped: "cash-sweep" };
+    if (sweep && (trade || moved)) return { skipped: "cash-sweep" };
     // Currency itself ("CUR:USD") has no ticker to keep.
     const symbol = security?.ticker_symbol && security.type !== "cash" ? normalizeTicker(security.ticker_symbol) : null;
-    if ((trade || type === "DIVIDEND") && !symbol) return { skipped: "no-symbol" };
+    if ((trade || moved || type === "DIVIDEND") && !symbol) return { skipped: "no-symbol" };
 
     const quantity = transaction.quantity != null ? Math.abs(transaction.quantity) : null;
     const amount = transaction.amount != null ? Math.abs(transaction.amount) : null;
     const fees = transaction.fees != null && transaction.fees > 0 ? round(transaction.fees, 2) : null;
+    // A share move's price, when Plaid has one, is what each share was
+    // worth that day; its amount is usually 0 (no cash moved), so its value
+    // comes from quantity × price instead.
+    const movedPrice = transaction.price != null && transaction.price > 0 ? round(transaction.price, 6) : null;
     const candidate = {
         type,
         date: transaction.date,
-        symbol: trade || type === "DIVIDEND" ? symbol : null,
-        quantity: trade ? (quantity ? round(quantity, 6) : null) : null,
-        price: trade ? (transaction.price != null ? round(Math.abs(transaction.price), 6) : null) : null,
-        amount: amount ? round(amount, 2) : null,
+        symbol: trade || moved || type === "DIVIDEND" ? symbol : null,
+        quantity: trade || moved ? (quantity ? round(quantity, 6) : null) : null,
+        price: trade ? (transaction.price != null ? round(Math.abs(transaction.price), 6) : null) : moved ? movedPrice : null,
+        amount: moved ? null : amount ? round(amount, 2) : null,
         fees,
         currency: transaction.iso_currency_code ?? "USD",
         notes: noteOf(transaction.name),

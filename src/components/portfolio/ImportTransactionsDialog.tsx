@@ -93,7 +93,7 @@ export function ImportTransactionsDialog({ accounts }: { accounts: readonly Tran
                         <DialogTitle>Import transactions from CSV</DialogTitle>
                         <DialogDescription>
                             Use your broker&apos;s activity or history export. Atlas reads the date, the action (buy, sell,
-                            dividend, interest, deposit, withdrawal or fee), the symbol, quantity, price, amount or value,
+                            dividend, interest, deposit, withdrawal, fee, RSU vest, or shares moved in or out), the symbol, quantity, price, amount or value,
                             fees and currency.
                             Transactions already imported are skipped.
                         </DialogDescription>

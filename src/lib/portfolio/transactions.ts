@@ -5,13 +5,23 @@
  * come from the account's own snapshot (decision D5).
  */
 
-export const TRANSACTION_TYPES = ['BUY', 'SELL', 'DIVIDEND', 'INTEREST', 'DEPOSIT', 'WITHDRAWAL', 'FEE'] as const;
+export const TRANSACTION_TYPES = [
+    'BUY', 'SELL', 'DIVIDEND', 'INTEREST', 'DEPOSIT', 'WITHDRAWAL', 'FEE', 'VEST', 'TRANSFER_IN', 'TRANSFER_OUT',
+] as const;
 export type TransactionType = (typeof TRANSACTION_TYPES)[number];
 
 /** Trades: a symbol, a quantity and a price. */
 export const TRADE_TYPES: ReadonlySet<TransactionType> = new Set(['BUY', 'SELL']);
+/**
+ * Shares that arrive or leave without a trade: an RSU vest, and shares moved
+ * in or out of the account (from another broker, a gift). A symbol and a
+ * quantity; the price, when known, is what each share was worth that day.
+ */
+export const SHARE_MOVE_TYPES: ReadonlySet<TransactionType> = new Set(['VEST', 'TRANSFER_IN', 'TRANSFER_OUT']);
 /** Types about one security. */
-export const SYMBOL_TYPES: ReadonlySet<TransactionType> = new Set(['BUY', 'SELL', 'DIVIDEND']);
+export const SYMBOL_TYPES: ReadonlySet<TransactionType> = new Set(['BUY', 'SELL', 'DIVIDEND', 'VEST', 'TRANSFER_IN', 'TRANSFER_OUT']);
+/** Types with a number of shares. */
+export const QUANTITY_TYPES: ReadonlySet<TransactionType> = new Set(['BUY', 'SELL', 'VEST', 'TRANSFER_IN', 'TRANSFER_OUT']);
 
 export const TRANSACTION_TYPE_LABELS: Record<TransactionType, string> = {
     BUY: 'Buy',
@@ -21,6 +31,9 @@ export const TRANSACTION_TYPE_LABELS: Record<TransactionType, string> = {
     DEPOSIT: 'Deposit',
     WITHDRAWAL: 'Withdrawal',
     FEE: 'Fee',
+    VEST: 'Vest',
+    TRANSFER_IN: 'Shares in',
+    TRANSFER_OUT: 'Shares out',
 };
 
 export interface TransactionInput {
@@ -37,10 +50,10 @@ export interface TransactionInput {
     notes?: string | null;
 }
 
-/** The transaction's cash value: given, or quantity × price for a trade. Always positive. */
+/** The transaction's value: given, or quantity × price for a trade or share move. Always positive. */
 export function transactionAmount(input: Pick<TransactionInput, 'type' | 'quantity' | 'price' | 'amount'>): number {
     if (input.amount != null) return Math.round(Math.abs(input.amount) * 100) / 100;
-    if (TRADE_TYPES.has(input.type) && input.quantity != null && input.price != null) {
+    if (QUANTITY_TYPES.has(input.type) && input.quantity != null && input.price != null) {
         return Math.round(Math.abs(input.quantity * input.price) * 100) / 100;
     }
     return 0;

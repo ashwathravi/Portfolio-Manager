@@ -112,10 +112,40 @@ describe("Plaid investment transactions", () => {
             ["cash", "distribution", "WITHDRAWAL"],
             ["cash", "tax withheld", "FEE"],
             ["cash", "adjustment", null],
+            // A transfer without a quantity says nothing about shares.
             ["transfer", "send", null],
             ["cancel", null, null],
         ];
         for (const [type, subtype, expected] of cases) assert.equal(transactionTypeForPlaid(type, subtype), expected, `${type}/${subtype}`);
+    });
+
+    test("share transfers: shares in, shares out, and a vest by its description; corporate actions aren't recorded", () => {
+        assert.equal(transactionTypeForPlaid("transfer", "transfer", { quantity: 25, name: "TRANSFER OF SECURITIES" }), "TRANSFER_IN");
+        assert.equal(transactionTypeForPlaid("transfer", "send", { quantity: -25, name: "ACAT OUT" }), "TRANSFER_OUT");
+        assert.equal(transactionTypeForPlaid("transfer", "stock distribution", { quantity: 12, name: "RSU VEST GOOG" }), "VEST");
+        assert.equal(transactionTypeForPlaid("transfer", "transfer", { quantity: 12, name: "Shares released - restricted stock" }), "VEST");
+        // A negative vest-like row is shares leaving (sold to cover), not a vest.
+        assert.equal(transactionTypeForPlaid("transfer", "transfer", { quantity: -4, name: "RSU VEST GOOG" }), "TRANSFER_OUT");
+        assert.equal(transactionTypeForPlaid("transfer", "transfer", { quantity: 0 }), null);
+        assert.equal(transactionTypeForPlaid("transfer", "split", { quantity: 10 }), null);
+        assert.equal(transactionTypeForPlaid("transfer", "merger", { quantity: 10 }), null);
+        assert.equal(transactionTypeForPlaid("transfer", "exercise", { quantity: 10 }), null);
+    });
+
+    test("regression: an RSU vest Plaid reports as a transfer is kept, valued at the day's price, with no cash amount", () => {
+        const vest = mapPlaidTransaction(
+            transaction({ type: "transfer", subtype: "transfer", quantity: 12, price: 170.25, amount: 0, fees: null, name: "RSU VEST" }),
+            security("goog"),
+        );
+        assert.ok("row" in vest);
+        assert.deepEqual(
+            [vest.row.type, vest.row.symbol, vest.row.quantity, vest.row.price, vest.row.amount],
+            ["VEST", "GOOG", 12, 170.25, null],
+        );
+        const out = mapPlaidTransaction(transaction({ type: "transfer", subtype: "send", quantity: -5, price: 0, amount: 0, fees: null, name: "ACAT OUT" }), security("aapl"));
+        assert.ok("row" in out);
+        assert.deepEqual([out.row.type, out.row.quantity, out.row.price], ["TRANSFER_OUT", 5, null]);
+        assert.deepEqual(mapPlaidTransaction(transaction({ type: "transfer", subtype: "transfer" }), security("aapl", { ticker_symbol: null })), { skipped: "no-symbol" });
     });
 
     test("a buy keeps its quantity, price, net amount and fees; a sell's negative quantity is a quantity", () => {
@@ -160,7 +190,7 @@ describe("Plaid investment transactions", () => {
     });
 
     test("regression: what Atlas doesn't record, or can't, is left out with a reason", () => {
-        assert.deepEqual(mapPlaidTransaction(transaction({ type: "transfer", subtype: "transfer" }), security("aapl")), { skipped: "not-recorded" });
+        assert.deepEqual(mapPlaidTransaction(transaction({ type: "transfer", subtype: "split" }), security("aapl")), { skipped: "not-recorded" });
         assert.deepEqual(mapPlaidTransaction(transaction({ type: "cancel", subtype: null }), security("aapl")), { skipped: "not-recorded" });
         assert.deepEqual(mapPlaidTransaction(transaction({ iso_currency_code: null, unofficial_currency_code: "BTC" }), security("btc")), { skipped: "other-currency" });
         // A trade without a price can't be recorded as one.
@@ -178,7 +208,7 @@ describe("Plaid investment transactions", () => {
     test("accountTransactions keeps the account's rows and counts the rest by reason", () => {
         const result = accountTransactions(ACCOUNT, [
             transaction({ investment_transaction_id: "a" }),
-            transaction({ investment_transaction_id: "b", type: "transfer" }),
+            transaction({ investment_transaction_id: "b", type: "transfer", subtype: "merger" }),
             transaction({ investment_transaction_id: "c", type: "cancel" }),
             transaction({ investment_transaction_id: "d", account_id: "acc_other" }),
         ], [security("aapl")]);

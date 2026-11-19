@@ -17,6 +17,17 @@ describe('transactionTypeFor', () => {
         ];
         for (const [action, type] of cases) assert.equal(transactionTypeFor(action), type, action);
     });
+
+    test('equity compensation and shares moved between brokers are shares, not cash', () => {
+        const cases: [string, string | null][] = [
+            ['RSU Vest', 'VEST'], ['Restricted Stock Vesting', 'VEST'], ['Shares Released', 'VEST'], ['Stock Release', 'VEST'],
+            ['Shares In', 'TRANSFER_IN'], ['Securities Transferred In', 'TRANSFER_IN'], ['ACAT In', 'TRANSFER_IN'], ['Transfer of Securities', 'TRANSFER_IN'],
+            ['Shares Out', 'TRANSFER_OUT'], ['Securities Transferred Out', 'TRANSFER_OUT'], ['ACAT Out', 'TRANSFER_OUT'],
+            // Cash transfers stay cash; an investment isn't a vest.
+            ['Transfer In', 'DEPOSIT'], ['Transfer Out', 'WITHDRAWAL'], ['Investment Income', null],
+        ];
+        for (const [action, type] of cases) assert.equal(transactionTypeFor(action), type, action);
+    });
 });
 
 describe('parseTradeDate', () => {
@@ -74,6 +85,27 @@ describe('parseTransactionsCsv', () => {
             ['BUY', '2026-03-05', 1250, 'T-1'],
             ['DIVIDEND', '2026-03-15', 12, 'T-2'],
             ['BUY', '2026-03-15', 12, 'T-3'],
+        ]);
+    });
+
+    test('regression: an RSU vest and shares moved in are kept with their quantity, and a price from the value when there is one', () => {
+        const csv = [
+            'Date,Action,Symbol,Description,Quantity,Price,Amount',
+            '02/25/2026,RSU Vest,GOOG,ALPHABET INC CL C,12,,2043.00',
+            '03/01/2026,Securities Transferred In,VTI,VANGUARD TOTAL,40,,',
+            '03/02/2026,Shares Out,VTI,VANGUARD TOTAL,-5,250,',
+            '03/03/2026,RSU Vest,,ALPHABET INC CL C,12,,',
+            '03/04/2026,Shares In,AAPL,APPLE INC,,,',
+        ].join('\n');
+        const { rows, issues } = parseTransactionsCsv(csv);
+        assert.deepEqual(rows.map((r) => [r.type, r.symbol, r.quantity, r.price, r.amount]), [
+            ['VEST', 'GOOG', 12, 170.25, null],
+            ['TRANSFER_IN', 'VTI', 40, null, null],
+            ['TRANSFER_OUT', 'VTI', 5, 250, null],
+        ]);
+        assert.deepEqual(issues.map((i) => i.message), [
+            'Vest on 2026-03-03 has no symbol.',
+            'AAPL: a shares in needs a quantity.',
         ]);
     });
 
