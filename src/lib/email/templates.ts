@@ -217,7 +217,7 @@ export function weeklyReviewEmail(review: WeeklyReview, leftOut: readonly string
         [
             "Realized P&L",
             wholeDollars(stats.realizedPnlUsd),
-            stats.navPctChange === null ? trades : `${formatPct(stats.navPctChange, { signed: true, decimals: 2 })} of net worth · ${trades}`,
+            stats.navPctChange === null ? trades : `${formatPct(stats.navPctChange, { signed: true, decimals: 2 })} of portfolio value · ${trades}`,
         ],
         [
             "Rule adherence",

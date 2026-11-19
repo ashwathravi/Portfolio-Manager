@@ -128,7 +128,7 @@ describe("weeklyReviewEmail", () => {
         assert.ok(email.html.includes("Week of Oct 26–30"));
         for (const text of [email.html, email.text]) {
             assert.ok(text.includes("+$1,234"), "realized P&L in whole dollars");
-            assert.ok(text.includes("+0.49% of net worth · 2 closed trades"));
+            assert.ok(text.includes("+0.49% of portfolio value · 2 closed trades"));
             assert.ok(text.includes("80/100"));
             assert.ok(text.includes("1 exception"));
             assert.ok(text.includes("SELL 10 AAPL"));

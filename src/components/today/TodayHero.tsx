@@ -88,9 +88,9 @@ export function TodayHero({
     if (holdings.length === 0) return <FirstRunCard accounts={accounts} cashTotal={cashTotal} bankLinking={bankLinking} />;
 
     return (
-        <section className="pm-card pm-today-hero" data-testid="today-hero" aria-label="Net worth">
+        <section className="pm-card pm-today-hero" data-testid="today-hero" aria-label="Portfolio value">
             <div className="pm-today-hero-main">
-                <span className="pm-today-label">Net worth</span>
+                <span className="pm-today-label">Portfolio value</span>
                 <p className="pm-today-networth" data-testid="today-networth">{formatUsd(netWorth)}</p>
                 <p
                     className={`pm-today-change ${today ? (change > 0 ? "pm-pos" : change < 0 ? "pm-neg" : "") : ""}`}

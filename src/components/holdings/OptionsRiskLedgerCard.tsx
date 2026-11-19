@@ -234,7 +234,7 @@ export function OptionsRiskLedgerCard({
             </div>
             <p className="pm-metric-note" data-testid="options-ledger-note">
                 Prices are the latest end-of-day close where Atlas&apos;s data includes the contract, otherwise your own
-                price or what you paid. Option positions aren&apos;t counted in net worth or returns yet.
+                price or what you paid. Option positions aren&apos;t counted in portfolio value or returns yet.
             </p>
 
             <OptionPositionDialog

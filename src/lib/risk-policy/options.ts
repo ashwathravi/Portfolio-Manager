@@ -538,7 +538,7 @@ function buildSummaryIssues({
         issues.push({
             code: "loss_budget_cap",
             severity: "breached",
-            message: `Options max-loss budget exceeds ${policy.maxLossBudgetPct}% of liquid net worth.`,
+            message: `Options max-loss budget exceeds ${policy.maxLossBudgetPct}% of liquid portfolio value.`,
         });
     }
     if (expiringPremiumPctOfPortfolio > policy.expiryClusterMaxPremiumPct) {

@@ -139,12 +139,12 @@ describe('generateReview', () => {
     test('measures P&L against the net worth given, and leaves the share out without one', () => {
         const withNav = generateReview([entry()], BOUNDS, { nav: 40_000 });
         assert.equal(withNav.stats.navPctChange, 1);
-        assert.match(withNav.narrative, /Realised P&L of \+\$400 \(\+1\.0% of net worth\)\./);
+        assert.match(withNav.narrative, /Realised P&L of \+\$400 \(\+1\.0% of portfolio value\)\./);
 
         const without = generateReview([entry()], BOUNDS);
         assert.equal(without.stats.navPctChange, null);
         assert.match(without.narrative, /Realised P&L of \+\$400\./);
-        assert.doesNotMatch(without.narrative, /net worth|NAV/);
+        assert.doesNotMatch(without.narrative, /net worth|portfolio value|NAV/);
         assert.equal(generateReview([entry()], BOUNDS, { nav: 0 }).stats.navPctChange, null);
     });
 

@@ -121,7 +121,7 @@ test.describe('Portfolio › Holdings', () => {
         await expect(ledger.getByTestId('options-ledger-empty')).toHaveText('No option positions yet.');
         await expect(ledger.getByTestId('options-risk-row')).toHaveCount(0);
         await expect(ledger.getByRole('button', { name: 'Add option' })).toBeEnabled();
-        await expect(ledger.getByTestId('options-ledger-note')).toContainText("aren't counted in net worth or returns yet");
+        await expect(ledger.getByTestId('options-ledger-note')).toContainText("aren't counted in portfolio value or returns yet");
     });
 });
 

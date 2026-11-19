@@ -86,7 +86,7 @@ export default function PrivacyPage({ searchParams }: { searchParams: LegalSearc
             <section aria-labelledby="privacy-use">
                 <h2 id="privacy-use">How we use it</h2>
                 <ul>
-                    <li>To run the app: show your net worth, holdings, activity and performance, and check trade ideas against your risk policy.</li>
+                    <li>To run the app: show your portfolio value, holdings, activity and performance, and check trade ideas against your risk policy.</li>
                     <li>To keep it secure: sign-in, limiting request rates, and investigating misuse.</li>
                     <li>
                         To send the emails you turn on in Settings: your alerts each weekday evening, and the

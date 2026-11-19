@@ -63,7 +63,7 @@ export function buildNarrative(stats: ReviewStats): string {
         ? `No realised P&L to tally.`
         : navPctChange === null
             ? `Realised P&L of ${signedUsd(realizedPnlUsd)}.`
-            : `Realised P&L of ${signedUsd(realizedPnlUsd)} (${signedPct(navPctChange)} of net worth).`;
+            : `Realised P&L of ${signedUsd(realizedPnlUsd)} (${signedPct(navPctChange)} of portfolio value).`;
 
     // Sentence 3 — adherence + best decision + exceptions, compressed
     // into a single line. Skip when nothing interesting happened.
