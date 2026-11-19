@@ -80,16 +80,33 @@ export interface ExportedOptionPosition {
 /** An order plan drafted on Trade, as the blotter shows it (src/types/execution.ts). */
 export type ExportedOrderPlan = Order;
 
+/** A holding valued by hand (manual_holdings): its value as of a day. */
+export interface ExportedManualHolding {
+    name: string;
+    identifier: string | null;
+    quantity: number | null;
+    value: number;
+    costBasis: number | null;
+    valueAsOf: string;
+    /** "manual", or "plaid" for a linked account's holding with no ticker. */
+    source: string;
+    updatedAt: string;
+}
+
 export interface ExportedAccount {
     id: string;
     name: string;
     description: string | null;
     /** "manual" or "plaid". */
     source: string;
+    accountType: string | null;
+    institution: string | null;
+    taxTreatment: string | null;
     cashBalance: number;
     createdAt: string;
     updatedAt: string;
     holdings: ExportedHolding[];
+    manualHoldings: ExportedManualHolding[];
     optionPositions: ExportedOptionPosition[];
     transactions: ExportedTransaction[];
     valuationHistory: ExportedValuation[];

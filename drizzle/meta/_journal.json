@@ -246,6 +246,13 @@
       "when": 1795127799678,
       "tag": "0034_account_kinds",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1795128369422,
+      "tag": "0035_manual_holdings",
+      "breakpoints": true
     }
   ]
 }

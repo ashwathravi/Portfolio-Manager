@@ -25,6 +25,7 @@ const text = z.string();
 const securitySchema = z.object({
     security_id: text,
     ticker_symbol: text.nullish(),
+    cusip: text.nullish(),
     name: text.nullish(),
     type: text.nullish(),
     is_cash_equivalent: z.boolean().nullish(),
@@ -186,8 +187,25 @@ export interface SyncedPosition {
 
 export type HoldingSkipReason = "no-ticker" | "option" | "other-currency" | "short";
 
+/**
+ * A holding with no ticker that the institution values (a 401(k)'s
+ * collective trust, a 529 portfolio): kept as a holding valued by hand
+ * (manual_holdings), at the institution's value, which each sync replaces.
+ */
+export interface InstitutionValuedHolding {
+    /** Plaid's security_id: the same holding on the next sync. */
+    externalId: string;
+    name: string;
+    identifier: string | null;
+    quantity: number | null;
+    value: number;
+    costBasis: number | null;
+}
+
 export interface AccountHoldings {
     positions: SyncedPosition[];
+    /** Holdings with no ticker, at the institution's value. */
+    institutionValued: InstitutionValuedHolding[];
     /** Cash and cash equivalents (a money market sweep), in USD. */
     cashUsd: number;
     skipped: { reason: HoldingSkipReason; name: string }[];
@@ -221,6 +239,7 @@ export function accountHoldings(
     const bySecurity = new Map(securities.map((s) => [s.security_id, s]));
     const positions = new Map<string, SyncedPosition & { cost: number; costKnown: boolean }>();
     const skipped: AccountHoldings["skipped"] = [];
+    const valued = new Map<string, InstitutionValuedHolding>();
     let cashUsd = 0;
 
     for (const holding of holdings) {
@@ -242,7 +261,27 @@ export function accountHoldings(
         }
         const symbol = security?.ticker_symbol ? normalizeTicker(security.ticker_symbol) : null;
         if (!symbol) {
-            skipped.push({ reason: "no-ticker", name });
+            // Valued by the institution, it still counts; with no value, it can't.
+            if (!(value > 0) || holding.quantity < 0) {
+                skipped.push({ reason: "no-ticker", name });
+                continue;
+            }
+            const existing = valued.get(holding.security_id);
+            const cost = holding.cost_basis != null && holding.cost_basis > 0 ? holding.cost_basis : null;
+            if (existing) {
+                existing.value += value;
+                existing.quantity = existing.quantity != null && holding.quantity > 0 ? existing.quantity + holding.quantity : existing.quantity;
+                existing.costBasis = existing.costBasis != null && cost != null ? existing.costBasis + cost : null;
+            } else {
+                valued.set(holding.security_id, {
+                    externalId: holding.security_id,
+                    name: name.slice(0, 120),
+                    identifier: security?.cusip?.trim().slice(0, 40) || null,
+                    quantity: holding.quantity > 0 ? holding.quantity : null,
+                    value,
+                    costBasis: cost,
+                });
+            }
             continue;
         }
         if (!(holding.quantity > 0)) {
@@ -274,6 +313,14 @@ export function accountHoldings(
             avgCost: round(cost / quantity, 6),
             price,
         })),
+        institutionValued: [...valued.values()]
+            .map((v) => ({
+                ...v,
+                value: round(v.value, 2),
+                quantity: v.quantity == null ? null : round(v.quantity, 6),
+                costBasis: v.costBasis == null ? null : round(v.costBasis, 2),
+            }))
+            .sort((a, b) => a.name.localeCompare(b.name) || a.externalId.localeCompare(b.externalId)),
         cashUsd: round(cashUsd, 2),
         skipped,
         costUnknown: rows.filter((p) => !p.costKnown).map((p) => p.symbol),

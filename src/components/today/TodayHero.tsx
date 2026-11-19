@@ -27,11 +27,16 @@ export interface TodayHeroHolding {
 export function TodayHero({
     holdings,
     cashTotal,
+    manualTotal = 0,
+    manualCount = 0,
     accounts,
     bankLinking,
 }: {
     holdings: TodayHeroHolding[];
     cashTotal: number;
+    /** Holdings valued by hand: their total, counted as it stands (no today's change). */
+    manualTotal?: number;
+    manualCount?: number;
     /** The user's accounts, for the first-run steps and the CSV import. */
     accounts: readonly ImportAccountOption[];
     /** Whether the first-run steps may offer to connect a bank (x30). */
@@ -70,7 +75,7 @@ export function TodayHero({
     const today = movedToday > 0;
     const complete = today && movedToday === positions;
 
-    const netWorth = invested + cashTotal;
+    const netWorth = invested + manualTotal + cashTotal;
     const liveIndicator = (
         <div className="pm-today-hero-live">
             <LiveDataIndicator
@@ -85,7 +90,7 @@ export function TodayHero({
     );
     const changePct = netWorth - change > 0 ? (change / (netWorth - change)) * 100 : 0;
 
-    if (holdings.length === 0) return <FirstRunCard accounts={accounts} cashTotal={cashTotal} bankLinking={bankLinking} />;
+    if (holdings.length === 0 && manualCount === 0) return <FirstRunCard accounts={accounts} cashTotal={cashTotal} bankLinking={bankLinking} />;
 
     return (
         <section className="pm-card pm-today-hero" data-testid="today-hero" aria-label="Portfolio value">
@@ -113,9 +118,12 @@ export function TodayHero({
                 </p>
             </div>
             <dl className="pm-today-hero-facts">
-                <div><dt>Invested</dt><dd>{formatUsd(invested, { decimals: 0 })}</dd></div>
+                <div><dt>Invested</dt><dd>{formatUsd(invested + manualTotal, { decimals: 0 })}</dd></div>
                 <div><dt>Cash</dt><dd>{formatUsd(cashTotal, { decimals: 0 })}</dd></div>
-                <div><dt>Positions</dt><dd>{holdings.length}</dd></div>
+                <div><dt>Positions</dt><dd>{holdings.length + manualCount}</dd></div>
+                {manualCount > 0 && (
+                    <div data-testid="today-manual"><dt>Valued by hand</dt><dd>{formatUsd(manualTotal, { decimals: 0 })}</dd></div>
+                )}
             </dl>
             {liveIndicator}
         </section>

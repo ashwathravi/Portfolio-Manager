@@ -66,11 +66,28 @@ describe("accountHoldings", () => {
         assert.deepEqual(result.positions, []);
         assert.deepEqual(result.skipped, [
             { reason: "option", name: "opt Inc" },
-            { reason: "no-ticker", name: "US Treasury 2030" },
             { reason: "other-currency", name: "shop Inc" },
             { reason: "other-currency", name: "btc Inc" },
             { reason: "short", name: "short Inc" },
         ]);
+    });
+
+    test("regression: a holding with no ticker counts at the institution's value, valued by hand; with no value it can't", () => {
+        // A 401(k)'s collective trust has a CUSIP and a value, no ticker:
+        // it was dropped, and the account's value with it.
+        const result = accountHoldings(ACCOUNT, [
+            holding("cit", { quantity: 120.5, institution_price: 85, institution_value: 10242.5, cost_basis: 9000 }),
+            holding("cit", { quantity: 10, institution_price: 85, institution_value: 850, cost_basis: null }),
+            holding("private", { quantity: 1, institution_price: null, institution_value: null }),
+        ], [
+            security("cit", { ticker_symbol: null, name: "Target 2055 Trust", type: "mutual fund", cusip: "12345X678" }),
+            security("private", { ticker_symbol: null, name: "Acme Holdings" }),
+        ]);
+        assert.deepEqual(result.positions, []);
+        assert.deepEqual(result.institutionValued, [{
+            externalId: "cit", name: "Target 2055 Trust", identifier: "12345X678", quantity: 130.5, value: 11092.5, costBasis: null,
+        }]);
+        assert.deepEqual(result.skipped, [{ reason: "no-ticker", name: "Acme Holdings" }]);
     });
 
     test("without a cost basis, a position is held at its price: no gain Plaid didn't report", () => {

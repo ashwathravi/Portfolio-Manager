@@ -1,4 +1,6 @@
 import { Suspense } from "react";
+import { ManualHoldingsCard } from "@/components/holdings/ManualHoldingsCard";
+import { loadManualHoldings, type ManualHolding } from "@/lib/portfolio/manual-holdings";
 import { requirePageUserId } from "@/lib/auth/request-user";
 import { isDatabaseConfigured } from "@/db/connection-options";
 import { loadQuotes } from "@/lib/services/market-data-service";
@@ -43,14 +45,16 @@ async function HoldingsContent({ rowView }: { rowView: HoldingsRowView }) {
     let accounts: Array<ImportAccountOption & { cashBalance: number | null }> = [];
     let optionPositions: LoadedOptionPosition[] = [];
     let optionTheses: Array<{ id: string; ticker: string; title: string }> = [];
+    let manual: ManualHolding[] = [];
     let unavailable = false;
     try {
-        [dbHoldings, accounts, optionPositions, optionTheses] = await Promise.all([
+        [dbHoldings, accounts, optionPositions, optionTheses, manual] = await Promise.all([
             buildUserHoldingsQuery(userId),
             buildUserPortfolioOptionsQuery(userId),
             // The LEAPS ledger (launch item i63), the underlyings priced as the holdings are.
             loadOptionPositions(userId, { quotes: loadQuotes }),
             loadThesisChoices(userId),
+            loadManualHoldings(userId),
         ]);
     } catch (e) {
         // With a configured database a failure is an outage, not an empty
@@ -143,6 +147,12 @@ async function HoldingsContent({ rowView }: { rowView: HoldingsRowView }) {
                 // connect a bank only where Settings can (x30).
                 bankLinking={bankLinkingAvailable()}
             />
+            <div className="pm-holdings-stack">
+                <ManualHoldingsCard
+                    accounts={accounts.map(({ id, name }) => ({ id, name }))}
+                    rows={manual.map((m) => ({ ...m, account: accounts.find((a) => a.id === m.portfolioId)?.name ?? "" }))}
+                />
+            </div>
         </>
     );
 }

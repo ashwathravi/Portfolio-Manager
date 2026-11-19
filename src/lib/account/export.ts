@@ -20,6 +20,7 @@ import {
     emailPreferences,
     holdings,
     journalEntries,
+    manualHoldings,
     optionPositions,
     orderPlans,
     plaidAccounts,
@@ -63,8 +64,10 @@ export async function buildAccountExport(userId: string, database: Database = db
 
         const accounts = await tx.select().from(portfolios).where(eq(portfolios.userId, userId)).orderBy(asc(portfolios.name), asc(portfolios.id));
         const ids = accounts.map((a) => a.id);
-        const [held, options, activity, history, historyPositions, plans] = ids.length === 0 ? [[], [], [], [], [], []] : await Promise.all([
+        const [held, valuedByHand, options, activity, history, historyPositions, plans] = ids.length === 0 ? [[], [], [], [], [], [], []] : await Promise.all([
             tx.select().from(holdings).where(inArray(holdings.portfolioId, ids)).orderBy(asc(holdings.symbol)),
+            tx.select().from(manualHoldings).where(and(eq(manualHoldings.userId, userId), inArray(manualHoldings.portfolioId, ids)))
+                .orderBy(asc(manualHoldings.name), asc(manualHoldings.id)),
             tx.select().from(optionPositions).where(and(eq(optionPositions.userId, userId), inArray(optionPositions.portfolioId, ids)))
                 .orderBy(asc(optionPositions.expiry), asc(optionPositions.underlying), asc(optionPositions.id)),
             tx.select().from(transactions).where(inArray(transactions.portfolioId, ids)).orderBy(asc(transactions.timestamp), asc(transactions.id)),
@@ -131,6 +134,9 @@ export async function buildAccountExport(userId: string, database: Database = db
                 name: account.name,
                 description: account.description,
                 source: account.source,
+                accountType: account.accountType,
+                institution: account.institution,
+                taxTreatment: account.taxTreatment,
                 cashBalance: account.cashBalance ?? 0,
                 createdAt: account.createdAt.toISOString(),
                 updatedAt: account.updatedAt.toISOString(),
@@ -141,6 +147,16 @@ export async function buildAccountExport(userId: string, database: Database = db
                     avgCost: Number(h.avgCost),
                     lastPrice: h.currentPrice,
                     updatedAt: h.updatedAt.toISOString(),
+                })),
+                manualHoldings: valuedByHand.filter((m) => m.portfolioId === account.id).map((m) => ({
+                    name: m.name,
+                    identifier: m.identifier,
+                    quantity: num(m.quantity),
+                    value: Number(m.value),
+                    costBasis: num(m.costBasis),
+                    valueAsOf: m.valueAsOf,
+                    source: m.source,
+                    updatedAt: m.updatedAt.toISOString(),
                 })),
                 optionPositions: options.filter((o) => o.portfolioId === account.id).map((o) => ({
                     underlying: o.underlying,

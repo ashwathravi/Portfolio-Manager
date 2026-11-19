@@ -10,10 +10,10 @@
  * the nightly job (syncAllPlaidItems).
  */
 
-import { and, asc, eq, inArray, isNull, ne, notInArray, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, isNull, ne, notInArray, sql } from "drizzle-orm";
 
 import { db } from "@/db";
-import { holdings, plaidAccounts, plaidItems, portfolios, transactions } from "@/db/schema";
+import { holdings, manualHoldings, plaidAccounts, plaidItems, portfolios, transactions } from "@/db/schema";
 import {
     AccountLimitError,
     MAX_ACCOUNTS_PER_USER,
@@ -258,7 +258,7 @@ export interface AccountSyncWrite {
     /** The account number's last four digits, to tell two same-named accounts apart. */
     mask: string | null;
     description: string;
-    holdings: Pick<AccountHoldings, "positions" | "cashUsd">;
+    holdings: Pick<AccountHoldings, "positions" | "cashUsd"> & Partial<Pick<AccountHoldings, "institutionValued">>;
     /**
      * What kind of account Plaid says it is, and where it's held
      * (linkedAccountKind). A new portfolio takes them; an existing one fills
@@ -328,8 +328,9 @@ export async function writeAccountSync(input: AccountSyncWrite, database: Databa
         let portfolio: { id: string; name: string; created: boolean };
         if (existing) {
             const positionsChanged = await replaceHoldings(tx, existing.id, input.holdings.positions, input.now);
+            const valuedChanged = await replaceInstitutionValued(tx, input.userId, existing.id, input.holdings.institutionValued ?? [], input.now);
             const cashChanged = existing.cash !== input.holdings.cashUsd;
-            if (positionsChanged || cashChanged) {
+            if (positionsChanged || valuedChanged || cashChanged) {
                 await tx
                     .update(portfolios)
                     .set({ cashBalance: input.holdings.cashUsd, updatedAt: input.now })
@@ -369,6 +370,7 @@ export async function writeAccountSync(input: AccountSyncWrite, database: Databa
                 .returning({ id: portfolios.id, name: portfolios.name });
             portfolio = { ...created, created: true };
             await replaceHoldings(tx, portfolio.id, input.holdings.positions, input.now);
+            await replaceInstitutionValued(tx, input.userId, portfolio.id, input.holdings.institutionValued ?? [], input.now);
         }
 
         const written = input.transactions ? await upsertTransactions(tx, portfolio.id, input.transactions) : { added: 0, updated: 0 };
@@ -400,6 +402,71 @@ export async function writeAccountSync(input: AccountSyncWrite, database: Databa
  * updated_at (also the stock split watermark) moves only when its quantity
  * or cost does; a new price or name alone isn't a change in what's held.
  */
+/**
+ * The account's holdings with no ticker, at the institution's value: the
+ * ones the last sync brought in (source "plaid") are updated, added or
+ * removed to match. One the user edited became theirs (source "manual")
+ * and is left alone. True when anything changed.
+ */
+async function replaceInstitutionValued(
+    tx: Executor,
+    userId: string,
+    portfolioId: string,
+    rows: AccountHoldings["institutionValued"],
+    now: Date,
+): Promise<boolean> {
+    const existing = await tx
+        .select({
+            id: manualHoldings.id,
+            externalId: manualHoldings.externalId,
+            value: manualHoldings.value,
+            quantity: manualHoldings.quantity,
+            costBasis: manualHoldings.costBasis,
+        })
+        .from(manualHoldings)
+        .where(and(eq(manualHoldings.portfolioId, portfolioId), eq(manualHoldings.userId, userId), eq(manualHoldings.source, "plaid")));
+    const byExternal = new Map(existing.map((row) => [row.externalId, row]));
+    // One the user edited is theirs now, wherever they put it.
+    const taken = new Set((await tx
+        .select({ externalId: manualHoldings.externalId })
+        .from(manualHoldings)
+        .where(and(eq(manualHoldings.userId, userId), eq(manualHoldings.source, "manual"), isNotNull(manualHoldings.externalId))))
+        .map((row) => row.externalId));
+    const asOf = now.toISOString().slice(0, 10);
+    const sameNumber = (stored: string | null, next: number | null) => (stored == null ? next == null : next != null && Number(stored) === next);
+    let changed = false;
+    for (const row of rows) {
+        if (taken.has(row.externalId)) continue;
+        const values = {
+            name: row.name,
+            identifier: row.identifier,
+            quantity: row.quantity == null ? null : String(row.quantity),
+            value: String(row.value),
+            costBasis: row.costBasis == null ? null : String(row.costBasis),
+            valueAsOf: asOf,
+            updatedAt: now,
+        };
+        const before = byExternal.get(row.externalId);
+        byExternal.delete(row.externalId);
+        if (!before) {
+            await tx.insert(manualHoldings).values({ userId, portfolioId, ...values, source: "plaid", externalId: row.externalId, createdAt: now });
+            changed = true;
+        } else if (!sameNumber(before.value, row.value) || !sameNumber(before.quantity, row.quantity) || !sameNumber(before.costBasis, row.costBasis)) {
+            await tx.update(manualHoldings).set(values).where(eq(manualHoldings.id, before.id));
+            changed = true;
+        } else {
+            // The same value again: only the day it's as of moves.
+            await tx.update(manualHoldings).set({ valueAsOf: asOf, name: row.name, identifier: row.identifier }).where(eq(manualHoldings.id, before.id));
+        }
+    }
+    const gone = [...byExternal.values()].map((row) => row.id);
+    if (gone.length > 0) {
+        await tx.delete(manualHoldings).where(inArray(manualHoldings.id, gone));
+        changed = true;
+    }
+    return changed;
+}
+
 async function replaceHoldings(tx: Executor, portfolioId: string, positions: AccountHoldings["positions"], now: Date): Promise<boolean> {
     const held = new Map(
         (await tx
