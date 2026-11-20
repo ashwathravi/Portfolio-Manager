@@ -116,6 +116,9 @@ export default async function Today() {
   const patternTrades = closedTrades && inPatternWindow(closedTrades, new Date());
 
   const cashTotal = allPortfolios.reduce((s, p) => s + (p.cashBalance || 0), 0);
+  // Holdings valued by hand: no quote, counted at the value the user (or Plaid) gave.
+  const manualHoldings = allPortfolios.flatMap((p) => p.manualHoldings ?? []);
+  const manualTotal = manualHoldings.reduce((s, m) => s + (Number(m.value) || 0), 0);
   const allHoldings = allPortfolios.flatMap((p) =>
     p.holdings.map((h) => ({
       id: h.id,
@@ -169,6 +172,8 @@ export default async function Today() {
         <TodayHero
           holdings={heroHoldings}
           cashTotal={cashTotal}
+          manualTotal={manualTotal}
+          manualCount={manualHoldings.length}
           accounts={allPortfolios.map((p) => ({ id: p.id, name: p.name }))}
           // Decided here, on the server: the first-run steps offer to connect
           // a bank only where Settings can (x30).

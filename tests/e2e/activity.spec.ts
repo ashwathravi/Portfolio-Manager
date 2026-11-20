@@ -111,6 +111,39 @@ test.describe('Portfolio › Activity — recording transactions', () => {
         await expect(activityRow(page, 'Starter position')).toContainText('CRM');
     });
 
+    test('a vest and shares moved out are entered as shares, the price optional, and stay after a reload', async ({ page }) => {
+        const add = async (type: string, symbol: string, quantity: string, note: string, button: string, price?: string) => {
+            await page.getByRole('button', { name: 'Add transaction' }).click();
+            const dialog = page.getByRole('dialog');
+            await dialog.getByLabel('Type').selectOption(type);
+            await dialog.getByLabel('Date').fill('2026-03-15');
+            // Shares, not an amount: no Amount field, and the price is optional.
+            await expect(dialog.getByLabel('Amount ($)')).toHaveCount(0);
+            await dialog.getByLabel('Symbol').fill(symbol);
+            await dialog.getByLabel('Quantity').fill(quantity);
+            if (price) await dialog.getByLabel('Price that day ($, optional)').fill(price);
+            await dialog.getByLabel('Note (optional)').fill(note);
+            await dialog.getByRole('button', { name: button }).click();
+            await expect(dialog).toBeHidden();
+        };
+        await add('VEST', 'msft', '12', 'Quarterly RSU vest', 'Add vest');
+        await add('TRANSFER_OUT', 'aapl', '5', 'Moved to the joint account', 'Add shares out', '200');
+
+        const vest = activityRow(page, 'Quarterly RSU vest');
+        await expect(vest).toContainText('VEST');
+        await expect(vest).toContainText('MSFT');
+        await expect(vest).toContainText('12');
+        // No price that day: no value, rather than $0.00.
+        await expect(vest).not.toContainText('$0.00');
+        const moved = activityRow(page, 'Moved to the joint account');
+        await expect(moved).toContainText('SHARES OUT');
+        await expect(moved).toContainText('AAPL');
+        await expect(moved).toContainText('$1,000.00');
+        await reloadAppPage(page);
+        await expect(activityRow(page, 'Quarterly RSU vest')).toContainText('MSFT');
+        await expect(activityRow(page, 'Moved to the joint account')).toContainText('SHARES OUT');
+    });
+
     test('the symbol can be found by company name (i35)', async ({ page }) => {
         await page.getByRole('button', { name: 'Add transaction' }).click();
         const dialog = page.getByRole('dialog');

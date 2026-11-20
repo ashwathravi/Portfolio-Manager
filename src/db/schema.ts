@@ -223,10 +223,22 @@ export const portfolios = pgTable("portfolios", {
     // linked account's holdings and cash, and upserts its transactions.
     source: text("source").default("manual").notNull(),
     externalAccountId: text("external_account_id"),
+    // What kind of account it is, where it's held, and how it's taxed
+    // (src/lib/portfolio/account-kinds.ts). Optional: null is "not said",
+    // never a guess.
+    accountType: text("account_type"),
+    institution: text("institution"),
+    taxTreatment: text("tax_treatment"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (table) => ({
     userIdIdx: index("portfolios_user_id_idx").on(table.userId),
+    accountTypeCheck: check(
+        "portfolios_account_type_check",
+        sql`${table.accountType} in ('brokerage', '401k', '403b', 'traditional_ira', 'roth_ira', 'sep_ira', 'pension', '529', 'hsa', 'equity_comp', 'crypto', 'other')`,
+    ),
+    taxTreatmentCheck: check("portfolios_tax_treatment_check", sql`${table.taxTreatment} in ('taxable', 'tax_deferred', 'tax_free')`),
+    institutionCheck: check("portfolios_institution_check", sql`char_length(${table.institution}) between 1 and 80`),
     userExternalAccountIdx: uniqueIndex("portfolios_user_source_external_account_idx")
         .on(table.userId, table.source, table.externalAccountId)
         .where(sql`${table.externalAccountId} is not null`),
@@ -357,6 +369,60 @@ export const optionPositions = pgTable("option_positions", {
         sql`(${table.userMark} is null) = (${table.userMarkDate} is null) and (${table.userMark} is null or ${table.userMark} >= 0)`,
     ),
     sourceCheck: check("option_positions_source_check", sql`${table.source} in ('manual', 'csv')`),
+    serverOnlyNoClientAccess: serverOnlyNoClientAccessPolicy(),
+    appRuntimeAccess: appRuntimeAccessPolicy(),
+})).enableRLS();
+
+// ---------------------------------------------------------------------------
+// Holdings valued by hand
+// ---------------------------------------------------------------------------
+/**
+ * What an account holds that Atlas can't price from market data: a fund
+ * with no ticker (a 401(k)'s collective trust, a 529 portfolio, known by
+ * a CUSIP or a plan's name), a private company, a note. The user (or the
+ * institution, through Plaid) gives its value as of a day, and it counts
+ * at that value until the next one. No quote is ever looked up for it.
+ */
+export const manualHoldings = pgTable("manual_holdings", {
+    id: uuid("id").default(sql`gen_random_uuid()`).primaryKey(),
+    userId: text("user_id")
+        .notNull()
+        .references(() => authUsers.id, { onDelete: "cascade" }),
+    // Its account, which must be the same user's (manual_holdings_portfolio_owner_fk).
+    portfolioId: uuid("portfolio_id").notNull(),
+    name: text("name").notNull(),
+    // A CUSIP, ISIN or the plan's own code, when there is one.
+    identifier: text("identifier"),
+    // Units held, when the holding has them; its value stands on its own.
+    quantity: numeric("quantity"),
+    value: numeric("value").notNull(),
+    costBasis: numeric("cost_basis"),
+    valueAsOf: date("value_as_of", { mode: "string" }).notNull(),
+    // "manual", or "plaid": a linked account's holding with no ticker,
+    // whose value each sync replaces; externalId is the account it was
+    // synced into and Plaid's security_id (institutionValuedKey), kept when
+    // the user edits or moves it.
+    source: text("source").notNull().default("manual"),
+    externalId: text("external_id"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => ({
+    userIdIdx: index("manual_holdings_user_id_idx").on(table.userId),
+    portfolioIdIdx: index("manual_holdings_portfolio_id_idx").on(table.portfolioId),
+    portfolioExternalIdx: uniqueIndex("manual_holdings_portfolio_external_idx")
+        .on(table.portfolioId, table.externalId)
+        .where(sql`${table.externalId} is not null`),
+    portfolioOwner: foreignKey({
+        name: "manual_holdings_portfolio_owner_fk",
+        columns: [table.portfolioId, table.userId],
+        foreignColumns: [portfolios.id, portfolios.userId],
+    }).onDelete("cascade"),
+    nameCheck: check("manual_holdings_name_check", sql`char_length(${table.name}) between 1 and 120`),
+    identifierCheck: check("manual_holdings_identifier_check", sql`${table.identifier} is null or char_length(${table.identifier}) between 1 and 40`),
+    valueCheck: check("manual_holdings_value_check", sql`${table.value} >= 0`),
+    quantityCheck: check("manual_holdings_quantity_check", sql`${table.quantity} is null or ${table.quantity} > 0`),
+    costBasisCheck: check("manual_holdings_cost_basis_check", sql`${table.costBasis} is null or ${table.costBasis} >= 0`),
+    sourceCheck: check("manual_holdings_source_check", sql`${table.source} in ('manual', 'plaid')`),
     serverOnlyNoClientAccess: serverOnlyNoClientAccessPolicy(),
     appRuntimeAccess: appRuntimeAccessPolicy(),
 })).enableRLS();
@@ -1198,7 +1264,15 @@ export const portfoliosRelations = relations(portfolios, ({ one, many }) => ({
         references: [authUsers.id],
     }),
     holdings: many(holdings),
+    manualHoldings: many(manualHoldings),
     transactions: many(transactions),
+}));
+
+export const manualHoldingsRelations = relations(manualHoldings, ({ one }) => ({
+    portfolio: one(portfolios, {
+        fields: [manualHoldings.portfolioId],
+        references: [portfolios.id],
+    }),
 }));
 
 export const holdingsRelations = relations(holdings, ({ one }) => ({

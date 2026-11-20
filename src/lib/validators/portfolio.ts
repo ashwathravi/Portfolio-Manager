@@ -1,9 +1,11 @@
 import { z } from 'zod';
+import { ACCOUNT_TYPES, INSTITUTION_MAX_LENGTH, TAX_TREATMENTS } from '@/lib/portfolio/account-kinds';
 import { safeText } from './common';
 
 /**
  * Bodies for managing the user's accounts (launch item i41): create one,
- * or change its name, description or cash. Names follow the CSV import's
+ * or change its name, description, cash, type, institution or tax
+ * treatment. Names follow the CSV import's
  * "new account" rule.
  */
 
@@ -18,11 +20,19 @@ const cashBalance = z.number({ message: 'Cash must be a number' })
     .max(PORTFOLIO_LIMITS.cash, 'Cash is out of range')
     .transform((value) => Math.round(value * 100) / 100);
 
+// Each can be cleared with null; an empty institution clears it too.
+const accountType = z.enum(ACCOUNT_TYPES, { message: 'Choose an account type' }).nullable();
+const taxTreatment = z.enum(TAX_TREATMENTS, { message: 'Choose how the account is taxed' }).nullable();
+const institution = safeText.trim().max(INSTITUTION_MAX_LENGTH, 'Institution name is too long').nullable();
+
 /** POST /api/portfolios */
 export const portfolioCreateSchema = z.object({
     name,
     description: description.optional(),
     cashBalance: cashBalance.optional(),
+    accountType: accountType.optional(),
+    institution: institution.optional(),
+    taxTreatment: taxTreatment.optional(),
 }).strict();
 
 /** PATCH /api/portfolios/[id]: any of the fields, at least one. */
@@ -31,9 +41,12 @@ export const portfolioUpdateSchema = z.object({
     // An empty description clears it.
     description: description.optional(),
     cashBalance: cashBalance.optional(),
+    accountType: accountType.optional(),
+    institution: institution.optional(),
+    taxTreatment: taxTreatment.optional(),
 }).strict().refine(
-    (body) => body.name !== undefined || body.description !== undefined || body.cashBalance !== undefined,
-    'Change at least one of name, description or cash',
+    (body) => Object.values(body).some((value) => value !== undefined),
+    'Change at least one of name, description, cash, type, institution or tax treatment',
 );
 
 export type PortfolioCreateBody = z.infer<typeof portfolioCreateSchema>;

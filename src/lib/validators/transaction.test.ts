@@ -27,11 +27,20 @@ describe('transactionRowSchema', () => {
     });
 
     test('each kind refuses what it lacks', () => {
-        assert.equal(message({ ...BUY, symbol: undefined }), 'Buys, sells and dividends need a symbol');
+        assert.equal(message({ ...BUY, symbol: undefined }), 'Buys, sells, dividends, vests and share moves need a symbol');
         assert.equal(message({ ...BUY, price: undefined }), 'Buys and sells need a quantity and a price');
         assert.equal(message({ type: 'DIVIDEND', date: '2026-03-10', symbol: 'AAPL' }), 'Enter the amount');
         assert.equal(message({ type: 'DEPOSIT', date: '2026-03-01', amount: 0 }), 'Enter the amount');
-        assert.equal(message({ type: 'DEPOSIT', date: '2026-03-01', amount: 10, quantity: 1 }), 'Only buys, sells and dividends have a quantity');
+        assert.equal(message({ type: 'DEPOSIT', date: '2026-03-01', amount: 10, quantity: 1 }), 'Only buys, sells, dividends, vests and share moves have a quantity');
+        assert.equal(message({ type: 'VEST', date: '2026-03-01', quantity: 10 }), 'Buys, sells, dividends, vests and share moves need a symbol');
+        assert.equal(message({ type: 'TRANSFER_IN', date: '2026-03-01', symbol: 'AAPL' }), 'Vests and share moves need a quantity');
+    });
+
+    test('a vest or share move needs a symbol and a quantity; its price that day is optional and no amount is asked for', () => {
+        for (const type of ['VEST', 'TRANSFER_IN', 'TRANSFER_OUT']) {
+            assert.equal(transactionRowSchema.safeParse({ type, date: '2026-03-01', symbol: 'GOOG', quantity: 12.5 }).success, true, type);
+            assert.equal(transactionRowSchema.safeParse({ type, date: '2026-03-01', symbol: 'GOOG', quantity: 12.5, price: 170.25 }).success, true, type);
+        }
     });
 
     test('values, dates, currency and text have rules', () => {

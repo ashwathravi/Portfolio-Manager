@@ -25,6 +25,7 @@ const text = z.string();
 const securitySchema = z.object({
     security_id: text,
     ticker_symbol: text.nullish(),
+    cusip: text.nullish(),
     name: text.nullish(),
     type: text.nullish(),
     is_cash_equivalent: z.boolean().nullish(),
@@ -186,8 +187,25 @@ export interface SyncedPosition {
 
 export type HoldingSkipReason = "no-ticker" | "option" | "other-currency" | "short";
 
+/**
+ * A holding with no ticker that the institution values (a 401(k)'s
+ * collective trust, a 529 portfolio): kept as a holding valued by hand
+ * (manual_holdings), at the institution's value, which each sync replaces.
+ */
+export interface InstitutionValuedHolding {
+    /** Plaid's security_id: the same holding on the next sync. */
+    externalId: string;
+    name: string;
+    identifier: string | null;
+    quantity: number | null;
+    value: number;
+    costBasis: number | null;
+}
+
 export interface AccountHoldings {
     positions: SyncedPosition[];
+    /** Holdings with no ticker, at the institution's value. */
+    institutionValued: InstitutionValuedHolding[];
     /** Cash and cash equivalents (a money market sweep), in USD. */
     cashUsd: number;
     skipped: { reason: HoldingSkipReason; name: string }[];
@@ -221,6 +239,7 @@ export function accountHoldings(
     const bySecurity = new Map(securities.map((s) => [s.security_id, s]));
     const positions = new Map<string, SyncedPosition & { cost: number; costKnown: boolean }>();
     const skipped: AccountHoldings["skipped"] = [];
+    const valued = new Map<string, InstitutionValuedHolding>();
     let cashUsd = 0;
 
     for (const holding of holdings) {
@@ -242,7 +261,27 @@ export function accountHoldings(
         }
         const symbol = security?.ticker_symbol ? normalizeTicker(security.ticker_symbol) : null;
         if (!symbol) {
-            skipped.push({ reason: "no-ticker", name });
+            // Valued by the institution, it still counts; with no value, it can't.
+            if (!(value > 0) || holding.quantity < 0) {
+                skipped.push({ reason: "no-ticker", name });
+                continue;
+            }
+            const existing = valued.get(holding.security_id);
+            const cost = holding.cost_basis != null && holding.cost_basis > 0 ? holding.cost_basis : null;
+            if (existing) {
+                existing.value += value;
+                existing.quantity = existing.quantity != null && holding.quantity > 0 ? existing.quantity + holding.quantity : existing.quantity;
+                existing.costBasis = existing.costBasis != null && cost != null ? existing.costBasis + cost : null;
+            } else {
+                valued.set(holding.security_id, {
+                    externalId: holding.security_id,
+                    name: name.slice(0, 120),
+                    identifier: security?.cusip?.trim().slice(0, 40) || null,
+                    quantity: holding.quantity > 0 ? holding.quantity : null,
+                    value,
+                    costBasis: cost,
+                });
+            }
             continue;
         }
         if (!(holding.quantity > 0)) {
@@ -274,6 +313,14 @@ export function accountHoldings(
             avgCost: round(cost / quantity, 6),
             price,
         })),
+        institutionValued: [...valued.values()]
+            .map((v) => ({
+                ...v,
+                value: round(v.value, 2),
+                quantity: v.quantity == null ? null : round(v.quantity, 6),
+                costBasis: v.costBasis == null ? null : round(v.costBasis, 2),
+            }))
+            .sort((a, b) => a.name.localeCompare(b.name) || a.externalId.localeCompare(b.externalId)),
         cashUsd: round(cashUsd, 2),
         skipped,
         costUnknown: rows.filter((p) => !p.costKnown).map((p) => p.symbol),
@@ -310,15 +357,39 @@ export type MappedTransaction =
     | { row: TransactionRow & { externalId: string } }
     | { skipped: TransactionSkipReason };
 
-/** Atlas's type for a Plaid type and subtype; null for what it doesn't record. */
-export function transactionTypeForPlaid(type: string, subtype: string | null | undefined): TransactionRow["type"] | null {
+/**
+ * Plaid's transfer subtypes that move shares into or out of the account
+ * without a trade: an RSU vest arrives as one, shares moved from another
+ * broker as another. Corporate actions (a split, a merger, a spin-off) and
+ * option exercises change what a position is, not whether shares arrived,
+ * and aren't recorded.
+ */
+const SHARE_TRANSFER_SUBTYPES: ReadonlySet<string> = new Set(["transfer", "send", "request", "stock distribution"]);
+
+/** A transfer's description that says it is equity compensation vesting. */
+const VEST_NOTE = /\b(vest(ed|ing)?|rsu|restricted stock|(shares?|stock) released?|released shares)\b/i;
+
+/**
+ * Atlas's type for a Plaid type and subtype; null for what it doesn't
+ * record. A share transfer's direction comes from its quantity (positive
+ * is shares in) and whether it is a vest from its description.
+ */
+export function transactionTypeForPlaid(
+    type: string,
+    subtype: string | null | undefined,
+    { quantity = null, name = null }: { quantity?: number | null; name?: string | null } = {},
+): TransactionRow["type"] | null {
     const t = type.trim().toLowerCase();
+    const sub = (subtype ?? "").trim().toLowerCase();
     if (t === "buy") return "BUY";
     if (t === "sell") return "SELL";
     if (t === "fee") return "FEE";
-    // A cancel, and a transfer of shares in or out (no cash moved; the
-    // holdings say what's held), aren't recorded.
-    if (t === "cash") return CASH_SUBTYPES[(subtype ?? "").trim().toLowerCase()] ?? null;
+    if (t === "cash") return CASH_SUBTYPES[sub] ?? null;
+    if (t === "transfer" && SHARE_TRANSFER_SUBTYPES.has(sub) && quantity != null && quantity !== 0) {
+        if (quantity < 0) return "TRANSFER_OUT";
+        return VEST_NOTE.test(name ?? "") ? "VEST" : "TRANSFER_IN";
+    }
+    // A cancel, a corporate action, and a transfer with no shares aren't recorded.
     return null;
 }
 
@@ -329,31 +400,36 @@ function noteOf(raw: string | null | undefined): string | null {
 }
 
 export function mapPlaidTransaction(transaction: PlaidInvestmentTransaction, security: PlaidSecurity | undefined): MappedTransaction {
-    const type = transactionTypeForPlaid(transaction.type, transaction.subtype);
+    const type = transactionTypeForPlaid(transaction.type, transaction.subtype, { quantity: transaction.quantity, name: transaction.name });
     if (!type) return { skipped: "not-recorded" };
     // Kept in its currency (CAD, EUR); an unofficial one (a coin) isn't a currency.
     if (transaction.unofficial_currency_code) return { skipped: "other-currency" };
 
     const trade = type === "BUY" || type === "SELL";
+    const moved = type === "VEST" || type === "TRANSFER_IN" || type === "TRANSFER_OUT";
     // A cash equivalent with a ticker (a money market sweep, SPAXX) is cash
     // in the holdings: buying or selling it moves cash within the account,
     // not into a position, but its dividends are income from that fund.
     const sweep = security?.is_cash_equivalent === true && security.type !== "cash";
-    if (sweep && trade) return { skipped: "cash-sweep" };
+    if (sweep && (trade || moved)) return { skipped: "cash-sweep" };
     // Currency itself ("CUR:USD") has no ticker to keep.
     const symbol = security?.ticker_symbol && security.type !== "cash" ? normalizeTicker(security.ticker_symbol) : null;
-    if ((trade || type === "DIVIDEND") && !symbol) return { skipped: "no-symbol" };
+    if ((trade || moved || type === "DIVIDEND") && !symbol) return { skipped: "no-symbol" };
 
     const quantity = transaction.quantity != null ? Math.abs(transaction.quantity) : null;
     const amount = transaction.amount != null ? Math.abs(transaction.amount) : null;
     const fees = transaction.fees != null && transaction.fees > 0 ? round(transaction.fees, 2) : null;
+    // A share move's price, when Plaid has one, is what each share was
+    // worth that day; its amount is usually 0 (no cash moved), so its value
+    // comes from quantity × price instead.
+    const movedPrice = transaction.price != null && transaction.price > 0 ? round(transaction.price, 6) : null;
     const candidate = {
         type,
         date: transaction.date,
-        symbol: trade || type === "DIVIDEND" ? symbol : null,
-        quantity: trade ? (quantity ? round(quantity, 6) : null) : null,
-        price: trade ? (transaction.price != null ? round(Math.abs(transaction.price), 6) : null) : null,
-        amount: amount ? round(amount, 2) : null,
+        symbol: trade || moved || type === "DIVIDEND" ? symbol : null,
+        quantity: trade || moved ? (quantity ? round(quantity, 6) : null) : null,
+        price: trade ? (transaction.price != null ? round(Math.abs(transaction.price), 6) : null) : moved ? movedPrice : null,
+        amount: moved ? null : amount ? round(amount, 2) : null,
         fees,
         currency: transaction.iso_currency_code ?? "USD",
         notes: noteOf(transaction.name),

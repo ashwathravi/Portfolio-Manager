@@ -49,7 +49,7 @@ export const PRIMARY_NAV: readonly NavDestination[] = [
         id: 'today',
         title: 'Today',
         href: '/',
-        description: 'Net worth, today’s change, and what needs your attention',
+        description: 'Portfolio value, today’s change, and what needs your attention',
     },
     {
         id: 'portfolio',

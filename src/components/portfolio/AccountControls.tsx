@@ -16,6 +16,15 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { PORTFOLIO_LIMITS } from "@/lib/validators/portfolio";
+import {
+    ACCOUNT_TYPE_LABELS,
+    ACCOUNT_TYPES,
+    DEFAULT_TAX_TREATMENT,
+    INSTITUTION_MAX_LENGTH,
+    TAX_TREATMENT_LABELS,
+    TAX_TREATMENTS,
+    type AccountType,
+} from "@/lib/portfolio/account-kinds";
 
 /**
  * Portfolio › Accounts: create an account, and edit or delete one (launch
@@ -28,6 +37,9 @@ export interface EditableAccount {
     description: string | null;
     cashUsd: number;
     positions: number;
+    accountType?: string | null;
+    institution?: string | null;
+    taxTreatment?: string | null;
 }
 
 async function send(path: string, init: RequestInit): Promise<{ ok: true } | { ok: false; message: string }> {
@@ -69,6 +81,9 @@ function AccountDialog({
     const [name, setName] = useState("");
     const [description, setDescription] = useState("");
     const [cash, setCash] = useState("");
+    const [accountType, setAccountType] = useState("");
+    const [institution, setInstitution] = useState("");
+    const [taxTreatment, setTaxTreatment] = useState("");
     const [error, setError] = useState<string | null>(null);
     const [saving, setSaving] = useState(false);
 
@@ -79,6 +94,9 @@ function AccountDialog({
         setName(editing?.name ?? "");
         setDescription(editing?.description ?? "");
         setCash(editing ? String(editing.cashUsd) : "");
+        setAccountType(editing?.accountType ?? "");
+        setInstitution(editing?.institution ?? "");
+        setTaxTreatment(editing?.taxTreatment ?? "");
         setError(null);
     }, [open, editing]);
 
@@ -89,15 +107,17 @@ function AccountDialog({
         if (!name.trim()) return setError("Name the account.");
         if (!Number.isFinite(cashBalance)) return setError("Cash must be a number, such as 2500 or 2,500.00.");
 
+        // Empty is "not said": null clears what an edit had.
+        const kind = { accountType: accountType || null, institution: institution.trim() || null, taxTreatment: taxTreatment || null };
         setSaving(true);
         const result = editing
             ? await send(`/api/portfolios/${editing.id}`, {
                 method: "PATCH",
-                body: JSON.stringify({ name: name.trim(), description: description.trim(), cashBalance }),
+                body: JSON.stringify({ name: name.trim(), description: description.trim(), cashBalance, ...kind }),
             })
             : await send("/api/portfolios", {
                 method: "POST",
-                body: JSON.stringify({ name: name.trim(), description: description.trim() || undefined, cashBalance }),
+                body: JSON.stringify({ name: name.trim(), description: description.trim() || undefined, cashBalance, ...kind }),
             });
         setSaving(false);
         if (!result.ok) return setError(result.message);
@@ -125,13 +145,49 @@ function AccountDialog({
                                 autoFocus
                             />
                         </label>
+                        <div className="pm-form-pair">
+                            <label className="pm-exec-field" htmlFor={`${ids}-type`}>
+                                <span className="pm-exec-field-label">Type (optional)</span>
+                                <select
+                                    id={`${ids}-type`}
+                                    className="pm-exec-input"
+                                    value={accountType}
+                                    onChange={(e) => {
+                                        const next = e.target.value;
+                                        setAccountType(next);
+                                        // Suggest how it's usually taxed; the user's own pick stands.
+                                        if (next && !taxTreatment) setTaxTreatment(DEFAULT_TAX_TREATMENT[next as AccountType] ?? "");
+                                    }}
+                                >
+                                    <option value="">Not set</option>
+                                    {ACCOUNT_TYPES.map((t) => <option key={t} value={t}>{ACCOUNT_TYPE_LABELS[t]}</option>)}
+                                </select>
+                            </label>
+                            <label className="pm-exec-field" htmlFor={`${ids}-tax`}>
+                                <span className="pm-exec-field-label">Tax treatment (optional)</span>
+                                <select id={`${ids}-tax`} className="pm-exec-input" value={taxTreatment} onChange={(e) => setTaxTreatment(e.target.value)}>
+                                    <option value="">Not set</option>
+                                    {TAX_TREATMENTS.map((t) => <option key={t} value={t}>{TAX_TREATMENT_LABELS[t]}</option>)}
+                                </select>
+                            </label>
+                        </div>
+                        <label className="pm-exec-field" htmlFor={`${ids}-institution`}>
+                            <span className="pm-exec-field-label">Institution (optional)</span>
+                            <Input
+                                id={`${ids}-institution`}
+                                value={institution}
+                                maxLength={INSTITUTION_MAX_LENGTH}
+                                placeholder="e.g. Fidelity, Schwab"
+                                onChange={(e) => setInstitution(e.target.value)}
+                            />
+                        </label>
                         <label className="pm-exec-field" htmlFor={`${ids}-description`}>
                             <span className="pm-exec-field-label">Description (optional)</span>
                             <Input
                                 id={`${ids}-description`}
                                 value={description}
                                 maxLength={PORTFOLIO_LIMITS.description}
-                                placeholder="e.g. Fidelity, taxable"
+                                placeholder="e.g. Rollover from old employer"
                                 onChange={(e) => setDescription(e.target.value)}
                             />
                         </label>

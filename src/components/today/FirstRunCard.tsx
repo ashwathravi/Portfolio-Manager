@@ -38,8 +38,8 @@ export function FirstRunCard({
 
     return (
         <section className="pm-card pm-empty-card pm-today-hero" data-testid="today-hero" data-empty="true" aria-labelledby="first-run-title">
-            <span className="pm-today-label">Net worth</span>
-            <h2 id="first-run-title">Add your accounts to see your net worth</h2>
+            <span className="pm-today-label">Portfolio value</span>
+            <h2 id="first-run-title">Add your accounts to see your portfolio value</h2>
             <p>
                 Today shows your money first, then anything that needs your attention. Two steps get you there,
                 and every number comes from what you add.

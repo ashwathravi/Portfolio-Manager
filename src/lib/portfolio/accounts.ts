@@ -17,15 +17,23 @@ export interface AccountInput {
     id: string;
     name: string;
     description?: string | null;
+    accountType?: string | null;
+    institution?: string | null;
+    taxTreatment?: string | null;
     cashBalance?: number | null;
     updatedAt?: Date | string | null;
     holdings: readonly AccountHoldingInput[];
+    /** Holdings valued by hand: counted at their value, at cost when given (else at the value). */
+    manualHoldings?: readonly { value: string | number; costBasis?: string | number | null }[];
 }
 
 export interface AccountRow {
     id: string;
     name: string;
     description: string | null;
+    accountType: string | null;
+    institution: string | null;
+    taxTreatment: string | null;
     positions: number;
     investedUsd: number;
     cashUsd: number;
@@ -72,13 +80,21 @@ export function buildAccountRows(
             invested += value;
             cost += qty * avg;
         }
+        for (const m of a.manualHoldings ?? []) {
+            const value = num(m.value);
+            invested += value;
+            cost += m.costBasis == null ? value : num(m.costBasis);
+        }
         const cash = num(a.cashBalance);
         const updated = a.updatedAt ? new Date(a.updatedAt) : null;
         return {
             id: a.id,
             name: a.name,
             description: a.description ?? null,
-            positions: a.holdings.length,
+            accountType: a.accountType ?? null,
+            institution: a.institution ?? null,
+            taxTreatment: a.taxTreatment ?? null,
+            positions: a.holdings.length + (a.manualHoldings?.length ?? 0),
             investedUsd: round2(invested),
             cashUsd: round2(cash),
             totalUsd: round2(invested + cash),

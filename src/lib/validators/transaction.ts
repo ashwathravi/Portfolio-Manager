@@ -1,13 +1,15 @@
 import { z } from 'zod';
 
-import { SYMBOL_TYPES, TRADE_TYPES, TRANSACTION_TYPES } from '@/lib/portfolio/transactions';
+import { QUANTITY_TYPES, SHARE_MOVE_TYPES, SYMBOL_TYPES, TRADE_TYPES, TRANSACTION_TYPES } from '@/lib/portfolio/transactions';
 import { safeText } from './common';
 import { tickerSchema } from './market-data';
 
 /**
  * Transactions as the browser sends them (launch item i40): one, entered by
  * hand, or the rows of a CSV import. Trades need a symbol, quantity and
- * price; dividends a symbol and an amount; cash movements an amount.
+ * price; vests and share moves a symbol and a quantity (the price that
+ * day is optional); dividends a symbol and an amount; cash movements an
+ * amount.
  */
 
 export const TRANSACTION_LIMITS = { notes: 500, externalId: 128, importRows: 2000 } as const;
@@ -31,10 +33,11 @@ export const transactionRowSchema = z.object({
     externalId: z.string().trim().min(1).max(TRANSACTION_LIMITS.externalId, 'externalId must be at most 128 characters')
         .regex(/^[^\p{Cc}]*$/u, 'externalId must be printable text').optional(),
 }).strict()
-    .refine((row) => !SYMBOL_TYPES.has(row.type) || Boolean(row.symbol), { message: 'Buys, sells and dividends need a symbol', path: ['symbol'] })
+    .refine((row) => !SYMBOL_TYPES.has(row.type) || Boolean(row.symbol), { message: 'Buys, sells, dividends, vests and share moves need a symbol', path: ['symbol'] })
     .refine((row) => !TRADE_TYPES.has(row.type) || (row.quantity != null && row.price != null), { message: 'Buys and sells need a quantity and a price', path: ['quantity'] })
-    .refine((row) => TRADE_TYPES.has(row.type) || (row.amount != null && row.amount > 0), { message: 'Enter the amount', path: ['amount'] })
-    .refine((row) => TRADE_TYPES.has(row.type) || row.quantity == null || row.type === 'DIVIDEND', { message: 'Only buys, sells and dividends have a quantity', path: ['quantity'] });
+    .refine((row) => !SHARE_MOVE_TYPES.has(row.type) || row.quantity != null, { message: 'Vests and share moves need a quantity', path: ['quantity'] })
+    .refine((row) => QUANTITY_TYPES.has(row.type) || (row.amount != null && row.amount > 0), { message: 'Enter the amount', path: ['amount'] })
+    .refine((row) => QUANTITY_TYPES.has(row.type) || row.quantity == null || row.type === 'DIVIDEND', { message: 'Only buys, sells, dividends, vests and share moves have a quantity', path: ['quantity'] });
 
 export type TransactionRow = z.infer<typeof transactionRowSchema>;
 

@@ -1,7 +1,7 @@
 import { normalizeTicker } from '@/lib/research/watchlist';
 
 import { fitToHeader, normalizeHeader, parseNumber, readCsvRecords, type ParseIssue } from './csvImport';
-import { TRADE_TYPES, type TransactionType } from './transactions';
+import { SHARE_MOVE_TYPES, SYMBOL_TYPES, TRADE_TYPES, TRANSACTION_TYPE_LABELS, type TransactionType } from './transactions';
 
 /**
  * Transactions CSV import (launch item i40): reads a broker's activity or
@@ -68,6 +68,13 @@ function findColumn(headers: string[], key: Column): number {
  * the cash.
  */
 const ACTIONS: ReadonlyArray<[RegExp, TransactionType]> = [
+    // Equity compensation and shares moved between brokers come before the
+    // cash patterns: "Transfer of securities in" is shares, not a deposit.
+    // Not when the action says it was sold or moved: "Sell RSU" is a sale,
+    // "RSU Shares Out" a transfer.
+    [/^(?!.*\b(sell|sold|sale|out|in|transfer(red)?|deliver(ed)?|received)\b).*\b(vest(ed|ing)?|rsu|restricted stock|(shares?|stock) released?|released shares)\b/i, 'VEST'],
+    [/\b((securities|shares|stock|acats?) (transfer(red)? )?(in|received)|(securities|shares|stock) transfer(red)? in|transfer of (securities|shares|stock)(?! out\b)( in)?|acats? in|receive (securities|shares)|shares in)\b/i, 'TRANSFER_IN'],
+    [/\b((securities|shares|stock|acats?) (transfer(red)? )?(out|delivered)|(securities|shares|stock) transfer(red)? out|transfer of (securities|shares|stock) out|acats? out|deliver (securities|shares)|shares out)\b/i, 'TRANSFER_OUT'],
     [/\breinvest(ed)?\s+(dividend|div)\b/i, 'DIVIDEND'],
     [/\breinvest/i, 'BUY'],
     [/\b(buy|bought|purchase)\b/i, 'BUY'],
@@ -126,7 +133,10 @@ export function parseTransactionsCsv(text: string): TransactionParseResult {
     const col = Object.fromEntries((Object.keys(HEADER_ALIASES) as Column[]).map((key) => [key, findColumn(headers, key)])) as Record<Column, number>;
     // Commission and fees can be columns of their own: they add up.
     const feeColumns = headers.flatMap((h, i) => ((HEADER_ALIASES.fees as readonly string[]).includes(h) ? [i] : []));
-    if (col.amount < 0 && col.gross < 0 && (col.quantity < 0 || col.price < 0)) {
+    // Without a value column only share moves (a vest, shares in or out),
+    // which need just a quantity, can import: a buy or sell row without a
+    // price is listed on its own line.
+    if (col.amount < 0 && col.gross < 0 && col.quantity < 0) {
         return {
             rows: [],
             issues: [{ line: records[headerIndex].line, message: 'Add an Amount column, or Quantity and Price columns, so each transaction has a value.' }],
@@ -176,7 +186,7 @@ export function parseTransactionsCsv(text: string): TransactionParseResult {
         // name ("... HIGH DIVIDEND YIELD ETF"), not what happened.
         const type = transactionTypeFor(cell('action'));
         if (!type) {
-            issues.push({ line: lineNo, message: `Can't tell what “${cell('action')}” is. Leave it out or change it to Buy, Sell, Dividend, Interest, Deposit, Withdrawal or Fee.` });
+            issues.push({ line: lineNo, message: `Can't tell what “${cell('action')}” is. Leave it out or change it to Buy, Sell, Dividend, Interest, Deposit, Withdrawal, Fee, Vest, Shares in or Shares out.` });
             continue;
         }
 
@@ -186,8 +196,8 @@ export function parseTransactionsCsv(text: string): TransactionParseResult {
             issues.push({ line: lineNo, message: `“${rawSymbol}” is not a ticker.` });
             continue;
         }
-        if ((type === 'BUY' || type === 'SELL' || type === 'DIVIDEND') && !symbol) {
-            issues.push({ line: lineNo, message: `${type === 'DIVIDEND' ? 'Dividend' : type === 'BUY' ? 'Buy' : 'Sell'} on ${date} has no symbol.` });
+        if (SYMBOL_TYPES.has(type) && !symbol) {
+            issues.push({ line: lineNo, message: `${TRANSACTION_TYPE_LABELS[type]} on ${date} has no symbol.` });
             continue;
         }
 
@@ -239,6 +249,23 @@ export function parseTransactionsCsv(text: string): TransactionParseResult {
             rows.push({
                 type, date, symbol, quantity: round(quantity, 6), price: round(unit, 6),
                 amount: amount != null && amount > 0 ? round(amount, 2) : null,
+                fees: fees ? round(fees, 2) : null,
+                currency,
+                notes: noteOf(cell('description')),
+                ...(cell('id') ? { externalId: cell('id') } : {}),
+            });
+        } else if (SHARE_MOVE_TYPES.has(type)) {
+            // Shares in or out with no trade: the quantity, and the price
+            // that day when the file has one (or a value to work it out).
+            if (!quantity) {
+                issues.push({ line: lineNo, message: `${symbol}: a ${TRANSACTION_TYPE_LABELS[type].toLowerCase()} needs a quantity.` });
+                continue;
+            }
+            const value = grossValue ?? amount;
+            const unit = price ?? (value != null && value > 0 ? value / quantity : null);
+            rows.push({
+                type, date, symbol, quantity: round(quantity, 6), price: unit != null && unit > 0 ? round(unit, 6) : null,
+                amount: null,
                 fees: fees ? round(fees, 2) : null,
                 currency,
                 notes: noteOf(cell('description')),

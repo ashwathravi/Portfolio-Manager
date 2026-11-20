@@ -34,7 +34,8 @@
 import { and, asc, desc, eq, gte, inArray, lte, sql } from "drizzle-orm";
 
 import { db } from "@/db";
-import { holdings, jobRuns, portfolios, portfolioSnapshotPositions, portfolioSnapshots, priceBars } from "@/db/schema";
+import { holdings, jobRuns, manualHoldings, portfolios, portfolioSnapshotPositions, portfolioSnapshots, priceBars } from "@/db/schema";
+import { manualTotalsByPortfolio } from "@/lib/portfolio/manual-holdings";
 import { splitTakesEffectAt } from "@/lib/portfolio/split-adjustments";
 import { previousTradingDay } from "@/lib/markets/market-hours";
 import { getLatestBarDate } from "@/lib/markets/price-store";
@@ -149,6 +150,8 @@ export function valueSnapshot(
     positions: readonly PositionInput[],
     closes: ReadonlyMap<string, readonly StoredClose[]>,
     cash: number,
+    /** Holdings valued by hand (manual_holdings): their value and cost, counted as they stand. */
+    manual: { value: number; cost: number } = { value: 0, cost: 0 },
 ): SnapshotValue {
     const bySymbol = new Map<string, { quantity: number; costBasis: number }>();
     for (const position of positions) {
@@ -185,6 +188,8 @@ export function valueSnapshot(
             marketValue,
         });
     }
+    if (Number.isFinite(manual.value) && manual.value > 0) holdingsValue += manual.value;
+    if (Number.isFinite(manual.cost) && manual.cost > 0) costBasis += manual.cost;
     const safeCash = Number.isFinite(cash) ? cash : 0;
     return { date, holdingsValue, cash: safeCash, totalValue: holdingsValue + safeCash, costBasis, positions: rows, unpriced };
 }
@@ -223,6 +228,13 @@ export function buildPositionsQuery(database: Pick<Database, "select"> = db) {
             updatedAt: holdings.updatedAt,
         })
         .from(holdings);
+}
+
+/** Every holding valued by hand (the job values all portfolios). */
+export function buildManualValuesQuery(database: Pick<Database, "select"> = db) {
+    return database
+        .select({ portfolioId: manualHoldings.portfolioId, value: manualHoldings.value, costBasis: manualHoldings.costBasis })
+        .from(manualHoldings);
 }
 
 export function buildClosesBetweenQuery(symbols: string[], from: string, to: string, database: Pick<Database, "select"> = db) {
@@ -416,7 +428,7 @@ export interface SnapshotStore {
     /** The latest successful price run's `holdingSplits` detail, or undefined. */
     latestHoldingSplits(): Promise<unknown>;
     /** Every portfolio with its cash, last change and positions, read as one consistent snapshot. */
-    portfolios(): Promise<Array<{ portfolioId: string; cash: number; lastChange: Date; positions: PositionInput[] }>>;
+    portfolios(): Promise<Array<{ portfolioId: string; cash: number; lastChange: Date; positions: PositionInput[]; manual?: { value: number; cost: number } }>>;
     closes(symbols: string[], from: string, to: string): Promise<Map<string, StoredClose[]>>;
     completeDays(portfolioIds: string[], from: string): Promise<Map<string, Set<string>>>;
     write(portfolioId: string, snapshots: readonly SnapshotValue[]): Promise<void>;
@@ -439,11 +451,17 @@ export function createSnapshotStore(database: Database = db): SnapshotStore {
                 list.push({ symbol: row.symbol, quantity: Number(row.quantity), avgCost: Number(row.avgCost), updatedAt: row.updatedAt });
                 byPortfolio.set(row.portfolioId, list);
             }
+            const manual = manualTotalsByPortfolio((await buildManualValuesQuery(tx)).map((row) => ({
+                portfolioId: row.portfolioId,
+                value: Number(row.value),
+                costBasis: row.costBasis == null ? null : Number(row.costBasis),
+            })));
             return states.map((state) => ({
                 portfolioId: state.portfolioId,
                 cash: state.cash ?? 0,
                 lastChange: state.lastChange,
                 positions: byPortfolio.get(state.portfolioId) ?? [],
+                manual: manual.get(state.portfolioId),
             }));
         }, { isolationLevel: "repeatable read", accessMode: "read only" }),
         async closes(symbols, from, to) {
@@ -524,7 +542,7 @@ export async function recordValuationSnapshots({
     let partial = 0;
     let provisional = 0;
     for (const plan of due) {
-        const snapshots = plan.days.map((day) => valueSnapshot(day, plan.positions, closes, plan.cash));
+        const snapshots = plan.days.map((day) => valueSnapshot(day, plan.positions, closes, plan.cash, plan.manual));
         await store.write(plan.portfolioId, snapshots);
         written += snapshots.length;
         partial += snapshots.filter((snapshot) => snapshot.unpriced.length > 0).length;

@@ -423,7 +423,7 @@ test.describe('Today › Weekly review from your closed trades (launch item i51)
         const card = section.getByTestId('weekly-review-card');
         await expect(card).toHaveAttribute('data-week-id', seeded.weekId);
         await expect(card.getByTestId('weekly-review-pnl')).toContainText(seeded.todayInWeek ? '-$50' : '-$100');
-        await expect(card.getByTestId('weekly-review-pnl')).toContainText('of net worth');
+        await expect(card.getByTestId('weekly-review-pnl')).toContainText('of portfolio value');
         if (!seeded.todayInWeek) {
             await expect(card.getByTestId('weekly-review-adherence')).toContainText('No reasons recorded on Trade');
             await expect(card).toContainText('This week you closed 1 trade.');

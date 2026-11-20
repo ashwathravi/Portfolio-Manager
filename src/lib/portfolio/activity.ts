@@ -6,8 +6,9 @@
 
 import { computeChurnAnalysis, type ChurnTickerRow } from '../risk-policy/churn';
 import { matchInternalTransfers, type InternalTransfer } from './internal-transfers';
+import { TRANSACTION_TYPES, TRANSACTION_TYPE_LABELS, type TransactionType } from './transactions';
 
-export type ActivitySide = 'BUY' | 'SELL' | 'DIVIDEND' | 'INTEREST' | 'DEPOSIT' | 'WITHDRAWAL' | 'FEE' | 'OTHER';
+export type ActivitySide = 'BUY' | 'SELL' | 'DIVIDEND' | 'INTEREST' | 'DEPOSIT' | 'WITHDRAWAL' | 'FEE' | 'VEST' | 'TRANSFER_IN' | 'TRANSFER_OUT' | 'OTHER';
 
 export interface TransactionRowInput {
     id: string;
@@ -89,9 +90,14 @@ function toNumber(value: string | number | null | undefined): number | null {
     return Number.isFinite(n) ? n : null;
 }
 
+/** What the activity table calls a side: "Buy", "Vest", "Shares in"; "Other" for a type Atlas doesn't know. */
+export function sideLabel(side: ActivitySide): string {
+    return side === 'OTHER' ? 'Other' : TRANSACTION_TYPE_LABELS[side];
+}
+
 export function normalizeSide(type: string): ActivitySide {
     const t = type.trim().toUpperCase();
-    if (t === 'BUY' || t === 'SELL' || t === 'DIVIDEND' || t === 'INTEREST' || t === 'DEPOSIT' || t === 'WITHDRAWAL' || t === 'FEE') return t;
+    if ((TRANSACTION_TYPES as readonly string[]).includes(t)) return t as TransactionType;
     return 'OTHER';
 }
 

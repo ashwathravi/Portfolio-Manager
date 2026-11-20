@@ -10,10 +10,10 @@
  * the nightly job (syncAllPlaidItems).
  */
 
-import { and, asc, eq, inArray, isNull, ne, notInArray, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, isNull, ne, notInArray, sql } from "drizzle-orm";
 
 import { db } from "@/db";
-import { holdings, plaidAccounts, plaidItems, portfolios, transactions } from "@/db/schema";
+import { holdings, manualHoldings, plaidAccounts, plaidItems, portfolios, transactions } from "@/db/schema";
 import {
     AccountLimitError,
     MAX_ACCOUNTS_PER_USER,
@@ -22,6 +22,7 @@ import {
     sameAccountName,
 } from "@/lib/portfolio/manage";
 import { transactionValues } from "@/lib/portfolio/transactionsWrite";
+import { accountTypeForPlaid, INSTITUTION_MAX_LENGTH, taxTreatmentForPlaid } from "@/lib/portfolio/account-kinds";
 import { PORTFOLIO_LIMITS } from "@/lib/validators/portfolio";
 import type { TransactionRow } from "@/lib/validators/transaction";
 
@@ -214,6 +215,7 @@ interface SyncTarget {
     plaidAccountId: string;
     name: string;
     mask: string | null;
+    subtype: string;
     lastSyncedAt: Date | null;
 }
 
@@ -230,6 +232,7 @@ async function loadSyncTargets(userId: string, itemId: string, database: Databas
             plaidAccountId: plaidAccounts.plaidAccountId,
             name: plaidAccounts.name,
             mask: plaidAccounts.mask,
+            subtype: plaidAccounts.subtype,
             lastSyncedAt: plaidAccounts.lastSyncedAt,
         })
         .from(plaidAccounts)
@@ -255,10 +258,28 @@ export interface AccountSyncWrite {
     /** The account number's last four digits, to tell two same-named accounts apart. */
     mask: string | null;
     description: string;
-    holdings: Pick<AccountHoldings, "positions" | "cashUsd">;
+    holdings: Pick<AccountHoldings, "positions" | "cashUsd"> & Partial<Pick<AccountHoldings, "institutionValued">>;
+    /**
+     * What kind of account Plaid says it is, and where it's held
+     * (linkedAccountKind). A new portfolio takes them; an existing one fills
+     * in only what it has none of, so the user's own choice stands.
+     */
+    kind?: LinkedAccountKind;
     /** Null when Plaid's history isn't ready yet: transactions wait for the next sync. */
     transactions: readonly (TransactionRow & { externalId: string })[] | null;
     now: Date;
+}
+
+export interface LinkedAccountKind {
+    accountType: string | null;
+    institution: string | null;
+    taxTreatment: string | null;
+}
+
+/** A linked account's kind from Plaid's subtype, and its institution from the connection. */
+export function linkedAccountKind(subtype: string | null, institutionName: string | null): LinkedAccountKind {
+    const institution = institutionName?.trim().slice(0, INSTITUTION_MAX_LENGTH) || null;
+    return { accountType: accountTypeForPlaid(subtype), institution, taxTreatment: taxTreatmentForPlaid(subtype) };
 }
 
 export interface AccountSyncWritten {
@@ -307,12 +328,28 @@ export async function writeAccountSync(input: AccountSyncWrite, database: Databa
         let portfolio: { id: string; name: string; created: boolean };
         if (existing) {
             const positionsChanged = await replaceHoldings(tx, existing.id, input.holdings.positions, input.now);
+            const valuedChanged = await replaceInstitutionValued(tx, input.userId, existing.id, input.holdings.institutionValued ?? [], input.now);
             const cashChanged = existing.cash !== input.holdings.cashUsd;
-            if (positionsChanged || cashChanged) {
+            if (positionsChanged || valuedChanged || cashChanged) {
                 await tx
                     .update(portfolios)
                     .set({ cashBalance: input.holdings.cashUsd, updatedAt: input.now })
                     .where(and(eq(portfolios.id, existing.id), eq(portfolios.userId, input.userId)));
+            }
+            if (input.kind) {
+                // Not a financial change: updated_at stays where it was.
+                await tx
+                    .update(portfolios)
+                    .set({
+                        accountType: sql`coalesce(${portfolios.accountType}, ${input.kind.accountType})`,
+                        institution: sql`coalesce(${portfolios.institution}, ${input.kind.institution})`,
+                        taxTreatment: sql`coalesce(${portfolios.taxTreatment}, ${input.kind.taxTreatment})`,
+                    })
+                    .where(and(
+                        eq(portfolios.id, existing.id),
+                        eq(portfolios.userId, input.userId),
+                        sql`(${portfolios.accountType} is null or ${portfolios.institution} is null or ${portfolios.taxTreatment} is null)`,
+                    ));
             }
             portfolio = { id: existing.id, name: existing.name, created: false };
         } else {
@@ -327,11 +364,13 @@ export async function writeAccountSync(input: AccountSyncWrite, database: Databa
                     cashBalance: input.holdings.cashUsd,
                     source: "plaid",
                     externalAccountId: input.plaidAccountId,
+                    ...(input.kind ?? {}),
                     updatedAt: input.now,
                 })
                 .returning({ id: portfolios.id, name: portfolios.name });
             portfolio = { ...created, created: true };
             await replaceHoldings(tx, portfolio.id, input.holdings.positions, input.now);
+            await replaceInstitutionValued(tx, input.userId, portfolio.id, input.holdings.institutionValued ?? [], input.now);
         }
 
         const written = input.transactions ? await upsertTransactions(tx, portfolio.id, input.transactions) : { added: 0, updated: 0 };
@@ -363,6 +402,82 @@ export async function writeAccountSync(input: AccountSyncWrite, database: Databa
  * updated_at (also the stock split watermark) moves only when its quantity
  * or cost does; a new price or name alone isn't a change in what's held.
  */
+/**
+ * The account's holdings with no ticker, at the institution's value: the
+ * ones the last sync brought in (source "plaid") are updated, added or
+ * removed to match. One the user edited became theirs (source "manual")
+ * and is left alone. True when anything changed.
+ */
+/**
+ * A synced holding's key: Plaid's security ID within the account it is
+ * held in, so one security held in two linked accounts is two holdings.
+ */
+export function institutionValuedKey(portfolioId: string, securityId: string): string {
+    return `${portfolioId}:${securityId}`;
+}
+
+async function replaceInstitutionValued(
+    tx: Executor,
+    userId: string,
+    portfolioId: string,
+    rows: AccountHoldings["institutionValued"],
+    now: Date,
+): Promise<boolean> {
+    const existing = await tx
+        .select({
+            id: manualHoldings.id,
+            externalId: manualHoldings.externalId,
+            quantity: manualHoldings.quantity,
+            costBasis: manualHoldings.costBasis,
+        })
+        .from(manualHoldings)
+        .where(and(eq(manualHoldings.portfolioId, portfolioId), eq(manualHoldings.userId, userId), eq(manualHoldings.source, "plaid")));
+    const byExternal = new Map(existing.map((row) => [row.externalId, row]));
+    // One the user edited is theirs now, wherever they put it. It keeps the
+    // key of the account it came from, so the same security in another
+    // linked account still syncs.
+    const taken = new Set((await tx
+        .select({ externalId: manualHoldings.externalId })
+        .from(manualHoldings)
+        .where(and(eq(manualHoldings.userId, userId), eq(manualHoldings.source, "manual"), isNotNull(manualHoldings.externalId))))
+        .map((row) => row.externalId));
+    const asOf = now.toISOString().slice(0, 10);
+    const sameNumber = (stored: string | null, next: number | null) => (stored == null ? next == null : next != null && Number(stored) === next);
+    // A holding added, gone, or with another quantity or cost is a change
+    // to the account. A new value alone is a price, as a quote is for a
+    // ticker: it doesn't move the account's last change, which would keep
+    // the nightly valuation from recording the session it closed.
+    let changed = false;
+    for (const row of rows) {
+        const key = institutionValuedKey(portfolioId, row.externalId);
+        if (taken.has(key)) continue;
+        const values = {
+            name: row.name,
+            identifier: row.identifier,
+            quantity: row.quantity == null ? null : String(row.quantity),
+            value: String(row.value),
+            costBasis: row.costBasis == null ? null : String(row.costBasis),
+            valueAsOf: asOf,
+            updatedAt: now,
+        };
+        const before = byExternal.get(key);
+        byExternal.delete(key);
+        if (!before) {
+            await tx.insert(manualHoldings).values({ userId, portfolioId, ...values, source: "plaid", externalId: key, createdAt: now });
+            changed = true;
+        } else {
+            await tx.update(manualHoldings).set(values).where(eq(manualHoldings.id, before.id));
+            if (!sameNumber(before.quantity, row.quantity) || !sameNumber(before.costBasis, row.costBasis)) changed = true;
+        }
+    }
+    const gone = [...byExternal.values()].map((row) => row.id);
+    if (gone.length > 0) {
+        await tx.delete(manualHoldings).where(inArray(manualHoldings.id, gone));
+        changed = true;
+    }
+    return changed;
+}
+
 async function replaceHoldings(tx: Executor, portfolioId: string, positions: AccountHoldings["positions"], now: Date): Promise<boolean> {
     const held = new Map(
         (await tx
@@ -528,6 +643,7 @@ export async function syncPlaidItem(userId: string, itemId: string, deps: SyncDe
                     mask: account.mask,
                     description: linkedPortfolioDescription(item.institutionName, account.mask),
                     holdings: held,
+                    kind: linkedAccountKind(account.subtype, item.institutionName),
                     transactions: activity?.rows ?? null,
                     now,
                 }, database);

@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import type { db } from "@/db";
 import { holdings, portfolios } from "@/db/schema";
 
-import { importHoldings } from "./importHoldings";
+import { importHoldings, importHoldingsToAccounts } from "./importHoldings";
 import { AccountLimitError, DuplicateAccountNameError, MAX_ACCOUNTS_PER_USER } from "./manage";
 
 const USER = "00000000-0000-4000-8000-00000000a001";
@@ -19,15 +19,17 @@ function fakeDatabase(accounts: Array<{ id: string; name: string }> = [{ id: POR
     const updated: Record<string, unknown>[] = [];
     const createdAccounts: Record<string, unknown>[] = [];
     let locks = 0;
+    const order: string[] = [];
     const tx = {
         execute: async () => {
             locks++;
+            order.push("account lock");
         },
         select: () => ({
             from: (table: unknown) => ({
                 where: () => {
                     if (table === portfolios) {
-                        return { limit: () => ({ for: async () => [{ id: PORTFOLIO }] }), orderBy: async () => accounts };
+                        return { limit: () => ({ for: async () => (order.push("row lock"), [{ id: PORTFOLIO }]) }), orderBy: async () => accounts };
                     }
                     return Promise.resolve([{ id: "h-1", symbol: "AAPL", quantity: "1", avgCost: "100" }]);
                 },
@@ -53,7 +55,7 @@ function fakeDatabase(accounts: Array<{ id: string; name: string }> = [{ id: POR
         }),
     };
     const database = { transaction: async (fn: (t: typeof tx) => Promise<unknown>) => fn(tx) } as unknown as typeof db;
-    return { database, inserted, updated, createdAccounts, locks: () => locks };
+    return { database, inserted, updated, createdAccounts, locks: () => locks, order };
 }
 
 describe("importHoldings", () => {
@@ -141,6 +143,22 @@ describe("importHoldings into a new account", () => {
     test("importing into an existing account doesn't take the lock or check names", async () => {
         const fake = fakeDatabase([]);
         await importHoldings(USER, { portfolioId: PORTFOLIO, rows }, {}, fake.database);
+        assert.equal(fake.locks(), 0);
+    });
+
+    test("regression: a batch that creates an account takes the account lock before any account's rows", async () => {
+        // The Codex finding on PR #216: locking an existing account's row
+        // and then the user's lock (for the new account's name) is the
+        // reverse of a Plaid sync's order, so the two could deadlock.
+        const fake = fakeDatabase([]);
+        await importHoldingsToAccounts(USER, [{ portfolioId: PORTFOLIO, rows }, { newPortfolioName: "Joint", rows }], {}, fake.database);
+        assert.equal(fake.order[0], "account lock");
+        assert.ok(fake.order.indexOf("row lock") > 0);
+    });
+
+    test("a batch into existing accounts only takes no account lock", async () => {
+        const fake = fakeDatabase([]);
+        await importHoldingsToAccounts(USER, [{ portfolioId: PORTFOLIO, rows }], {}, fake.database);
         assert.equal(fake.locks(), 0);
     });
 });

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { accountKindLine } from "@/lib/portfolio/account-kinds";
 import type { AccountRow, AccountsSummary } from "@/lib/portfolio/accounts";
 import { formatPct, formatShortDate, formatUsd } from "@/lib/format";
 import { AccountRowActions, NewAccountButton } from "./AccountControls";
@@ -75,6 +76,7 @@ export function AccountsView({ rows, summary, bankLinking }: { rows: AccountRow[
                                 <tr key={r.id}>
                                     <td>
                                         <div className="pm-account-name">{r.name}</div>
+                                        {accountKindLine(r) && <div className="pm-card-subtitle" data-testid="account-kind">{accountKindLine(r)}</div>}
                                         {r.description && <div className="pm-card-subtitle">{r.description}</div>}
                                     </td>
                                     <td className="num">{formatUsd(r.totalUsd)}</td>
@@ -92,7 +94,10 @@ export function AccountsView({ rows, summary, bankLinking }: { rows: AccountRow[
                                     <td>{formatShortDate(r.updatedAt)}</td>
                                     <td>
                                         <AccountRowActions
-                                            account={{ id: r.id, name: r.name, description: r.description, cashUsd: r.cashUsd, positions: r.positions }}
+                                            account={{
+                                                id: r.id, name: r.name, description: r.description, cashUsd: r.cashUsd, positions: r.positions,
+                                                accountType: r.accountType, institution: r.institution, taxTreatment: r.taxTreatment,
+                                            }}
                                         />
                                     </td>
                                 </tr>

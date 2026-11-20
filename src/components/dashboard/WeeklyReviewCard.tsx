@@ -144,7 +144,7 @@ export function WeeklyReviewCard({ entries, nav = null, now }: WeeklyReviewCardP
                     value={formatUsdSigned(stats.realizedPnlUsd)}
                     sub={stats.navPctChange === null
                         ? `${stats.tradeCount.total} closed ${stats.tradeCount.total === 1 ? "trade" : "trades"}`
-                        : `${formatPctSigned(stats.navPctChange)} of net worth`}
+                        : `${formatPctSigned(stats.navPctChange)} of portfolio value`}
                     tone={pnlPositive ? "pos" : "neg"}
                     testId="weekly-review-pnl"
                 />

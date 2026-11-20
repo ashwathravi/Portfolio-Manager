@@ -8,6 +8,7 @@ import postgres from 'postgres';
 import * as schema from '../../src/db/schema';
 import type { PlaidFetch } from '../../src/lib/plaid/link';
 import { deletePortfolio } from '../../src/lib/portfolio/manage';
+import { updateManualHolding } from '../../src/lib/portfolio/manual-holdings';
 import { MAX_PLAID_CONNECTIONS_PER_USER, PlaidTokenUnavailableError, disconnectPlaidItem, handlePlaidWebhook, listPlaidConnections } from '../../src/lib/plaid/connections';
 import { createDrizzlePlaidTokenRegistryStore, resetPlaidTokenVaultForTests, setPlaidTokenRegistryStoreForTests, storePlaidConnection } from '../../src/lib/plaid/server-token-vault';
 import { PlaidItemNotFoundError, connectedAccountFingerprints, refreshPlaidItem, selectPlaidAccounts, syncAllPlaidItems, syncPlaidItem } from '../../src/lib/plaid/sync';
@@ -268,6 +269,50 @@ describe('Plaid sync into portfolios', { skip: !DATABASE_URL && 'SCRIPTS_TEST_DA
         assert.ok(order.indexOf('acc_rot_a') < order.indexOf('acc_rot_b'), order.join(','));
     });
 
+    test('a fund with no ticker: kept per account, its new value alone is a price, and an edit takes over only its own account\'s', async () => {
+        await linkedUser('u-fund', 'item-fund', [['acc_fx', 'Brokerage', 'investment'], ['acc_fy', 'IRA', 'investment']]);
+        await selectPlaidAccounts('u-fund', 'item-fund', ['acc_fx', 'acc_fy'], database);
+        const FUND = { security_id: 'sec_fund', ticker_symbol: null, name: 'Stable Value Fund', type: 'mutual fund', cusip: '123456789' };
+        const plaidWith = (price: number) => fakePlaid({
+            '/investments/holdings/get': (body) => ({
+                json: {
+                    holdings: (body.options as { account_ids: string[] }).account_ids.flatMap((account) => [
+                        { account_id: account, security_id: 'sec_aapl', quantity: 1, institution_price: 100, institution_value: 100, cost_basis: 90, iso_currency_code: 'USD' },
+                        { account_id: account, security_id: 'sec_fund', quantity: 10, institution_price: price, institution_value: 10 * price, cost_basis: 100, iso_currency_code: 'USD' },
+                    ]),
+                    securities: [...SECURITIES, FUND],
+                },
+            }),
+            '/investments/transactions/get': transactionsOf('acc_fx', []),
+        });
+        const fund = () => sql<{ account: string; source: string; value: number; external: string }[]>`
+            SELECT p.external_account_id AS account, m.source, m.value::float AS value, m.external_id AS external
+            FROM manual_holdings m JOIN portfolios p ON p.id = m.portfolio_id WHERE m.user_id = 'u-fund' ORDER BY p.external_account_id`;
+        const lastChange = async () => (await sql<{ at: string }[]>`SELECT max(updated_at)::text AS at FROM portfolios WHERE user_id = 'u-fund'`)[0].at;
+
+        await syncPlaidItem('u-fund', 'item-fund', deps(plaidWith(11).fetchImpl));
+        const first = await fund();
+        assert.deepEqual(first.map((r) => [r.account, r.source, r.value]), [['acc_fx', 'plaid', 110], ['acc_fy', 'plaid', 110]]);
+        assert.notEqual(first[0].external, first[1].external);
+
+        // The next day's sync: only the fund's value moved. The value is
+        // new, but the accounts' last change stays, so the nightly valuation
+        // still records the session.
+        const changedAt = await lastChange();
+        await syncPlaidItem('u-fund', 'item-fund', deps(plaidWith(12).fetchImpl, new Date('2026-10-26T22:30:00.000Z')));
+        assert.deepEqual((await fund()).map((r) => r.value), [120, 120]);
+        assert.equal(await lastChange(), changedAt);
+
+        // The user values the first account's fund by hand. The IRA's, the
+        // same security, still syncs, and the edited one isn't added back.
+        const [{ id, portfolio }] = await sql<{ id: string; portfolio: string }[]>`
+            SELECT m.id, m.portfolio_id AS portfolio FROM manual_holdings m JOIN portfolios p ON p.id = m.portfolio_id
+            WHERE p.external_account_id = 'acc_fx'`;
+        assert.ok(await updateManualHolding('u-fund', id, portfolio, { name: 'Stable Value Fund', identifier: null, quantity: 10, value: 150, costBasis: 100, valueAsOf: '2026-10-27' }, { database }));
+        await syncPlaidItem('u-fund', 'item-fund', deps(plaidWith(13).fetchImpl, new Date('2026-10-27T22:30:00.000Z')));
+        assert.deepEqual((await fund()).map((r) => [r.account, r.source, r.value]), [['acc_fx', 'manual', 150], ['acc_fy', 'plaid', 130]]);
+    });
+
     test('a sync makes the portfolio, replaces its holdings and cash, and upserts its transactions', async () => {
         await linkedUser('u-sync', 'item-sync', [['acc_brokerage', 'Individual', 'investment']]);
         await selectPlaidAccounts('u-sync', 'item-sync', ['acc_brokerage'], database);
@@ -281,7 +326,7 @@ describe('Plaid sync into portfolios', { skip: !DATABASE_URL && 'SCRIPTS_TEST_DA
         assert.deepEqual(result.accounts.map(({ name, created, positions, cashUsd, transactionsAdded, transactionsUpdated, transactionsSkipped, transactionsPending }) =>
             ({ name, created, positions, cashUsd, transactionsAdded, transactionsUpdated, transactionsSkipped, transactionsPending })), [{
             name: 'Fidelity Individual', created: true, positions: 1, cashUsd: 250,
-            transactionsAdded: 2, transactionsUpdated: 0, transactionsSkipped: { 'not-recorded': 1 }, transactionsPending: false,
+            transactionsAdded: 3, transactionsUpdated: 0, transactionsSkipped: {}, transactionsPending: false,
         }]);
         // The first sync asks for two years.
         assert.equal(first.requests.find((r) => r.endpoint === '/investments/transactions/get')?.body.start_date, '2024-10-25');
@@ -297,6 +342,8 @@ describe('Plaid sync into portfolios', { skip: !DATABASE_URL && 'SCRIPTS_TEST_DA
         assert.deepEqual((await activity()).map((r) => ({ ...r })), [
             { external_id: 'plaid:txn_buy', type: 'BUY', symbol: 'AAPL', quantity: 10, price: 80, amount: 800.05, fees: 0.05, source: 'plaid' },
             { external_id: 'plaid:txn_div', type: 'DIVIDEND', symbol: 'MSFT', quantity: null, price: null, amount: 7.5, fees: null, source: 'plaid' },
+            // Shares moved in from another broker: a record, with no cash and no price.
+            { external_id: 'plaid:txn_xfer', type: 'TRANSFER_IN', symbol: 'VTI', quantity: 3, price: null, amount: 0, fees: null, source: 'plaid' },
         ]);
         const [account] = await sql<{ synced: boolean; status: string }[]>`
             SELECT last_synced_at = ${NOW.toISOString()}::timestamp AS synced, sync_status AS status FROM plaid_accounts WHERE plaid_account_id = 'acc_brokerage'`;
@@ -324,7 +371,7 @@ describe('Plaid sync into portfolios', { skip: !DATABASE_URL && 'SCRIPTS_TEST_DA
         assert.deepEqual({ ...renamed }, { name: 'My brokerage', cash: 75 });
         // Holdings are what the institution reports now: the hand-added one is gone.
         assert.deepEqual((await held()).map((r) => [r.symbol, r.quantity, r.avg, r.price]), [['AAPL', 12, 83.333333, 110], ['VTI', 3, 250, 250]]);
-        assert.deepEqual((await activity()).map((r) => [r.external_id, r.price]), [['plaid:txn_buy', 80.5], ['plaid:txn_div', null], ['plaid:txn_sell', 110]]);
+        assert.deepEqual((await activity()).map((r) => [r.external_id, r.price]), [['plaid:txn_buy', 80.5], ['plaid:txn_div', null], ['plaid:txn_sell', 110], ['plaid:txn_xfer', null]]);
     });
 
     test('history that isn\'t ready yet: positions now, two years of transactions next time', async () => {

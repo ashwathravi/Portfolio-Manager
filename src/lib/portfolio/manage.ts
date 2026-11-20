@@ -99,6 +99,9 @@ export interface ManagedPortfolio {
     name: string;
     description: string | null;
     cashBalance: number;
+    accountType: string | null;
+    institution: string | null;
+    taxTreatment: string | null;
 }
 
 const returned = {
@@ -106,9 +109,23 @@ const returned = {
     name: portfolios.name,
     description: portfolios.description,
     cashBalance: portfolios.cashBalance,
+    accountType: portfolios.accountType,
+    institution: portfolios.institution,
+    taxTreatment: portfolios.taxTreatment,
 };
 
-function toManaged(row: { id: string; name: string; description: string | null; cashBalance: number | null }): ManagedPortfolio {
+type ReturnedRow = Omit<ManagedPortfolio, "cashBalance"> & { cashBalance: number | null };
+
+/** The kind fields a body sets: each given one, an empty institution as none. */
+function kindFields(body: Pick<PortfolioUpdateBody, "accountType" | "institution" | "taxTreatment">) {
+    return {
+        ...(body.accountType !== undefined ? { accountType: body.accountType } : {}),
+        ...(body.institution !== undefined ? { institution: body.institution || null } : {}),
+        ...(body.taxTreatment !== undefined ? { taxTreatment: body.taxTreatment } : {}),
+    };
+}
+
+function toManaged(row: ReturnedRow): ManagedPortfolio {
     return { ...row, cashBalance: row.cashBalance ?? 0 };
 }
 
@@ -121,6 +138,7 @@ export function buildCreatePortfolioQuery(userId: string, body: PortfolioCreateB
             description: body.description || null,
             cashBalance: body.cashBalance ?? 0,
             totalValue: body.cashBalance ?? 0,
+            ...kindFields(body),
         })
         .returning(returned);
 }
@@ -145,6 +163,7 @@ export function buildUpdatePortfolioQuery(userId: string, id: string, body: Port
         .set({
             ...(body.name !== undefined ? { name: body.name } : {}),
             ...(body.description !== undefined ? { description: body.description || null } : {}),
+            ...kindFields(body),
             ...(body.cashBalance !== undefined
                 ? {
                     cashBalance: body.cashBalance,

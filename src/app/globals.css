@@ -1735,7 +1735,8 @@
  * ======================================================================== */
 
 /* Outer stack reuses the Dashboard rhythm — sections separated by 20px. */
-.pm-holdings-stack {
+.pm-holdings-stack,
+.pm-manual-holdings-stack {
   display: flex;
   flex-direction: column;
   gap: 20px;

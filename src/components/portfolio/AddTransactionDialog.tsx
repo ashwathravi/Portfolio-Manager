@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { TickerSearchInput } from "@/components/command/TickerSearchInput";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
+    QUANTITY_TYPES,
     SYMBOL_TYPES,
     TRADE_TYPES,
     TRANSACTION_TYPES,
@@ -64,6 +65,8 @@ export function AddTransactionDialog({ accounts }: { accounts: readonly Transact
     }, [open, accounts]);
 
     const trade = TRADE_TYPES.has(type);
+    // Trades, vests and share moves are shares; a vest's or move's price is optional.
+    const shares = QUANTITY_TYPES.has(type);
     const needsSymbol = SYMBOL_TYPES.has(type);
 
     const submit = async (event: React.FormEvent) => {
@@ -78,14 +81,15 @@ export function AddTransactionDialog({ accounts }: { accounts: readonly Transact
             }
             return n;
         };
-        const q = trade ? number(quantity, "Quantity") : null;
-        const p = trade ? number(price, "Price") : null;
-        const a = trade ? null : number(amount, "Amount");
+        const q = shares ? number(quantity, "Quantity") : null;
+        const p = shares ? number(price, "Price") : null;
+        const a = shares ? null : number(amount, "Amount");
         const f = number(fees, "Fees");
         if (q === "bad" || p === "bad" || a === "bad" || f === "bad") return;
         if (needsSymbol && !symbol.trim()) return setError("Enter the symbol.");
         if (trade && (q == null || q === 0 || p == null)) return setError("Enter the quantity and price.");
-        if (!trade && (a == null || a === 0)) return setError("Enter the amount.");
+        if (shares && !trade && (q == null || q === 0)) return setError("Enter the quantity.");
+        if (!shares && (a == null || a === 0)) return setError("Enter the amount.");
 
         setSaving(true);
         try {
@@ -99,7 +103,7 @@ export function AddTransactionDialog({ accounts }: { accounts: readonly Transact
                         type,
                         date,
                         ...(needsSymbol ? { symbol: symbol.trim().toUpperCase() } : {}),
-                        ...(trade ? { quantity: q, price: p } : { amount: a }),
+                        ...(shares ? { quantity: q, ...(p != null ? { price: p } : {}) } : { amount: a }),
                         ...(f != null && f > 0 ? { fees: f } : {}),
                         ...(notes.trim() ? { notes: notes.trim() } : {}),
                     },
@@ -170,14 +174,14 @@ export function AddTransactionDialog({ accounts }: { accounts: readonly Transact
                                     </div>
                                 )}
                             </div>
-                            {trade ? (
+                            {shares ? (
                                 <div className="pm-form-pair">
                                     <label className="pm-exec-field" htmlFor={`${ids}-quantity`}>
                                         <span className="pm-exec-field-label">Quantity</span>
                                         <input id={`${ids}-quantity`} className="pm-exec-input" inputMode="decimal" value={quantity} onChange={(e) => setQuantity(e.target.value)} />
                                     </label>
                                     <label className="pm-exec-field" htmlFor={`${ids}-price`}>
-                                        <span className="pm-exec-field-label">Price ($)</span>
+                                        <span className="pm-exec-field-label">{trade ? "Price ($)" : "Price that day ($, optional)"}</span>
                                         <input id={`${ids}-price`} className="pm-exec-input" inputMode="decimal" value={price} onChange={(e) => setPrice(e.target.value)} />
                                     </label>
                                 </div>

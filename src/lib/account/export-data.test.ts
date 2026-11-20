@@ -4,8 +4,8 @@ import assert from 'node:assert/strict';
 import { holdingsCsvRows, transactionsCsvRows, type AccountExport, type ExportedAccount } from './export-data';
 
 const account = (name: string, fields: Partial<ExportedAccount> = {}): ExportedAccount => ({
-    id: name, name, description: null, source: 'manual', cashBalance: 0, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
-    holdings: [], optionPositions: [], transactions: [], valuationHistory: [], orderPlans: [], ...fields,
+    id: name, name, description: null, source: 'manual', accountType: null, institution: null, taxTreatment: null, cashBalance: 0, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
+    holdings: [], manualHoldings: [], optionPositions: [], transactions: [], valuationHistory: [], orderPlans: [], ...fields,
 });
 const exported = (accounts: ExportedAccount[]): AccountExport => ({
     format: 'atlas-wealth-export', version: 1, exportedAt: '2026-10-26T18:00:00.000Z', profile: { name: null, email: null }, settings: null,

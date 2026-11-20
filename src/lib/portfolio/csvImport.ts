@@ -24,6 +24,8 @@ import { describeOptionContract, OPTION_POSITION_MULTIPLIER, optionContractTicke
 export const MAX_IMPORT_ROWS = 1000;
 
 export interface ImportRow {
+    /** The account the file puts it in, when the file has an account column. */
+    account?: string;
     symbol: string;
     name: string;
     quantity: number;
@@ -39,6 +41,8 @@ export interface ParseIssue {
 
 /** An option position read from the file: the contract, how many, and the premium per share. */
 export interface OptionImportRow extends OptionContract {
+    /** The account the file puts it in, when the file has an account column. */
+    account?: string;
     /** Contracts; negative for a written position. */
     quantity: number;
     premium: number;
@@ -51,9 +55,17 @@ export interface ParseResult {
     issues: ParseIssue[];
     /** Cash, total, and blank rows ignored on purpose. */
     skipped: number;
+    /**
+     * The file's accounts in the order they first appear, when it has an
+     * account column (a positions export covering several accounts, as
+     * Fidelity's and Monarch's are); empty for a one-account file.
+     */
+    accounts: string[];
 }
 
-const HEADER_ALIASES: Record<'symbol' | 'quantity' | 'avgCost' | 'costBasis' | 'name' | 'assetType', readonly string[]> = {
+const HEADER_ALIASES: Record<'symbol' | 'quantity' | 'avgCost' | 'costBasis' | 'name' | 'assetType' | 'accountName' | 'accountNumber', readonly string[]> = {
+    accountName: ['account', 'account name', 'account nickname', 'account name/number', 'account display name'],
+    accountNumber: ['account number', 'account #', 'account no', 'account no.', 'account id'],
     symbol: ['symbol', 'ticker', 'sym', 'security symbol'],
     quantity: ['quantity', 'qty', 'shares', 'units', 'position'],
     avgCost: ['avg cost', 'average cost', 'avg price', 'average price', 'cost/share', 'cost per share', 'unit cost', 'price paid', 'avg cost basis', 'average cost basis'],
@@ -239,6 +251,7 @@ export function parseHoldingsCsv(text: string): ParseResult {
             options: [],
             issues: [{ line: 1, message: 'No header row with a Symbol and a Quantity column was found.' }],
             skipped: 0,
+            accounts: [],
         };
     }
 
@@ -249,13 +262,21 @@ export function parseHoldingsCsv(text: string): ParseResult {
         costBasis: findColumn(headers, 'costBasis'),
         name: findColumn(headers, 'name'),
         assetType: findColumn(headers, 'assetType'),
+        accountName: findColumn(headers, 'accountName'),
+        accountNumber: findColumn(headers, 'accountNumber'),
     };
+    const byAccount = col.accountName >= 0 || col.accountNumber >= 0;
+    // Each account by its number when the file has one (two accounts can
+    // share a name, "Individual"), else by its name; labelled at the end.
+    const accountNames = new Map<string, string>();
+    const accountOrder: string[] = [];
     if (col.avgCost < 0 && col.costBasis < 0) {
         return {
             rows: [],
             options: [],
             issues: [{ line: records[headerIndex].line, message: 'Add an Average cost or a Cost basis column so gains can be calculated.' }],
             skipped: 0,
+            accounts: [],
         };
     }
 
@@ -281,11 +302,28 @@ export function parseHoldingsCsv(text: string): ParseResult {
             skipped++;
             continue;
         }
+        let accountKey = '';
+        if (byAccount) {
+            const accountName = col.accountName >= 0 ? (cells[col.accountName] ?? '').trim() : '';
+            const accountNumber = col.accountNumber >= 0 ? (cells[col.accountNumber] ?? '').trim() : '';
+            accountKey = accountNumber || accountName;
+            if (!accountKey) {
+                issues.push({ line: lineNo, message: `${rawSymbol || 'This row'}: no account. Fill in the account column.` });
+                continue;
+            }
+            if (!accountNames.has(accountKey)) {
+                accountNames.set(accountKey, accountName);
+                accountOrder.push(accountKey);
+            } else if (!accountNames.get(accountKey) && accountName) {
+                accountNames.set(accountKey, accountName);
+            }
+        }
         const contract = optionContractOf(rawSymbol, cells, col);
         if (contract) {
-            const option = readOptionRow(contract, cells, col, lineNo, issues);
-            if (!option) continue;
-            const key = optionContractTicker(option);
+            const read = readOptionRow(contract, cells, col, lineNo, issues);
+            if (!read) continue;
+            const option: OptionImportRow = byAccount ? { ...read, account: accountKey } : read;
+            const key = `${accountKey}\u0000${optionContractTicker(option)}`;
             const prev = options.get(key);
             if (prev && Math.sign(prev.quantity) !== Math.sign(option.quantity)) {
                 // Bought and written lots of one contract have no single
@@ -331,13 +369,14 @@ export function parseHoldingsCsv(text: string): ParseResult {
             continue;
         }
         const name = col.name >= 0 ? (cells[col.name] ?? '').trim() : '';
-        const prev = merged.get(symbol);
+        const key = `${accountKey}\u0000${symbol}`;
+        const prev = merged.get(key);
         if (prev) {
-            // The same symbol on two lines (e.g. two lots): combine at the
-            // quantity-weighted average cost.
+            // The same symbol on two lines of one account (e.g. two lots):
+            // combine at the quantity-weighted average cost.
             const qty = prev.quantity + quantity;
-            merged.set(symbol, {
-                symbol,
+            merged.set(key, {
+                ...prev,
                 name: prev.name || name,
                 quantity: qty,
                 avgCost: (prev.avgCost * prev.quantity + avgCost * quantity) / qty,
@@ -347,17 +386,71 @@ export function parseHoldingsCsv(text: string): ParseResult {
                 issues.push({ line: lineNo, message: `Only the first ${MAX_IMPORT_ROWS} positions can be imported at once.` });
                 break;
             }
-            merged.set(symbol, { symbol, name, quantity, avgCost });
+            merged.set(key, byAccount ? { account: accountKey, symbol, name, quantity, avgCost } : { symbol, name, quantity, avgCost });
         }
     }
 
-    const rows = [...merged.values()].map((r) => ({
+    const labels = accountLabels(accountOrder, accountNames);
+    const label = <T extends { account?: string }>(r: T): T => (r.account === undefined ? r : { ...r, account: labels.get(r.account)! });
+    const rows = [...merged.values()].map((r) => label({
         ...r,
         quantity: round(r.quantity, 6),
         avgCost: round(r.avgCost, 4),
     }));
-    const optionRows = [...options.values()].map((o) => ({ ...o, quantity: round(o.quantity, 6), premium: round(o.premium, 4) }));
-    return { rows, options: optionRows, issues, skipped };
+    const optionRows = [...options.values()].map((o) => label({ ...o, quantity: round(o.quantity, 6), premium: round(o.premium, 4) }));
+    return { rows, options: optionRows, issues, skipped, accounts: accountOrder.map((k) => labels.get(k)!) };
+}
+
+/**
+ * What each account is called in the preview and, when it's new, in Atlas:
+ * its name; its name and the number's last four when two share a name; its
+ * number when the file gives no name. At most 80 characters, as account
+ * names are.
+ */
+const ACCOUNT_LABEL_MAX = 80;
+
+function accountLabels(order: readonly string[], names: ReadonlyMap<string, string>): Map<string, string> {
+    const count = new Map<string, number>();
+    for (const key of order) {
+        const name = names.get(key) || key;
+        count.set(name.toLowerCase(), (count.get(name.toLowerCase()) ?? 0) + 1);
+    }
+    const labels = new Map<string, string>();
+    const taken = new Set<string>();
+    // Shortened from the name, never the suffix, and numbered when still
+    // alike: each label is an account's identity in the import.
+    const fit = (name: string, suffix: string) => `${name.slice(0, ACCOUNT_LABEL_MAX - suffix.length).trimEnd()}${suffix}`;
+    for (const key of order) {
+        const name = names.get(key) || key;
+        const shared = (count.get(name.toLowerCase()) ?? 0) > 1 && names.get(key);
+        const suffix = shared ? ` ••${key.replace(/\s+/g, '').slice(-4)}` : '';
+        let label = fit(name, suffix);
+        for (let n = 2; taken.has(label.toLowerCase()); n++) label = fit(name, `${suffix} (${n})`);
+        taken.add(label.toLowerCase());
+        labels.set(key, label);
+    }
+    return labels;
+}
+
+export interface AccountImportGroup {
+    account: string;
+    rows: ImportRow[];
+    options: OptionImportRow[];
+}
+
+function withoutAccount<T extends { account?: string }>(row: T): Omit<T, 'account'> {
+    const copy = { ...row };
+    delete copy.account;
+    return copy;
+}
+
+/** A multi-account file's positions, one group per account in the file's order; [] for a one-account file. */
+export function groupImportByAccount(result: Pick<ParseResult, 'rows' | 'options' | 'accounts'>): AccountImportGroup[] {
+    return result.accounts.map((account) => ({
+        account,
+        rows: result.rows.filter((r) => r.account === account).map(withoutAccount),
+        options: result.options.filter((o) => o.account === account).map(withoutAccount),
+    })).filter((g) => g.rows.length + g.options.length > 0);
 }
 
 /** What the import API takes in one go (OPTION_POSITION_LIMITS.importRows). */

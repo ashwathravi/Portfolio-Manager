@@ -1,6 +1,7 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert';
 import {
+    groupImportByAccount,
     MAX_IMPORT_ROWS,
     parseHoldingsCsv,
     parseNumber,
@@ -232,7 +233,8 @@ describe('parseHoldingsCsv › option rows (launch item i63)', () => {
         const r = parseHoldingsCsv(csv);
         assert.deepStrictEqual(r.issues, []);
         assert.deepStrictEqual(r.rows, []);
-        assert.deepStrictEqual(r.options, [{ underlying: 'SPY', contractType: 'put', strike: 552.5, expiry: '2026-12-18', quantity: 1, premium: 12.05 }]);
+        assert.deepStrictEqual(r.options, [{ account: 'Individual', underlying: 'SPY', contractType: 'put', strike: 552.5, expiry: '2026-12-18', quantity: 1, premium: 12.05 }]);
+        assert.deepStrictEqual(r.accounts, ['Individual']);
     });
 
     test('a row the file marks as an option is read from its description', () => {
@@ -307,5 +309,72 @@ describe('planHoldingsImport', () => {
     test('an empty account turns every row into an insert', () => {
         const plan = planHoldingsImport([], [{ symbol: 'X', name: '', quantity: 1, avgCost: 1 }]);
         assert.deepStrictEqual(summarizePlan(plan), { insert: 1, update: 0, unchanged: 0 });
+    });
+});
+
+describe('parseHoldingsCsv › files covering several accounts', () => {
+    test("each row keeps its account; one symbol in two accounts is two positions; groups follow the file's order", () => {
+        const csv = [
+            'Account Name,Symbol,Description,Quantity,Average Cost',
+            'Roth IRA,VTI,VANGUARD TOTAL,10,$200',
+            'Brokerage,AAPL,APPLE INC,5,$150',
+            'Roth IRA,VTI,VANGUARD TOTAL,10,$220',
+            'Brokerage,VTI,VANGUARD TOTAL,2,$250',
+        ].join('\n');
+        const r = parseHoldingsCsv(csv);
+        assert.deepStrictEqual(r.issues, []);
+        assert.deepStrictEqual(r.accounts, ['Roth IRA', 'Brokerage']);
+        assert.deepStrictEqual(r.rows.map((x) => [x.account, x.symbol, x.quantity, x.avgCost]), [
+            ['Roth IRA', 'VTI', 20, 210],
+            ['Brokerage', 'AAPL', 5, 150],
+            ['Brokerage', 'VTI', 2, 250],
+        ]);
+        const groups = groupImportByAccount(r);
+        assert.deepStrictEqual(groups.map((g) => [g.account, g.rows.map((x) => x.symbol)]), [['Roth IRA', ['VTI']], ['Brokerage', ['AAPL', 'VTI']]]);
+        // What goes to the API carries no account field.
+        assert.equal('account' in groups[0].rows[0], false);
+    });
+
+    test('accounts with one name are told apart by the last four of their number; a number alone is the label', () => {
+        const csv = [
+            'Account Number,Account Name,Symbol,Quantity,Cost Basis Total',
+            'X11112222,Individual,AAPL,1,$100',
+            'Y33334444,Individual,MSFT,1,$300',
+            'Z55556666,,GOOG,1,$150',
+        ].join('\n');
+        const r = parseHoldingsCsv(csv);
+        assert.deepStrictEqual(r.accounts, ['Individual ••2222', 'Individual ••4444', 'Z55556666']);
+        assert.deepStrictEqual(r.rows.map((x) => x.account), ['Individual ••2222', 'Individual ••4444', 'Z55556666']);
+    });
+
+    test('regression: long names that share 80 characters stay distinct accounts, keeping their number', () => {
+        const long = 'Joint Tenants With Rights Of Survivorship Brokerage Account For The Family Trust Of';
+        const csv = [
+            'Account Number,Account Name,Symbol,Quantity,Cost Basis Total',
+            `X11112222,${long},AAPL,1,$100`,
+            `Y33334444,${long},MSFT,1,$300`,
+            `Z55556666,${long} Alice,GOOG,1,$150`,
+            `Z77778888,${long} Bob,NVDA,1,$150`,
+        ].join('\n');
+        const r = parseHoldingsCsv(csv);
+        assert.equal(new Set(r.accounts).size, 4, r.accounts.join(' | '));
+        for (const label of r.accounts) assert.ok(label.length <= 80, label);
+        assert.ok(r.accounts[0].endsWith('••2222'), r.accounts[0]);
+        assert.ok(r.accounts[1].endsWith('••4444'), r.accounts[1]);
+        assert.deepStrictEqual(groupImportByAccount(r).map((g) => g.rows.map((x) => x.symbol)), [['AAPL'], ['MSFT'], ['GOOG'], ['NVDA']]);
+    });
+
+    test('a row without an account, in a file that has the column, is listed', () => {
+        const csv = ['Account,Symbol,Quantity,Average Cost', 'Brokerage,AAPL,1,$100', ',MSFT,1,$300'].join('\n');
+        const r = parseHoldingsCsv(csv);
+        assert.deepStrictEqual(r.rows.map((x) => x.symbol), ['AAPL']);
+        assert.deepStrictEqual(r.issues, [{ line: 3, message: 'MSFT: no account. Fill in the account column.' }]);
+    });
+
+    test('a one-account file has no accounts and no groups', () => {
+        const r = parseHoldingsCsv(['Symbol,Quantity,Average Cost', 'AAPL,1,$100'].join('\n'));
+        assert.deepStrictEqual(r.accounts, []);
+        assert.deepStrictEqual(groupImportByAccount(r), []);
+        assert.equal('account' in r.rows[0], false);
     });
 });

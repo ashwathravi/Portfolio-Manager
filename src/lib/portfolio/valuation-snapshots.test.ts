@@ -128,6 +128,16 @@ describe("valueSnapshot", () => {
         });
         assert.equal(valueSnapshot(FRI, [], new Map(), Number.NaN).totalValue, 0);
     });
+
+    test("regression: holdings valued by hand count at their value and cost, priced or not by market data", () => {
+        // A 401(k) fund with no ticker was left out of the account's history.
+        const snapshot = valueSnapshot(FRI, [{ symbol: "AAPL", quantity: 1, avgCost: 150 }], closes({ AAPL: [[FRI, 200]] }), 100, { value: 10_000, cost: 8_000 });
+        assert.deepEqual(
+            [snapshot.holdingsValue, snapshot.cash, snapshot.totalValue, snapshot.costBasis, snapshot.unpriced],
+            [10_200, 100, 10_300, 8_150, []],
+        );
+        assert.equal(valueSnapshot(FRI, [], new Map(), 0, { value: 5_000, cost: 5_000 }).totalValue, 5_000);
+    });
 });
 
 describe("snapshot queries", () => {

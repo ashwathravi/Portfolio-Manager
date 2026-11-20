@@ -36,7 +36,7 @@ const ADD_STEP: GettingStartedStep = {
 const AFTER_ACCOUNTS: readonly GettingStartedStep[] = [
     {
         title: 'Start each day on Today',
-        body: 'Net worth and today’s change come first, then “Needs your attention”: policy breaches, theses due for review, and the weekly review.',
+        body: 'Portfolio value and today’s change come first, then “Needs your attention”: policy breaches, theses due for review, and the weekly review.',
         href: '/',
         cta: 'Open Today',
     },

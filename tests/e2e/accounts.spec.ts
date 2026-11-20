@@ -94,6 +94,29 @@ test.describe('Portfolio › Accounts — managing accounts', () => {
         await expect(row(page, 'Roth IRA')).toContainText('$2,500');
     });
 
+    test("an account's type, institution and tax treatment are kept, shown under its name, and can be cleared", async ({ page }) => {
+        await page.getByRole('button', { name: 'New account' }).click();
+        const dialog = await fillAccount(page, { name: 'Old 401k' });
+        await dialog.getByLabel('Type (optional)').selectOption({ label: '401(k)' });
+        // Picking a kind suggests how it's usually taxed.
+        await expect(dialog.getByLabel('Tax treatment (optional)')).toHaveValue('tax_deferred');
+        await dialog.getByLabel('Institution (optional)').fill('Vanguard');
+        await dialog.getByRole('button', { name: 'Add account' }).click();
+        await expect(dialog).toBeHidden();
+        await expect(row(page, 'Old 401k').getByTestId('account-kind')).toHaveText('401(k) · Vanguard');
+
+        await reloadAppPage(page);
+        await page.getByRole('button', { name: 'Actions for Old 401k' }).click();
+        await page.getByRole('menuitem', { name: 'Edit' }).click();
+        const edit = page.getByRole('dialog');
+        await expect(edit.getByLabel('Tax treatment (optional)')).toHaveValue('tax_deferred');
+        await edit.getByLabel('Type (optional)').selectOption('');
+        await edit.getByLabel('Institution (optional)').fill('');
+        await edit.getByRole('button', { name: 'Save changes' }).click();
+        await expect(edit).toBeHidden();
+        await expect(row(page, 'Old 401k').getByTestId('account-kind')).toHaveCount(0);
+    });
+
     test('an account can be renamed and its cash changed', async ({ page }) => {
         await page.getByRole('button', { name: 'Actions for Dividend Income' }).click();
         await page.getByRole('menuitem', { name: 'Edit' }).click();

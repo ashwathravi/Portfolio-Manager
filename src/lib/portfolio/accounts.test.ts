@@ -63,3 +63,15 @@ describe('portfolio accounts', () => {
         assert.deepStrictEqual(summarizeAccounts(buildAccountRows([])), { accounts: 0, positions: 0, totalUsd: 0, cashUsd: 0 });
     });
 });
+
+describe('holdings valued by hand', () => {
+    test('count in the account at their value, at cost when given (else at the value), and as positions', () => {
+        const [row] = buildAccountRows([{
+            id: 'k', name: '401(k)', cashBalance: 0, holdings: [{ symbol: 'VTI', quantity: 1, avgCost: 200, currentPrice: 250 }],
+            manualHoldings: [{ value: '10000', costBasis: '8000' }, { value: 500, costBasis: null }],
+        }]);
+        assert.strictEqual(row.investedUsd, 10_750);
+        assert.strictEqual(row.costBasisUsd, 8_700);
+        assert.strictEqual(row.positions, 3);
+    });
+});

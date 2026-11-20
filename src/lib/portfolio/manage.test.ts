@@ -23,7 +23,7 @@ const NOW = new Date("2026-10-24T08:00:00.000Z");
 describe("account queries", () => {
     test("create adds an account for the user, its total value its cash", () => {
         const { sql, params } = buildCreatePortfolioQuery(USER, { name: "Roth IRA", description: "Fidelity", cashBalance: 2500 }).toSQL();
-        assert.match(sql, /^insert into "portfolios" \(.*"user_id".*\) values .* returning "id", "name", "description", "cash_balance"$/i);
+        assert.match(sql, /^insert into "portfolios" \(.*"user_id".*\) values .* returning "id", "name", "description", "cash_balance", "account_type", "institution", "tax_treatment"$/i);
         assert.ok(params.includes(USER));
         assert.ok(params.includes("Roth IRA"));
         assert.equal(params.filter((p) => p === 2500).length, 2);
@@ -46,6 +46,17 @@ describe("account queries", () => {
         assert.match(renamed.sql, /set "name" = \$1, "description" = \$2 where/i);
         // An empty description clears it.
         assert.equal(renamed.params[1], null);
+    });
+
+    test("type, institution and tax treatment are set when given and cleared with null; an empty institution is none", () => {
+        const created = buildCreatePortfolioQuery(USER, { name: "Roth IRA", accountType: "roth_ira", institution: "Fidelity", taxTreatment: "tax_free" }).toSQL();
+        for (const value of ["roth_ira", "Fidelity", "tax_free"]) assert.ok(created.params.includes(value), value);
+
+        const cleared = buildUpdatePortfolioQuery(USER, ID, { accountType: null, institution: "" }, NOW).toSQL();
+        assert.match(cleared.sql, /set "account_type" = \$1, "institution" = \$2 where/i);
+        assert.deepEqual(cleared.params.slice(0, 2), [null, null]);
+        // Not a financial change.
+        assert.doesNotMatch(cleared.sql, /updated_at/);
     });
 
     test("regression: only a change of cash moves the account's last-change time", () => {

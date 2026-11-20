@@ -48,8 +48,25 @@ describe('portfolioUpdateSchema', () => {
     });
 
     test('at least one change, and the same rules as creating', () => {
-        assert.equal(message(portfolioUpdateSchema, {}), 'Change at least one of name, description or cash');
+        assert.equal(message(portfolioUpdateSchema, {}), 'Change at least one of name, description, cash, type, institution or tax treatment');
         assert.equal(message(portfolioUpdateSchema, { name: '' }), 'Name the account');
         assert.equal(portfolioUpdateSchema.safeParse({ id: '00000000-0000-4000-8000-000000000001' }).success, false);
+    });
+});
+
+describe('account kind fields', () => {
+    test('a type, institution and tax treatment from the lists, each clearable with null', () => {
+        assert.deepEqual(
+            portfolioCreateSchema.parse({ name: 'Roth IRA', accountType: 'roth_ira', institution: ' Fidelity ', taxTreatment: 'tax_free' }),
+            { name: 'Roth IRA', accountType: 'roth_ira', institution: 'Fidelity', taxTreatment: 'tax_free' },
+        );
+        assert.deepEqual(portfolioUpdateSchema.parse({ accountType: null }), { accountType: null });
+        assert.deepEqual(portfolioUpdateSchema.parse({ institution: null, taxTreatment: null }), { institution: null, taxTreatment: null });
+    });
+
+    test('refuses what is not on the lists, and an institution too long', () => {
+        assert.equal(message(portfolioCreateSchema, { name: 'A', accountType: 'checking' }), 'Choose an account type');
+        assert.equal(message(portfolioUpdateSchema, { taxTreatment: 'exempt' }), 'Choose how the account is taxed');
+        assert.equal(message(portfolioUpdateSchema, { institution: 'x'.repeat(81) }), 'Institution name is too long');
     });
 });
