@@ -143,6 +143,14 @@ describe("stepSegments", () => {
         near(asset.stock.return, 0.0625);
     });
 
+    test("a hand-valued holding written down to zero is the segment's full loss", () => {
+        const fund = closes({ "manual:f1": [[MON, 2000], [TUE, 0]] });
+        const step = stepSegments([{ date: MON, totalValue: 4000, positions: [{ symbol: "manual:f1", marketValue: 2000 }] }], TUE, fund, segmentsOf);
+        const sector = Object.fromEntries(step!.sector.map((s) => [s.key, s]));
+        near(sector.other.weight, 0.5);
+        near(sector.other.return, -1);
+    });
+
     test("a position without a close counts as unchanged; one without a value is in nothing", () => {
         const step = stepSegments([{ date: MON, totalValue: 8000, positions: [{ symbol: "KO", marketValue: 6000 }, { symbol: "BND", marketValue: 2000 }, { symbol: "XNEW", marketValue: null }] }], TUE, bars, segmentsOf);
         const sector = Object.fromEntries(step!.sector.map((s) => [s.key, s]));

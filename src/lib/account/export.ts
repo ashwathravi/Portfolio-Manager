@@ -41,7 +41,7 @@ import {
 import { buildListFollowedFilersQuery } from "@/lib/alpha-radar/follows";
 import { orderFromRow } from "@/lib/execution/orders";
 
-import { manualSymbol } from "@/lib/portfolio/valuation-snapshots";
+import { manualHoldingId } from "@/lib/portfolio/manual-symbol";
 import { ACCOUNT_EXPORT_FORMAT, ACCOUNT_EXPORT_VERSION, type AccountExport, type ExportedValuationPosition } from "./export-data";
 
 type Database = typeof db;
@@ -82,12 +82,12 @@ export async function buildAccountExport(userId: string, database: Database = db
             .where(inArray(manualHoldingValues.manualHoldingId, valuedByHand.map((m) => m.id)))
             .orderBy(asc(manualHoldingValues.date));
         // A holding valued by hand is in the history under its own key: shown by its name.
-        const handNames = new Map(valuedByHand.map((m) => [manualSymbol(m.id), m.name]));
+        const handNames = new Map(valuedByHand.map((m) => [m.id, m.name]));
         const positionsOn = new Map<string, ExportedValuationPosition[]>();
         for (const p of historyPositions) {
             const key = `${p.portfolioId}|${p.date}`;
             const day = positionsOn.get(key) ?? [];
-            day.push({ symbol: handNames.get(p.symbol) ?? p.symbol, quantity: Number(p.quantity), costBasis: p.costBasis, close: p.close, closeDate: p.closeDate, marketValue: p.marketValue });
+            day.push({ symbol: handNames.get(manualHoldingId(p.symbol) ?? "") ?? p.symbol, quantity: Number(p.quantity), costBasis: p.costBasis, close: p.close, closeDate: p.closeDate, marketValue: p.marketValue });
             positionsOn.set(key, day);
         }
 

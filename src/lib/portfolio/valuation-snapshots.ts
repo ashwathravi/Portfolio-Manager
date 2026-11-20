@@ -34,7 +34,7 @@
 import { and, asc, desc, eq, gte, inArray, lt, lte, sql } from "drizzle-orm";
 
 import { db } from "@/db";
-import { manualSymbol } from "./manual-symbol";
+import { manualSymbol, manualUnitSymbol } from "./manual-symbol";
 import { holdings, jobRuns, manualHoldingValues, manualHoldings, portfolios, portfolioSnapshotPositions, portfolioSnapshots, priceBars } from "@/db/schema";
 import { splitTakesEffectAt } from "@/lib/portfolio/split-adjustments";
 import { previousTradingDay } from "@/lib/markets/market-hours";
@@ -150,14 +150,15 @@ export interface ManualSnapshotHolding {
     history?: ReadonlyArray<{ date: string; value: number; quantity: number | null }>;
 }
 
-export { isManualSymbol, MANUAL_SYMBOL_PREFIX, manualSymbol } from "./manual-symbol";
+export { isManualSymbol, manualHoldingId, MANUAL_SYMBOL_PREFIX, manualSymbol, manualUnitSymbol } from "./manual-symbol";
 
 /**
  * A hand-valued holding at `date`'s close: the value recorded for the
  * latest day on or before it (a value stands until the next one), or, if
  * none is that old, the earliest recorded. Its "close" is the value of one
- * unit when the units are known then and now (so units bought later aren't
- * a gain), otherwise the whole value, as one unit.
+ * unit when that value's units are known (so units bought later aren't a
+ * gain), otherwise the whole value, as one unit. The two scales go by
+ * different symbols (manualUnitSymbol), so no return is taken across them.
  */
 export function manualPositionOn(holding: ManualSnapshotHolding, date: string): SnapshotPosition {
     const history = holding.history ?? [];
@@ -168,13 +169,13 @@ export function manualPositionOn(holding: ManualSnapshotHolding, date: string): 
     }
     const value = found ? found.value : holding.value;
     const thenQuantity = found ? found.quantity : holding.quantity;
-    const byUnit = holding.quantity != null && holding.quantity > 0 && thenQuantity != null && thenQuantity > 0;
-    const quantity = byUnit ? holding.quantity! : 1;
-    const close = byUnit ? value / thenQuantity! : value;
+    const byUnit = thenQuantity != null && thenQuantity > 0;
+    const quantity = byUnit ? thenQuantity : 1;
+    const close = byUnit ? value / thenQuantity : value;
     const marketValue = Number.isFinite(close) && close >= 0 ? quantity * close : 0;
     const cost = holding.costBasis ?? marketValue;
     return {
-        symbol: manualSymbol(holding.id),
+        symbol: byUnit ? manualUnitSymbol(holding.id) : manualSymbol(holding.id),
         quantity,
         costBasis: Number.isFinite(cost) ? cost : 0,
         close,

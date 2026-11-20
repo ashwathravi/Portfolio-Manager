@@ -163,11 +163,13 @@ describe("valueSnapshot", () => {
             history: [{ date: THU, value: 1_000, quantity: 10 }, { date: FRI, value: 2_200, quantity: 20 }],
         };
         const thursday = manualPositionOn(fund, THU);
-        assert.deepEqual([thursday.quantity, thursday.close, thursday.marketValue, thursday.costBasis], [20, 100, 2_000, 2_000]);
+        assert.deepEqual([thursday.symbol, thursday.quantity, thursday.close, thursday.marketValue, thursday.costBasis], [`${manualSymbol(FUND)}/unit`, 10, 100, 1_000, 1_000]);
         assert.deepEqual([manualPositionOn(fund, FRI).close, manualPositionOn(fund, FRI).marketValue], [110, 2_200]);
-        // Units not known then: the whole value, as one unit.
+        // Units not known then: the whole value, as one unit, under the
+        // holding's own key (a whole value doesn't compare with a unit's).
         const loose = { ...fund, history: [{ date: THU, value: 1_000, quantity: null }] };
-        assert.deepEqual([manualPositionOn(loose, FRI).quantity, manualPositionOn(loose, FRI).close], [1, 1_000]);
+        const whole = manualPositionOn(loose, FRI);
+        assert.deepEqual([whole.symbol, whole.quantity, whole.close, whole.marketValue], [manualSymbol(FUND), 1, 1_000, 1_000]);
     });
 });
 

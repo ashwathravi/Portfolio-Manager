@@ -35,6 +35,17 @@ describe("risk policy / stress scenarios", () => {
         assert.ok(result.policyBreaches.some((breach) => breach.label.includes("Single-name")));
     });
 
+    test("a large holding valued by hand is never the single name after a scenario", () => {
+        const result = runStressScenario({
+            holdings: [
+                { symbol: "VTI", name: "Total market", marketValue: 100_000 },
+                { symbol: "manual:m1", name: "Target 2055 Trust", marketValue: 900_000 },
+            ],
+            scenario: findStressScenario("ai_basket_30_down"),
+        });
+        assert.ok(!result.policyBreaches.some((breach) => breach.label.includes("Single-name")));
+    });
+
     test("applies theme shocks by fallback theme weights", () => {
         const result = runStressScenario({
             holdings: HOLDINGS,
