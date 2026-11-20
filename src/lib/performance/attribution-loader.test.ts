@@ -112,6 +112,27 @@ describe("buildAttributionHistory", () => {
         assert.equal(first.technology.weight, 0);
     });
 
+    test("a hand-valued holding is in the other segments, its return read from the snapshots", async () => {
+        const FUND = "manual:5f0c2b1e-8d4a-4e6b-9c3d-1a2b3c4d5e6f";
+        const { calls, loadCloses, loadProfiles } = loaders();
+        const profiled: string[][] = [];
+        const history = await buildAttributionHistory({
+            accounts: [{ id: "k401", name: "401(k)" }],
+            snapshots: [{ portfolioId: "k401", date: MON, totalValue: 1_000 }, { portfolioId: "k401", date: TUE, totalValue: 1_100 }],
+            positions: [
+                { portfolioId: "k401", date: MON, symbol: FUND, marketValue: 1_000, close: 1_000 },
+                { portfolioId: "k401", date: TUE, symbol: FUND, marketValue: 1_100, close: 1_100 },
+            ],
+        }, null, loadCloses, async (symbols) => {
+            profiled.push([...symbols]);
+            return loadProfiles();
+        });
+        const other = history.steps[0].sector.find((s) => s.key === "other");
+        assert.ok(other && Math.abs(other.weight - 1) < 1e-12 && Math.abs(other.return - 0.1) < 1e-12);
+        assert.ok(!calls[0].symbols.includes(FUND));
+        assert.deepEqual(profiled, [[]]);
+    });
+
     test("without enough sector ETF prices there's no benchmark, and no step has one", async () => {
         const { loadCloses, loadProfiles } = loaders(MIN_STYLE_RETURNS - 10);
         const history = await buildAttributionHistory(rows, null, loadCloses, loadProfiles);

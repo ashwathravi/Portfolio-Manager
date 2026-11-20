@@ -17,6 +17,8 @@ import {
     snapshotDays,
     splitReadiness,
     valueSnapshot,
+    manualPositionOn,
+    manualSymbol,
     windowStart,
     type PositionInput,
     type SnapshotStore,
@@ -27,6 +29,7 @@ import {
 // Thursday 15 and Friday 16 October 2026 close at 4:00 PM EDT (20:00Z).
 const THU = "2026-10-15";
 const FRI = "2026-10-16";
+const FUND = "5f0c2b1e-8d4a-4e6b-9c3d-1a2b3c4d5e6f";
 
 function closes(entries: Record<string, Array<[string, number]>>): Map<string, StoredClose[]> {
     return new Map(Object.entries(entries).map(([symbol, bars]) => [symbol, bars.map(([date, close]) => ({ date, close }))]));
@@ -131,12 +134,42 @@ describe("valueSnapshot", () => {
 
     test("regression: holdings valued by hand count at their value and cost, priced or not by market data", () => {
         // A 401(k) fund with no ticker was left out of the account's history.
-        const snapshot = valueSnapshot(FRI, [{ symbol: "AAPL", quantity: 1, avgCost: 150 }], closes({ AAPL: [[FRI, 200]] }), 100, { value: 10_000, cost: 8_000 });
+        const snapshot = valueSnapshot(FRI, [{ symbol: "AAPL", quantity: 1, avgCost: 150 }], closes({ AAPL: [[FRI, 200]] }), 100, [
+            { id: FUND, value: 10_000, quantity: null, costBasis: 8_000 },
+        ]);
         assert.deepEqual(
             [snapshot.holdingsValue, snapshot.cash, snapshot.totalValue, snapshot.costBasis, snapshot.unpriced],
             [10_200, 100, 10_300, 8_150, []],
         );
-        assert.equal(valueSnapshot(FRI, [], new Map(), 0, { value: 5_000, cost: 5_000 }).totalValue, 5_000);
+        assert.deepEqual(snapshot.positions.map((p) => [p.symbol, p.marketValue, p.closeDate]), [["AAPL", 200, FRI], [manualSymbol(FUND), 10_000, FRI]]);
+        assert.equal(valueSnapshot(FRI, [], new Map(), 0, [{ id: FUND, value: 5_000, quantity: null, costBasis: null }]).totalValue, 5_000);
+    });
+
+    test("regression: a missed night is valued at that night's value, not today's", () => {
+        // Codex on PR #216: a recovery run wrote Friday's fund value into Thursday.
+        const fund = {
+            id: FUND, value: 1_100, quantity: null, costBasis: 900,
+            history: [{ date: "2026-10-14", value: 1_000, quantity: null }, { date: FRI, value: 1_100, quantity: null }],
+        };
+        assert.equal(valueSnapshot(THU, [], new Map(), 0, [fund]).totalValue, 1_000);
+        assert.equal(valueSnapshot(FRI, [], new Map(), 0, [fund]).totalValue, 1_100);
+        // Before the first value recorded, the earliest stands.
+        assert.equal(valueSnapshot("2026-10-13", [], new Map(), 0, [fund]).totalValue, 1_000);
+    });
+
+    test("with units known, a past value is per unit, so units added later aren't counted as a gain", () => {
+        const fund = {
+            id: FUND, value: 2_200, quantity: 20, costBasis: null,
+            history: [{ date: THU, value: 1_000, quantity: 10 }, { date: FRI, value: 2_200, quantity: 20 }],
+        };
+        const thursday = manualPositionOn(fund, THU);
+        assert.deepEqual([thursday.symbol, thursday.quantity, thursday.close, thursday.marketValue, thursday.costBasis], [`${manualSymbol(FUND)}/unit`, 10, 100, 1_000, 1_000]);
+        assert.deepEqual([manualPositionOn(fund, FRI).close, manualPositionOn(fund, FRI).marketValue], [110, 2_200]);
+        // Units not known then: the whole value, as one unit, under the
+        // holding's own key (a whole value doesn't compare with a unit's).
+        const loose = { ...fund, history: [{ date: THU, value: 1_000, quantity: null }] };
+        const whole = manualPositionOn(loose, FRI);
+        assert.deepEqual([whole.symbol, whole.quantity, whole.close, whole.marketValue], [manualSymbol(FUND), 1, 1_000, 1_000]);
     });
 });
 
@@ -246,6 +279,27 @@ describe("recordValuationSnapshots", () => {
         ]);
         // One read of closes, from a week before the earliest day.
         assert.deepEqual(closeQueries, [[["AAPL"], "2026-10-08", FRI]]);
+    });
+
+    test("regression: backfilled days of a hand-valued holding read its value recorded for each day", async () => {
+        const { store, writes } = fakeStore({
+            states: [{ portfolioId: "p1", cash: 0, lastChange: "2026-10-15T15:00:00Z" }],
+        });
+        const portfolios = store.portfolios;
+        // Read with the portfolio's state, in one transaction (Codex on PR #217).
+        store.portfolios = async () => (await portfolios()).map((p) => ({
+            ...p,
+            manual: [{
+                id: FUND, value: 1_100, quantity: null, costBasis: null,
+                history: [{ date: "2026-10-09", value: 1_000, quantity: null }, { date: FRI, value: 1_100, quantity: null }],
+            }],
+        }));
+
+        const detail = await recordValuationSnapshots({ store });
+
+        assert.deepEqual(writes.map((write) => write.snapshots.map((snapshot) => [snapshot.date, snapshot.totalValue])), [[[THU, 1_000], [FRI, 1_100]]]);
+        // Valued for the session itself: complete, not provisional.
+        assert.ok("provisional" in detail && detail.provisional === 0);
     });
 
     test("recomputes a partial snapshot, and leaves complete ones alone", async () => {

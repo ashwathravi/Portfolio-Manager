@@ -141,6 +141,7 @@ async function HoldingsContent({ rowView }: { rowView: HoldingsRowView }) {
                 // The LEAPS ledger measures against what Today and Trade do:
                 // holdings, cash and options together.
                 cashTotal={accounts.reduce((sum, account) => sum + (account.cashBalance || 0), 0)}
+                handValuedTotal={manual.reduce((sum, m) => sum + m.value, 0)}
                 optionPositions={optionPositions}
                 optionTheses={optionTheses}
                 // Decided here, on the server: the empty state offers to

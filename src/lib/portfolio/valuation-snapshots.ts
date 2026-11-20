@@ -31,11 +31,11 @@
  * hold (importHoldings does).
  */
 
-import { and, asc, desc, eq, gte, inArray, lte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, lt, lte, sql } from "drizzle-orm";
 
 import { db } from "@/db";
-import { holdings, jobRuns, manualHoldings, portfolios, portfolioSnapshotPositions, portfolioSnapshots, priceBars } from "@/db/schema";
-import { manualTotalsByPortfolio } from "@/lib/portfolio/manual-holdings";
+import { manualSymbol, manualUnitSymbol } from "./manual-symbol";
+import { holdings, jobRuns, manualHoldingValues, manualHoldings, portfolios, portfolioSnapshotPositions, portfolioSnapshots, priceBars } from "@/db/schema";
 import { splitTakesEffectAt } from "@/lib/portfolio/split-adjustments";
 import { previousTradingDay } from "@/lib/markets/market-hours";
 import { getLatestBarDate } from "@/lib/markets/price-store";
@@ -139,19 +139,67 @@ export function snapshotDays({
     return days.reverse();
 }
 
+/** A holding valued by hand (manual_holdings), with the values recorded for it. */
+export interface ManualSnapshotHolding {
+    id: string;
+    /** As it stands now. */
+    value: number;
+    quantity: number | null;
+    costBasis: number | null;
+    /** Values recorded for it (manual_holding_values), oldest first; none: its value now on every day. */
+    history?: ReadonlyArray<{ date: string; value: number; quantity: number | null }>;
+}
+
+export { isManualSymbol, manualHoldingId, MANUAL_SYMBOL_PREFIX, manualSymbol, manualUnitSymbol } from "./manual-symbol";
+
+/**
+ * A hand-valued holding at `date`'s close: the value recorded for the
+ * latest day on or before it (a value stands until the next one), or, if
+ * none is that old, the earliest recorded. Its "close" is the value of one
+ * unit when that value's units are known (so units bought later aren't a
+ * gain), otherwise the whole value, as one unit. The two scales go by
+ * different symbols (manualUnitSymbol), so no return is taken across them.
+ */
+export function manualPositionOn(holding: ManualSnapshotHolding, date: string): SnapshotPosition {
+    const history = holding.history ?? [];
+    let found = history[0];
+    for (const row of history) {
+        if (row.date > date) break;
+        found = row;
+    }
+    const value = found ? found.value : holding.value;
+    const thenQuantity = found ? found.quantity : holding.quantity;
+    const byUnit = thenQuantity != null && thenQuantity > 0;
+    const quantity = byUnit ? thenQuantity : 1;
+    const close = byUnit ? value / thenQuantity : value;
+    const marketValue = Number.isFinite(close) && close >= 0 ? quantity * close : 0;
+    const cost = holding.costBasis ?? marketValue;
+    return {
+        symbol: byUnit ? manualUnitSymbol(holding.id) : manualSymbol(holding.id),
+        quantity,
+        costBasis: Number.isFinite(cost) ? cost : 0,
+        close,
+        // Its value for this session, whatever day it was given as of: the
+        // snapshot is complete (buildCompleteDaysQuery) and not recomputed.
+        closeDate: date,
+        marketValue,
+    };
+}
+
 /**
  * A portfolio's value at `date`'s close. Holdings of one symbol are combined;
  * zero-quantity rows are ignored. Each symbol is valued at its last close on
  * or before `date`, if that is at most STALE_CLOSE_DAYS old; otherwise it is
- * unpriced (its cost basis still counts, its value doesn't).
+ * unpriced (its cost basis still counts, its value doesn't). A holding
+ * valued by hand is a position of its own at its value then
+ * (manualPositionOn), never unpriced.
  */
 export function valueSnapshot(
     date: string,
     positions: readonly PositionInput[],
     closes: ReadonlyMap<string, readonly StoredClose[]>,
     cash: number,
-    /** Holdings valued by hand (manual_holdings): their value and cost, counted as they stand. */
-    manual: { value: number; cost: number } = { value: 0, cost: 0 },
+    manual: readonly ManualSnapshotHolding[] = [],
 ): SnapshotValue {
     const bySymbol = new Map<string, { quantity: number; costBasis: number }>();
     for (const position of positions) {
@@ -188,8 +236,12 @@ export function valueSnapshot(
             marketValue,
         });
     }
-    if (Number.isFinite(manual.value) && manual.value > 0) holdingsValue += manual.value;
-    if (Number.isFinite(manual.cost) && manual.cost > 0) costBasis += manual.cost;
+    for (const holding of [...manual].sort((a, b) => a.id.localeCompare(b.id))) {
+        const row = manualPositionOn(holding, date);
+        holdingsValue += row.marketValue ?? 0;
+        costBasis += row.costBasis;
+        rows.push(row);
+    }
     const safeCash = Number.isFinite(cash) ? cash : 0;
     return { date, holdingsValue, cash: safeCash, totalValue: holdingsValue + safeCash, costBasis, positions: rows, unpriced };
 }
@@ -233,8 +285,37 @@ export function buildPositionsQuery(database: Pick<Database, "select"> = db) {
 /** Every holding valued by hand (the job values all portfolios). */
 export function buildManualValuesQuery(database: Pick<Database, "select"> = db) {
     return database
-        .select({ portfolioId: manualHoldings.portfolioId, value: manualHoldings.value, costBasis: manualHoldings.costBasis })
+        .select({
+            id: manualHoldings.id,
+            portfolioId: manualHoldings.portfolioId,
+            value: manualHoldings.value,
+            quantity: manualHoldings.quantity,
+            costBasis: manualHoldings.costBasis,
+        })
         .from(manualHoldings);
+}
+
+/** The values recorded for `ids` from `from` on. */
+export function buildManualHistoryQuery(ids: string[], from: string, database: Pick<Database, "select"> = db) {
+    return database
+        .select({ id: manualHoldingValues.manualHoldingId, date: manualHoldingValues.date, value: manualHoldingValues.value, quantity: manualHoldingValues.quantity })
+        .from(manualHoldingValues)
+        .where(and(inArray(manualHoldingValues.manualHoldingId, ids), gte(manualHoldingValues.date, from)))
+        .orderBy(asc(manualHoldingValues.manualHoldingId), asc(manualHoldingValues.date));
+}
+
+/** For each of `ids`, the last value recorded before `from`: the one that stood on `from`. */
+export function buildManualValueBeforeQuery(ids: string[], from: string, database: Pick<Database, "selectDistinctOn"> = db) {
+    return database
+        .selectDistinctOn([manualHoldingValues.manualHoldingId], {
+            id: manualHoldingValues.manualHoldingId,
+            date: manualHoldingValues.date,
+            value: manualHoldingValues.value,
+            quantity: manualHoldingValues.quantity,
+        })
+        .from(manualHoldingValues)
+        .where(and(inArray(manualHoldingValues.manualHoldingId, ids), lt(manualHoldingValues.date, from)))
+        .orderBy(asc(manualHoldingValues.manualHoldingId), desc(manualHoldingValues.date));
 }
 
 export function buildClosesBetweenQuery(symbols: string[], from: string, to: string, database: Pick<Database, "select"> = db) {
@@ -427,14 +508,53 @@ export interface SnapshotStore {
     latestCloseDate(): Promise<string | null>;
     /** The latest successful price run's `holdingSplits` detail, or undefined. */
     latestHoldingSplits(): Promise<unknown>;
-    /** Every portfolio with its cash, last change and positions, read as one consistent snapshot. */
-    portfolios(): Promise<Array<{ portfolioId: string; cash: number; lastChange: Date; positions: PositionInput[]; manual?: { value: number; cost: number } }>>;
+    /**
+     * Every portfolio with its cash, last change and positions, and its
+     * holdings valued by hand with the values recorded for them, read as one
+     * consistent snapshot.
+     */
+    portfolios(): Promise<Array<{ portfolioId: string; cash: number; lastChange: Date; positions: PositionInput[]; manual?: ManualSnapshotHolding[] }>>;
     closes(symbols: string[], from: string, to: string): Promise<Map<string, StoredClose[]>>;
     completeDays(portfolioIds: string[], from: string): Promise<Map<string, Set<string>>>;
     write(portfolioId: string, snapshots: readonly SnapshotValue[]): Promise<void>;
 }
 
-export function createSnapshotStore(database: Database = db): SnapshotStore {
+/**
+ * The earliest day a run can value: MAX_SNAPSHOT_DAYS sessions back from
+ * the newest close is well within this many calendar days of today.
+ */
+const MANUAL_HISTORY_CALENDAR_DAYS = 400;
+
+function manualHistoryFrom(now: Date = new Date()): string {
+    return minusCalendarDays(now.toISOString().slice(0, 10), MANUAL_HISTORY_CALENDAR_DAYS);
+}
+
+/** The values recorded for holdings valued by hand from `from` on, and the one standing on `from`, oldest first per holding. */
+export async function readManualHistory(
+    ids: string[],
+    from: string,
+    database: Pick<Database, "select" | "selectDistinctOn"> = db,
+): Promise<Map<string, NonNullable<ManualSnapshotHolding["history"]>>> {
+    const byHolding = new Map<string, Array<{ date: string; value: number; quantity: number | null }>>();
+    if (ids.length === 0) return byHolding;
+    const rows = [...await buildManualValueBeforeQuery(ids, from, database), ...await buildManualHistoryQuery(ids, from, database)];
+    for (const row of rows) {
+        const list = byHolding.get(row.id) ?? [];
+        list.push({ date: row.date, value: Number(row.value), quantity: numberOrNull(row.quantity) });
+        byHolding.set(row.id, list);
+    }
+    for (const list of byHolding.values()) list.sort((a, b) => a.date.localeCompare(b.date));
+    return byHolding;
+}
+
+function numberOrNull(value: string | null): number | null {
+    if (value == null) return null;
+    const n = Number(value);
+    return Number.isFinite(n) ? n : null;
+}
+
+/** `now` sets how far back the hand-valued holdings' values are read (tests). */
+export function createSnapshotStore(database: Database = db, { now }: { now?: () => Date } = {}): SnapshotStore {
     return {
         latestCloseDate: () => getLatestBarDate(database),
         async latestHoldingSplits() {
@@ -451,11 +571,16 @@ export function createSnapshotStore(database: Database = db): SnapshotStore {
                 list.push({ symbol: row.symbol, quantity: Number(row.quantity), avgCost: Number(row.avgCost), updatedAt: row.updatedAt });
                 byPortfolio.set(row.portfolioId, list);
             }
-            const manual = manualTotalsByPortfolio((await buildManualValuesQuery(tx)).map((row) => ({
-                portfolioId: row.portfolioId,
-                value: Number(row.value),
-                costBasis: row.costBasis == null ? null : Number(row.costBasis),
-            })));
+            const manual = new Map<string, ManualSnapshotHolding[]>();
+            const manualRows = await buildManualValuesQuery(tx);
+            // In this transaction too: a value recorded after the session
+            // closed comes with the change that keeps it out of that session.
+            const history = await readManualHistory(manualRows.map((row) => row.id), manualHistoryFrom(now?.() ?? new Date()), tx);
+            for (const row of manualRows) {
+                const list = manual.get(row.portfolioId) ?? [];
+                list.push({ id: row.id, value: Number(row.value), quantity: numberOrNull(row.quantity), costBasis: numberOrNull(row.costBasis), history: history.get(row.id) });
+                manual.set(row.portfolioId, list);
+            }
             return states.map((state) => ({
                 portfolioId: state.portfolioId,
                 cash: state.cash ?? 0,

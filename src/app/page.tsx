@@ -16,6 +16,7 @@ import { TodayTheses } from '@/components/today/TodayTheses';
 import { TodayEquityCurve } from '@/components/today/TodayEquityCurve';
 import { evaluateRiskPolicy } from '@/lib/risk-policy';
 import { buildPolicyPortfolio, valueHolding } from '@/lib/risk-policy/portfolio';
+import { manualSymbol } from '@/lib/portfolio/manual-symbol';
 import { loadPolicyTheses, loadUserRiskPolicy } from '@/lib/risk-policy/server';
 import type { SellDisciplineThesis } from '@/lib/risk-policy/sell-discipline';
 import { loadDashboardPortfolios } from '@/lib/dashboard-portfolios';
@@ -133,11 +134,21 @@ export default async function Today() {
     .filter((h) => h.symbol)
     .map(({ symbol, quantity, currentPrice, marketValue }) => ({ symbol, quantity, currentPrice, marketValue }));
 
-  const allocationHoldings: AllocationHolding[] = allHoldings.map((h) => ({
-    symbol: h.symbol,
-    portfolio: h.portfolio,
-    marketValue: h.marketValue,
-  }));
+  const allocationHoldings: AllocationHolding[] = [
+    ...allHoldings.map((h) => ({
+      symbol: h.symbol,
+      portfolio: h.portfolio,
+      marketValue: h.marketValue,
+    })),
+    // Valued by hand: core and broad, as the policy checks read them.
+    ...allPortfolios.flatMap((p) => (p.manualHoldings ?? []).map((m) => ({
+      symbol: manualSymbol(m.id),
+      portfolio: p.name,
+      policyBucket: 'core' as const,
+      themeWeights: [{ theme: 'broad_core_index' as const, weight: 1, source: 'fallback' as const }],
+      marketValue: Number(m.value) || 0,
+    }))),
+  ];
   const cashByPortfolio = Object.fromEntries(allPortfolios.map((p) => [p.name, p.cashBalance || 0]));
   const topHoldingsRows: TopHoldingsRow[] = allHoldings.map((h) => ({
     id: h.id,
@@ -162,7 +173,7 @@ export default async function Today() {
   // Measured as of now: the trading-activity window ends today, not at the last trade.
   const riskPolicySummary = evaluateRiskPolicy(policyPortfolio, riskPolicy, { asOf: new Date() });
   // Stocks or options: something for the policy to check.
-  const hasPolicyPositions = allHoldings.length > 0 || policyPortfolio.options.length > 0;
+  const hasPolicyPositions = allHoldings.length > 0 || manualHoldings.length > 0 || policyPortfolio.options.length > 0;
 
   return (
     <div className="pm-dashboard-stack p-6">
@@ -192,7 +203,7 @@ export default async function Today() {
         <TodayEquityCurve userId={userId} />
       </Suspense>
 
-      {allHoldings.length > 0 && (
+      {(allHoldings.length > 0 || manualHoldings.length > 0) && (
         <div className="pm-grid-2-63">
           <TopHoldingsCard rows={topHoldingsRows} limit={6} />
           <AllocationCard holdings={allocationHoldings} cashByPortfolio={cashByPortfolio} />

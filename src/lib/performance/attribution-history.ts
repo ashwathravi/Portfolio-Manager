@@ -24,7 +24,7 @@
  * segments' contributions, linked the same way, to the portfolio's return.
  */
 
-import { closeOn } from "./holdings-returns";
+import { closeOn, stepCloses } from "./holdings-returns";
 import {
     ASSET_CLASS_SEGMENTS,
     SECTOR_ETFS,
@@ -219,9 +219,8 @@ export function stepSegments(
     for (const snapshot of snapshots) {
         for (const { symbol, marketValue } of snapshot.positions) {
             if (marketValue === null || !Number.isFinite(marketValue) || marketValue === 0) continue;
-            const from = closeOn(closes.get(symbol), snapshot.date);
-            const at = closeOn(closes.get(symbol), to);
-            const g = from !== null && at !== null ? marketValue * (at / from - 1) : 0;
+            const step = stepCloses(closes, symbol, snapshot.date, to);
+            const g = step !== null ? marketValue * (step.at / step.from - 1) : 0;
             const segments = segmentsOf(symbol);
             for (const basis of ["sector", "assetClass"] as const) {
                 const key = segments[basis];

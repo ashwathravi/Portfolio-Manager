@@ -10,6 +10,7 @@ import {
 } from "./themes";
 import { employerStockName } from "./de-risking";
 import { sectorFor, type Sector } from "@/lib/holdings/sector";
+import { isManualSymbol } from "@/lib/portfolio/manual-symbol";
 
 export type StressTargetKind = "ticker" | "theme" | "bucket" | "sector" | "portfolio";
 
@@ -344,7 +345,11 @@ function buildPostScenarioBreaches(
         marketValue: Math.max(0, holding.marketValue + (impactBySymbol.get(holding.symbol) ?? 0)),
     }));
     const breaches: StressPolicyBreach[] = [];
-    const top = [...stressedHoldings].sort((a, b) => b.marketValue - a.marketValue)[0];
+    // A holding valued by hand isn't one name (a fund, a property, a plan);
+    // it counts toward the themes below but is never the single name.
+    const top = stressedHoldings
+        .filter((holding) => !isManualSymbol(holding.symbol))
+        .sort((a, b) => b.marketValue - a.marketValue)[0];
     if (top) {
         const pct = (top.marketValue / projectedPortfolioValueUsd) * 100;
         if (pct > 25) {

@@ -23,6 +23,7 @@
  */
 
 import { previousTradingDay } from "@/lib/markets/market-hours";
+import { isManualSymbol, manualHoldingId, manualSymbol, manualUnitSymbol } from "@/lib/portfolio/manual-symbol";
 import { STALE_CLOSE_DAYS, type StoredClose } from "@/lib/portfolio/valuation-snapshots";
 import type { DatedValue } from "./periodSummary";
 
@@ -80,6 +81,49 @@ export function closeOn(closes: readonly StoredClose[] | undefined, date: string
 }
 
 /**
+ * A hand-valued holding's "close" (from the snapshots, manualCloses) for
+ * `date`, by closeOn's rule except that zero is a value (it was written
+ * off), and none when the holding was recorded at its other scale since
+ * (a whole value and a value per unit don't compare).
+ */
+export function manualCloseOn(
+    closes: ReadonlyMap<string, readonly StoredClose[]>,
+    symbol: string,
+    date: string,
+): number | null {
+    let found: StoredClose | undefined;
+    for (const bar of closes.get(symbol) ?? []) {
+        if (bar.date > date) break;
+        found = bar;
+    }
+    if (!found || !Number.isFinite(found.close) || found.close < 0) return null;
+    if (found.date < minusCalendarDays(date, STALE_CLOSE_DAYS)) return null;
+    const id = manualHoldingId(symbol);
+    const other = id === null ? null : symbol === manualSymbol(id) ? manualUnitSymbol(id) : manualSymbol(id);
+    const since = found.date;
+    if (other && (closes.get(other) ?? []).some((bar) => bar.date > since && bar.date <= date)) return null;
+    return found.close;
+}
+
+/**
+ * A position's closes at both ends of a step from `from` to `to`, by
+ * closeOn, or manualCloseOn for a hand-valued holding (which may end at
+ * zero); null when either is missing or the start isn't above zero.
+ */
+export function stepCloses(
+    closes: ReadonlyMap<string, readonly StoredClose[]>,
+    symbol: string,
+    from: string,
+    to: string,
+): { from: number; at: number } | null {
+    const manual = isManualSymbol(symbol);
+    const a = manual ? manualCloseOn(closes, symbol, from) : closeOn(closes.get(symbol), from);
+    const z = manual ? manualCloseOn(closes, symbol, to) : closeOn(closes.get(symbol), to);
+    if (a === null || z === null || !(a > 0)) return null;
+    return { from: a, at: z };
+}
+
+/**
  * Trading sessions after `from` up to and including `to`; outside the
  * market calendar's years, weekdays.
  */
@@ -124,10 +168,9 @@ export function stepReturn(
                 continue;
             }
             if (marketValue === 0) continue;
-            const from = closeOn(closes.get(symbol), snapshot.date);
-            const at = closeOn(closes.get(symbol), to);
-            if (from === null || at === null) unpriced.add(symbol);
-            else gain += marketValue * (at / from - 1);
+            const step = stepCloses(closes, symbol, snapshot.date, to);
+            if (step === null) unpriced.add(symbol);
+            else gain += marketValue * (step.at / step.from - 1);
         }
     }
     const listed = [...unpriced].sort();

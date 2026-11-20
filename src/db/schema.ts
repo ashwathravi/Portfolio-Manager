@@ -428,6 +428,32 @@ export const manualHoldings = pgTable("manual_holdings", {
 })).enableRLS();
 
 /**
+ * A holding valued by hand, as it stood on each day it was valued: one row
+ * per holding per as-of date, written with every value saved (the user's,
+ * or a Plaid sync's). The nightly valuation reads a past session's value
+ * from here, so a missed night is filled in with that night's value
+ * rather than today's, and Returns can count a change in it as a gain.
+ * The user's own value stands from its as-of date on: saving it removes
+ * later rows (src/lib/portfolio/manual-holdings.ts).
+ */
+export const manualHoldingValues = pgTable("manual_holding_values", {
+    manualHoldingId: uuid("manual_holding_id")
+        .notNull()
+        .references(() => manualHoldings.id, { onDelete: "cascade" }),
+    date: date("date", { mode: "string" }).notNull(),
+    value: numeric("value").notNull(),
+    // Units held then, when the holding has them.
+    quantity: numeric("quantity"),
+    recordedAt: timestamp("recorded_at").defaultNow().notNull(),
+}, (table) => ({
+    pk: primaryKey({ columns: [table.manualHoldingId, table.date] }),
+    valueCheck: check("manual_holding_values_value_check", sql`${table.value} >= 0`),
+    quantityCheck: check("manual_holding_values_quantity_check", sql`${table.quantity} is null or ${table.quantity} > 0`),
+    serverOnlyNoClientAccess: serverOnlyNoClientAccessPolicy(),
+    appRuntimeAccess: appRuntimeAccessPolicy(),
+})).enableRLS();
+
+/**
  * The newest end-of-day close of each contract anyone holds (launch item
  * i63), from Massive where its plan includes options. Shared, like
  * price_bars: a contract costs one call a night however many hold it, and

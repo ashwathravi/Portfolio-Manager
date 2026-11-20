@@ -2,7 +2,7 @@ import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 
 import type { StoredClose } from "@/lib/portfolio/valuation-snapshots";
-import { benchmarkSeries, closeOn, returnSeries, sessionsBetween, stepReturn, type AccountSnapshot } from "./holdings-returns";
+import { benchmarkSeries, closeOn, manualCloseOn, returnSeries, sessionsBetween, stepReturn, type AccountSnapshot } from "./holdings-returns";
 
 function closes(entries: Record<string, Array<[string, number]>>): Map<string, StoredClose[]> {
     return new Map(Object.entries(entries).map(([symbol, bars]) => [symbol, bars.map(([date, close]) => ({ date, close }))]));
@@ -72,6 +72,34 @@ describe("stepReturn", () => {
 
     test("nothing invested has no return", () => {
         assert.equal(stepReturn([snapshot("a", MON, 0, {})], TUE, bars).stepReturn, null);
+    });
+
+    test("a hand-valued holding written down to zero is a full loss, not unpriced", () => {
+        const FUND = "manual:f1";
+        const step = stepReturn([snapshot("a", MON, 0, { [FUND]: 5000 })], TUE, closes({ [FUND]: [[MON, 5000], [TUE, 0]] }));
+        near(step.stepReturn, -1);
+        assert.deepEqual(step.unpriced, []);
+    });
+
+    test("a hand-valued holding whose close changed scale is unpriced, not a gain", () => {
+        // Monday's value was the whole holding; Tuesday's is per unit.
+        const series = closes({ "manual:f1": [[MON, 5000]], "manual:f1/unit": [[TUE, 50]] });
+        const step = stepReturn([snapshot("a", MON, 1000, { "manual:f1": 5000 })], TUE, series);
+        near(step.stepReturn, 0);
+        assert.deepEqual(step.unpriced, ["manual:f1"]);
+        // Without a change of scale its last value stands.
+        assert.deepEqual(stepReturn([snapshot("a", MON, 0, { "manual:f1": 5000 })], TUE, closes({ "manual:f1": [[MON, 5000]] })).unpriced, []);
+    });
+});
+
+describe("manualCloseOn", () => {
+    test("takes zero as a value, and none across a change of scale", () => {
+        const series = closes({ "manual:f1": [[MON, 5000], [WED, 0]], "manual:f1/unit": [[THU, 40]] });
+        assert.equal(manualCloseOn(series, "manual:f1", TUE), 5000);
+        assert.equal(manualCloseOn(series, "manual:f1", WED), 0);
+        assert.equal(manualCloseOn(series, "manual:f1", THU), null);
+        assert.equal(manualCloseOn(series, "manual:f1/unit", THU), 40);
+        assert.equal(manualCloseOn(series, "manual:f1/unit", WED), null);
     });
 });
 
