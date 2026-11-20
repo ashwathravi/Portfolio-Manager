@@ -107,6 +107,26 @@ describe("buildReturnHistory", () => {
         near(history.points[2].stepReturn, 0);
     });
 
+    test("regression: a hand-valued holding's change in value is a gain, read from the snapshots, never the price store", async () => {
+        // Codex on PR #216: a fund with no ticker rising 10% read as a 0% return.
+        const FUND = "manual:5f0c2b1e-8d4a-4e6b-9c3d-1a2b3c4d5e6f";
+        const { calls, load } = fakeCloses();
+        const history = await buildReturnHistory({
+            accounts: [{ id: "k401", name: "401(k)" }],
+            snapshots: [
+                { portfolioId: "k401", date: MON, totalValue: 1_000 },
+                { portfolioId: "k401", date: TUE, totalValue: 1_100 },
+            ],
+            positions: [
+                { portfolioId: "k401", date: MON, symbol: FUND, marketValue: 1_000, close: 1_000 },
+                { portfolioId: "k401", date: TUE, symbol: FUND, marketValue: 1_100, close: 1_100 },
+            ],
+        }, null, load);
+        near(history.points[1].stepReturn, 0.1);
+        assert.deepEqual(history.points[1].unpriced, []);
+        assert.ok(!calls[0].symbols.includes(FUND));
+    });
+
     test("an account that isn't the user's shows all of theirs", async () => {
         const { load } = fakeCloses();
         const history = await buildReturnHistory(rows, "someone-elses", load);

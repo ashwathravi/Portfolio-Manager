@@ -66,6 +66,36 @@ describe("policyHoldings", () => {
     });
 });
 
+describe("holdings valued by hand", () => {
+    const FUND = { id: "m1", symbol: "manual:m1", name: "Target 2055 Trust", quantity: 1, avgCost: 80_000, currentPrice: 90_000, marketValue: 90_000, defaultBucket: "core" as const };
+    const ONE_STOCK: PolicyPortfolio = {
+        holdings: [{ id: "h1", symbol: "ACME", name: "Acme", quantity: 100, avgCost: 50, currentPrice: 100, marketValue: 10_000, defaultBucket: "active" }],
+        handValued: [FUND],
+        cashTotal: 0,
+        trades: [],
+        theses: [],
+        options: [],
+    };
+
+    test("regression: count in the portfolio's value, so one stock beside a big fund isn't all of it", () => {
+        // Codex on PR #216: $10k of employer stock beside a $90k fund with no
+        // ticker was checked as 100% of the portfolio.
+        assert.equal(policyPortfolioValue(ONE_STOCK), 100_000);
+        const summary = evaluateRiskPolicy(ONE_STOCK, POLICY);
+        const single = summary.dimensions.find((d) => d.id === "single_name_concentration")!;
+        assert.ok(Math.abs((single.currentPct ?? Number.NaN) - 10) < 1e-9, `got ${single.currentPct}`);
+    });
+
+    test("are core and broad, never a single name, and leave no policy metadata missing", () => {
+        const input = riskPolicyInput({ ...ONE_STOCK, holdings: [] }, POLICY);
+        assert.deepEqual(input.holdings, []);
+        assert.deepEqual(input.otherHoldings?.map((h) => [h.symbol, h.policyBucket, h.themeWeights?.[0]?.theme]), [["manual:m1", "core", "broad_core_index"]]);
+        const summary = evaluateRiskPolicy({ ...ONE_STOCK, holdings: [] }, POLICY);
+        assert.equal(summary.dimensions.find((d) => d.id === "single_name_concentration")!.currentPct, 0);
+        assert.equal(summary.dimensions.find((d) => d.id === "missing_policy_metadata")!.status, "inside");
+    });
+});
+
 describe("riskPolicyInput / evaluateRiskPolicy", () => {
     test("the user's policy, on their portfolio, with no example option positions", () => {
         const policy: RiskPolicySettings = {

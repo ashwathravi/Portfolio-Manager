@@ -98,6 +98,12 @@ export interface RiskPolicyDashboardOptions {
 }
 
 export interface RiskPolicyDashboardInput {
+    /**
+     * Holdings that count toward the portfolio's value, buckets, themes and
+     * stress tests but are never a single name to concentrate in (holdings
+     * valued by hand: a retirement plan's fund, a college plan).
+     */
+    otherHoldings?: readonly RiskPolicyDashboardHolding[];
     holdings: readonly RiskPolicyDashboardHolding[];
     cashTotal?: number;
     trades?: readonly RiskPolicyDashboardTrade[];
@@ -193,7 +199,8 @@ export function computeRiskPolicyDashboard(
             }],
         }]
         : [];
-    const policyHoldings = [...holdings, ...optionHoldings, ...cashHolding];
+    const otherHoldings = normalizeHoldings(input.otherHoldings ?? [], new Set());
+    const policyHoldings = [...holdings, ...otherHoldings, ...optionHoldings, ...cashHolding];
     const writtenOptionLiability = optionPositions
         .filter((position) => position.quantity < 0)
         .reduce((sum, position) => sum - optionNetValue(position), 0);

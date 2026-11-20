@@ -8,6 +8,8 @@ import postgres from 'postgres';
 import * as schema from '../../src/db/schema';
 import { AccountDeletionBlockedError, deleteAccount } from '../../src/lib/account/delete';
 import { buildAccountExport } from '../../src/lib/account/export';
+import { addManualHolding, updateManualHolding } from '../../src/lib/portfolio/manual-holdings';
+import { manualSymbol } from '../../src/lib/portfolio/manual-symbol';
 import { hasGoogleAccount } from '../../src/lib/auth/new-accounts';
 import { googleWorkspaceDomains } from '../../src/lib/auth/session-access';
 import type { PlaidFetch } from '../../src/lib/plaid/link';
@@ -186,6 +188,24 @@ describe('account deletion and export', { skip: !DATABASE_URL && 'SCRIPTS_TEST_D
         for (const leak of ['userId', 'writeSession', 'writeSeq', 'dismissed', 'cleared', 'occurrence', 'An earlier question', 'secret-cipher', 'item-u-export', 'acc-u-export', 'u-other', 'unsubscribe-secret', 'alertsSince', 'emailClaimedAt', 'emailBatch', 'alerts/batch-']) {
             assert.ok(!text.includes(leak), leak);
         }
+    });
+
+    test('a holding valued by hand is exported with its values by day, and named in the valuation history', async () => {
+        const portfolioId = await seedUser('u-export-fund');
+        const id = await addManualHolding('u-export-fund', portfolioId, {
+            name: 'Target 2055 Trust', identifier: null, quantity: null, value: 900, costBasis: 800, valueAsOf: '2026-10-22',
+        }, { database });
+        await updateManualHolding('u-export-fund', id, portfolioId, {
+            name: 'Target 2055 Trust', identifier: null, quantity: null, value: 1000, costBasis: 800, valueAsOf: '2026-10-23',
+        }, { database });
+        await sql`INSERT INTO portfolio_snapshot_positions (portfolio_id, date, symbol, quantity, cost_basis, close, close_date, market_value)
+            VALUES (${portfolioId}, '2026-10-23', ${manualSymbol(id)}, 1, 800, 1000, '2026-10-23', 1000)`;
+
+        const [account] = (await buildAccountExport('u-export-fund', database, NOW)).accounts;
+        assert.deepEqual(account.manualHoldings.map((m) => [m.name, m.value, m.values]), [
+            ['Target 2055 Trust', 1000, [{ date: '2026-10-22', value: 900, quantity: null }, { date: '2026-10-23', value: 1000, quantity: null }]],
+        ]);
+        assert.deepEqual(account.valuationHistory[0].positions.map((p) => [p.symbol, p.marketValue]), [['AAPL', 1000], ['Target 2055 Trust', 1000]]);
     });
 
     test('deleting ends the user\'s Plaid connections, then removes every row of theirs, and nobody else\'s', async () => {

@@ -205,6 +205,34 @@ test.describe('Today page', () => {
 // AR-112 — Pattern feed card
 // --------------------------------------------------------------------- //
 
+test.describe('Today › holdings valued by hand', () => {
+    test.skip(!databaseAuthEnabled, 'holdings valued by hand are saved in the database');
+
+    test('regression: a book of only hand-valued holdings gets the policy checks and allocation, never a single-name breach', async ({ context, page }) => {
+        // Codex on PR #216: the policy checks didn't see these holdings.
+        await signInAsNewUser(context, { firstSignIn: true });
+        const created = await page.request.post('/api/portfolios', { data: { name: '401(k)', cashBalance: 0 } });
+        expect(created.status()).toBe(201);
+        const { data: { id } } = await created.json() as { data: { id: string } };
+        for (const [name, value] of [['Target 2055 Trust', 90_000], ['Stable Value Fund', 10_000]] as const) {
+            const added = await page.request.post('/api/portfolio/manual-holdings', {
+                data: { portfolioId: id, holding: { name, value, valueAsOf: '2026-11-19' } },
+            });
+            expect(added.status()).toBe(201);
+        }
+
+        await gotoAppPage(page, '/');
+        await expect(page.getByTestId('today-networth')).toHaveText('$100,000.00');
+        await expect(page.getByRole('region', { name: 'Allocation' })).toBeVisible();
+        await openPolicyChecks(page);
+        const dimension = (policyId: string) => page.locator(`[data-testid="risk-policy-dimension"][data-policy-id="${policyId}"]`);
+        // No single name held: nothing to concentrate in, never a breach.
+        await expect(dimension('single_name_concentration')).not.toHaveAttribute('data-status', 'breached');
+        await expect(dimension('single_name_concentration')).toContainText('0');
+        await expect(dimension('missing_policy_metadata')).toHaveAttribute('data-status', 'inside');
+    });
+});
+
 test.describe('Pattern feed (AR-112)', () => {
     test.beforeEach(async ({ page }) => {
         // Ensure each test starts with zero snoozed patterns so the

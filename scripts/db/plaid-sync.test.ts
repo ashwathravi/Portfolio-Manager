@@ -9,6 +9,7 @@ import * as schema from '../../src/db/schema';
 import type { PlaidFetch } from '../../src/lib/plaid/link';
 import { deletePortfolio } from '../../src/lib/portfolio/manage';
 import { updateManualHolding } from '../../src/lib/portfolio/manual-holdings';
+import { createSnapshotStore } from '../../src/lib/portfolio/valuation-snapshots';
 import { MAX_PLAID_CONNECTIONS_PER_USER, PlaidTokenUnavailableError, disconnectPlaidItem, handlePlaidWebhook, listPlaidConnections } from '../../src/lib/plaid/connections';
 import { createDrizzlePlaidTokenRegistryStore, resetPlaidTokenVaultForTests, setPlaidTokenRegistryStoreForTests, storePlaidConnection } from '../../src/lib/plaid/server-token-vault';
 import { PlaidItemNotFoundError, connectedAccountFingerprints, refreshPlaidItem, selectPlaidAccounts, syncAllPlaidItems, syncPlaidItem } from '../../src/lib/plaid/sync';
@@ -311,6 +312,27 @@ describe('Plaid sync into portfolios', { skip: !DATABASE_URL && 'SCRIPTS_TEST_DA
         assert.ok(await updateManualHolding('u-fund', id, portfolio, { name: 'Stable Value Fund', identifier: null, quantity: 10, value: 150, costBasis: 100, valueAsOf: '2026-10-27' }, { database }));
         await syncPlaidItem('u-fund', 'item-fund', deps(plaidWith(13).fetchImpl, new Date('2026-10-27T22:30:00.000Z')));
         assert.deepEqual((await fund()).map((r) => [r.account, r.source, r.value]), [['acc_fx', 'manual', 150], ['acc_fy', 'plaid', 130]]);
+
+        // Each value is kept as of its day, so a missed night's valuation
+        // reads that night's value (Codex on PR #216).
+        const history = await sql<{ account: string; date: string; value: number }[]>`
+            SELECT p.external_account_id AS account, v.date::text AS date, v.value::float AS value
+            FROM manual_holding_values v JOIN manual_holdings m ON m.id = v.manual_holding_id JOIN portfolios p ON p.id = m.portfolio_id
+            WHERE m.user_id = 'u-fund' ORDER BY 1, 2`;
+        assert.deepEqual(history.map((r) => [r.account, r.date, r.value]), [
+            ['acc_fx', '2026-10-25', 110], ['acc_fx', '2026-10-26', 120], ['acc_fx', '2026-10-27', 150],
+            ['acc_fy', '2026-10-25', 110], ['acc_fy', '2026-10-26', 120], ['acc_fy', '2026-10-27', 130],
+        ]);
+        // The nightly valuation reads them back: from a day on, with the one standing on it.
+        const values = await createSnapshotStore(database).manualHistory!([id], '2026-10-26');
+        assert.deepEqual(values.get(id)?.map((r) => [r.date, r.value, r.quantity]), [['2026-10-25', 110, 10], ['2026-10-26', 120, 10], ['2026-10-27', 150, 10]]);
+        const later = await createSnapshotStore(database).manualHistory!([id], '2026-10-27');
+        assert.deepEqual(later.get(id)?.map((r) => r.date), ['2026-10-26', '2026-10-27']);
+
+        // The user's value stands from its day on: one dated earlier drops the later ones.
+        assert.ok(await updateManualHolding('u-fund', id, portfolio, { name: 'Stable Value Fund', identifier: null, quantity: 10, value: 140, costBasis: 100, valueAsOf: '2026-10-26' }, { database }));
+        const edited = await sql<{ date: string; value: number }[]>`SELECT date::text AS date, value::float AS value FROM manual_holding_values WHERE manual_holding_id = ${id} ORDER BY date`;
+        assert.deepEqual(edited.map((r) => [r.date, r.value]), [['2026-10-25', 110], ['2026-10-26', 140]]);
     });
 
     test('a sync makes the portfolio, replaces its holdings and cash, and upserts its transactions', async () => {

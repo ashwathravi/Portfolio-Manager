@@ -81,6 +81,8 @@ export interface HoldingsPageClientProps {
     importAccounts?: readonly ImportAccountOption[];
     /** Cash across the accounts: part of what the LEAPS ledger measures against. */
     cashTotal?: number;
+    /** Holdings valued by hand, across the accounts: part of it too. */
+    handValuedTotal?: number;
     /**
      * Whether Settings can connect a bank (bankLinkingAvailable, x30). Without
      * it the empty state offers to add an account by hand instead of a
@@ -96,6 +98,7 @@ export function HoldingsPageClient({
     optionTheses = [],
     importAccounts = [],
     cashTotal = 0,
+    handValuedTotal = 0,
     bankLinking,
 }: HoldingsPageClientProps) {
     const [sectorFilter, setSectorFilter] = useState<Sector | "All">("All");
@@ -228,9 +231,9 @@ export function HoldingsPageClient({
         () => optionPositions.reduce((sum, position) => sum + optionNetValue(toOptionRiskPosition(position)), 0),
         [optionPositions],
     );
-    // As policyPortfolioValue measures it for Today and Trade: holdings, cash
-    // and options together.
-    const totalPolicyValue = summary.marketValue + cashTotal + optionsNetValue;
+    // As policyPortfolioValue measures it for Today and Trade: holdings
+    // (those valued by hand too), cash and options together.
+    const totalPolicyValue = summary.marketValue + handValuedTotal + cashTotal + optionsNetValue;
 
     // ---- Filter + sort for the table ----
     const tableRows = useMemo<HoldingsTableRow[]>(() => {

@@ -20,6 +20,7 @@ import {
     emailPreferences,
     holdings,
     journalEntries,
+    manualHoldingValues,
     manualHoldings,
     optionPositions,
     orderPlans,
@@ -40,6 +41,7 @@ import {
 import { buildListFollowedFilersQuery } from "@/lib/alpha-radar/follows";
 import { orderFromRow } from "@/lib/execution/orders";
 
+import { manualSymbol } from "@/lib/portfolio/valuation-snapshots";
 import { ACCOUNT_EXPORT_FORMAT, ACCOUNT_EXPORT_VERSION, type AccountExport, type ExportedValuationPosition } from "./export-data";
 
 type Database = typeof db;
@@ -76,11 +78,16 @@ export async function buildAccountExport(userId: string, database: Database = db
             tx.select().from(orderPlans).where(and(eq(orderPlans.userId, userId), inArray(orderPlans.portfolioId, ids)))
                 .orderBy(asc(orderPlans.createdAt), asc(orderPlans.id)),
         ]);
+        const handValues = valuedByHand.length === 0 ? [] : await tx.select().from(manualHoldingValues)
+            .where(inArray(manualHoldingValues.manualHoldingId, valuedByHand.map((m) => m.id)))
+            .orderBy(asc(manualHoldingValues.date));
+        // A holding valued by hand is in the history under its own key: shown by its name.
+        const handNames = new Map(valuedByHand.map((m) => [manualSymbol(m.id), m.name]));
         const positionsOn = new Map<string, ExportedValuationPosition[]>();
         for (const p of historyPositions) {
             const key = `${p.portfolioId}|${p.date}`;
             const day = positionsOn.get(key) ?? [];
-            day.push({ symbol: p.symbol, quantity: Number(p.quantity), costBasis: p.costBasis, close: p.close, closeDate: p.closeDate, marketValue: p.marketValue });
+            day.push({ symbol: handNames.get(p.symbol) ?? p.symbol, quantity: Number(p.quantity), costBasis: p.costBasis, close: p.close, closeDate: p.closeDate, marketValue: p.marketValue });
             positionsOn.set(key, day);
         }
 
@@ -157,6 +164,8 @@ export async function buildAccountExport(userId: string, database: Database = db
                     valueAsOf: m.valueAsOf,
                     source: m.source,
                     updatedAt: m.updatedAt.toISOString(),
+                    values: handValues.filter((v) => v.manualHoldingId === m.id)
+                        .map((v) => ({ date: v.date, value: Number(v.value), quantity: num(v.quantity) })),
                 })),
                 optionPositions: options.filter((o) => o.portfolioId === account.id).map((o) => ({
                     underlying: o.underlying,

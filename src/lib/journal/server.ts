@@ -48,6 +48,8 @@ interface JournalAccount {
     name: string;
     cashBalance: number | null;
     holdings: StoredPolicyHolding[];
+    /** Holdings valued by hand: part of the portfolio's value at the value given. */
+    manualHoldings?: ReadonlyArray<{ value: string | number }>;
 }
 
 export interface TradeJournalLoaders {
@@ -99,7 +101,10 @@ export async function loadTradeJournal(
     ]);
     const { trades, leftOut } = await loadClosedTrades(rows, sources.loadCloses, now);
     const netWorth = accountRows.reduce(
-        (sum, account) => sum + (account.cashBalance || 0) + account.holdings.reduce((s, h) => s + valueHolding(h).marketValue, 0),
+        (sum, account) => sum
+            + (account.cashBalance || 0)
+            + account.holdings.reduce((s, h) => s + valueHolding(h).marketValue, 0)
+            + (account.manualHoldings ?? []).reduce((s, m) => s + (Number(m.value) || 0), 0),
         0,
     );
     return {

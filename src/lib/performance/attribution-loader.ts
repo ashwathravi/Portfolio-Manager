@@ -9,7 +9,7 @@ import { db } from "@/db";
 import { sectorFor } from "@/lib/holdings/sector";
 import { getSecurityProfiles } from "@/lib/markets/price-store";
 import type { SecurityProfile } from "@/lib/markets/security-profile";
-import { STALE_CLOSE_DAYS } from "@/lib/portfolio/valuation-snapshots";
+import { isManualSymbol, STALE_CLOSE_DAYS } from "@/lib/portfolio/valuation-snapshots";
 import {
     benchmarkSectorReturns,
     BENCHMARK_ETF,
@@ -21,7 +21,7 @@ import {
     type BenchmarkWeights,
     type StepSnapshot,
 } from "./attribution-history";
-import { readHistoryRows, storedClosesLoader, type ClosesLoader, type ReturnAccount, type ReturnHistoryRows } from "./return-history";
+import { manualCloses, readHistoryRows, storedClosesLoader, type ClosesLoader, type ReturnAccount, type ReturnHistoryRows } from "./return-history";
 
 type Database = typeof db;
 
@@ -73,7 +73,9 @@ export async function buildAttributionHistory(
         const snapshot = byKey.get(`${position.portfolioId}|${position.date}`);
         if (!snapshot) continue;
         snapshot.positions.push({ symbol: position.symbol, marketValue: position.marketValue });
-        held.add(position.symbol);
+        // A holding valued by hand has no price or profile to look up: its
+        // values come from the snapshots, and it is in the "other" segments.
+        if (!isManualSymbol(position.symbol)) held.add(position.symbol);
     }
     const byDate = new Map<string, StepSnapshot[]>();
     for (const snapshot of byKey.values()) {
@@ -95,6 +97,7 @@ export async function buildAttributionHistory(
             loadCloses([...new Set([...held, BENCHMARK_ETF, ...SECTOR_ETFS])].sort(), from, last),
             loadProfiles(held),
         ]);
+        for (const [symbol, series] of manualCloses(positions)) closes.set(symbol, series);
         const spyDates = (closes.get(BENCHMARK_ETF) ?? []).map((c) => c.date).filter((date) => date >= lookback);
         benchmark = estimateBenchmarkWeights(spyDates, closes);
         const segmentsOf = (symbol: string) => symbolSegments(profiles.get(symbol.toUpperCase()), sectorFor(symbol));

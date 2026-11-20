@@ -45,6 +45,7 @@ export interface ExportedValuation {
 }
 
 export interface ExportedValuationPosition {
+    /** A ticker, or the name of a holding valued by hand. */
     symbol: string;
     quantity: number;
     costBasis: number;
@@ -91,6 +92,8 @@ export interface ExportedManualHolding {
     /** "manual", or "plaid" for a linked account's holding with no ticker. */
     source: string;
     updatedAt: string;
+    /** Its value on each day it was valued, oldest first. */
+    values: { date: string; value: number; quantity: number | null }[];
 }
 
 export interface ExportedAccount {

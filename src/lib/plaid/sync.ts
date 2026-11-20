@@ -22,6 +22,7 @@ import {
     sameAccountName,
 } from "@/lib/portfolio/manage";
 import { transactionValues } from "@/lib/portfolio/transactionsWrite";
+import { recordManualValue } from "@/lib/portfolio/manual-holdings";
 import { accountTypeForPlaid, INSTITUTION_MAX_LENGTH, taxTreatmentForPlaid } from "@/lib/portfolio/account-kinds";
 import { PORTFOLIO_LIMITS } from "@/lib/validators/portfolio";
 import type { TransactionRow } from "@/lib/validators/transaction";
@@ -462,13 +463,21 @@ async function replaceInstitutionValued(
         };
         const before = byExternal.get(key);
         byExternal.delete(key);
+        let id: string;
         if (!before) {
-            await tx.insert(manualHoldings).values({ userId, portfolioId, ...values, source: "plaid", externalId: key, createdAt: now });
+            const [inserted] = await tx
+                .insert(manualHoldings)
+                .values({ userId, portfolioId, ...values, source: "plaid", externalId: key, createdAt: now })
+                .returning({ id: manualHoldings.id });
+            id = inserted.id;
             changed = true;
         } else {
             await tx.update(manualHoldings).set(values).where(eq(manualHoldings.id, before.id));
+            id = before.id;
             if (!sameNumber(before.quantity, row.quantity) || !sameNumber(before.costBasis, row.costBasis)) changed = true;
         }
+        // Dated, so a missed night's valuation reads that night's value.
+        await recordManualValue(tx, id, { date: asOf, value: values.value, quantity: values.quantity }, { now });
     }
     const gone = [...byExternal.values()].map((row) => row.id);
     if (gone.length > 0) {
