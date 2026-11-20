@@ -286,16 +286,17 @@ describe("recordValuationSnapshots", () => {
             states: [{ portfolioId: "p1", cash: 0, lastChange: "2026-10-15T15:00:00Z" }],
         });
         const portfolios = store.portfolios;
-        store.portfolios = async () => (await portfolios()).map((p) => ({ ...p, manual: [{ id: FUND, value: 1_100, quantity: null, costBasis: null }] }));
-        const asked: Array<[string[], string]> = [];
-        store.manualHistory = async (ids, from) => {
-            asked.push([ids, from]);
-            return new Map([[FUND, [{ date: "2026-10-09", value: 1_000, quantity: null }, { date: FRI, value: 1_100, quantity: null }]]]);
-        };
+        // Read with the portfolio's state, in one transaction (Codex on PR #217).
+        store.portfolios = async () => (await portfolios()).map((p) => ({
+            ...p,
+            manual: [{
+                id: FUND, value: 1_100, quantity: null, costBasis: null,
+                history: [{ date: "2026-10-09", value: 1_000, quantity: null }, { date: FRI, value: 1_100, quantity: null }],
+            }],
+        }));
 
         const detail = await recordValuationSnapshots({ store });
 
-        assert.deepEqual(asked, [[[FUND], THU]]);
         assert.deepEqual(writes.map((write) => write.snapshots.map((snapshot) => [snapshot.date, snapshot.totalValue])), [[[THU, 1_000], [FRI, 1_100]]]);
         // Valued for the session itself: complete, not provisional.
         assert.ok("provisional" in detail && detail.provisional === 0);

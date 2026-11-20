@@ -9,7 +9,7 @@ import * as schema from '../../src/db/schema';
 import type { PlaidFetch } from '../../src/lib/plaid/link';
 import { deletePortfolio } from '../../src/lib/portfolio/manage';
 import { updateManualHolding } from '../../src/lib/portfolio/manual-holdings';
-import { createSnapshotStore } from '../../src/lib/portfolio/valuation-snapshots';
+import { createSnapshotStore, readManualHistory } from '../../src/lib/portfolio/valuation-snapshots';
 import { MAX_PLAID_CONNECTIONS_PER_USER, PlaidTokenUnavailableError, disconnectPlaidItem, handlePlaidWebhook, listPlaidConnections } from '../../src/lib/plaid/connections';
 import { createDrizzlePlaidTokenRegistryStore, resetPlaidTokenVaultForTests, setPlaidTokenRegistryStoreForTests, storePlaidConnection } from '../../src/lib/plaid/server-token-vault';
 import { PlaidItemNotFoundError, connectedAccountFingerprints, refreshPlaidItem, selectPlaidAccounts, syncAllPlaidItems, syncPlaidItem } from '../../src/lib/plaid/sync';
@@ -324,10 +324,14 @@ describe('Plaid sync into portfolios', { skip: !DATABASE_URL && 'SCRIPTS_TEST_DA
             ['acc_fy', '2026-10-25', 110], ['acc_fy', '2026-10-26', 120], ['acc_fy', '2026-10-27', 130],
         ]);
         // The nightly valuation reads them back: from a day on, with the one standing on it.
-        const values = await createSnapshotStore(database).manualHistory!([id], '2026-10-26');
+        const values = await readManualHistory([id], '2026-10-26', database);
         assert.deepEqual(values.get(id)?.map((r) => [r.date, r.value, r.quantity]), [['2026-10-25', 110, 10], ['2026-10-26', 120, 10], ['2026-10-27', 150, 10]]);
-        const later = await createSnapshotStore(database).manualHistory!([id], '2026-10-27');
+        const later = await readManualHistory([id], '2026-10-27', database);
         assert.deepEqual(later.get(id)?.map((r) => r.date), ['2026-10-26', '2026-10-27']);
+        // ... in the same transaction as the portfolios' state (Codex on PR #217).
+        const states = await createSnapshotStore(database, { now: () => new Date('2026-10-28T12:00:00Z') }).portfolios();
+        const held = states.flatMap((state) => state.manual ?? []).find((m) => m.id === id);
+        assert.deepEqual(held?.history?.map((r) => [r.date, r.value]), [['2026-10-25', 110], ['2026-10-26', 120], ['2026-10-27', 150]]);
 
         // The user's value stands from its day on: one dated earlier drops the later ones.
         assert.ok(await updateManualHolding('u-fund', id, portfolio, { name: 'Stable Value Fund', identifier: null, quantity: 10, value: 140, costBasis: 100, valueAsOf: '2026-10-26' }, { database }));

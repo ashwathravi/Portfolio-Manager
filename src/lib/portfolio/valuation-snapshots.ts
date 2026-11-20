@@ -508,13 +508,43 @@ export interface SnapshotStore {
     latestCloseDate(): Promise<string | null>;
     /** The latest successful price run's `holdingSplits` detail, or undefined. */
     latestHoldingSplits(): Promise<unknown>;
-    /** Every portfolio with its cash, last change and positions, read as one consistent snapshot. */
+    /**
+     * Every portfolio with its cash, last change and positions, and its
+     * holdings valued by hand with the values recorded for them, read as one
+     * consistent snapshot.
+     */
     portfolios(): Promise<Array<{ portfolioId: string; cash: number; lastChange: Date; positions: PositionInput[]; manual?: ManualSnapshotHolding[] }>>;
-    /** The values recorded for holdings valued by hand from `from` on, and the one standing on `from`, oldest first per holding. */
-    manualHistory?(ids: string[], from: string): Promise<Map<string, NonNullable<ManualSnapshotHolding["history"]>>>;
     closes(symbols: string[], from: string, to: string): Promise<Map<string, StoredClose[]>>;
     completeDays(portfolioIds: string[], from: string): Promise<Map<string, Set<string>>>;
     write(portfolioId: string, snapshots: readonly SnapshotValue[]): Promise<void>;
+}
+
+/**
+ * The earliest day a run can value: MAX_SNAPSHOT_DAYS sessions back from
+ * the newest close is well within this many calendar days of today.
+ */
+const MANUAL_HISTORY_CALENDAR_DAYS = 400;
+
+function manualHistoryFrom(now: Date = new Date()): string {
+    return minusCalendarDays(now.toISOString().slice(0, 10), MANUAL_HISTORY_CALENDAR_DAYS);
+}
+
+/** The values recorded for holdings valued by hand from `from` on, and the one standing on `from`, oldest first per holding. */
+export async function readManualHistory(
+    ids: string[],
+    from: string,
+    database: Pick<Database, "select" | "selectDistinctOn"> = db,
+): Promise<Map<string, NonNullable<ManualSnapshotHolding["history"]>>> {
+    const byHolding = new Map<string, Array<{ date: string; value: number; quantity: number | null }>>();
+    if (ids.length === 0) return byHolding;
+    const rows = [...await buildManualValueBeforeQuery(ids, from, database), ...await buildManualHistoryQuery(ids, from, database)];
+    for (const row of rows) {
+        const list = byHolding.get(row.id) ?? [];
+        list.push({ date: row.date, value: Number(row.value), quantity: numberOrNull(row.quantity) });
+        byHolding.set(row.id, list);
+    }
+    for (const list of byHolding.values()) list.sort((a, b) => a.date.localeCompare(b.date));
+    return byHolding;
 }
 
 function numberOrNull(value: string | null): number | null {
@@ -523,7 +553,8 @@ function numberOrNull(value: string | null): number | null {
     return Number.isFinite(n) ? n : null;
 }
 
-export function createSnapshotStore(database: Database = db): SnapshotStore {
+/** `now` sets how far back the hand-valued holdings' values are read (tests). */
+export function createSnapshotStore(database: Database = db, { now }: { now?: () => Date } = {}): SnapshotStore {
     return {
         latestCloseDate: () => getLatestBarDate(database),
         async latestHoldingSplits() {
@@ -541,9 +572,13 @@ export function createSnapshotStore(database: Database = db): SnapshotStore {
                 byPortfolio.set(row.portfolioId, list);
             }
             const manual = new Map<string, ManualSnapshotHolding[]>();
-            for (const row of await buildManualValuesQuery(tx)) {
+            const manualRows = await buildManualValuesQuery(tx);
+            // In this transaction too: a value recorded after the session
+            // closed comes with the change that keeps it out of that session.
+            const history = await readManualHistory(manualRows.map((row) => row.id), manualHistoryFrom(now?.() ?? new Date()), tx);
+            for (const row of manualRows) {
                 const list = manual.get(row.portfolioId) ?? [];
-                list.push({ id: row.id, value: Number(row.value), quantity: numberOrNull(row.quantity), costBasis: numberOrNull(row.costBasis) });
+                list.push({ id: row.id, value: Number(row.value), quantity: numberOrNull(row.quantity), costBasis: numberOrNull(row.costBasis), history: history.get(row.id) });
                 manual.set(row.portfolioId, list);
             }
             return states.map((state) => ({
@@ -554,18 +589,6 @@ export function createSnapshotStore(database: Database = db): SnapshotStore {
                 manual: manual.get(state.portfolioId),
             }));
         }, { isolationLevel: "repeatable read", accessMode: "read only" }),
-        async manualHistory(ids, from) {
-            const byHolding = new Map<string, Array<{ date: string; value: number; quantity: number | null }>>();
-            if (ids.length === 0) return byHolding;
-            const rows = [...await buildManualValueBeforeQuery(ids, from, database), ...await buildManualHistoryQuery(ids, from, database)];
-            for (const row of rows) {
-                const list = byHolding.get(row.id) ?? [];
-                list.push({ date: row.date, value: Number(row.value), quantity: numberOrNull(row.quantity) });
-                byHolding.set(row.id, list);
-            }
-            for (const list of byHolding.values()) list.sort((a, b) => a.date.localeCompare(b.date));
-            return byHolding;
-        },
         async closes(symbols, from, to) {
             const bySymbol = new Map<string, StoredClose[]>();
             if (symbols.length === 0) return bySymbol;
@@ -639,13 +662,6 @@ export async function recordValuationSnapshots({
     const symbols = [...new Set(due.flatMap((plan) => plan.positions.map((position) => position.symbol.trim().toUpperCase())))].sort();
     const earliest = due.map((plan) => plan.days[0]).sort()[0];
     const closes = await store.closes(symbols, minusCalendarDays(earliest, STALE_CLOSE_DAYS), latest);
-
-    // Each hand-valued holding at its value on each day, not today's.
-    const manualIds = due.flatMap((plan) => (plan.manual ?? []).map((holding) => holding.id));
-    const history = manualIds.length > 0 && store.manualHistory ? await store.manualHistory(manualIds, earliest) : new Map();
-    for (const plan of due) {
-        plan.manual = plan.manual?.map((holding) => ({ ...holding, history: history.get(holding.id) ?? holding.history }));
-    }
 
     let written = 0;
     let partial = 0;
