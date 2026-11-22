@@ -80,6 +80,11 @@ export interface PolicyPortfolioHolding {
 /** The user's portfolio, as every risk-policy view reads it. */
 export interface PolicyPortfolio {
     holdings: PolicyPortfolioHolding[];
+    /**
+     * Holdings valued by hand (no ticker): in the portfolio's value, its
+     * buckets, themes and stress tests, never checked as a single name.
+     */
+    handValued?: PolicyPortfolioHolding[];
     cashTotal: number;
     trades: RiskPolicyDashboardTrade[];
     /** The theses the user wrote (examples left out). */
@@ -91,9 +96,10 @@ export interface PolicyPortfolio {
 export const EMPTY_POLICY_PORTFOLIO: PolicyPortfolio = { holdings: [], cashTotal: 0, trades: [], theses: [], options: [] };
 
 /** What the holdings, option positions and cash are worth together; a written option counts against it. */
-export function policyPortfolioValue(portfolio: Pick<PolicyPortfolio, "holdings" | "cashTotal"> & { options?: readonly OptionRiskPosition[] }): number {
+export function policyPortfolioValue(portfolio: Pick<PolicyPortfolio, "holdings" | "cashTotal" | "handValued"> & { options?: readonly OptionRiskPosition[] }): number {
     return portfolio.cashTotal
         + portfolio.holdings.reduce((sum, holding) => sum + holding.marketValue, 0)
+        + (portfolio.handValued ?? []).reduce((sum, holding) => sum + holding.marketValue, 0)
         + (portfolio.options ?? []).reduce((sum, position) => sum + optionNetValue(position), 0);
 }
 
@@ -187,6 +193,13 @@ export function riskPolicyInput(
     const churn = policy.churnPolicy ?? DEFAULT_CHURN_POLICY;
     return {
         holdings: policyHoldings(portfolio.holdings, policy),
+        otherHoldings: (portfolio.handValued ?? []).map((holding) => ({
+            ...holding,
+            policyBucket: holding.defaultBucket,
+            isEmployerStock: false,
+            // Diversified, as its bucket assumes: not an unknown theme to classify.
+            themeWeights: [{ theme: "broad_core_index" as const, weight: 1, source: "fallback" as const }],
+        })),
         cashTotal: portfolio.cashTotal,
         trades: portfolio.trades,
         theses: portfolio.theses,

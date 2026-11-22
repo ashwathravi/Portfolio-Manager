@@ -5,10 +5,10 @@
  * reads as not found.
  */
 
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, gt, sql } from "drizzle-orm";
 
 import { db } from "@/db";
-import { manualHoldings, portfolios } from "@/db/schema";
+import { manualHoldingValues, manualHoldings, portfolios } from "@/db/schema";
 import type { ManualHoldingInput } from "@/lib/validators/manual-holding";
 import { buildLockUserAccountsQuery } from "./manage";
 import { AccountNotFoundError } from "./transactionsWrite";
@@ -96,6 +96,32 @@ function values(input: ManualHoldingInput) {
 }
 
 /**
+ * Records a holding's value as of its day (manual_holding_values), replacing
+ * one already recorded for that day. The user's own value stands from its
+ * day on (`fromThenOn`): values recorded for later days, a sync's, are
+ * dropped, so the history doesn't go back to them after the user's edit.
+ */
+export async function recordManualValue(
+    tx: Executor,
+    manualHoldingId: string,
+    { date, value, quantity }: { date: string; value: string; quantity: string | null },
+    { fromThenOn = false, now = new Date() }: { fromThenOn?: boolean; now?: Date } = {},
+): Promise<void> {
+    if (fromThenOn) {
+        await tx
+            .delete(manualHoldingValues)
+            .where(and(eq(manualHoldingValues.manualHoldingId, manualHoldingId), gt(manualHoldingValues.date, date)));
+    }
+    await tx
+        .insert(manualHoldingValues)
+        .values({ manualHoldingId, date, value, quantity, recordedAt: now })
+        .onConflictDoUpdate({
+            target: [manualHoldingValues.manualHoldingId, manualHoldingValues.date],
+            set: { value: sql`excluded.value`, quantity: sql`excluded.quantity`, recordedAt: sql`excluded.recorded_at` },
+        });
+}
+
+/**
  * The account's last change moves with it: the nightly valuation takes the
  * newest of an account's changes as the day its history may be rewritten from.
  */
@@ -118,6 +144,8 @@ export async function addManualHolding(
             .insert(manualHoldings)
             .values({ userId, portfolioId, ...values(input), source: "manual", createdAt: now, updatedAt: now })
             .returning({ id: manualHoldings.id });
+        const saved = values(input);
+        await recordManualValue(tx, inserted.id, { date: saved.valueAsOf, value: saved.value, quantity: saved.quantity }, { fromThenOn: true, now });
         await touchAccount(tx, portfolioId, now);
         return inserted.id;
     });
@@ -150,6 +178,8 @@ export async function updateManualHolding(
             .update(manualHoldings)
             .set({ portfolioId, ...values(input), source: "manual", updatedAt: now })
             .where(and(eq(manualHoldings.id, id), eq(manualHoldings.userId, userId)));
+        const saved = values(input);
+        await recordManualValue(tx, id, { date: saved.valueAsOf, value: saved.value, quantity: saved.quantity }, { fromThenOn: true, now });
         await touchAccount(tx, portfolioId, now);
         if (before.portfolioId !== portfolioId) await touchAccount(tx, before.portfolioId, now);
         return true;

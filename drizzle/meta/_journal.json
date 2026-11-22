@@ -253,6 +253,13 @@
       "when": 1795128369422,
       "tag": "0035_manual_holdings",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1795146153229,
+      "tag": "0036_manual_holding_values",
+      "breakpoints": true
     }
   ]
 }

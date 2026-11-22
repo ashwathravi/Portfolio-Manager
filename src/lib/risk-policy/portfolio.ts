@@ -8,6 +8,7 @@
 import type { ActivityRow } from "@/lib/portfolio/activity";
 import type { SecurityProfile } from "@/lib/markets/security-profile";
 import { holdingName } from "@/lib/markets/security-profile";
+import { manualSymbol } from "@/lib/portfolio/manual-symbol";
 import type { Quote } from "@/types/market-data";
 
 import { defaultPolicyBucket } from "./buckets";
@@ -26,9 +27,40 @@ export interface StoredPolicyHolding {
     marketValue?: string | number | null;
 }
 
+/** A holding valued by hand (manual_holdings), as the portfolio queries return it. */
+export interface StoredHandValuedHolding {
+    id: string;
+    name: string;
+    value: string | number;
+    costBasis?: string | number | null;
+}
+
 export interface StoredPolicyAccount {
     cashBalance?: number | null;
     holdings: readonly StoredPolicyHolding[];
+    manualHoldings?: readonly StoredHandValuedHolding[];
+}
+
+/**
+ * Holdings valued by hand, as the policy reads them: part of the
+ * portfolio's value, in the core bucket (most are a retirement plan's or
+ * a college plan's diversified fund), never a single name.
+ */
+export function handValuedPolicyHoldings(accounts: readonly StoredPolicyAccount[]): PolicyPortfolioHolding[] {
+    return accounts.flatMap((account) => (account.manualHoldings ?? []).map((holding) => {
+        const marketValue = Number(holding.value) || 0;
+        const cost = holding.costBasis == null ? marketValue : Number(holding.costBasis) || 0;
+        return {
+            id: holding.id,
+            symbol: manualSymbol(holding.id),
+            name: holding.name,
+            quantity: 1,
+            avgCost: cost,
+            currentPrice: marketValue,
+            marketValue,
+            defaultBucket: "core" as const,
+        };
+    }));
 }
 
 /**
@@ -90,6 +122,7 @@ export function buildPolicyPortfolio({
     );
     return {
         holdings,
+        handValued: handValuedPolicyHoldings(accounts),
         cashTotal: accounts.reduce((sum, account) => sum + (account.cashBalance || 0), 0),
         // The policy's figures are in dollars: a trade in another currency is
         // left out of its turnover rather than added as if it were dollars.

@@ -366,6 +366,34 @@ test.describe('Holdings › LEAPS ledger before any position', () => {
     });
 });
 
+test.describe('Holdings › LEAPS ledger with holdings valued by hand', () => {
+    test.skip(!databaseAuthEnabled, 'option positions and holdings valued by hand are saved in the database');
+
+    test('regression: premium is measured against the portfolio with its hand-valued holdings', async ({ context, page }) => {
+        await signInAsNewUser(context, { firstSignIn: true });
+        await gotoAppPage(page, '/portfolios/holdings');
+        const created = await page.request.post('/api/portfolios', { data: { name: 'Plan account', cashBalance: 10_000 } });
+        expect(created.status()).toBe(201);
+        const { id: portfolioId } = (await created.json()).data;
+        const position = { underlying: 'SPY', contractType: 'call', strike: 550, expiry: '2027-12-17', quantity: 1, premium: 10 };
+        expect((await page.request.post('/api/portfolio/options', { data: { portfolioId, position } })).status()).toBe(201);
+        const valuedAsOf = new Date().toISOString().slice(0, 10);
+        const fund = await page.request.post('/api/portfolio/manual-holdings', {
+            data: { portfolioId, holding: { name: 'Target 2055 Trust', value: 9_000, valueAsOf: valuedAsOf } },
+        });
+        expect(fund.status()).toBe(201);
+
+        await reloadAppPage(page);
+        const ledger = page.getByTestId('options-risk-ledger');
+        const row = ledger.getByTestId('options-risk-row');
+        await expect(row).toContainText('SPY 2027-12-17 550C');
+        // $1,000 of premium in $10,000 cash + $9,000 valued by hand + the
+        // option itself: 5.0%, as Today and Trade measure it (not 9.1%).
+        await expect(row).toContainText('5.0%');
+        await expect(ledger.getByLabel('Options exposure summary')).toContainText('5.0%');
+    });
+});
+
 const OTHER_USERS_ACCOUNT = '00000000-0000-4000-8000-000000000009';
 const UNKNOWN_ID = '00000000-0000-4000-8000-0000000006ff';
 

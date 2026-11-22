@@ -42,7 +42,12 @@ function fakeDatabase(selects: unknown[][]) {
         insert: () => ({
             values: (values: unknown) => {
                 writes.push({ op: "insert", values });
-                return { returning: async () => [{ id: "m-new" }] };
+                return {
+                    returning: async () => [{ id: "m-new" }],
+                    onConflictDoUpdate: async () => {
+                        writes[writes.length - 1].op = "record value";
+                    },
+                };
             },
         }),
         update: () => ({
@@ -54,6 +59,11 @@ function fakeDatabase(selects: unknown[][]) {
         }),
         delete: () => ({
             where: () => ({
+                // Awaited as is: the later values dropped.
+                then: (resolve: (value: unknown) => void) => {
+                    writes.push({ op: "drop later values" });
+                    resolve(undefined);
+                },
                 returning: async () => {
                     writes.push({ op: "delete" });
                     return answers.shift() ?? [];
@@ -122,12 +132,14 @@ describe("writing holdings valued by hand", () => {
         assert.equal(await addManualHolding(USER, ACCOUNT, INPUT, { database, now }), "m-new");
         // Under the account-write lock a Plaid sync takes, so neither
         // overwrites the other (the Codex finding on PR #216).
-        assert.deepEqual(writes.map((w) => w.op), ["lock", "insert", "update"]);
+        assert.deepEqual(writes.map((w) => w.op), ["lock", "insert", "drop later values", "record value", "update"]);
         assert.deepEqual(writes[1].values, {
             userId: USER, portfolioId: ACCOUNT, name: INPUT.name, identifier: INPUT.identifier, quantity: "10", value: "1500", costBasis: null,
             valueAsOf: INPUT.valueAsOf, source: "manual", createdAt: now, updatedAt: now,
         });
-        assert.deepEqual(writes[2].values, { updatedAt: now });
+        // Its value as of its day, the user's from then on.
+        assert.deepEqual(writes[3].values, { manualHoldingId: "m-new", date: INPUT.valueAsOf, value: "1500", quantity: "10", recordedAt: now });
+        assert.deepEqual(writes[4].values, { updatedAt: now });
     });
 
     test("editing a holding the user doesn't have is false, and nothing is written", async () => {
@@ -139,7 +151,7 @@ describe("writing holdings valued by hand", () => {
     test("moving a holding to another account marks both accounts changed", async () => {
         const { database, writes } = fakeDatabase([[{ id: OTHER_ACCOUNT }], [{ portfolioId: ACCOUNT }]]);
         assert.equal(await updateManualHolding(USER, "m-1", OTHER_ACCOUNT, INPUT, { database }), true);
-        assert.deepEqual(writes.map((w) => w.op), ["lock", "update", "update", "update"]);
+        assert.deepEqual(writes.map((w) => w.op), ["lock", "update", "drop later values", "record value", "update", "update"]);
         assert.equal((writes[1].values as { source: string }).source, "manual");
     });
 

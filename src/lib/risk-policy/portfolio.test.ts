@@ -50,6 +50,20 @@ describe("buildPolicyPortfolio", () => {
         ]);
     });
 
+    test("holdings valued by hand are their own list, at their value, in the core bucket", () => {
+        const portfolio = buildPolicyPortfolio({
+            accounts: [{ holdings: [], manualHoldings: [
+                { id: "m1", name: "Stable Value Fund", value: "1500.5", costBasis: "1200" },
+                { id: "m2", name: "Private Co", value: 300, costBasis: null },
+            ] }],
+        });
+        assert.deepEqual(portfolio.holdings, []);
+        assert.deepEqual(portfolio.handValued, [
+            { id: "m1", symbol: "manual:m1", name: "Stable Value Fund", quantity: 1, avgCost: 1_200, currentPrice: 1_500.5, marketValue: 1_500.5, defaultBucket: "core" },
+            { id: "m2", symbol: "manual:m2", name: "Private Co", quantity: 1, avgCost: 300, currentPrice: 300, marketValue: 300, defaultBucket: "core" },
+        ]);
+    });
+
     test("without reference data only the well-known tickers have a bucket", () => {
         const portfolio = buildPolicyPortfolio({
             accounts: [{ holdings: [

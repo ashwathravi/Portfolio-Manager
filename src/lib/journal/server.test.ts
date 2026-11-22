@@ -131,6 +131,19 @@ describe('loadTradeJournal', () => {
         assert.deepEqual(calls.filter((c) => !c.startsWith('closes:')).sort(), ['accounts:user-a', 'activity:user-a', 'decisions:user-a', 'orders:user-a']);
     });
 
+    test('regression: holdings valued by hand count in net worth, so a gain is its share of everything', async () => {
+        // Codex on PR #216: a 401(k) fund with no ticker was left out of the
+        // weekly review's denominator.
+        const { fake } = loaders();
+        const journal = await loadTradeJournal('user-a', {
+            now: NOW,
+            sources: fake,
+            accounts: [{ id: 'acct-main', name: 'Main', cashBalance: 100, holdings: [], manualHoldings: [{ value: '9000.5' }, { value: 900 }] }],
+            activity: ACTIVITY.slice(0, 2),
+        });
+        assert.equal(journal.netWorth, 10_000.5);
+    });
+
     test('uses the accounts and activity the page already loaded', async () => {
         const { calls, fake } = loaders();
         const journal = await loadTradeJournal('user-a', {

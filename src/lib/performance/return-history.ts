@@ -13,6 +13,7 @@ import { loggableError } from "@/lib/observability/loggable-error";
 import {
     buildClosesBetweenQuery,
     buildUserSnapshotsQuery,
+    isManualSymbol,
     STALE_CLOSE_DAYS,
     type StoredClose,
 } from "@/lib/portfolio/valuation-snapshots";
@@ -75,6 +76,7 @@ export function buildUserSnapshotPositionsQuery(
             date: portfolioSnapshotPositions.date,
             symbol: portfolioSnapshotPositions.symbol,
             marketValue: portfolioSnapshotPositions.marketValue,
+            close: portfolioSnapshotPositions.close,
         })
         .from(portfolioSnapshotPositions)
         .innerJoin(portfolios, eq(portfolioSnapshotPositions.portfolioId, portfolios.id))
@@ -96,7 +98,29 @@ export interface ReturnHistoryRows {
     /** Every snapshot of the user's, oldest first. */
     snapshots: ReadonlyArray<{ portfolioId: string; date: string; totalValue: number }>;
     /** Positions of the shown account's snapshots (or all of them). */
-    positions: ReadonlyArray<{ portfolioId: string; date: string; symbol: string; marketValue: number | null }>;
+    positions: ReadonlyArray<{ portfolioId: string; date: string; symbol: string; marketValue: number | null; close?: number | null }>;
+}
+
+/**
+ * The "closes" of holdings valued by hand, from the snapshots themselves:
+ * each snapshot recorded such a holding at its value for that session
+ * (valuation-snapshots.ts), which no price store has. With them a change
+ * in its value between two snapshots is a gain or a loss, like a ticker's.
+ */
+export function manualCloses(
+    positions: ReadonlyArray<{ date: string; symbol: string; close?: number | null }>,
+): Map<string, StoredClose[]> {
+    const bySymbol = new Map<string, Map<string, number>>();
+    for (const position of positions) {
+        if (!isManualSymbol(position.symbol) || position.close == null || !Number.isFinite(position.close)) continue;
+        const days = bySymbol.get(position.symbol) ?? new Map<string, number>();
+        days.set(position.date, position.close);
+        bySymbol.set(position.symbol, days);
+    }
+    return new Map([...bySymbol].map(([symbol, days]) => [
+        symbol,
+        [...days].map(([date, close]) => ({ date, close })).sort((a, b) => a.date.localeCompare(b.date)),
+    ]));
 }
 
 /** Stored closes for `symbols` from `from` to `to`, oldest first per symbol. */
@@ -130,7 +154,7 @@ export async function buildReturnHistory(
         const snapshot = byKey.get(`${position.portfolioId}|${position.date}`);
         if (!snapshot) continue;
         snapshot.positions.push({ symbol: position.symbol, marketValue: position.marketValue });
-        symbols.add(position.symbol);
+        if (!isManualSymbol(position.symbol)) symbols.add(position.symbol);
     }
 
     const chosen = [...byKey.values()];
@@ -139,6 +163,7 @@ export async function buildReturnHistory(
     if (chosen.length > 0) {
         const dates = chosen.map((snapshot) => snapshot.date).sort();
         const closes = await loadCloses([...symbols].sort(), minusCalendarDays(dates[0], STALE_CLOSE_DAYS), dates[dates.length - 1]);
+        for (const [symbol, series] of manualCloses(positions)) closes.set(symbol, series);
         points = returnSeries(chosen, closes);
         const pointDates = points.map((point) => point.date);
         benchmarks = RETURN_BENCHMARKS.flatMap((benchmark) => {
