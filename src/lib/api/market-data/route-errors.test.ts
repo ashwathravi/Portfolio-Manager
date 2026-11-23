@@ -56,6 +56,11 @@ describe("marketDataErrorResponse", () => {
         assert.equal(response.status, 500);
         assert.deepEqual(await response.json(), { error: "Unable to fetch quote.", code: "MARKET_DATA_QUOTE_FAILED" });
         assert.equal(logged.mock.callCount(), 1);
-        assert.equal(logged.mock.calls[0].arguments[1], failure);
+        const entry = JSON.parse(String(logged.mock.calls[0].arguments[0]));
+        assert.equal(entry.code, "MARKET_DATA_QUOTE_FAILED");
+        assert.deepEqual(
+            { name: entry.error.name, message: entry.error.message, status: entry.error.status },
+            { name: "PolygonApiError", message: failure.message, status: 404 },
+        );
     });
 });

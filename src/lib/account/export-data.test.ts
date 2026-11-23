@@ -4,12 +4,12 @@ import assert from 'node:assert/strict';
 import { holdingsCsvRows, transactionsCsvRows, type AccountExport, type ExportedAccount } from './export-data';
 
 const account = (name: string, fields: Partial<ExportedAccount> = {}): ExportedAccount => ({
-    id: name, name, description: null, source: 'manual', accountType: null, institution: null, taxTreatment: null, cashBalance: 0, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
+    id: name, name, description: null, source: 'manual', accountType: null, institution: null, taxTreatment: null, ownership: null, cashBalance: 0, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
     holdings: [], manualHoldings: [], optionPositions: [], transactions: [], valuationHistory: [], orderPlans: [], ...fields,
 });
 const exported = (accounts: ExportedAccount[]): AccountExport => ({
     format: 'atlas-wealth-export', version: 1, exportedAt: '2026-10-26T18:00:00.000Z', profile: { name: null, email: null }, settings: null,
-    accounts, linkedConnections: [], watchlist: [], journal: [], theses: [], askHistory: [], strategies: [], alphaRadarFollows: [], alertRules: [], alerts: [], emailPreferences: null,
+    accounts, linkedConnections: [], netWorthItems: [], watchlist: [], journal: [], theses: [], askHistory: [], strategies: [], alphaRadarFollows: [], alertRules: [], alerts: [], emailPreferences: null,
 });
 const trade = (date: string, symbol: string) => ({ date, type: 'BUY', symbol, quantity: 2, price: 10.5, amount: 21, fees: null, currency: 'USD', notes: null, source: 'csv' });
 
@@ -34,4 +34,17 @@ test('transactionsCsvRows - every account\'s transactions, oldest first, dates a
         { account: 'Brokerage', date: '2026-03-05', type: 'BUY', symbol: 'AAPL', quantity: 2, price: 10.5, amount: 21, fees: '', currency: 'USD', notes: '', source: 'csv' },
     ]);
     assert.deepEqual(transactionsCsvRows(exported([])), []);
+});
+
+test('holdingsCsvRows - keeps a position worth a few dollars beside a large one: Holdings groups small positions only on screen', () => {
+    const data = exported([
+        account('Robo account', { holdings: [
+            { symbol: 'AAPL', name: 'Apple', quantity: 100, avgCost: 200, lastPrice: 210, updatedAt: '' },
+            { symbol: 'ZQA', name: 'Fund A', quantity: 2, avgCost: 1.5, lastPrice: 1.5, updatedAt: '' },
+        ] }),
+    ]);
+    assert.deepEqual(holdingsCsvRows(data), [
+        { account: 'Robo account', symbol: 'AAPL', name: 'Apple', quantity: 100, avg_cost: 200, cost_basis: 20000, last_price: 210 },
+        { account: 'Robo account', symbol: 'ZQA', name: 'Fund A', quantity: 2, avg_cost: 1.5, cost_basis: 3, last_price: 1.5 },
+    ]);
 });

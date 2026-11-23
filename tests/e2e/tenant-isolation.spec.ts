@@ -1,6 +1,10 @@
 import { expect, test } from '@playwright/test';
 
+import { e2eDatabase } from './helpers/users';
+
 const OTHER_USER_PORTFOLIO_ID = '00000000-0000-4000-8000-000000000009';
+// User B's one other asset, "Other User Asset Sentinel".
+const OTHER_USER_ITEM_ID = '00000000-0000-4000-8000-000000000701';
 const PRIMARY_USER_PORTFOLIO_ID = '00000000-0000-4000-8000-000000000001';
 const OTHER_USER_SESSION_TOKEN = 'e2e-session-user-b';
 const databaseAuthEnabled = Boolean(process.env.CI || process.env.E2E_DATABASE_AUTH === '1');
@@ -30,6 +34,24 @@ test.describe('Portfolio tenant isolation', () => {
         });
     });
 
+    test('never shows or changes another user\'s other assets and debts', async ({ page }) => {
+        await page.goto('/portfolios/accounts');
+        await expect(page.getByTestId('net-worth-items')).toBeVisible();
+        await expect(page.getByText('Other User Asset Sentinel')).toHaveCount(0);
+
+        const takeover = { kind: 'asset', category: 'other_asset', name: 'Taken over', value: 1, valueAsOf: '2026-11-01' };
+        for (const response of [
+            await page.request.put(`/api/portfolio/net-worth-items/${OTHER_USER_ITEM_ID}`, { data: takeover }),
+            await page.request.delete(`/api/portfolio/net-worth-items/${OTHER_USER_ITEM_ID}`),
+        ]) {
+            expect(response.status()).toBe(404);
+            expect(await response.json()).toEqual({ error: 'Asset or debt not found', code: 'NET_WORTH_ITEM_NOT_FOUND' });
+        }
+        const rows = await e2eDatabase()<{ name: string; value: string }[]>`
+            SELECT name, value::text AS value FROM net_worth_items WHERE id = ${OTHER_USER_ITEM_ID}`;
+        expect(rows.map((r) => ({ ...r }))).toEqual([{ name: 'Other User Asset Sentinel', value: '999.00' }]);
+    });
+
     test('maps a second verified session to only the second user portfolio graph', async ({ context, page }) => {
         await context.clearCookies();
         await context.addCookies([{
@@ -56,6 +78,10 @@ test.describe('Portfolio tenant isolation', () => {
             `/api/portfolio/${PRIMARY_USER_PORTFOLIO_ID}/value`,
         );
         expect(primaryUserValueResponse.status()).toBe(404);
+
+        // Its own other asset is in its own card.
+        await page.goto('/portfolios/accounts');
+        await expect(page.getByTestId('net-worth-items')).toContainText('Other User Asset Sentinel');
     });
 
     test('rejects an opaque Auth.js cookie on a dotted dynamic application path', async ({ context, page }) => {

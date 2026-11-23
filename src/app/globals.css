@@ -1528,6 +1528,17 @@
   white-space: nowrap;
   max-width: 200px;
 }
+/* A holding valued by hand has no ticker: its name leads, wrapped rather than cut off. */
+.pm-holdings-ticker[data-hand-valued="true"] .pm-holdings-sym {
+  max-width: 240px;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+/* "Valued by hand" under it, at a contrast small text can be read at. */
+.pm-holdings-tag {
+  font-size: 11px;
+  color: var(--pm-fg-muted);
+}
 .pm-alloc-bar-cell {
   min-width: 120px;
 }
@@ -1950,6 +1961,64 @@
   background: var(--pm-bg-2);
   color: var(--pm-fg-muted);
   white-space: nowrap;
+}
+
+/* Small positions: one row after the others that opens in place. Scoped
+   under .pm-table-full to outweigh its cell padding; its hover rule still
+   wins. Its 10px padding, against a row's 12px, makes up for the 24px
+   button, so it's as tall as the rows around it. */
+.pm-table-full .pm-small-positions-group td {
+  background: color-mix(in oklab, var(--pm-bg-2) 55%, transparent);
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+
+.pm-small-positions-label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.pm-small-positions-toggle {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 24px;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--pm-fg);
+  font: inherit;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+}
+
+.pm-small-positions-toggle:focus-visible {
+  outline: 2px solid var(--pm-accent);
+  outline-offset: 2px;
+}
+
+/* Darker than muted: on the group's tint, muted is about 4.2:1, and 11px text needs 4.5:1. */
+.pm-small-positions-note {
+  font-size: 11px;
+  color: color-mix(in oklab, var(--pm-fg-muted) 85%, var(--pm-fg));
+  padding-left: 20px;
+}
+
+.pm-table-full .pm-small-position-row td:first-child {
+  padding-left: 30px;
+}
+
+/* The group's "N accounts" pill holds their names for a screen reader;
+   positioned, so that hidden text sits inside the card it scrolls with
+   and never widens the page. */
+.pm-small-positions-group .pm-account-pill {
+  position: relative;
 }
 
 .pm-policy-chip,
@@ -2450,6 +2519,14 @@
   font-weight: 800;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* A holding valued by hand goes by its name, not a ticker: in the UI font, wrapped rather than cut off. */
+.pm-stress-contributor[data-hand-valued="true"] span:first-child {
+  font-family: inherit;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .pm-stress-contributor strong {
@@ -5227,7 +5304,7 @@
   transition: border-color 120ms ease, box-shadow 120ms ease;
 }
 
-.pm-exec-input:hover {
+.pm-exec-input:hover:not(:disabled) {
   border-color: color-mix(in oklab, var(--pm-accent) 30%, var(--pm-border));
 }
 
@@ -5235,6 +5312,14 @@
   outline: none;
   border-color: color-mix(in oklab, var(--pm-accent) 55%, var(--pm-border));
   box-shadow: 0 0 0 3px color-mix(in oklab, var(--pm-accent) 18%, transparent);
+}
+
+/* Shown but not editable (a synced option contract's terms): muted and
+   flat, so it doesn't read as a field to fill in. */
+.pm-exec-input:disabled {
+  color: var(--pm-fg-muted);
+  background: transparent;
+  cursor: not-allowed;
 }
 
 .pm-exec-textarea {
@@ -6338,12 +6423,25 @@
   font-weight: 700;
 }
 
+/* "By hand" where a holding valued by hand has no ticker: a tag, not a symbol. */
+.pm-bucket-holding-symbol[data-hand-valued="true"] {
+  color: var(--pm-fg-muted);
+  font-family: inherit;
+  font-weight: 600;
+}
+
 .pm-bucket-holding-name {
   overflow: hidden;
   color: var(--pm-fg-muted);
   font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* With no ticker, the name, account and value are what tell the holding apart: none is cut off. */
+.pm-bucket-holding-row[data-hand-valued="true"] .pm-bucket-holding-name {
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .pm-bucket-holding-pct {

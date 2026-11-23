@@ -20,6 +20,7 @@ export interface AccountInput {
     accountType?: string | null;
     institution?: string | null;
     taxTreatment?: string | null;
+    ownership?: string | null;
     cashBalance?: number | null;
     updatedAt?: Date | string | null;
     holdings: readonly AccountHoldingInput[];
@@ -34,6 +35,7 @@ export interface AccountRow {
     accountType: string | null;
     institution: string | null;
     taxTreatment: string | null;
+    ownership: string | null;
     positions: number;
     investedUsd: number;
     cashUsd: number;
@@ -94,6 +96,7 @@ export function buildAccountRows(
             accountType: a.accountType ?? null,
             institution: a.institution ?? null,
             taxTreatment: a.taxTreatment ?? null,
+            ownership: a.ownership ?? null,
             positions: a.holdings.length + (a.manualHoldings?.length ?? 0),
             investedUsd: round2(invested),
             cashUsd: round2(cash),

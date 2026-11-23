@@ -1,9 +1,9 @@
 /**
  * Option positions (launch item i63): the contracts the user holds, entered
- * by hand or imported from a broker's positions CSV, as the LEAPS ledger
- * and the risk policy read them. Browser-safe: naming a contract the way
- * Massive does, reading one the ways brokers write it, and choosing the
- * price a position is marked at.
+ * by hand, imported from a broker's positions CSV, or synced from a linked
+ * account (launch item i44), as the LEAPS ledger and the risk policy read
+ * them. Browser-safe: naming a contract the way Massive does, reading one
+ * the ways brokers write it, and choosing the price a position is marked at.
  */
 
 import type { OptionContractType, OptionRiskPosition } from "@/lib/risk-policy/options";
@@ -108,13 +108,16 @@ export function isOptionStrike(strike: number): boolean {
 // ---------------------------------------------------------------------------
 
 /**
- * What a position is marked at: the newest of the stored close and the
- * user's own price (the close on a tie), else the premium paid, as a
- * position without a price counts at cost.
+ * What a position is marked at: the newest of the stored close, the user's
+ * own price and the linked account's price (on the same day, in that
+ * order), else the premium paid, as a position without a price counts at
+ * cost. A close or a price of the user's of $0 is a price (a contract that
+ * expired worthless); the institution's is used only above $0.
  */
 export type OptionMark =
     | { source: "close"; price: number; date: string }
     | { source: "user"; price: number; date: string }
+    | { source: "institution"; price: number; date: string }
     | { source: "cost"; price: number };
 
 export function chooseOptionMark({
@@ -123,23 +126,44 @@ export function chooseOptionMark({
     closeDate,
     userMark,
     userMarkDate,
+    institutionPrice,
+    institutionPriceDate,
 }: {
     premium: number;
     close?: number | null;
     closeDate?: string | null;
     userMark?: number | null;
     userMarkDate?: string | null;
+    institutionPrice?: number | null;
+    institutionPriceDate?: string | null;
 }): OptionMark {
-    const hasClose = close != null && Number.isFinite(close) && close >= 0 && Boolean(closeDate);
-    const hasUser = userMark != null && Number.isFinite(userMark) && userMark >= 0 && Boolean(userMarkDate);
-    if (hasClose && (!hasUser || closeDate! >= userMarkDate!)) return { source: "close", price: close!, date: closeDate! };
-    if (hasUser) return { source: "user", price: userMark!, date: userMarkDate! };
-    return { source: "cost", price: premium };
+    const dated: Exclude<OptionMark, { source: "cost" }>[] = [];
+    if (close != null && Number.isFinite(close) && close >= 0 && closeDate) dated.push({ source: "close", price: close, date: closeDate });
+    if (userMark != null && Number.isFinite(userMark) && userMark >= 0 && userMarkDate) dated.push({ source: "user", price: userMark, date: userMarkDate });
+    if (institutionPrice != null && Number.isFinite(institutionPrice) && institutionPrice > 0 && institutionPriceDate) {
+        dated.push({ source: "institution", price: institutionPrice, date: institutionPriceDate });
+    }
+    // Only a later day displaces one before it in that order.
+    const newest = dated.reduce<(typeof dated)[number] | null>((best, mark) => (best === null || mark.date > best.date ? mark : best), null);
+    return newest ?? { source: "cost", price: premium };
+}
+
+/** Where a mark comes from, as the ledger says it: "Close Oct 1", "Your price Oct 2", "At cost: no price yet". */
+export function describeOptionMark(mark: OptionMark): string {
+    if (mark.source === "cost") return "At cost: no price yet";
+    const [year, month, day] = mark.date.split("-").map(Number);
+    const date = new Date(Date.UTC(year, month - 1, day)).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+    if (mark.source === "close") return `Close ${date}`;
+    if (mark.source === "user") return `Your price ${date}`;
+    return `Institution's price ${date}`;
 }
 
 // ---------------------------------------------------------------------------
 // The ledger's view
 // ---------------------------------------------------------------------------
+
+/** Entered by hand, imported from a positions CSV, or synced from a linked account. */
+export type OptionPositionSource = "manual" | "csv" | "plaid";
 
 /** A position as the server loads it: the stored row with its account, mark and thesis. */
 export interface LoadedOptionPosition extends OptionContract {
@@ -147,12 +171,22 @@ export interface LoadedOptionPosition extends OptionContract {
     portfolioId: string;
     account: string;
     contract: string;
+    source: OptionPositionSource;
+    /**
+     * From a linked account that still syncs: its contract, contracts,
+     * premium and account are the institution's, and can't be changed,
+     * moved or deleted here.
+     */
+    synced: boolean;
     quantity: number;
     premium: number;
     multiplier: number;
     openedAt: string | null;
     userMark: number | null;
     userMarkDate: string | null;
+    /** The price per share the linked account last reported, and its day. */
+    institutionPrice: number | null;
+    institutionPriceDate: string | null;
     thesisId: string | null;
     /** The linked thesis's title; null when there is none, or it was deleted. */
     thesisTitle: string | null;

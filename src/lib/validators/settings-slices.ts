@@ -240,10 +240,15 @@ const churnPolicySchema = z.strictObject({
 /** A holding's ticker as the app stores it: AAPL, BRK.B, BTC-USD. */
 const ticker = z.string().max(10).regex(/^[A-Z0-9]+(?:[.-][A-Z0-9]+)*$/, { error: 'must be a ticker such as AAPL or BRK.B' });
 
+/** A holding valued by hand, by its id as Postgres writes it (bucketChoiceKey). */
+const handValuedKey = z.string().regex(/^manual:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/, {
+    error: 'must be manual: and the id of a holding valued by hand',
+});
+
 const bucketAssignmentsSchema = z
-    .partialRecord(ticker, z.enum(ASSIGNABLE_POLICY_BUCKETS))
+    .partialRecord(z.union([ticker, handValuedKey]), z.enum(ASSIGNABLE_POLICY_BUCKETS))
     .refine((assignments) => Object.keys(assignments).length <= MAX_BUCKET_ASSIGNMENTS, {
-        error: `must hold at most ${MAX_BUCKET_ASSIGNMENTS} tickers`,
+        error: `must hold at most ${MAX_BUCKET_ASSIGNMENTS.toLocaleString('en-US')} choices`,
     });
 
 export const riskPolicySettingsSchema = z.strictObject({

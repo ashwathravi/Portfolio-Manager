@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { test, expect, type Page } from '@playwright/test';
 import { clickUntil, gotoAppPage, openPolicyChecks, reloadAppPage } from './helpers/app';
-import { accountRowsLeft, databaseAuthEnabled, signInAsFreshUser } from './helpers/users';
+import { accountRowsLeft, databaseAuthEnabled, signInAsFreshUser, signInAsNewUser } from './helpers/users';
 
 /** The next save of the user's settings whose risk policy passes `check`. */
 function savedRiskPolicy(page: Page, check: (riskPolicy: Record<string, unknown>) => boolean) {
@@ -15,6 +15,21 @@ function savedRiskPolicy(page: Page, check: (riskPolicy: Record<string, unknown>
 async function hasPolicyHoldings(page: Page): Promise<boolean> {
     await expect(page.getByTestId('bucket-holdings')).toBeVisible();
     return !(await page.getByTestId('bucket-holdings-empty').isVisible());
+}
+
+/** Groups Today's Allocation card by policy bucket. */
+async function groupAllocationByBucket(page: Page) {
+    const byPolicy = page.getByRole('region', { name: 'Allocation' }).getByRole('radio', { name: 'Policy' });
+    await clickUntil(byPolicy, async () => {
+        await expect(byPolicy).toHaveAttribute('aria-checked', 'true', { timeout: 1000 });
+    });
+}
+
+/** A group's share of Today's Allocation card, found by its label. */
+function allocationShare(page: Page, label: string) {
+    return page.getByRole('region', { name: 'Allocation' }).locator('.pm-alloc-row')
+        .filter({ has: page.getByText(label, { exact: true }) })
+        .locator('.pm-alloc-pct');
 }
 
 /**
@@ -156,8 +171,11 @@ test.describe('Settings page', () => {
                         data: {
                             itemId: 'item-plaid-sandbox-investments',
                             accounts: [
-                                { name: 'Plaid Sandbox Investments Plaid Growth Brokerage', positions: 7, transactionsAdded: 100, transactionsPending: false, holdingsSkipped: 0, costUnknown: 0 },
-                                { name: 'Plaid Sandbox Investments Plaid Roth IRA', positions: 2, transactionsAdded: 20, transactionsPending: false, holdingsSkipped: 1, costUnknown: 0 },
+                                {
+                                    name: 'Plaid Sandbox Investments Plaid Growth Brokerage', positions: 7, valued: 1, transactionsAdded: 100, transactionsPending: false,
+                                    holdingsSkipped: 3, skipped: { 'no-ticker': 1, 'other-currency': 1, short: 1 }, costUnknown: 0,
+                                },
+                                { name: 'Plaid Sandbox Investments Plaid Roth IRA', positions: 2, options: 2, transactionsAdded: 20, transactionsPending: false, holdingsSkipped: 1, skipped: { option: 1 }, costUnknown: 0 },
                             ],
                             overLimit: [],
                         },
@@ -189,7 +207,13 @@ test.describe('Settings page', () => {
         await card.getByRole('button', { name: 'Connect selected' }).click();
 
         // Only the accounts picked sync: the checking account was unticked.
-        await expect(page.getByText("2 accounts: 9 positions and 120 new transactions. 1 holding without a ticker, or in another currency, wasn't brought in.")).toBeVisible();
+        // The option contracts the IRA holds come in as option positions;
+        // what wasn't brought in says why, one sentence for each reason.
+        await expect(page.getByText(
+            "2 accounts: 9 positions, 2 option positions, 1 holding valued by the institution and 120 new transactions. "
+            + "1 option or warrant without clear contract details wasn't brought in. 1 holding with no ticker and no value wasn't brought in. "
+            + "1 holding in another currency wasn't brought in. 1 short position wasn't brought in.",
+        )).toBeVisible();
         expect(syncRequests[0]).toEqual({ itemId: 'item-plaid-sandbox-investments', plaidAccountIds: ['plaid-growth-brokerage', 'plaid-roth-ira'] });
 
         // The connection as the server has it: what each account syncs into.
@@ -528,7 +552,14 @@ test.describe('Settings page', () => {
         // Launch item i65: the export is the account's data, not this browser's settings.
         test.skip(!databaseAuthEnabled, 'requires the database-auth E2E mode');
         const data = page.getByTestId('data-management');
-        const [json] = await Promise.all([page.waitForEvent('download'), data.getByRole('button', { name: 'Everything (JSON)' }).click()]);
+        // The sections hydrate inside a Suspense boundary, so a click as the
+        // page arrives can be lost: click until the download has gone.
+        const [json] = await Promise.all([
+            page.waitForEvent('download'),
+            clickUntil(data.getByRole('button', { name: 'Everything (JSON)' }), async () => {
+                await expect(page.getByText('Your data was downloaded.')).toBeVisible({ timeout: 5_000 });
+            }),
+        ]);
         expect(json.suggestedFilename()).toMatch(/^atlas-wealth-export-\d{4}-\d{2}-\d{2}\.json$/);
         const exported = JSON.parse(readFileSync(await json.path(), 'utf8')) as { format: string; accounts: Array<{ name: string; transactions: unknown[] }> };
         expect(exported.format).toBe('atlas-wealth-export');
@@ -736,6 +767,11 @@ test.describe('Settings page', () => {
         // TSLA is the only speculative holding: 12% of the portfolio, over the 5% cap.
         await gotoAppPage(page, '/');
         await expect(page.getByTestId('today-triage-item').filter({ hasText: 'Speculative/options' })).toHaveCount(1);
+        // Allocation files it there too, and has nothing in core.
+        await groupAllocationByBucket(page);
+        const speculativeShare = await allocationShare(page, 'Speculative/options').textContent() ?? '';
+        expect(speculativeShare).toMatch(/^\d+\.\d%$/);
+        await expect(allocationShare(page, 'Core')).toHaveCount(0);
 
         await gotoAppPage(page, '/settings');
         const tsla = page.getByLabel('TSLA bucket');
@@ -759,6 +795,10 @@ test.describe('Settings page', () => {
         await expect(
             page.locator('[data-testid="risk-policy-dimension"][data-policy-id="speculative_options_exposure"]'),
         ).toHaveAttribute('data-status', 'inside');
+        // So does Allocation: TSLA's share moves from speculative to core.
+        await groupAllocationByBucket(page);
+        await expect(allocationShare(page, 'Core')).toHaveText(speculativeShare);
+        await expect(allocationShare(page, 'Speculative/options')).toHaveCount(0);
 
         // Holdings files it under the bucket chosen.
         await gotoAppPage(page, '/portfolios/holdings');
@@ -980,6 +1020,117 @@ function plaidE2EAccount({
         verificationStatus: 'automatically_verified',
     };
 }
+
+// Launch item i54: a holding valued by hand takes a bucket the way a ticker does.
+test.describe('Settings › buckets for holdings valued by hand', () => {
+    test.skip(!databaseAuthEnabled, 'holdings valued by hand are saved in the database');
+
+    /** The buckets `riskPolicy` keeps for holdings valued by hand, keyed by their ids. */
+    const handValuedChoices = (riskPolicy: Record<string, unknown>) =>
+        Object.entries((riskPolicy.bucketAssignments as Record<string, string>) ?? {})
+            .filter(([key]) => /^manual:[0-9a-f-]{36}$/.test(key))
+            .map(([, bucket]) => bucket);
+
+    test('each is listed by name and account and starts in core; the bucket chosen for it moves Today\'s checks', async ({ context, page }) => {
+        // Settings, Today and Settings again.
+        test.slow();
+        await signInAsNewUser(context, { firstSignIn: true });
+        const created = await page.request.post('/api/portfolios', { data: { name: '401(k)', cashBalance: 0 } });
+        expect(created.status()).toBe(201);
+        const { data: { id } } = await created.json() as { data: { id: string } };
+        for (const [name, value] of [['Target 2055 Trust', 90_000], ['Private Co shares', 10_000]] as const) {
+            const added = await page.request.post('/api/portfolio/manual-holdings', {
+                data: { portfolioId: id, holding: { name, value, valueAsOf: '2026-11-19' } },
+            });
+            expect(added.status()).toBe(201);
+        }
+        const bucketRow = (bucket: string) => page.locator(`[data-testid="bucket-policy-row"][data-bucket="${bucket}"]`);
+
+        await gotoAppPage(page, '/settings');
+        const rows = page.getByTestId('bucket-holding');
+        await expect(rows).toHaveCount(2);
+        await expect(rows.locator('.pm-bucket-holding-symbol')).toHaveText(['By hand', 'By hand']);
+        await expect(rows.first()).toContainText('Target 2055 Trust · 401(k)');
+        await expect(page.getByTestId('bucket-holdings')).toContainText('Holdings valued by hand start in core.');
+        const fund = page.getByLabel('Bucket for Private Co shares in 401(k)');
+        await expect(fund).toHaveValue('');
+        await expect(fund.locator('option:checked')).toHaveText('Core (default)');
+        await expect(bucketRow('core')).toContainText('from Target 2055 Trust, Private Co shares');
+
+        const saved = savedRiskPolicy(page, (riskPolicy) => handValuedChoices(riskPolicy).includes('speculative'));
+        await clickUntil(fund, async () => {
+            await fund.selectOption('speculative');
+            await expect(fund).toHaveValue('speculative', { timeout: 1000 });
+        });
+        await saved;
+        // $10,000 of $100,000: over the 5% cap.
+        await expect(bucketRow('speculative')).toHaveAttribute('data-status', 'breached');
+        await expect(bucketRow('speculative')).toContainText('Private Co shares');
+        await expect(bucketRow('core')).not.toContainText('Private Co shares');
+
+        await reloadAppPage(page);
+        await expect(page.getByLabel('Bucket for Private Co shares in 401(k)')).toHaveValue('speculative');
+
+        // Today evaluates the saved policy, and names the holding rather than its key.
+        await gotoAppPage(page, '/');
+        await expect(page.getByTestId('today-triage-item').filter({ hasText: 'Speculative/options' })).toHaveCount(1);
+        expect(await openPolicyChecks(page)).toBe(true);
+        const dimension = (policyId: string) => page.locator(`[data-testid="risk-policy-dimension"][data-policy-id="${policyId}"]`);
+        await expect(dimension('speculative_options_exposure')).toHaveAttribute('data-status', 'breached');
+        await expect(dimension('speculative_options_exposure')).toContainText('Private Co shares');
+        await expect(dimension('missing_policy_metadata')).toHaveAttribute('data-status', 'inside');
+        await expect(dimension('single_name_concentration')).not.toHaveAttribute('data-status', 'breached');
+        await expect(page.getByTestId('risk-policy-dashboard')).not.toContainText(/manual:/i);
+        // Allocation files the shares under speculative too, and the fund stays in core.
+        await groupAllocationByBucket(page);
+        await expect(allocationShare(page, 'Speculative/options')).toHaveText('10.0%');
+        await expect(allocationShare(page, 'Core')).toHaveText('90.0%');
+
+        await gotoAppPage(page, '/settings');
+        const back = savedRiskPolicy(page, (riskPolicy) => handValuedChoices(riskPolicy).length === 0);
+        const fundAgain = page.getByLabel('Bucket for Private Co shares in 401(k)');
+        // The saved choice shows once the page has hydrated with the user's settings.
+        await expect(fundAgain).toHaveValue('speculative');
+        await fundAgain.selectOption('');
+        await back;
+        await expect(fundAgain.locator('option:checked')).toHaveText('Core (default)');
+        await expect(bucketRow('core')).toContainText('from Target 2055 Trust, Private Co shares');
+    });
+
+    test('two of one name in one account are told apart by their values, in full on a phone', async ({ context, page }) => {
+        await signInAsNewUser(context, { firstSignIn: true });
+        const created = await page.request.post('/api/portfolios', { data: { name: 'Brokerage', cashBalance: 0 } });
+        expect(created.status()).toBe(201);
+        const { data: { id } } = await created.json() as { data: { id: string } };
+        for (const value of [250_000, 100_000, 100_000]) {
+            const added = await page.request.post('/api/portfolio/manual-holdings', {
+                data: { portfolioId: id, holding: { name: 'Rental property', value, valueAsOf: '2026-11-19' } },
+            });
+            expect(added.status()).toBe(201);
+        }
+
+        await page.setViewportSize({ width: 390, height: 844 });
+        await gotoAppPage(page, '/settings');
+        // By value, then by place among those of the same value.
+        const names = page.getByTestId('bucket-holding').locator('.pm-bucket-holding-name');
+        await expect(names).toHaveText([
+            'Rental property · Brokerage · $250,000',
+            'Rental property · Brokerage · $100,000, 1 of 2',
+            'Rental property · Brokerage · $100,000, 2 of 2',
+        ]);
+        for (const label of [
+            'Bucket for Rental property in Brokerage ($250,000)',
+            'Bucket for Rental property in Brokerage ($100,000, 1 of 2)',
+            'Bucket for Rental property in Brokerage ($100,000, 2 of 2)',
+        ]) {
+            await expect(page.getByLabel(label, { exact: true })).toHaveCount(1);
+        }
+        // Wrapped, not cut off: what tells them apart is at the end.
+        for (const name of await names.all()) {
+            expect(await name.evaluate((element) => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(0);
+        }
+    });
+});
 
 test.describe('Settings card layout', () => {
     test('regression: guardrail and execution rows are inset from the card edge', async ({ page }) => {

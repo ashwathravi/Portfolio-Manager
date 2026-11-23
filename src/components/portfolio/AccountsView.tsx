@@ -1,8 +1,12 @@
 import Link from "next/link";
+import { DataUnavailableNotice } from "@/components/data-display/DataUnavailableNotice";
+import type { AccountGroups } from "@/lib/portfolio/account-groups";
 import { accountKindLine } from "@/lib/portfolio/account-kinds";
 import type { AccountRow, AccountsSummary } from "@/lib/portfolio/accounts";
+import type { NetWorthItemsRead } from "@/lib/portfolio/net-worth";
 import { formatPct, formatShortDate, formatUsd } from "@/lib/format";
 import { AccountRowActions, NewAccountButton } from "./AccountControls";
+import { NetWorthItemsCard } from "./NetWorthItemsCard";
 
 /**
  * Portfolio › Accounts. Every figure comes from the user's portfolios in
@@ -14,8 +18,90 @@ import { AccountRowActions, NewAccountButton } from "./AccountControls";
  * x30). Without it Settings says bank linking isn't set up and points back
  * here, so the empty state leads with adding an account by hand and has no
  * Connect link.
+ *
+ * Under the totals, the accounts' value by tax treatment and by ownership
+ * (groupAccounts), each once any account says.
+ *
+ * Under the accounts, even before there are any, the Other assets and debts
+ * card (NetWorthItemsCard) holds what the user owns and owes outside them,
+ * which Today adds up as the net worth.
  */
-export function AccountsView({ rows, summary, bankLinking }: { rows: AccountRow[]; summary: AccountsSummary; bankLinking: boolean }) {
+export interface AccountsViewProps {
+    rows: AccountRow[];
+    summary: AccountsSummary;
+    /** The rows' value by tax treatment and by ownership (groupAccounts). */
+    groups: AccountGroups;
+    bankLinking: boolean;
+    /**
+     * The user's other assets and debts (readNetWorthItemsForPage);
+     * "unavailable" when they couldn't be read, and null (or left out)
+     * without a database, with nowhere to keep them, so there is no card.
+     */
+    netWorth?: NetWorthItemsRead;
+}
+
+interface OtherAssetsAndDebtsProps {
+    netWorth: AccountsViewProps["netWorth"];
+    accountsTotal: number;
+}
+
+/** The Other assets and debts card, its outage notice, or nothing. */
+function OtherAssetsAndDebts({ netWorth, accountsTotal }: OtherAssetsAndDebtsProps) {
+    if (netWorth === "unavailable") return <DataUnavailableNotice what="your other assets and debts" />;
+    if (!netWorth) return null;
+    return <NetWorthItemsCard items={netWorth} accountsTotal={accountsTotal} />;
+}
+
+interface AccountGroupStripsProps {
+    groups: AccountGroups;
+    /** How many accounts there are: the hint is for two or more, which a split could tell apart. */
+    accounts: number;
+}
+
+/**
+ * A strip for each split an account says anything for, each group naming
+ * its accounts under its value: on screen, not in a tooltip, so a keyboard,
+ * a phone and a screen reader get them as a mouse does. With neither said
+ * anywhere, a line on how. The ids are fixed: the view renders once on its
+ * page.
+ */
+function AccountGroupStrips({ groups, accounts }: AccountGroupStripsProps) {
+    const strips = [
+        { id: "accounts-by-tax", title: "By tax treatment", groups: groups.byTaxTreatment },
+        { id: "accounts-by-ownership", title: "By ownership", groups: groups.byOwnership },
+    ].filter((strip) => strip.groups.length > 0);
+    if (strips.length === 0) {
+        if (accounts < 2) return null;
+        return (
+            <p className="pm-empty-line" data-testid="accounts-groups-hint">
+                Set a tax treatment or ownership on your accounts (Edit, in each row&apos;s menu) to see your value split by them.
+            </p>
+        );
+    }
+    return (
+        <div className="pm-account-groups" data-testid="accounts-groups">
+            {strips.map((strip) => (
+                <section key={strip.id} className="pm-account-group" aria-labelledby={`${strip.id}-title`} data-testid={strip.id}>
+                    <h2 id={`${strip.id}-title`} className="pm-account-group-title">{strip.title}</h2>
+                    <dl className="pm-metric-strip">
+                        {strip.groups.map((g) => (
+                            <div key={g.key} data-group={g.key}>
+                                <dt>{g.label}</dt>
+                                <dd>
+                                    {formatUsd(g.totalUsd)}
+                                    {g.sharePct !== null && <> <span className="pm-account-group-share">{formatPct(g.sharePct)}</span></>}
+                                </dd>
+                                <dd className="pm-account-group-accounts" data-testid="account-group-accounts">{g.accountNames.join(", ")}</dd>
+                            </div>
+                        ))}
+                    </dl>
+                </section>
+            ))}
+        </div>
+    );
+}
+
+export function AccountsView({ rows, summary, groups, bankLinking, netWorth = null }: AccountsViewProps) {
     if (rows.length === 0) {
         return (
             <div className="pm-page" data-testid="accounts-view">
@@ -40,6 +126,7 @@ export function AccountsView({ rows, summary, bankLinking }: { rows: AccountRow[
                         </div>
                     )}
                 </section>
+                <OtherAssetsAndDebts netWorth={netWorth} accountsTotal={0} />
             </div>
         );
     }
@@ -51,11 +138,12 @@ export function AccountsView({ rows, summary, bankLinking }: { rows: AccountRow[
                     <NewAccountButton />
                 </div>
                 <dl className="pm-metric-strip" data-testid="accounts-summary">
-                    <div><dt>Total value</dt><dd>{formatUsd(summary.totalUsd)}</dd></div>
+                    <div><dt>Portfolio value</dt><dd>{formatUsd(summary.totalUsd)}</dd></div>
                     <div><dt>Cash</dt><dd>{formatUsd(summary.cashUsd)}</dd></div>
                     <div><dt>Accounts</dt><dd>{summary.accounts}</dd></div>
                     <div><dt>Positions</dt><dd>{summary.positions}</dd></div>
                 </dl>
+                <AccountGroupStrips groups={groups} accounts={rows.length} />
                 <div className="pm-table-scroll">
                     <table className="pm-table-full" data-testid="accounts-table">
                         <thead>
@@ -87,7 +175,7 @@ export function AccountsView({ rows, summary, bankLinking }: { rows: AccountRow[
                                     </td>
                                     <td className="num">{r.positions}</td>
                                     <td>
-                                        <span className="pm-share-bar" title={`${r.sharePct}% of total value`}>
+                                        <span className="pm-share-bar" title={`${r.sharePct}% of your portfolio value`}>
                                             <span style={{ width: `${r.sharePct}%` }} />
                                         </span>
                                     </td>
@@ -97,6 +185,7 @@ export function AccountsView({ rows, summary, bankLinking }: { rows: AccountRow[
                                             account={{
                                                 id: r.id, name: r.name, description: r.description, cashUsd: r.cashUsd, positions: r.positions,
                                                 accountType: r.accountType, institution: r.institution, taxTreatment: r.taxTreatment,
+                                                ownership: r.ownership,
                                             }}
                                         />
                                     </td>
@@ -106,6 +195,7 @@ export function AccountsView({ rows, summary, bankLinking }: { rows: AccountRow[
                     </table>
                 </div>
             </section>
+            <OtherAssetsAndDebts netWorth={netWorth} accountsTotal={summary.totalUsd} />
         </div>
     );
 }

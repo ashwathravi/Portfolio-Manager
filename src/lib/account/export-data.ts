@@ -4,6 +4,7 @@
  * Settings card builds the CSV files from the same export.
  */
 
+import type { AssignablePolicyBucket } from "@/lib/risk-policy/user-policy";
 import type { Order } from "@/types/execution";
 
 export const ACCOUNT_EXPORT_FORMAT = "atlas-wealth-export";
@@ -55,8 +56,14 @@ export interface ExportedValuationPosition {
     marketValue: number | null;
 }
 
-/** An option position (launch item i63), as entered or imported. */
+/** An option position (launch item i63), as entered, imported or synced. */
 export interface ExportedOptionPosition {
+    /**
+     * Massive's name for the contract (O:AAPL270115C00250000): a weekly a
+     * sync brought in is named for its own root (SPXW), which the
+     * underlying alone doesn't give.
+     */
+    contract: string;
     underlying: string;
     contractType: string;
     strike: number;
@@ -70,10 +77,13 @@ export interface ExportedOptionPosition {
     /** The user's own price per share, and its date. */
     userMark: number | null;
     userMarkDate: string | null;
+    /** The price per share the linked account last reported, and its date. */
+    institutionPrice: number | null;
+    institutionPriceDate: string | null;
     thesisId: string | null;
     expiryTest: string;
     exitRule: string;
-    /** "manual" or "csv". */
+    /** "manual", "csv" or "plaid". */
     source: string;
     updatedAt: string;
 }
@@ -89,11 +99,13 @@ export interface ExportedManualHolding {
     value: number;
     costBasis: number | null;
     valueAsOf: string;
-    /** "manual", or "plaid" for a linked account's holding with no ticker. */
+    /** "manual"; "plaid" for a linked account's holding with no ticker; "csv" for one a positions file brought in. */
     source: string;
     updatedAt: string;
     /** Its value on each day it was valued, oldest first. */
     values: { date: string; value: number; quantity: number | null }[];
+    /** The bucket chosen for it in Settings › Bucket policy; null while it's in its default, core. */
+    policyBucket: AssignablePolicyBucket | null;
 }
 
 export interface ExportedAccount {
@@ -105,6 +117,8 @@ export interface ExportedAccount {
     accountType: string | null;
     institution: string | null;
     taxTreatment: string | null;
+    /** Whose name it's in: "individual", "joint", "dependent" or "business"; null when not said. */
+    ownership: string | null;
     cashBalance: number;
     createdAt: string;
     updatedAt: string;
@@ -124,6 +138,25 @@ export interface ExportedConnection {
     accounts: { name: string; mask: string | null; type: string; subtype: string; syncing: boolean }[];
 }
 
+/**
+ * An asset or debt outside the accounts (net_worth_items), as entered on
+ * Accounts: a home, a car, a mortgage. For a debt, the value is the balance
+ * owed, never negative.
+ */
+export interface ExportedNetWorthItem {
+    /** "asset" or "debt". */
+    kind: string;
+    category: string;
+    name: string;
+    value: number;
+    valueAsOf: string;
+    note: string | null;
+    createdAt: string;
+    updatedAt: string;
+    /** Its value on each day it was valued, oldest first. */
+    values: { date: string; value: number }[];
+}
+
 export interface AccountExport {
     format: typeof ACCOUNT_EXPORT_FORMAT;
     version: typeof ACCOUNT_EXPORT_VERSION;
@@ -132,6 +165,8 @@ export interface AccountExport {
     settings: { version: number; settings: unknown; updatedAt: string } | null;
     accounts: ExportedAccount[];
     linkedConnections: ExportedConnection[];
+    /** Assets and debts outside the accounts, assets first, largest first. */
+    netWorthItems: ExportedNetWorthItem[];
     watchlist: Record<string, unknown>[];
     journal: Record<string, unknown>[];
     theses: Record<string, unknown>[];

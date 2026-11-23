@@ -5,7 +5,9 @@
  * Shares, cost and value add up, and the cost per share is blended over all
  * of them, as on the symbol's detail page. A combined row is worth exactly
  * what its account rows are worth, so the table always agrees with the
- * summary above it.
+ * summary above it. Holdings works out its small positions after combining
+ * (small-positions.ts), so By symbol judges a symbol across all its
+ * accounts.
  */
 
 export type HoldingsRowView = "account" | "symbol";
@@ -48,6 +50,10 @@ export interface SymbolPosition {
     last: number | null;
     /** Some of the shares, not all, have no price and are counted at cost. */
     partlyAtCost: boolean;
+    /** What its shares with a price are worth; the rest count at cost. */
+    pricedValue: number;
+    /** What its shares with a price cost. */
+    pricedCost: number;
     /** Over the shares with a price; null when none has one. */
     totalReturnPct: number | null;
     todayPct: number | null;
@@ -55,6 +61,8 @@ export interface SymbolPosition {
     allocationPct: number;
     /** The names of the accounts holding it, one per account, in name order. */
     accounts: string[];
+    /** The IDs of the accounts holding it, in the same order as `accounts`. */
+    accountIds: string[];
 }
 
 /** True when some symbol (in any letter case) is held in more than one account. */
@@ -104,6 +112,7 @@ function combineGroup<T extends AccountPosition>(key: string, group: readonly T[
             ? priced[0].last
             : pricedQuantity !== 0 ? pricedValue / pricedQuantity : null;
 
+    const accounts = accountsInNameOrder(group);
     return {
         ...group[0],
         id: `symbol:${key}`,
@@ -113,22 +122,27 @@ function combineGroup<T extends AccountPosition>(key: string, group: readonly T[
         marketValue: sum(group, (p) => p.marketValue),
         last,
         partlyAtCost: priced.length > 0 && priced.length < group.length,
+        pricedValue,
+        pricedCost,
         totalReturnPct: priced.length > 0 && pricedCost > 0 ? ((pricedValue - pricedCost) / pricedCost) * 100 : null,
         todayPct: group.find((p) => p.todayPct !== null)?.todayPct ?? null,
         todayChangeAbs: sum(group, (p) => p.todayChangeAbs),
         allocationPct: sum(group, (p) => p.allocationPct),
-        accounts: accountNames(group),
+        accounts: accounts.names,
+        accountIds: accounts.ids,
     };
 }
 
 /**
- * One name per account, in name order: the order holdings arrive in isn't
- * fixed between accounts, and the list should read the same every time.
+ * One name per account, in name order, with the accounts' IDs in the same
+ * order: the order holdings arrive in isn't fixed between accounts, and the
+ * list should read the same every time.
  */
-function accountNames(group: readonly AccountPosition[]): string[] {
+function accountsInNameOrder(group: readonly AccountPosition[]): { ids: string[]; names: string[] } {
     const names = new Map<string, string>();
     for (const p of group) if (!names.has(p.accountId)) names.set(p.accountId, p.account);
-    return [...names.values()].sort((a, b) => a.localeCompare(b, "en-US", { sensitivity: "base" }));
+    const sorted = [...names].sort(([, a], [, b]) => a.localeCompare(b, "en-US", { sensitivity: "base" }));
+    return { ids: sorted.map(([id]) => id), names: sorted.map(([, name]) => name) };
 }
 
 function sum<T>(rows: readonly T[], value: (row: T) => number): number {

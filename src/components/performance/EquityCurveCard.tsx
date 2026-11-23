@@ -43,12 +43,14 @@ export interface EquityCurveCardProps {
     benchmarks: Benchmark[];
     /** Observations per year: 12 for month ends, 252 for daily closes. */
     periodsPerYear: number;
+    /** A line under the return saying what it covers, when that needs saying. */
+    note?: string;
 }
 
 const RANGES: readonly EquityRange[] = ["1M", "3M", "6M", "YTD", "1Y", "3Y", "ALL"];
 const EMPTY_BENCHMARK_SERIES: DatedValue[] = [];
 
-export function EquityCurveCard({ portfolio, benchmarks, periodsPerYear }: EquityCurveCardProps) {
+export function EquityCurveCard({ portfolio, benchmarks, periodsPerYear, note }: EquityCurveCardProps) {
     const sorted = useMemo(
         () => [...portfolio].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0)),
         [portfolio],
@@ -114,6 +116,7 @@ export function EquityCurveCard({ portfolio, benchmarks, periodsPerYear }: Equit
                                 : ""}
                         </span>
                     </p>
+                    {note && <p className="pm-card-subtitle" data-testid="equity-curve-note">{note}</p>}
                 </div>
                 <div className="pm-perf-equity-controls">
                     <div

@@ -226,6 +226,34 @@ describe("pre-trade risk policy evaluator", () => {
         assert.equal(result.checks.some((check) => check.ruleType === "missing_bucket_classification"), false);
     });
 
+    test("a holding valued by hand counts in the bucket chosen for it, never as the traded position", () => {
+        const result = evaluatePreTradeRiskPolicy({
+            holdings: [
+                { symbol: "TSLA", marketValue: 12_000, policyBucket: "speculative" },
+                {
+                    symbol: "manual:m1",
+                    name: "Private Co shares",
+                    marketValue: 20_000,
+                    policyBucket: "speculative",
+                    themeWeights: [{ theme: "unknown", weight: 1, source: "unknown" }],
+                },
+            ],
+            portfolioValue: 100_000,
+            trade: { ticker: "TSLA", side: "buy", quantity: 1, price: 250, linkedThesisId: "t", thesisUpdatedAt: "2026-05-01" },
+            asOf: "2026-05-15",
+        });
+
+        const bucket = result.checks.find((check) => check.ruleType === "bucket_allocation");
+        assert.ok(bucket);
+        assert.match(bucket.label, /Speculative/);
+        // $12,000 of TSLA and the $20,000 holding valued by hand, of $100,000.
+        assert.match(bucket.message, /worsens from 32%/);
+        assert.equal(bucket.currentPct, 32);
+        const position = result.checks.find((check) => check.ruleType === "single_position_allocation");
+        assert.ok(position);
+        assert.equal(position.currentValue, 12_000);
+    });
+
     test("flags theme/factor cap adds independently from bucket caps", () => {
         const result = evaluatePreTradeRiskPolicy({
             holdings: [{ symbol: "NVDA", marketValue: 180_000, policyBucket: "core" }],

@@ -76,6 +76,17 @@ describe("redactSecrets", () => {
         );
     });
 
+    test("regression: in JSON text, masks an apiKey parameter to the end of its string and keeps what follows", () => {
+        assert.equal(
+            redactSecrets(JSON.stringify({ message: "GET /v3/reference/tickers/AAPL?apiKey=k123", status: 502 }), {}),
+            '{"message":"GET /v3/reference/tickers/AAPL?apiKey=***","status":502}',
+        );
+        assert.equal(
+            redactSecrets(JSON.stringify({ stack: "GET /v3/reference/tickers/AAPL?apiKey=k123\n    at fetchJson" }), {}),
+            '{"stack":"GET /v3/reference/tickers/AAPL?apiKey=***\\n    at fetchJson"}',
+        );
+    });
+
     test("ignores short and blank values so ordinary words survive", () => {
         assert.equal(redactSecrets("the test failed", { CRON_SECRET: "test", AUTH_SECRET: "   " }), "the test failed");
     });

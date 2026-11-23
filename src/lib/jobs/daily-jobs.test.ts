@@ -5,7 +5,7 @@ import { assessJob, JOB_SCHEDULES } from "@/lib/health/job-health";
 import { createIngestAdapter, DEFAULT_BUDGET_MS, ingestDailyPrices } from "@/lib/markets/price-ingest";
 import { setErrorReporterForTests } from "@/lib/observability/report-error";
 
-import { refreshMarketData } from "./daily-jobs";
+import { DAILY_JOBS, refreshMarketData } from "./daily-jobs";
 import { runJob, type JobRunStore } from "./runner";
 
 describe("refreshMarketData", () => {
@@ -77,5 +77,14 @@ describe("refreshMarketData", () => {
             new Date("2026-11-07T00:30:00.000Z"),
         );
         assert.equal(health.status, "failed");
+    });
+});
+
+describe("DAILY_JOBS", () => {
+    test("linked accounts sync before the prices, so a contract a sync brought in gets its close the same night", () => {
+        // The price job marks the option contracts the user holds
+        // (listOptionContractsToMark), synced ones included (launch item i63).
+        const names = DAILY_JOBS.map((job) => job.name);
+        assert.ok(names.indexOf("plaid") >= 0 && names.indexOf("plaid") < names.indexOf("prices"));
     });
 });

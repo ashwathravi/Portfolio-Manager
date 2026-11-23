@@ -1,3 +1,5 @@
+import { isManualSymbol } from "@/lib/portfolio/manual-symbol";
+
 import {
     DEFAULT_BUCKET_POLICIES,
     type PolicyBucketAllocationRow,
@@ -248,6 +250,11 @@ export function computeRiskPolicyDashboard(
         cashTotal: cashTotal,
         employerSymbols: [...employerSymbols],
     });
+    // A holding valued by hand has no ticker whose theme the user could
+    // classify, so its bucket stands for its theme: an unknown one there is
+    // no missing metadata to fix.
+    const unknownThemeTickers = requireThemeRow(themeExposure.rows, "unknown").contributors
+        .filter((contributor) => !isManualSymbol(contributor.symbol));
 
     const dimensions: RiskPolicyDimension[] = [
         buildConcentrationDimension({
@@ -332,8 +339,8 @@ export function computeRiskPolicyDashboard(
         buildMissingMetadataDimension(
             bucketAllocation.unassignedMarketValue,
             bucketAllocation.unassignedCount,
-            themeExposure.unknownMarketValue,
-            themeExposure.unknownCount,
+            unknownThemeTickers.reduce((sum, contributor) => sum + contributor.weightedValue, 0),
+            unknownThemeTickers.length,
             totalMarketValue,
         ),
     ];

@@ -1,0 +1,2 @@
+ALTER TABLE "manual_holdings" DROP CONSTRAINT "manual_holdings_source_check";--> statement-breakpoint
+ALTER TABLE "manual_holdings" ADD CONSTRAINT "manual_holdings_source_check" CHECK ("manual_holdings"."source" in ('manual', 'plaid', 'csv'));

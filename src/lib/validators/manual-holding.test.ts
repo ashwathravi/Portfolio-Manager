@@ -27,6 +27,21 @@ describe('manualHoldingSchema', () => {
         assert.equal(manualHoldingSchema.safeParse({ name: 'A', value: 1, valueAsOf: '2026-11-19', source: 'plaid' }).success, false);
     });
 
+    test('regression: refuses a NUL in the name or identifier, which Postgres can\'t store', () => {
+        assert.equal(message({ name: 'Sample\u0000Fund', value: 1, valueAsOf: '2026-11-19' }), 'Input contains an invalid character (a null character)');
+        assert.equal(message({ name: 'Sample Fund', identifier: '12345\u0000X678', value: 1, valueAsOf: '2026-11-19' }), 'Input contains an invalid character (a null character)');
+    });
+
+    test("regression: refuses year 0000, which the ISO format has and Postgres doesn't; any day from 0001 to 9999 is fine", () => {
+        // Accepted, the save failed in the database with a 500 whose logged
+        // error carried the holding's name and value.
+        for (const valueAsOf of ['0000-01-01', '0000-12-31', '0000-02-29']) {
+            assert.equal(message({ name: 'A', value: 1, valueAsOf }), 'Enter the date of the value (YYYY-MM-DD)', valueAsOf);
+        }
+        assert.equal(manualHoldingSchema.parse({ name: 'A', value: 1, valueAsOf: '0001-01-01' }).valueAsOf, '0001-01-01');
+        assert.equal(manualHoldingSchema.parse({ name: 'A', value: 1, valueAsOf: '9999-12-31' }).valueAsOf, '9999-12-31');
+    });
+
     test('the body names the account', () => {
         assert.equal(manualHoldingBodySchema.safeParse({ portfolioId: ID, holding: { name: 'A', value: 1, valueAsOf: '2026-11-19' } }).success, true);
         assert.equal(manualHoldingBodySchema.safeParse({ holding: { name: 'A', value: 1, valueAsOf: '2026-11-19' } }).success, false);

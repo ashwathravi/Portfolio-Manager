@@ -160,7 +160,7 @@ Every ID from a URL or body is checked against the session's user, in the WHERE 
 - In GitHub, the owner connection and the Vercel token live in the `production` environment, which admits only master.
 - Secret scanning and push protection are on, with no open alerts.
 - Errors reaching Sentry lose cookies, bodies and query strings, and keep only five harmless request headers. Secrets are masked anywhere in an event (`src/lib/observability/sentry-options.ts`).
-- API errors answer a fixed message (`internalServerError`).
+- API errors answer a fixed message, and are logged as one line of JSON, so a carriage return or line feed in an error's message can't start a log line of its own (`internalServerError`).
 
 **Browser**
 - **Content-Security-Policy:** a fresh nonce on every response, with `'strict-dynamic'` and no `'unsafe-inline'` for scripts (`content-security-policy.spec.ts`).
@@ -187,7 +187,7 @@ Every ID from a URL or body is checked against the session's user, in the WHERE 
 | Market data | 120 a minute | 240 a minute |
 | Everything else | 180 a minute | 300 a minute |
 
-- **Daily quotas** (`src/lib/api/daily-quota.ts`, launch item i77): per user, on top of these, for what costs more than a request: 20 CSV imports, 10 bank links, 20 syncs on request and 100 backtests a day, in the same Upstash store; Ask keeps its own 30 questions a day. A user keeps at most 10 linked institutions, counted under a per-user lock as each is saved, and at most 500 watchlist tickers, 2,000 journal entries, 200 theses and 50,000 transactions (`src/lib/limits/records.ts`), checked the same way in each write's transaction. `docs/deployment.md` › Opening sign-up has the table.
+- **Daily quotas** (`src/lib/api/daily-quota.ts`, launch item i77): per user, on top of these, for what costs more than a request: 20 CSV imports, 10 bank links, 20 syncs on request and 100 backtests a day, in the same Upstash store; Ask keeps its own 30 questions a day. A user keeps at most 10 linked institutions, counted under a per-user lock as each is saved, and at most 500 watchlist tickers, 2,000 journal entries, 200 theses, 50,000 transactions, 1,000 holdings valued by hand and 100 other assets and debts (`src/lib/limits/records.ts`), checked the same way in each write's transaction. `docs/deployment.md` › Opening sign-up has the table.
 
 **Delivery**
 - **Actions:** every one is pinned to a commit SHA, and the default token is read-only.

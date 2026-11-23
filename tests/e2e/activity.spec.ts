@@ -248,6 +248,20 @@ test.describe('Portfolio › Activity — recording transactions', () => {
         await expect(activityRow(page, 'ADVANCED MICRO DEVICES')).toHaveCount(1);
     });
 
+    test('regression: a CSV saved as UTF-16 imports with its descriptions as written', async ({ page }) => {
+        // Read as UTF-8, its é came in as U+FFFD.
+        await page.getByRole('button', { name: 'Import CSV' }).click();
+        const dialog = page.getByTestId('transactions-import-dialog');
+        const csv = 'Run Date,Action,Symbol,Security Description,Quantity,Price ($),Amount ($)\r\n03/05/2026,YOU BOUGHT,ACME,Sample Café purchase,2,10,-20';
+        // Big-endian, with no byte-order mark.
+        const buffer = Buffer.from(csv, 'utf16le').swap16();
+        await dialog.getByLabel('CSV file').setInputFiles({ name: 'history.csv', mimeType: 'text/csv', buffer });
+        await expect(dialog.getByTestId('transactions-import-preview')).toContainText('history.csv: 1 transaction ready');
+        await dialog.getByRole('button', { name: 'Import 1 transaction' }).click();
+        await expect(dialog).toBeHidden();
+        await expect(activityRow(page, 'Sample Café purchase')).toHaveCount(1);
+    });
+
     test('a trade in another currency stays in it: its row, and Bought totalled apart from dollars', async ({ page }) => {
         // Codex findings on PR #154: CAD added into the dollar totals, and a
         // gross Value column had the fees taken off it.

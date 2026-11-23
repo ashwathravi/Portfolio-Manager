@@ -31,10 +31,13 @@
  * 4. Option marks (launch item i63): the newest close of each option
  *    contract anyone holds, asked about once a session, at most
  *    MAX_OPTION_MARKS_PER_RUN a run (one aggregates call each). Massive's
- *    free options plan has end-of-day bars; a plan without options answers
- *    403, which ends this step for the run without failing the job, and
- *    positions stay at the user's own price or the premium paid. Marks of
- *    contracts no one holds any more are dropped.
+ *    free options plan has end-of-day bars, published after midnight
+ *    Eastern, so in the evening the newest is the session before's. A range
+ *    that ends on a session not published yet may be refused (403); it is
+ *    asked again ending on the session before. A plan without options
+ *    refuses that too, which ends this step for the run without failing the
+ *    job, and positions stay at the user's own price or the premium paid.
+ *    Marks of contracts no one holds any more are dropped.
  * 5. Backfill two years of history for symbols that don't have it yet, one
  *    aggregates call per symbol, while the run's time budget lasts: held
  *    symbols and benchmarks first, and a looked-up symbol only once a daily
@@ -282,7 +285,8 @@ export type PriceIngestDetail = {
      * in the window (`noTrade`), failures (asked again next session), how
      * many held contracts still wait to be asked about this session, and
      * marks dropped because no one holds the contract. `notIncluded`: Massive
-     * answered 403, so the plan has no options data and the step stopped.
+     * answered 403 for a range ending on the session before too, so the plan
+     * has no options data and the step stopped.
      */
     optionMarks?: {
         updated: string[];
@@ -643,10 +647,25 @@ export async function ingestDailyPrices({
         stopped.optionMarks = beforeMarks;
     } else {
         const from = optionCloseWindowStart(session);
+        // Massive's free plan publishes a session's bars after midnight
+        // Eastern and may refuse a range that ends on one it hasn't yet (403),
+        // as it refuses that day's grouped bars: then the range ends on the
+        // session before, for this contract and the rest of the run. A 403 for
+        // that one too means the plan has no options data.
+        let to = session;
+        const latestClose = async (contract: string) => {
+            try {
+                return await paced(() => adapter.getLatestOptionClose(contract, from, to));
+            } catch (error) {
+                if (!(error instanceof PolygonApiError && error.status === 403 && to === session)) throw error;
+                to = previousTradingDay(session);
+                return paced(() => adapter.getLatestOptionClose(contract, from, to));
+            }
+        };
         for (const contract of await store.listOptionContractsToMark(MAX_OPTION_MARKS_PER_RUN, session)) {
             let found: { date: string; close: number } | null;
             try {
-                const answer = await paced(() => adapter.getLatestOptionClose(contract, from, session));
+                const answer = await latestClose(contract);
                 if ("stopped" in answer) {
                     stopped.optionMarks = answer.stopped;
                     break;

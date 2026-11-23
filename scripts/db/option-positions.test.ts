@@ -198,4 +198,17 @@ describe('option positions', { skip: !DATABASE_URL && 'SCRIPTS_TEST_DATABASE_URL
         await assert.rejects(sql.unsafe(`INSERT INTO option_positions (user_id, portfolio_id, contract, underlying, contract_type, strike, expiry, quantity, premium) VALUES ('u-checks', '${account}', 'O:X', 'X', 'call', 1, '2027-01-15', 0, 1)`), /option_positions_quantity_check/);
         await assert.rejects(sql.unsafe(`INSERT INTO option_positions (user_id, portfolio_id, contract, underlying, contract_type, strike, expiry, quantity, premium) VALUES ('u-checks', '${account}', 'O:X', 'X', 'straddle', 1, '2027-01-15', 1, 1)`), /option_positions_contract_type_check/);
     });
+
+    test("a position may come from a linked account's sync, with the institution's price dated; nothing else is a source", async () => {
+        const account = await seedUser('u-sources');
+        const insert = (contract: string, fields: string, values: string) =>
+            sql.unsafe(`INSERT INTO option_positions (user_id, portfolio_id, contract, underlying, contract_type, strike, expiry, quantity, premium${fields}) VALUES ('u-sources', '${account}', '${contract}', 'X', 'call', 1, '2027-01-15', 1, 1${values})`);
+        await insert('O:X1', ', source, institution_price, institution_price_date', ", 'plaid', 1.25, '2026-10-25'");
+        await assert.rejects(insert('O:X2', ', source', ", 'broker'"), /option_positions_source_check/);
+        // The institution's price and its day come together, never below $0.
+        await assert.rejects(insert('O:X3', ', institution_price', ', 1.25'), /option_positions_institution_price_check/);
+        await assert.rejects(insert('O:X4', ', institution_price_date', ", '2026-10-25'"), /option_positions_institution_price_check/);
+        await assert.rejects(insert('O:X5', ', institution_price, institution_price_date', ", -1, '2026-10-25'"), /option_positions_institution_price_check/);
+        assert.deepEqual((await sql`SELECT contract, source FROM option_positions WHERE user_id = 'u-sources'`).map((r) => [r.contract, r.source]), [['O:X1', 'plaid']]);
+    });
 });

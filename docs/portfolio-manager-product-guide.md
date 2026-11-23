@@ -176,18 +176,18 @@ Use Dashboard first each day.
 
 ### First run
 
-Before you have any positions, Today shows two steps in place of your net worth:
+Before you have any positions, Today shows two steps in place of your portfolio value:
 
 1. **Add an account**: **New account** (a name and the cash it holds), or **Connect an account** for a brokerage where bank linking is set up (Plaid's keys and a database; without them the link isn't offered, here or anywhere else, since Settings would only say bank linking isn't set up). Once done, the step shows how many accounts and how much cash.
-2. **Add your positions**: **Import CSV** with your broker's positions export (symbol, quantity, and average cost or cost basis). You see what was read before anything is saved, and it goes into your account (or a new one).
+2. **Add your positions**: **Import CSV** with your broker's positions export (symbol, quantity, and average cost or cost basis). A fund with no ticker, such as a 401(k) trust, comes in valued by hand at the file's market value. You see what was read before anything is saved, and it goes into your account (or a new one).
 
-When the first positions are in, the steps give way to your net worth. A new sign-in starts with example data off, so every number is your own; **Show example data** on the card (or Settings) turns the labelled examples on to look around first.
+When the first positions are in, the steps give way to your portfolio value. A new sign-in starts with example data off, so every number is your own; **Show example data** on the card (or Settings) turns the labelled examples on to look around first.
 
 What to review:
 
-- Portfolio value and daily movement.
+- Net worth (once you add other assets and debts on Accounts), portfolio value and daily movement, which is a share of the portfolio value, not of the net worth.
 - Allocation.
-- Top holdings.
+- Top holdings, by value: positions and holdings valued by hand together, each marked Valued by hand where it is.
 - Recent activity.
 - Alpha Radar signal card.
 - Risk Policy Dashboard card.
@@ -217,11 +217,15 @@ Use it to:
 
 The sector chips above the table are the sectors you hold, largest first. A position's sector and company name come from market reference data: its industry code, fetched by the nightly price job a few symbols a night. A symbol not fetched yet uses a built-in list of well-known tickers, or "Other".
 
+Positions worth very little, such as a robo-advisor's fractional shares, are shown together as one **small positions** row at the end of the table. Each is worth under $500 and under 0.5% of your market value, and it takes at least three of them (never every position you're looking at). Select it to see them, in the table's order; it starts closed each time you open Holdings. The summary above the table, the policy buckets, Today and the holdings CSV in Settings › Data still count each one. In **By symbol**, a symbol is small only if it is across all its accounts together.
+
 Important fields:
 
 - Policy bucket: core, satellite, speculative/options, special situation, cash reserve, or unassigned.
 - Theme/factor tags: AI infrastructure, semiconductors, mega-cap growth, cloud/platform, crypto/risk-on, employer-linked, broad core, bonds/cash.
 - Options risk: premium at risk, notional equivalent, expiry, thesis and max-loss policy.
+
+**Valued by hand** keeps the holdings Atlas can't price (a 401(k) fund with no ticker, a 529 portfolio, a private company): each counts at the value given, as of its date. Add one with **Add holding**, or import your broker's positions file: a row with no ticker but a market value comes in valued by hand, listed on its own in the preview, as of the day you choose in **Values as of**. Importing the file again updates the same holding (found by its CUSIP or other code, else its name) and keeps each day's value in its history; a file older than the value saved only adds its day. A holding the file no longer lists stays until you delete it. While a linked account syncs, its holdings without a ticker come in with each sync, so a file's can't be imported into it; once it stops syncing (disconnected, say), a file updates the ones its last sync brought in. In **Update value** a new value is dated today unless you give another day, and changing anything but the value (its name, units, cost, code or account) leaves the date as it was. You can keep up to 1,000, a linked account's included.
 
 ## Portfolios
 
@@ -234,9 +238,11 @@ Use it to:
 - Navigate into portfolio or holding details.
 - Track account count and high-level portfolio metadata.
 
-On **Portfolio › Accounts**, **New account** adds an account with its cash and an optional description, and each row's **⋯** menu edits or deletes one. Deleting an account deletes its positions, transactions and valuation history.
+On **Portfolio › Accounts**, **New account** adds an account with its cash and, optionally, its type, tax treatment, ownership, institution and a description, and each row's **⋯** menu edits or deletes one. Picking a type suggests how it's usually taxed and held, which you can keep or change. The line under the name shows the type, institution and ownership. Once any account has a tax treatment, the page splits your accounts' value by tax treatment, with the accounts that don't say under Not set, and the same goes for ownership; each group names its accounts under its value. A linked account takes its type and institution from Plaid, and the tax treatment that kind of account usually has, until you change any of them or its ownership. Only you set its ownership. Ownership doesn't change any total: an account held for a dependent or a business still counts in your portfolio value. Deleting an account deletes its positions, transactions and valuation history.
 
 Account names are unique, ignoring case and surrounding spaces: creating an account, renaming one, or importing a CSV into a new account with a name you already use is refused, so the import's account picker and the Returns account switcher can tell your accounts apart. You can have up to 50 accounts.
+
+Below your accounts, **Other assets and debts** keeps what you own and owe outside them: a home, a vehicle, cash in the bank, valuables or money owed to you, and a mortgage, auto loan, credit card, student loan or other debt. Give each a value (for a debt, the balance owed) and the date of it; **Update** changes both, and each value you give is kept by its date. In **Update** a new value is dated today unless you give another day, and a new name or note leaves the date as it was. Once you have any, this card shows your net worth, and so does Today's headline once your accounts hold positions (your portfolio value plus other assets, minus debts), with your portfolio value beside it; before then Today shows the first-run steps. The card's first figure is your portfolio value, as Today and the strip at the top of Accounts call it. Two items of the same name, such as two cards left named Credit card, are told apart by their value, which a screen reader reads with the row's **⋯** button and its menu, and which the prompt and the message show when you delete one. Returns, the equity curve and the risk policy still measure your accounts only. Investment and retirement accounts belong in Accounts, so don't add them here too. You can keep up to 100.
 
 ## Trade Log
 
@@ -457,6 +463,8 @@ Set targets and caps for:
 - Special situations.
 - Cash reserve.
 - Unassigned.
+
+Under **Your holdings**, choose the bucket each holding is in. A holding starts in the one its type suggests (funds and bonds core, single stocks active ideas, crypto and warrants speculative), and one valued by hand starts in core and is listed by its name and account. Today's checks, Allocation and stress test, Trade's checks and Ask follow the bucket you choose.
 
 ### GOOG De-Risking
 

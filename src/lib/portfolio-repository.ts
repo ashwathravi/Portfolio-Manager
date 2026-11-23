@@ -17,7 +17,7 @@ export function buildDashboardPortfoliosQuery(userId: string) {
     return db.query.portfolios.findMany({
         where: eq(portfolios.userId, userId),
         // Holdings valued by hand count toward an account's value as they stand.
-        with: { holdings: true, manualHoldings: { columns: { id: true, name: true, value: true, costBasis: true, valueAsOf: true } } },
+        with: { holdings: true, manualHoldings: { columns: { id: true, name: true, quantity: true, value: true, costBasis: true, valueAsOf: true } } },
     });
 }
 

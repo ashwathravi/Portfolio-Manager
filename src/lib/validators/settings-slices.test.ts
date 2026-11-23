@@ -2,6 +2,7 @@ import { beforeEach, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { plaidAccountToConnectedAccount } from '@/lib/plaid/link';
+import { manualSymbol } from '@/lib/portfolio/manual-symbol';
 import type { PlaidDiscoveredAccount } from '@/lib/plaid/types';
 import {
     DEFAULT_CASH_DEPLOYMENT_RULE,
@@ -233,6 +234,9 @@ const ACTIONS: ReadonlyArray<readonly [string, () => void]> = [
         assignments = withBucketChoice(assignments, 'BTC-USD', 'speculative', held);
         assignments = withBucketChoice(assignments, 'VTI', 'cash_reserve', held);
         assignments = withBucketChoice(assignments, 'VTI', null, held);
+        // A holding valued by hand, by its id.
+        const fund = manualSymbol('00000000-0000-4000-8000-000000000001');
+        assignments = withBucketChoice(assignments, fund, 'speculative', [...held, fund]);
         store().updateRiskPolicy({ bucketAssignments: assignments });
     }],
     ['updateRiskPolicy: employer tickers as EmployerStockPlanCard reads them', () => store().updateRiskPolicy({
@@ -565,7 +569,31 @@ describe('findSettingsIssue', () => {
             accepts(['riskPolicy', 'bucketAssignments'], most);
             assert.equal(
                 issueFor(['riskPolicy', 'bucketAssignments'], { ...most, EXTRA: 'core' }),
-                `settings.riskPolicy.bucketAssignments must hold at most ${MAX_BUCKET_ASSIGNMENTS} tickers`,
+                'settings.riskPolicy.bucketAssignments must hold at most 1,500 choices',
+            );
+        });
+
+        test('riskPolicy: bucket choices for holdings valued by hand go by manual: and the id in lower case', () => {
+            accepts(['riskPolicy', 'bucketAssignments'], { 'manual:00000000-0000-4000-8000-000000000001': 'speculative', AAPL: 'core' });
+            for (const key of [
+                'manual:00000000-0000-4000-8000-00000000000A',
+                'MANUAL:00000000-0000-4000-8000-000000000001',
+                'manual:m1',
+                'manual:',
+                'manual:00000000-0000-4000-8000-000000000001/unit',
+            ]) {
+                assert.equal(
+                    issueFor(['riskPolicy', 'bucketAssignments'], { [key]: 'core' }),
+                    `settings.riskPolicy.bucketAssignments has an unknown field ${JSON.stringify(key)}`,
+                );
+            }
+            // Tickers and holdings valued by hand share the limit.
+            const tickers = Object.fromEntries(Array.from({ length: MAX_BUCKET_ASSIGNMENTS - 1 }, (_, i) => [`T${i}`, 'core']));
+            const full = { ...tickers, 'manual:00000000-0000-4000-8000-000000000001': 'speculative' };
+            accepts(['riskPolicy', 'bucketAssignments'], full);
+            assert.equal(
+                issueFor(['riskPolicy', 'bucketAssignments'], { ...full, 'manual:00000000-0000-4000-8000-000000000002': 'core' }),
+                'settings.riskPolicy.bucketAssignments must hold at most 1,500 choices',
             );
         });
 
@@ -684,6 +712,15 @@ describe('sanitizeSettings', () => {
         assert.deepStrictEqual(loaded.riskPolicy?.bucketAssignments, { AAPL: 'core' });
         const tooMany = Object.fromEntries(Array.from({ length: MAX_BUCKET_ASSIGNMENTS + 1 }, (_, i) => [`T${i}`, 'core']));
         assert.deepStrictEqual(sanitize({ ...baseline(), riskPolicy: { ...baseline().riskPolicy, bucketAssignments: tooMany } }).riskPolicy?.bucketAssignments, {});
+    });
+
+    test('a well-formed choice for a holding valued by hand stays; a malformed one goes', () => {
+        const fund = 'manual:00000000-0000-4000-8000-000000000001';
+        const loaded = sanitize({
+            ...baseline(),
+            riskPolicy: { ...baseline().riskPolicy, bucketAssignments: { [fund]: 'speculative', 'MANUAL:00000000-0000-4000-8000-000000000002': 'core', 'manual:m1': 'active', VTI: 'core' } },
+        });
+        assert.deepStrictEqual(loaded.riskPolicy?.bucketAssignments, { [fund]: 'speculative', VTI: 'core' });
     });
 
     test('list items of the wrong kind, or without what identifies them, go; other required fields fall back', () => {

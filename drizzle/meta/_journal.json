@@ -260,6 +260,34 @@
       "when": 1795146153229,
       "tag": "0036_manual_holding_values",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1795404455016,
+      "tag": "0037_manual_holdings_csv_source",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1795404481188,
+      "tag": "0038_plaid_option_positions",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1795404498116,
+      "tag": "0039_account_ownership",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1795404529073,
+      "tag": "0040_net_worth_items",
+      "breakpoints": true
     }
   ]
 }

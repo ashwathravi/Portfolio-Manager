@@ -3,16 +3,26 @@
  *
  * Imports parsed holdings rows (from the Holdings "Import CSV" dialog) into
  * an account the signed-in user owns, or a new account for them, with the
- * file's option positions (launch item i63).
+ * file's option positions (launch item i63). Option rows for a contract a
+ * linked account that still syncs brought in are left as the sync has them,
+ * and counted in options.unchanged. The file's rows with no ticker Atlas
+ * can price come in as holdings valued by hand (`manual`), as of
+ * `valuesAsOf` (today in UTC when left out, at most tomorrow in UTC); a
+ * linked account refuses them while it syncs, since its bank reports its
+ * own.
  *
- * Body:     { portfolioId?: uuid, newPortfolioName?: string, rows: ImportRow[], options?: OptionContractRow[] }
+ * Body:     { portfolioId?: uuid, newPortfolioName?: string, rows: ImportRow[], options?: OptionContractRow[],
+ *             manual?: { name, identifier?, quantity?, value, costBasis? }[], valuesAsOf?: 'YYYY-MM-DD' }
  *           or, for a file covering several accounts, { accounts: [that body, …] }, written
  *           together or not at all, as one of the day's imports
- * Response: { data: { portfolioId, createdPortfolio, insert, update, unchanged, options: { insert, update, unchanged } } }
+ * Response: { data: { portfolioId, createdPortfolio, insert, update, unchanged, options: { insert, update, unchanged },
+ *             manual: { insert, update, unchanged, replacedPositions } } }
  *           or, for `accounts`, { data: { accounts: [that result, …] } } in the same order
  * Errors:   400 INVALID_IMPORT; 404 PORTFOLIO_NOT_FOUND; 409 DUPLICATE_ACCOUNT_NAME
- *           or ACCOUNT_LIMIT (a new account, checked as creating one); 413 IMPORT_TOO_LARGE;
- *           429 DAILY_QUOTA_REACHED (the day's CSV imports, shared with transactions)
+ *           or ACCOUNT_LIMIT (a new account, checked as creating one), LINKED_ACCOUNT (holdings
+ *           valued by hand into a linked account that still syncs; nothing is written) or
+ *           MANUAL_HOLDING_LIMIT; 413 IMPORT_TOO_LARGE; 429 DAILY_QUOTA_REACHED (the day's CSV
+ *           imports, shared with transactions)
  */
 
 import { NextResponse } from 'next/server';
@@ -22,14 +32,16 @@ import { consumeDailyQuota } from '@/lib/api/daily-quota';
 import { apiError, internalServerError, logApiEvent } from '@/lib/api/security';
 import { requestIdFrom } from '@/lib/observability/request-id';
 import { requireSessionApiUserScope } from '@/lib/api/session-security';
-import { ImportAccessError, importHoldings, importHoldingsToAccounts } from '@/lib/portfolio/importHoldings';
+import { RecordLimitError } from '@/lib/limits/records';
+import { recordLimitResponse } from '@/lib/limits/records-server';
+import { ImportAccessError, importHoldings, importHoldingsToAccounts, LinkedAccountImportError } from '@/lib/portfolio/importHoldings';
 import { AccountLimitError, DuplicateAccountNameError, MAX_ACCOUNTS_PER_USER } from '@/lib/portfolio/manage';
 import { loadQuotes } from '@/lib/services/market-data-service';
 import { portfolioImportSchema, portfolioMultiImportSchema } from '@/lib/validators/portfolio-import';
 
 export const dynamic = 'force-dynamic';
 
-/** ~1000 rows of JSON with generous names, over a few dozen accounts, stays well under this. */
+/** ~1000 rows of JSON (positions or holdings valued by hand) with generous names, over a few dozen accounts, stays well under this. */
 const MAX_BODY_BYTES = 384 * 1024;
 
 export async function POST(request: Request) {
@@ -69,6 +81,10 @@ export async function POST(request: Request) {
             optionRows: groups.reduce((n, g) => n + g.options.length, 0),
             inserted: results.reduce((n, r) => n + r.insert, 0),
             updated: results.reduce((n, r) => n + r.update, 0),
+            // Counts only: what the holdings are called stays out of the log.
+            manualRows: groups.reduce((n, g) => n + g.manual.length, 0),
+            manualInserted: results.reduce((n, r) => n + r.manual.insert, 0),
+            manualUpdated: results.reduce((n, r) => n + r.manual.update, 0),
             createdPortfolio: results.some((r) => r.createdPortfolio),
             userScoped: true,
         });
@@ -83,6 +99,8 @@ export async function POST(request: Request) {
         if (err instanceof AccountLimitError) {
             return apiError(`You can have at most ${MAX_ACCOUNTS_PER_USER} accounts.`, 'ACCOUNT_LIMIT', 409);
         }
+        if (err instanceof LinkedAccountImportError) return apiError(err.message, 'LINKED_ACCOUNT', 409);
+        if (err instanceof RecordLimitError) return recordLimitResponse(err);
         return internalServerError(err, 'Unable to import holdings.', 'PORTFOLIO_IMPORT_FAILED');
     }
 }

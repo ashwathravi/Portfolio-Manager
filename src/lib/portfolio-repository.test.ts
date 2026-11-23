@@ -8,6 +8,7 @@ import {
     buildUserHoldingPositionsQuery,
     buildUserHoldingsQuery,
     buildUserPortfolioCountQuery,
+    buildUserPortfolioOptionsQuery,
     buildUserTransactionsQuery,
 } from "./portfolio-repository";
 
@@ -29,12 +30,13 @@ function assertScoped(
 }
 
 describe("portfolio tenant query boundaries", () => {
-    test("scopes dashboard, holding, transaction, count, and ownership queries", () => {
+    test("scopes dashboard, holding, transaction, count, picker, and ownership queries", () => {
         assertScoped(buildDashboardPortfoliosQuery(USER_A), USER_A);
         assertScoped(buildUserHoldingsQuery(USER_A), USER_A);
         assertScoped(buildUserHoldingPositionsQuery(USER_A, "aapl"), USER_A);
         assertScoped(buildUserTransactionsQuery(USER_A), USER_A);
         assertScoped(buildUserPortfolioCountQuery(USER_A), USER_A);
+        assertScoped(buildUserPortfolioOptionsQuery(USER_A), USER_A);
         assertScoped(buildOwnedPortfolioQuery(USER_A, "00000000-0000-4000-8000-000000000001"), USER_A);
         assertScoped(buildOwnedPortfolioHoldingsQuery(USER_A, "00000000-0000-4000-8000-000000000001"), USER_A);
     });

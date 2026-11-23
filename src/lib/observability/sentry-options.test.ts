@@ -10,6 +10,8 @@ import {
     stripUrlQueries,
     usableSentryDsn,
 } from "./sentry-options";
+import { jsonLoggableError } from "./loggable-error";
+import { PolygonApiError } from "@/lib/providers/polygon-massive-adapter";
 
 const DSN = "https://abc123publickey@o4501234.ingest.us.sentry.io/4509876";
 
@@ -204,6 +206,88 @@ describe("scrubSentryEvent", () => {
 
         assert.equal(event.exception?.values?.[0].stacktrace?.frames?.[0].abs_path, chunk);
         assert.deepEqual(event.debug_meta?.images?.[0], { type: "sourcemap", code_file: chunk, debug_id: "abc" });
+    });
+
+    test("regression: cuts a failed query's parameters from exceptions and console breadcrumbs", () => {
+        const sql = 'insert into "net_worth_items" ("id", "user_id", "name", "note") values (default, $1, $2, $3) returning "id"';
+        const message = `Failed query: ${sql}\nparams: u-1,Sample home,MARKER-note\nsecond line MARKER-more`;
+        const event = scrubSentryEvent({
+            type: undefined,
+            exception: { values: [{ type: "Error", value: message }] },
+            breadcrumbs: [
+                {
+                    category: "console",
+                    level: "error",
+                    message: `Unable to add the asset or debt. Error: ${message}\n    at queryWithCache (session.js:41:15) {\n  params: [ 'MARKER-note' ]\n}`,
+                    data: {
+                        logger: "console",
+                        arguments: ["Unable to add the asset or debt.", { message, query: sql, params: ["u-1", "MARKER-note"] }],
+                    },
+                },
+                { category: "fetch", data: { url: "/api/portfolio/net-worth-items", params: ["MARKER-array"], parameters: ["MARKER-too"] } },
+            ],
+        } as ScrubbableEvent, {});
+
+        assert.ok(!JSON.stringify(event).includes("MARKER"), JSON.stringify(event));
+        assert.equal(event.exception?.values?.[0].value, `Failed query: ${sql}`);
+        assert.equal(event.breadcrumbs?.[0].message, `Unable to add the asset or debt. Error: Failed query: ${sql}`);
+        assert.deepEqual(event.breadcrumbs?.[0].data, { logger: "console" });
+        assert.deepEqual(event.breadcrumbs?.[1].data, { url: "/api/portfolio/net-worth-items" });
+    });
+
+    test("regression: cuts them from the JSON line a route's 500 logs, which a console breadcrumb keeps", () => {
+        const sql = 'insert into "net_worth_items" ("id", "user_id", "name", "note") values (default, $1, $2, $3) returning "id"';
+        // An error whose own message quotes a failed query's, parameters and all.
+        const quoted = `Save failed: Failed query: ${sql}\nparams: u-1,Sample "home",MARKER-note`;
+        const line = JSON.stringify({
+            event: "internal_server_error",
+            code: "NET_WORTH_ITEM_CREATE_FAILED",
+            message: "Unable to add the asset or debt.",
+            error: { name: "Error", message: quoted, stack: `Error: ${quoted}\n    at save (src/lib/portfolio/net-worth-items.ts:1:1)` },
+        });
+        const event = scrubSentryEvent({
+            type: undefined,
+            breadcrumbs: [{ category: "console", level: "error", message: line, data: { logger: "console", arguments: [line] } }],
+        } as ScrubbableEvent, {});
+
+        const scrubbed = String(event.breadcrumbs?.[0].message);
+        assert.ok(!scrubbed.includes("MARKER"), scrubbed);
+        const entry = JSON.parse(scrubbed);
+        assert.equal(entry.code, "NET_WORTH_ITEM_CREATE_FAILED");
+        assert.equal(entry.error.message, `Save failed: Failed query: ${sql}`);
+        assert.equal(entry.error.stack, `Error: Save failed: Failed query: ${sql}`);
+    });
+
+    test("regression: keeps the fields after a masked apiKey in the JSON line a route's 500 logs", () => {
+        // The provider's error quotes its request URL with the key already masked, as the adapter writes it.
+        const failure = new PolygonApiError(502, "Bad Gateway", "https://api.polygon.io/v3/reference/tickers/AAPL?apiKey=***");
+        const line = JSON.stringify({
+            event: "internal_server_error",
+            code: "MARKET_DATA_FUNDAMENTALS_FAILED",
+            message: "Unable to fetch fundamentals.",
+            error: jsonLoggableError(failure),
+        });
+        const event = scrubSentryEvent({
+            type: undefined,
+            breadcrumbs: [{ category: "console", level: "error", message: line, data: { logger: "console", arguments: [line] } }],
+        } as ScrubbableEvent, {});
+
+        const entry = JSON.parse(String(event.breadcrumbs?.[0].message));
+        assert.equal(entry.code, "MARKET_DATA_FUNDAMENTALS_FAILED");
+        assert.equal(entry.error.name, "PolygonApiError");
+        assert.equal(entry.error.message, "PolygonMassiveAdapter: HTTP 502 Bad Gateway — https://api.polygon.io/v3/reference/tickers/AAPL");
+        assert.equal(entry.error.status, 502);
+        assert.equal(entry.error.statusText, "Bad Gateway");
+        assert.ok(String(entry.error.stack).includes("HTTP 502 Bad Gateway — https://api.polygon.io/v3/reference/tickers/AAPL"), entry.error.stack);
+    });
+
+    test("keeps a params key that isn't a list of query parameters", () => {
+        const event = scrubSentryEvent({
+            type: undefined,
+            contexts: { route: { params: { id: "11111111-1111-4111-8111-111111111111" } } },
+        } as ScrubbableEvent, {});
+
+        assert.deepEqual(event.contexts?.route, { params: { id: "11111111-1111-4111-8111-111111111111" } });
     });
 
     test("serverSentryOptions scrubs with the server's secrets", async () => {

@@ -1,6 +1,9 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 
+import { RECORD_LIMITS } from "@/lib/limits/records";
+import { manualSymbol } from "@/lib/portfolio/manual-symbol";
+
 import { DEFAULT_BUCKET_POLICIES } from "./buckets";
 import { DEFAULT_CASH_DEPLOYMENT_RULE } from "./cash";
 import { DEFAULT_EMPLOYER_STOCK_DERISKING_PLAN } from "./de-risking";
@@ -10,16 +13,24 @@ import { DEFAULT_THEME_CAPS } from "./themes";
 import {
     DEFAULT_CHURN_POLICY,
     EMPTY_POLICY_PORTFOLIO,
+    HAND_VALUED_LABEL,
     MAX_BUCKET_ASSIGNMENTS,
     MAX_EMPLOYER_TICKERS,
+    bucketChoiceKey,
+    bucketChoiceLabels,
+    chosenBucket,
     chosenBucketForTrade,
     employerSymbols,
     evaluateRiskPolicy,
+    handValuedNames,
     parseEmployerTickers,
+    policyHoldingLabel,
     policyHoldings,
     policyPortfolioValue,
     riskPolicyInput,
     withBucketChoice,
+    type AssignablePolicyBucket,
+    type BucketChoiceListing,
     type PolicyPortfolio,
     type RiskPolicySettings,
 } from "./user-policy";
@@ -93,6 +104,113 @@ describe("holdings valued by hand", () => {
         const summary = evaluateRiskPolicy({ ...ONE_STOCK, holdings: [] }, POLICY);
         assert.equal(summary.dimensions.find((d) => d.id === "single_name_concentration")!.currentPct, 0);
         assert.equal(summary.dimensions.find((d) => d.id === "missing_policy_metadata")!.status, "inside");
+    });
+
+    const choosing = (bucket: AssignablePolicyBucket): RiskPolicySettings => ({ ...POLICY, bucketAssignments: { "manual:m1": bucket } });
+    const check = (summary: ReturnType<typeof evaluateRiskPolicy>, id: string) => summary.dimensions.find((d) => d.id === id)!;
+
+    test("are in the bucket chosen for them, core until then, and their theme follows it", () => {
+        const fund = (policy: RiskPolicySettings) => {
+            const [holding] = riskPolicyInput(ONE_STOCK, policy).otherHoldings ?? [];
+            return [holding.symbol, holding.policyBucket, holding.themeWeights?.map((weight) => weight.theme), holding.isEmployerStock];
+        };
+        assert.deepEqual(fund(POLICY), ["manual:m1", "core", ["broad_core_index"], false]);
+        assert.deepEqual(fund(choosing("core")), ["manual:m1", "core", ["broad_core_index"], false]);
+        assert.deepEqual(fund(choosing("cash_reserve")), ["manual:m1", "cash_reserve", ["bonds_treasuries_cash_equivalent"], false]);
+        assert.deepEqual(fund(choosing("special_situation")), ["manual:m1", "special_situation", ["special_situation_regulatory"], false]);
+        assert.deepEqual(fund(choosing("active")), ["manual:m1", "active", ["unknown"], false]);
+        assert.deepEqual(fund(choosing("speculative")), ["manual:m1", "speculative", ["unknown"], false]);
+        // Never employer stock: the employer plan names tickers.
+        const named = { ...choosing("speculative"), employerStockPlan: { ...POLICY.employerStockPlan, symbols: ["ACME"] } };
+        assert.deepEqual(fund(named), ["manual:m1", "speculative", ["unknown"], false]);
+        assert.equal(chosenBucket(choosing("active"), "MANUAL:M1"), "active");
+    });
+
+    test("regression: a choice moves Today's checks, but never the single-name ones", () => {
+        const before = evaluateRiskPolicy(ONE_STOCK, POLICY);
+        const after = evaluateRiskPolicy(ONE_STOCK, choosing("speculative"));
+        assert.equal(check(before, "speculative_options_exposure").status, "inside");
+        assert.equal(check(after, "speculative_options_exposure").status, "breached");
+        // The $90,000 fund of the $100,000.
+        assert.ok(Math.abs((check(after, "speculative_options_exposure").currentPct ?? Number.NaN) - 90) < 1e-9);
+        assert.ok(Math.abs((check(after, "single_name_concentration").currentPct ?? Number.NaN) - 10) < 1e-9);
+        assert.deepEqual(check(after, "single_name_concentration").impactedSymbols, ["ACME"]);
+        // ACME has no theme on record, so it is missing metadata before and
+        // after; the fund's unknown theme never is.
+        for (const summary of [before, after]) {
+            assert.equal(check(summary, "missing_policy_metadata").currentLabel, "1 holding");
+            assert.equal(check(summary, "missing_policy_metadata").currentValueUsd, 10_000);
+        }
+        const fundOnly = evaluateRiskPolicy({ ...ONE_STOCK, holdings: [] }, choosing("speculative"));
+        assert.equal(check(fundOnly, "missing_policy_metadata").status, "inside");
+        assert.equal(check(fundOnly, "speculative_options_exposure").status, "breached");
+    });
+
+    test("one chosen as cash reserve takes no loss in a broad drawdown; left in core it takes its share", () => {
+        const fundImpact = (policy: RiskPolicySettings) => evaluateRiskPolicy(ONE_STOCK, policy).stressTests
+            .find((result) => result.scenarioId === "broad_market_20_tech_beta")!
+            .contributors.find((contributor) => bucketChoiceKey(contributor.symbol) === "manual:m1")?.impactUsd ?? 0;
+        assert.equal(fundImpact(POLICY), -18_000);
+        assert.equal(fundImpact(choosing("cash_reserve")), 0);
+    });
+
+    test("ticker and hand-valued choices never mix", () => {
+        const policy = choosing("speculative");
+        assert.deepEqual(policyHoldings(ONE_STOCK.holdings, policy).map((row) => row.policyBucket), [null]);
+        assert.equal(chosenBucketForTrade(policy, "manual:m1", "equity"), undefined);
+        assert.equal(chosenBucketForTrade(policy, "MANUAL:M1", "equity"), undefined);
+    });
+
+    test("are named by their name wherever the policy lists them, never by their key", () => {
+        assert.equal(policyHoldingLabel("TSLA"), "TSLA");
+        assert.equal(policyHoldingLabel("TSLA", "Tesla"), "TSLA");
+        assert.equal(policyHoldingLabel("MANUAL:M1", "Target 2055 Trust"), "Target 2055 Trust");
+        assert.equal(policyHoldingLabel("manual:m1"), HAND_VALUED_LABEL);
+        assert.equal(policyHoldingLabel("manual:m1", "  "), "Valued by hand");
+        assert.equal(handValuedNames(ONE_STOCK).get(bucketChoiceKey("MANUAL:M1")), "Target 2055 Trust");
+        assert.equal(handValuedNames(EMPTY_POLICY_PORTFOLIO).size, 0);
+    });
+});
+
+describe("bucketChoiceLabels", () => {
+    const byHand = (key: string, name: string, account: string | undefined, marketValue: number): BucketChoiceListing =>
+        ({ key, ticker: null, name, ...(account ? { account } : {}), marketValue });
+
+    test("a ticker by its company's name; a holding valued by hand by its name and account", () => {
+        assert.deepEqual(bucketChoiceLabels([
+            { key: "VTI", ticker: "VTI", name: "Vanguard Total Stock Market ETF", marketValue: 50_000 },
+            byHand("manual:a", "Target 2055 Trust", "401(k)", 90_000),
+            byHand("manual:b", "Private Co shares", undefined, 10_000),
+        ]), [
+            { text: "Vanguard Total Stock Market ETF", select: "VTI bucket" },
+            { text: "Target 2055 Trust · 401(k)", select: "Bucket for Target 2055 Trust in 401(k)" },
+            { text: "Private Co shares", select: "Bucket for Private Co shares" },
+        ]);
+    });
+
+    test("regression: two of one name in one account are told apart by value, then by place among the same value", () => {
+        const labels = bucketChoiceLabels([
+            byHand("manual:a", "Rental property", "Brokerage", 250_000),
+            // Any case: a screen reader says them the same.
+            byHand("manual:b", "rental property", "Brokerage", 100_000),
+            byHand("manual:c", "Rental property", "Brokerage", 100_000.4),
+            // In another account, it is its own.
+            byHand("manual:d", "Rental property", "IRA", 100_000),
+        ]);
+        assert.deepEqual(labels, [
+            { text: "Rental property · Brokerage · $250,000", select: "Bucket for Rental property in Brokerage ($250,000)" },
+            { text: "rental property · Brokerage · $100,000, 1 of 2", select: "Bucket for rental property in Brokerage ($100,000, 1 of 2)" },
+            { text: "Rental property · Brokerage · $100,000, 2 of 2", select: "Bucket for Rental property in Brokerage ($100,000, 2 of 2)" },
+            { text: "Rental property · IRA", select: "Bucket for Rental property in IRA" },
+        ]);
+    });
+});
+
+describe("bucketChoiceKey", () => {
+    test("a ticker in upper case; a holding valued by hand as manual: and its id in lower case", () => {
+        assert.equal(bucketChoiceKey(" brk.b "), "BRK.B");
+        assert.equal(bucketChoiceKey("MANUAL:00000000-0000-4000-8000-0000000000AB"), "manual:00000000-0000-4000-8000-0000000000ab");
+        assert.equal(bucketChoiceKey("manual:m1"), "manual:m1");
     });
 });
 
@@ -180,6 +298,32 @@ describe("withBucketChoice", () => {
         // At the limit exactly, nothing goes.
         const most = Object.fromEntries(Array.from({ length: MAX_BUCKET_ASSIGNMENTS - 1 }, (_, i) => [`OLD${i}`, "core" as const]));
         assert.equal(Object.keys(withBucketChoice(most, "NEW", "active", [])).length, MAX_BUCKET_ASSIGNMENTS);
+    });
+
+    test("a holding valued by hand goes by manual: and its id in lower case", () => {
+        assert.deepEqual(withBucketChoice({}, "MANUAL:M1", "core", []), { "manual:m1": "core" });
+        assert.deepEqual(withBucketChoice({ "manual:m1": "core", VTI: "core" }, "manual:M1", null, []), { VTI: "core" });
+    });
+
+    test("past the limit, held holdings valued by hand stay beside held tickers", () => {
+        const full = Object.fromEntries(Array.from({ length: MAX_BUCKET_ASSIGNMENTS - 2 }, (_, i) => [`OLD${i}`, "core" as const]));
+        const choices = { ...full, "manual:m1": "speculative" as const, "manual:gone": "active" as const };
+        const next = withBucketChoice(choices, "NEW", "active", ["NEW", "OLD7", "MANUAL:M1"]);
+        assert.deepEqual(next, { OLD7: "core", "manual:m1": "speculative", NEW: "active" });
+    });
+
+    test("regression: every holding valued by hand a user can keep has a choice, and 500 tickers beside them", () => {
+        assert.ok(MAX_BUCKET_ASSIGNMENTS >= RECORD_LIMITS.manualHoldings + 500);
+        const handValued = Array.from(
+            { length: RECORD_LIMITS.manualHoldings },
+            (_, i) => manualSymbol(`00000000-0000-4000-8000-${String(i).padStart(12, "0")}`),
+        );
+        const held = [...handValued, ...Array.from({ length: 500 }, (_, i) => `T${i}`)];
+        const earlier = Object.fromEntries(held.slice(0, -1).map((symbol) => [bucketChoiceKey(symbol), "active" as const]));
+        const choices = withBucketChoice(earlier, held[held.length - 1], "speculative", held);
+        assert.equal(Object.keys(choices).length, held.length);
+        // None went to make room for the last: the first is still chosen.
+        assert.equal(chosenBucket({ bucketAssignments: choices }, handValued[0]), "active");
     });
 });
 

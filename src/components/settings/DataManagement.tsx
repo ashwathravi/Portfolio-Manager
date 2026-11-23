@@ -117,9 +117,9 @@ export function DataManagement() {
                     <div>
                         <h4 className="font-medium">Download your data</h4>
                         <p className="text-sm text-muted-foreground">
-                            Everything Atlas holds for you as one JSON file (accounts, holdings, transactions,
-                            drafted orders, value history, settings, watchlist, journal, theses and Ask history), or
-                            your transactions or holdings as CSV.
+                            Everything Atlas holds for you as one JSON file (accounts, holdings, transactions, other
+                            assets and debts, drafted orders, value history, settings, watchlist, journal, theses and
+                            Ask history), or your transactions or holdings as CSV.
                         </p>
                     </div>
                     <div className="flex flex-wrap gap-2">
@@ -158,10 +158,10 @@ export function DataManagement() {
                             <AlertDialogHeader>
                                 <AlertDialogTitle>Delete your account?</AlertDialogTitle>
                                 <AlertDialogDescription>
-                                    This deletes your accounts, holdings, transactions, drafted orders, value history,
-                                    settings, watchlist, journal, theses and Ask history, and ends Atlas&apos;s access to
-                                    your linked institutions through Plaid. It can&apos;t be undone; download your data
-                                    first if you want a copy.
+                                    This deletes your accounts, holdings, transactions, other assets and debts, drafted
+                                    orders, value history, settings, watchlist, journal, theses and Ask history, and ends
+                                    Atlas&apos;s access to your linked institutions through Plaid. It can&apos;t be undone;
+                                    download your data first if you want a copy.
                                 </AlertDialogDescription>
                             </AlertDialogHeader>
                             <div className="space-y-2 py-2">

@@ -6,13 +6,29 @@
  * accept (transactionRowSchema), so a Plaid transaction is held to the
  * same rules as one entered by hand or imported from a CSV.
  *
+ * Option contracts Plaid reports with their details become the account's
+ * option positions (launch item i63), as many contracts as the holding's
+ * quantity, price and value agree on, read the same way for every lot of
+ * a contract.
+ *
  * Mapping is pure and keeps what it can't bring in as a counted reason,
- * never a guess: a holding without a ticker, an option, a position in
- * another currency; a transaction type Atlas doesn't record.
+ * never a guess: a holding without a ticker or a value, an option or
+ * warrant without clear contract details, a position in another currency;
+ * a transaction type Atlas doesn't record, an option trade.
  */
 
 import { z } from "zod";
 
+import { getMarketDay, previousTradingDay } from "@/lib/markets/market-hours";
+import {
+    describeOptionContract,
+    isCalendarDate,
+    isOptionStrike,
+    optionContractTicker,
+    OPTION_POSITION_MULTIPLIER,
+    parseOptionContract,
+    type OptionContract,
+} from "@/lib/portfolio/option-positions";
 import { normalizeTicker } from "@/lib/research/watchlist";
 import { transactionRowSchema, TRANSACTION_LIMITS, type TransactionRow } from "@/lib/validators/transaction";
 
@@ -31,6 +47,9 @@ const securitySchema = z.object({
     is_cash_equivalent: z.boolean().nullish(),
     iso_currency_code: text.nullish(),
     unofficial_currency_code: text.nullish(),
+    // An option's contract, read on its own (optionContractSchema): a
+    // detail Atlas can't read leaves that one option out, not the sync.
+    option_contract: z.unknown().optional(),
 });
 
 const holdingSchema = z.object({
@@ -38,10 +57,20 @@ const holdingSchema = z.object({
     security_id: text,
     quantity: number,
     institution_price: number.nullish(),
+    // The day of the institution's price (YYYY-MM-DD), when Plaid has it.
+    institution_price_as_of: z.unknown().optional(),
     institution_value: number.nullish(),
     cost_basis: number.nullish(),
     iso_currency_code: text.nullish(),
     unofficial_currency_code: text.nullish(),
+});
+
+/** A security's option_contract, as Plaid documents it. */
+const optionContractSchema = z.object({
+    contract_type: text.nullish(),
+    expiration_date: text.nullish(),
+    strike_price: number.nullish(),
+    underlying_security_ticker: text.nullish(),
 });
 
 const transactionSchema = z.object({
@@ -185,7 +214,34 @@ export interface SyncedPosition {
     price: number | null;
 }
 
+/**
+ * Why a holding wasn't brought in: no ticker and no value; an option or
+ * warrant without contract details clear enough to bring in; held in
+ * another currency; a short stock position.
+ */
 export type HoldingSkipReason = "no-ticker" | "option" | "other-currency" | "short";
+
+/**
+ * An option contract the account holds, as Plaid reports it: it becomes
+ * one of the account's option positions (source "plaid").
+ */
+export interface SyncedOptionContract {
+    /** Massive's ticker for it (O:ACME270115C00150000). */
+    contract: string;
+    underlying: string;
+    contractType: "call" | "put";
+    strike: number;
+    /** YYYY-MM-DD. */
+    expiry: string;
+    /** Contracts; negative when written. */
+    quantity: number;
+    /** Per share: paid, or received when written. */
+    premium: number;
+    /** The institution's price per share, when it reports one. */
+    price: number | null;
+    /** The day of that price, when Plaid says. */
+    priceDate: string | null;
+}
 
 /**
  * A holding with no ticker that the institution values (a 401(k)'s
@@ -200,6 +256,8 @@ export interface InstitutionValuedHolding {
     quantity: number | null;
     value: number;
     costBasis: number | null;
+    /** The day of the institution's value, when Plaid dates it; of lots, the earliest. */
+    priceDate: string | null;
 }
 
 export interface AccountHoldings {
@@ -208,6 +266,13 @@ export interface AccountHoldings {
     institutionValued: InstitutionValuedHolding[];
     /** Cash and cash equivalents (a money market sweep), in USD. */
     cashUsd: number;
+    /** Option contracts with their details. */
+    options: SyncedOptionContract[];
+    /**
+     * Contracts reported this time without details clear enough to bring
+     * in: the rows an earlier sync wrote for them stay as they were.
+     */
+    optionsKept: string[];
     skipped: { reason: HoldingSkipReason; name: string }[];
     /** Positions whose cost Plaid doesn't report, valued at their price instead. */
     costUnknown: string[];
@@ -227,19 +292,430 @@ function round(n: number, places: number): number {
 }
 
 /**
+ * An option or a warrant: Plaid's derivative type, a security with
+ * option_contract details, or one whose ticker is a contract's symbol
+ * (ACME270115C00150000) whatever its type, so an option Plaid gives no
+ * type, or a stock's, never counts as a holding the institution values.
+ */
+function isOption(security: PlaidSecurity | undefined): boolean {
+    if (!security) return false;
+    if (security.type === "derivative" || security.option_contract != null) return true;
+    return Boolean(security.ticker_symbol && parseOptionContract(security.ticker_symbol));
+}
+
+/**
+ * The contract an option security is, from its option_contract details;
+ * null when they aren't all there and valid. When its ticker is a
+ * contract's symbol too, the two must agree. A symbol whose root is the
+ * underlying with letters after it (SPXW for SPX's weeklies) is a contract
+ * of its own and keeps that root in its ticker; one with digits after it
+ * (ACME1) is an adjusted contract, after a split or a merger, which
+ * delivers something other than 100 shares, and isn't read. `standard`
+ * says a symbol confirmed it, so it delivers 100 shares; without one, it
+ * may be an adjusted contract all the same.
+ */
+function plaidOptionContract(security: PlaidSecurity): { contract: string; details: OptionContract; standard: boolean } | null {
+    const parsed = optionContractSchema.safeParse(security.option_contract);
+    if (!parsed.success) return null;
+    const { contract_type, expiration_date, strike_price, underlying_security_ticker } = parsed.data;
+    const contractType = contract_type?.trim().toLowerCase();
+    const expiry = expiration_date?.trim().slice(0, 10) ?? "";
+    const underlying = underlying_security_ticker ? normalizeTicker(underlying_security_ticker) : null;
+    if ((contractType !== "call" && contractType !== "put") || !isCalendarDate(expiry) || strike_price == null || !isOptionStrike(strike_price) || !underlying) {
+        return null;
+    }
+    const details: OptionContract = { underlying, contractType, strike: strike_price, expiry };
+    const symbol = security.ticker_symbol ? parseOptionContract(security.ticker_symbol) : null;
+    if (!symbol) return { contract: optionContractTicker(details), details, standard: false };
+    if (symbol.contractType !== details.contractType || symbol.expiry !== details.expiry || Math.abs(symbol.strike - details.strike) > 1e-9) return null;
+    // BRKB and BRK.B are one root.
+    const root = symbol.underlying.replace(/[^A-Z0-9]/g, "");
+    const base = underlying.replace(/[^A-Z0-9]/g, "");
+    if (root === base) return { contract: optionContractTicker(details), details, standard: true };
+    if (root.startsWith(base) && /^[A-Z]+$/.test(root.slice(base.length))) {
+        return { contract: optionContractTicker({ ...details, underlying: root }), details, standard: true };
+    }
+    return null;
+}
+
+/**
+ * The option contracts a holdings response has, and their underlyings: what
+ * the stored prices that help read them are looked up for
+ * ({@link OptionPriceEvidence}).
+ */
+export function optionContractsIn(securities: readonly PlaidSecurity[]): { contracts: string[]; underlyings: string[] } {
+    const contracts = new Set<string>();
+    const underlyings = new Set<string>();
+    for (const security of securities) {
+        const read = isOption(security) ? plaidOptionContract(security) : null;
+        if (!read) continue;
+        contracts.add(read.contract);
+        underlyings.add(read.details.underlying);
+    }
+    return { contracts: [...contracts].sort(), underlyings: [...underlyings].sort() };
+}
+
+/** The contract an option's symbol names, for one whose details can't be read. */
+function symbolContract(security: PlaidSecurity): string | null {
+    const symbol = security.ticker_symbol ? parseOptionContract(security.ticker_symbol) : null;
+    return symbol ? optionContractTicker(symbol) : null;
+}
+
+/** A whole number of contracts, not none. */
+function whole(x: number): boolean {
+    return Math.abs(x - Math.round(x)) < 1e-6 && Math.round(x) !== 0;
+}
+
+/** Within rounding: 5 cents, or 2% of what it's checked against. */
+function near(a: number, b: number): boolean {
+    return Math.abs(a - b) <= Math.max(0.05, 0.02 * Math.abs(b));
+}
+
+/**
+ * How an option holding's quantity and price read. Plaid's quantity is
+ * typically the contracts × 100 at a price per share ("shares"), but
+ * institutions differ: some give the contracts at a price per share
+ * ("contracts"), some the contracts at a price per contract
+ * ("per-contract").
+ */
+export type OptionReading = "shares" | "contracts" | "per-contract";
+
+const OPTION_READINGS: readonly OptionReading[] = ["shares", "contracts", "per-contract"];
+
+/** A lot's contracts, and its price per share, read as `reading`. */
+function readOptionLot(quantity: number, price: number | null, reading: OptionReading): { contracts: number; perShare: number | null } {
+    const contracts = reading === "shares" ? quantity / OPTION_POSITION_MULTIPLIER : quantity;
+    const perShare = price == null ? null : reading === "per-contract" ? price / OPTION_POSITION_MULTIPLIER : price;
+    return { contracts, perShare };
+}
+
+/** A price to read and check against: a positive one. */
+function positivePrice(price: number | null | undefined): number | null {
+    return price != null && Number.isFinite(price) && price > 0 ? price : null;
+}
+
+/**
+ * The readings of an option holding in whole contracts whose worth comes to
+ * the value the institution reports. Shares at a price per share and as
+ * many contracts at a price per contract are worth the same, so a whole
+ * number of hundreds reads both ways, which accountHoldings settles for the
+ * contract as a whole. Without a price and a value to check against, only
+ * whole hundreds of shares read. `value` is Plaid's institution_value as
+ * reported, never one worked out from the quantity and price, which every
+ * reading would agree with.
+ */
+export function optionLotReadings(
+    quantity: number,
+    price: number | null | undefined,
+    value: number | null | undefined,
+): OptionReading[] {
+    if (!Number.isFinite(quantity)) return [];
+    const perShare = positivePrice(price);
+    const worth = value != null && Number.isFinite(value) ? Math.abs(value) : null;
+    if (perShare == null || worth == null) return whole(quantity / OPTION_POSITION_MULTIPLIER) ? ["shares"] : [];
+    return OPTION_READINGS.filter((reading) => {
+        const lot = readOptionLot(quantity, perShare, reading);
+        return whole(lot.contracts) && near(Math.abs(lot.contracts) * OPTION_POSITION_MULTIPLIER * (lot.perShare ?? 0), worth);
+    });
+}
+
+/** A contract's stored close per share, and the session it's from (option_marks). */
+export interface StoredOptionClose {
+    close: number;
+    /** YYYY-MM-DD; null when the database doesn't say. */
+    date: string | null;
+}
+
+/**
+ * An option position an earlier sync wrote (source "plaid"), in the reading
+ * that sync read the contract's lots in.
+ */
+export interface SyncedOptionRow {
+    /** Contracts; negative when written. */
+    contracts: number;
+    /** The institution's price per share it wrote; null when it had none. */
+    perShare: number | null;
+}
+
+/**
+ * What else says how an institution prices its options, for a contract
+ * whose lots read two ways: the database's prices, looked up for the
+ * contracts a holdings response has (optionContractsIn), and how the last
+ * sync read them.
+ */
+export interface OptionPriceEvidence {
+    /** Each contract's stored close (option_marks), by contract (O:ACME270115C00150000). */
+    contractCloses?: ReadonlyMap<string, StoredOptionClose>;
+    /** Each underlying's latest stored close, by ticker. */
+    underlyingPrices?: ReadonlyMap<string, number>;
+    /**
+     * The day of an institution's price Plaid doesn't date: the last session
+     * that ended by the sync, as the sync stores it. A stored close is
+     * checked against an undated price only with it.
+     */
+    undatedPriceDay?: string;
+    /**
+     * The option positions an earlier sync wrote, by Plaid's account_id,
+     * then by contract: the reading nearest the account's row stands when
+     * nothing else settles a contract (contractReading).
+     */
+    syncedOptions?: ReadonlyMap<string, ReadonlyMap<string, SyncedOptionRow>>;
+}
+
+/** One lot of an option contract, as Plaid reports it. */
+interface OptionLot {
+    name: string;
+    quantity: number;
+    /** The institution's price as reported, per share or per contract. */
+    price: number | null;
+    readings: OptionReading[];
+    /** |cost basis|, when Plaid reports one. */
+    cost: number | null;
+    priceDate: string | null;
+}
+
+/** One contract's lots in the account. */
+interface ContractLots {
+    details: OptionContract;
+    lots: OptionLot[];
+}
+
+/**
+ * The order a contract's lots are read in, whatever order Plaid lists them
+ * in: those with a price first, the newest price first, then the lowest. A
+ * price Plaid doesn't date is as of `undatedPriceDay`, as the sync dates
+ * it, or the newest without that day. The first lot's price is the one the
+ * readings are checked against (contractReading), and the one the row
+ * keeps, with its day.
+ */
+function lotOrder(undatedPriceDay: string | undefined): (a: OptionLot, b: OptionLot) => number {
+    const day = (lot: OptionLot) => lot.priceDate ?? undatedPriceDay ?? null;
+    return (a, b) => {
+        if ((a.price == null) !== (b.price == null)) return a.price == null ? 1 : -1;
+        const [dayA, dayB] = [day(a), day(b)];
+        if (dayA !== dayB) return dayA == null ? -1 : dayB == null ? 1 : dayB.localeCompare(dayA);
+        return (a.price ?? 0) - (b.price ?? 0);
+    };
+}
+
+/** The readings every lot of a contract reads in. */
+function sharedReadings(lots: readonly Pick<OptionLot, "readings">[]): OptionReading[] {
+    return OPTION_READINGS.filter((reading) => lots.every((lot) => lot.readings.includes(reading)));
+}
+
+/**
+ * Whether an option could be priced at `perShare` a share: a put never above
+ * its strike; given its underlying's price, a call never above it, and
+ * neither well under what it's worth exercised. The underlying's price may
+ * be another day's than the option's, so those allow for it.
+ */
+function couldBePriced(perShare: number, { contractType, strike }: OptionContract, underlying: number | null): boolean {
+    if (contractType === "put" && perShare > strike * 1.02 + 0.05) return false;
+    if (underlying == null) return true;
+    if (contractType === "call" && perShare > underlying * 1.25 + 0.05) return false;
+    const exercised = contractType === "call" ? underlying - strike : strike - underlying;
+    return !(exercised > 0 && perShare < exercised * 0.75 - 0.05);
+}
+
+/**
+ * Within three times of a stored close. The readings are a hundred times
+ * apart, so at most one is. An option that moved between three and about 33
+ * times since its close is near neither, but one that moved between about
+ * 33 and 300 times is near the other reading, the wrong one: so only a close
+ * from about the price's session is asked (closeForPriceDay).
+ */
+function nearClose(perShare: number, close: number): boolean {
+    return Math.abs(Math.log10(perShare / close)) < Math.log10(3);
+}
+
+/** The session a day's price is from: the day itself when the market traded, else the last day it did. */
+function sessionOf(day: string): string {
+    return getMarketDay(day).isTradingDay ? day : previousTradingDay(day);
+}
+
+/**
+ * A contract's stored close, when it's from about the session of the price
+ * it's checked against (`priceDay`): from two sessions before it to one
+ * after. The institution's price and the nightly close can be a session
+ * apart either way, and the close the nightly sync has is two sessions
+ * before its price: the sync runs before the prices job, and Massive's free
+ * plan publishes a session's bars after midnight Eastern, so that job
+ * stores the session before its own. Null otherwise, or when either has no
+ * day. option_marks keeps a close until a newer one arrives, so an illiquid
+ * contract's can be weeks old, and in that time an option can move far
+ * enough for its close to fit the wrong reading (nearClose).
+ */
+function closeForPriceDay(stored: StoredOptionClose | undefined, priceDay: string | null): number | null {
+    const close = positivePrice(stored?.close);
+    if (close == null || !stored?.date || !isCalendarDate(stored.date) || priceDay == null) return null;
+    try {
+        const closed = sessionOf(stored.date);
+        const priced = sessionOf(priceDay);
+        const before = previousTradingDay(priced);
+        return [priced, before, previousTradingDay(before)].includes(closed) || previousTradingDay(closed) === priced ? close : null;
+    } catch {
+        // A day before the market calendar starts, far too old to say anything.
+        return null;
+    }
+}
+
+/**
+ * The reading in which a contract's lots come nearest the account's synced
+ * row for it (`row`): the one whose contracts and price per share differ
+ * least from the row's, each counted in powers of ten, squared and added.
+ * The two readings are a hundred times apart in both, so the lots stay
+ * nearest the row's reading through contracts bought or sold and the
+ * market moving between syncs, unless the two together come to a
+ * hundredfold; lots an institution starts reporting the other way, the
+ * same contracts at the same price, come nearest the other. Null without a
+ * row, or when the lots are as near it either way.
+ */
+function rowReading(lots: readonly OptionLot[], readings: readonly OptionReading[], row: SyncedOptionRow | null): OptionReading | null {
+    if (row == null) return null;
+    // How far apart two amounts are in powers of ten, squared; nothing to compare is no distance.
+    const apart = (a: number | null, b: number | null) => (a != null && b != null && a > 0 && b > 0 ? Math.log10(a / b) ** 2 : 0);
+    const distance = (reading: OptionReading) => {
+        const contracts = lots.reduce((sum, lot) => sum + Math.round(readOptionLot(lot.quantity, lot.price, reading).contracts), 0);
+        return apart(Math.abs(contracts), Math.abs(row.contracts)) + apart(readOptionLot(1, lots[0].price, reading).perShare, row.perShare);
+    };
+    const [nearest, next] = readings.map((reading) => ({ reading, distance: distance(reading) })).sort((a, b) => a.distance - b.distance);
+    // As near either way, short of rounding, says nothing.
+    return nearest && (!next || next.distance - nearest.distance > 1e-9) ? nearest.reading : null;
+}
+
+/**
+ * The one reading of a contract's lots: the one each of them reads in. Lots
+ * in whole hundreds read both as shares at a price per share and as that
+ * many contracts at a price per contract, a hundred times as many. Plaid's
+ * shares stand unless something says otherwise: a price per share the
+ * option can't have (a put's above its strike, a call's above its
+ * underlying's price, either's well under what it's worth exercised), its
+ * stored close from about the session of its price (closeForPriceDay), the
+ * institution pricing its other contracts per contract, or the account's
+ * synced row for it (`synced`) being in the other reading (rowReading). Null
+ * when the lots don't agree, or what says how they read disagrees, as when
+ * lots with no price read only as shares and the row is in the other
+ * reading, so a guess is never stored.
+ */
+function contractReading(
+    { details, lots }: ContractLots,
+    { close, synced, underlying, pricesPerContract }: {
+        close: number | null;
+        synced: SyncedOptionRow | null;
+        underlying: number | null;
+        pricesPerContract: boolean;
+    },
+): OptionReading | null {
+    const fits = sharedReadings(lots);
+    if (fits.length <= 1) {
+        // Only Plaid's shares fit when a lot has no price and value to check
+        // it against (optionLotReadings). When the account's synced row is in
+        // the other reading, the lots aren't shares, and with no price they
+        // can't be read per contract: the contract is left out, and its row
+        // stays as the last sync that could read it wrote it.
+        if (fits[0] === "shares" && rowReading(lots, ["shares", "per-contract"], synced) === "per-contract") return null;
+        return fits[0] ?? null;
+    }
+    // Each lot reads more than one way, so each has a price.
+    const price = lots[0].price ?? 0;
+    const perShare = (reading: OptionReading) => readOptionLot(1, price, reading).perShare ?? 0;
+    const byClose = close == null ? null : fits.find((reading) => nearClose(perShare(reading), close)) ?? null;
+    let possible = fits.filter((reading) => couldBePriced(perShare(reading), details, underlying));
+    // An underlying's price of another day can rule both out; a put's strike still bounds it.
+    if (possible.length === 0) possible = fits.filter((reading) => couldBePriced(perShare(reading), details, null));
+    if (byClose) return possible.includes(byClose) ? byClose : null;
+    if (possible.length === 1) return possible[0];
+    if (pricesPerContract && possible.includes("per-contract")) return "per-contract";
+    // Nothing settles it tonight: no close from about its price's session (the
+    // prices job checks a few contracts a run, and one that doesn't trade keeps
+    // an old close), or one the option has moved too far from to fit either
+    // reading. The reading nearest the account's synced row stands, so a row
+    // read per contract doesn't go back to Plaid's shares, a hundred times
+    // fewer contracts, on such a night.
+    return rowReading(lots, possible, synced) ?? (possible.includes("shares") ? "shares" : possible[0] ?? null);
+}
+
+/**
+ * Whether the institution prices options per contract: a contract it holds
+ * reads only as contracts at a price per contract, and none only as
+ * contracts at a price per share. Only contracts a symbol confirms are
+ * asked: one without may be an adjusted contract, delivering other than
+ * 100 shares, which can read as priced per contract when it isn't.
+ */
+function institutionPricesPerContract(holdings: readonly PlaidHolding[], bySecurity: ReadonlyMap<string, PlaidSecurity>): boolean {
+    const contracts = new Map<string, { readings: OptionReading[] }[]>();
+    for (const holding of holdings) {
+        const security = bySecurity.get(holding.security_id);
+        if (!isOption(security) || holding.quantity === 0 || !inUsd(holding)) continue;
+        const read = plaidOptionContract(security!);
+        if (!read?.standard) continue;
+        const lots = contracts.get(read.contract) ?? [];
+        lots.push({ readings: optionLotReadings(holding.quantity, holding.institution_price, holding.institution_value) });
+        contracts.set(read.contract, lots);
+    }
+    const only = [...contracts.values()].map(sharedReadings).filter((fits) => fits.length === 1).map((fits) => fits[0]);
+    return only.includes("per-contract") && !only.includes("contracts");
+}
+
+/**
+ * Each ticker's price the holdings response gives, for an option's
+ * underlying the account holds: the institution's, as of the same day as
+ * its options' prices.
+ */
+function institutionPrices(holdings: readonly PlaidHolding[], bySecurity: ReadonlyMap<string, PlaidSecurity>): Map<string, number> {
+    const prices = new Map<string, number>();
+    for (const holding of holdings) {
+        const security = bySecurity.get(holding.security_id);
+        const price = positivePrice(holding.institution_price);
+        if (!security?.ticker_symbol || isOption(security) || isCash(security) || price == null || !inUsd(holding)) continue;
+        const symbol = normalizeTicker(security.ticker_symbol);
+        if (symbol && !prices.has(symbol)) prices.set(symbol, price);
+    }
+    return prices;
+}
+
+/** The day of the institution's price: a string that starts with a real date. */
+function priceDay(raw: unknown): string | null {
+    if (typeof raw !== "string") return null;
+    const day = raw.trim().slice(0, 10);
+    return isCalendarDate(day) ? day : null;
+}
+
+/** How many holdings were left out for each reason. */
+export function skippedByReason(skipped: readonly { reason: HoldingSkipReason }[]): Partial<Record<HoldingSkipReason, number>> {
+    const counts: Partial<Record<HoldingSkipReason, number>> = {};
+    for (const { reason } of skipped) counts[reason] = (counts[reason] ?? 0) + 1;
+    return counts;
+}
+
+/**
  * One account's holdings as Atlas keeps them: a row per ticker (Plaid's
- * lots of one security combined), cash and cash equivalents as the
- * account's cash, and the rest counted as not brought in.
+ * lots of one security combined), an option position per contract (its
+ * lots combined), cash and cash equivalents as the account's cash, and the
+ * rest counted as not brought in.
+ *
+ * An option's premium is its cost basis per share; without one, it is held
+ * at the institution's price, as a stock is. A contract's lots are read
+ * together, in the one reading each of them fits (contractReading), with
+ * `evidence` from the database for lots that read two ways. An option
+ * whose details or number of contracts can't be read is left out and its
+ * contract kept (optionsKept), so a sync never changes or deletes a
+ * position on a guess.
  */
 export function accountHoldings(
     accountId: string,
     holdings: readonly PlaidHolding[],
     securities: readonly PlaidSecurity[],
+    evidence: OptionPriceEvidence = {},
 ): AccountHoldings {
     const bySecurity = new Map(securities.map((s) => [s.security_id, s]));
     const positions = new Map<string, SyncedPosition & { cost: number; costKnown: boolean }>();
     const skipped: AccountHoldings["skipped"] = [];
     const valued = new Map<string, InstitutionValuedHolding>();
+    const options = new Map<string, ContractLots>();
+    // Contracts with a lot that couldn't be read: none of it is written,
+    // and what an earlier sync wrote for them stays.
+    const unread = new Set<string>();
     let cashUsd = 0;
 
     for (const holding of holdings) {
@@ -255,8 +731,28 @@ export function accountHoldings(
             cashUsd += value;
             continue;
         }
-        if (security?.type === "derivative") {
-            skipped.push({ reason: "option", name });
+        if (isOption(security)) {
+            if (holding.quantity === 0) continue;
+            const read = plaidOptionContract(security!);
+            const readings = read ? optionLotReadings(holding.quantity, holding.institution_price, holding.institution_value) : [];
+            if (!read || readings.length === 0) {
+                skipped.push({ reason: "option", name });
+                const key = read?.contract ?? symbolContract(security!);
+                if (key) unread.add(key);
+                continue;
+            }
+            // Read once all of the contract's lots are in, after this loop.
+            const lot: OptionLot = {
+                name,
+                quantity: holding.quantity,
+                price: positivePrice(holding.institution_price),
+                readings,
+                cost: holding.cost_basis != null && Number.isFinite(holding.cost_basis) && holding.cost_basis !== 0 ? Math.abs(holding.cost_basis) : null,
+                priceDate: priceDay(holding.institution_price_as_of),
+            };
+            const contract = options.get(read.contract);
+            if (contract) contract.lots.push(lot);
+            else options.set(read.contract, { details: read.details, lots: [lot] });
             continue;
         }
         const symbol = security?.ticker_symbol ? normalizeTicker(security.ticker_symbol) : null;
@@ -268,10 +764,14 @@ export function accountHoldings(
             }
             const existing = valued.get(holding.security_id);
             const cost = holding.cost_basis != null && holding.cost_basis > 0 ? holding.cost_basis : null;
+            const priceDate = priceDay(holding.institution_price_as_of);
             if (existing) {
                 existing.value += value;
                 existing.quantity = existing.quantity != null && holding.quantity > 0 ? existing.quantity + holding.quantity : existing.quantity;
                 existing.costBasis = existing.costBasis != null && cost != null ? existing.costBasis + cost : null;
+                // Lots valued on different days add up to a value no newer
+                // than the oldest of them.
+                if (priceDate != null && (existing.priceDate == null || priceDate < existing.priceDate)) existing.priceDate = priceDate;
             } else {
                 valued.set(holding.security_id, {
                     externalId: holding.security_id,
@@ -280,6 +780,7 @@ export function accountHoldings(
                     quantity: holding.quantity > 0 ? holding.quantity : null,
                     value,
                     costBasis: cost,
+                    priceDate,
                 });
             }
             continue;
@@ -304,6 +805,85 @@ export function accountHoldings(
         }
     }
 
+    // What settles a contract whose lots read two ways: how the institution
+    // prices its other contracts, and the underlying's price it reports,
+    // else the latest stored close.
+    const pricesPerContract = institutionPricesPerContract(holdings, bySecurity);
+    const underlyingPrices = institutionPrices(holdings, bySecurity);
+    const syncedRows = evidence.syncedOptions?.get(accountId);
+    const synced: { option: SyncedOptionContract; costKnown: boolean; label: string }[] = [];
+    for (const [contract, held] of options) {
+        // The newest price first, so the lots read the same in any order Plaid lists them.
+        held.lots.sort(lotOrder(evidence.undatedPriceDay));
+        const leaveOut = () => {
+            for (const lot of held.lots) skipped.push({ reason: "option", name: lot.name });
+            unread.add(contract);
+        };
+        if (unread.has(contract)) {
+            leaveOut();
+            continue;
+        }
+        const { underlying } = held.details;
+        const reading = contractReading(held, {
+            // The readings are checked against the newest price, the first lot's: a close counts only from about its day.
+            close: closeForPriceDay(evidence.contractCloses?.get(contract), held.lots[0].priceDate ?? evidence.undatedPriceDay ?? null),
+            synced: syncedRows?.get(contract) ?? null,
+            underlying: underlyingPrices.get(underlying) ?? positivePrice(evidence.underlyingPrices?.get(underlying)),
+            pricesPerContract,
+        });
+        // Lots that don't read the same way, or evidence that disagrees.
+        if (reading == null) {
+            leaveOut();
+            continue;
+        }
+        let contracts = 0;
+        let cost = 0;
+        let costKnown = true;
+        let long = false;
+        let short = false;
+        let perShare: number | null = null;
+        let priceDate: string | null = null;
+        for (const lot of held.lots) {
+            const read = readOptionLot(lot.quantity, lot.price, reading);
+            const lotContracts = Math.round(read.contracts);
+            contracts += lotContracts;
+            cost += lot.cost ?? 0;
+            costKnown &&= lot.cost != null;
+            long ||= lotContracts > 0;
+            short ||= lotContracts < 0;
+            // The price and its day come from the same lot: the newest price (lotOrder).
+            if (perShare == null && read.perShare != null) {
+                perShare = read.perShare;
+                priceDate = lot.priceDate;
+            }
+        }
+        // Long and short lots that cancel out: the account holds none.
+        if (contracts === 0) continue;
+        // Costs read only while every lot is on the same side.
+        costKnown &&= !(long && short);
+        const premium = costKnown ? cost / (Math.abs(contracts) * OPTION_POSITION_MULTIPLIER) : perShare;
+        // The option-position form's bounds, which the row is edited against
+        // once the account no longer syncs.
+        if (premium == null || Math.abs(contracts) > 1e6 || premium > 1e6) {
+            leaveOut();
+            continue;
+        }
+        const price = perShare == null ? null : round(perShare, 6);
+        synced.push({
+            option: {
+                contract,
+                ...held.details,
+                quantity: contracts,
+                premium: round(premium, 6),
+                price,
+                priceDate: price == null ? null : priceDate,
+            },
+            costKnown,
+            label: describeOptionContract(held.details),
+        });
+    }
+    synced.sort((a, b) => a.option.contract.localeCompare(b.option.contract));
+
     const rows = [...positions.values()].sort((a, b) => a.symbol.localeCompare(b.symbol));
     return {
         positions: rows.map(({ symbol, name, quantity, cost, price }) => ({
@@ -322,8 +902,13 @@ export function accountHoldings(
             }))
             .sort((a, b) => a.name.localeCompare(b.name) || a.externalId.localeCompare(b.externalId)),
         cashUsd: round(cashUsd, 2),
+        options: synced.map((o) => o.option),
+        optionsKept: [...unread].sort(),
         skipped,
-        costUnknown: rows.filter((p) => !p.costKnown).map((p) => p.symbol),
+        costUnknown: [
+            ...rows.filter((p) => !p.costKnown).map((p) => p.symbol),
+            ...synced.filter((o) => !o.costKnown).map((o) => o.label),
+        ],
     };
 }
 
@@ -351,7 +936,8 @@ const CASH_SUBTYPES: Readonly<Record<string, TransactionRow["type"]>> = {
     "margin expense": "FEE",
 };
 
-export type TransactionSkipReason = "not-recorded" | "no-symbol" | "other-currency" | "cash-sweep" | "invalid";
+/** Why a transaction wasn't recorded; "option" is a trade, move or dividend of an option or warrant. */
+export type TransactionSkipReason = "not-recorded" | "no-symbol" | "option" | "other-currency" | "cash-sweep" | "invalid";
 
 export type MappedTransaction =
     | { row: TransactionRow & { externalId: string } }
@@ -412,6 +998,10 @@ export function mapPlaidTransaction(transaction: PlaidInvestmentTransaction, sec
     // not into a position, but its dividends are income from that fund.
     const sweep = security?.is_cash_equivalent === true && security.type !== "cash";
     if (sweep && (trade || moved)) return { skipped: "cash-sweep" };
+    // Option trades aren't recorded (the positions come from the holdings):
+    // never as a trade of a ticker Plaid gives the contract. A fee charged
+    // on one still is.
+    if ((trade || moved || type === "DIVIDEND") && security && isOption(security)) return { skipped: "option" };
     // Currency itself ("CUR:USD") has no ticker to keep.
     const symbol = security?.ticker_symbol && security.type !== "cash" ? normalizeTicker(security.ticker_symbol) : null;
     if ((trade || moved || type === "DIVIDEND") && !symbol) return { skipped: "no-symbol" };

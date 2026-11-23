@@ -3,7 +3,9 @@
  *
  * Adds an option position, entered by hand on Holdings, to one of the
  * signed-in user's accounts (launch item i63), for the LEAPS ledger and the
- * risk policy's options checks.
+ * risk policy's options checks. It waits for the user's account lock, as a
+ * Plaid sync's write takes it: a contract a sync already brought into the
+ * account is 409 OPTION_POSITION_EXISTS, like any other the account holds.
  *
  * Body:     { portfolioId, position: { underlying, contractType, strike, expiry, quantity, premium, multiplier?,
  *             openedAt?, userMark?, userMarkDate?, thesisId?, expiryTest?, exitRule? } }

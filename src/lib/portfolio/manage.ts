@@ -102,6 +102,7 @@ export interface ManagedPortfolio {
     accountType: string | null;
     institution: string | null;
     taxTreatment: string | null;
+    ownership: string | null;
 }
 
 const returned = {
@@ -112,16 +113,37 @@ const returned = {
     accountType: portfolios.accountType,
     institution: portfolios.institution,
     taxTreatment: portfolios.taxTreatment,
+    ownership: portfolios.ownership,
 };
 
 type ReturnedRow = Omit<ManagedPortfolio, "cashBalance"> & { cashBalance: number | null };
 
 /** The kind fields a body sets: each given one, an empty institution as none. */
-function kindFields(body: Pick<PortfolioUpdateBody, "accountType" | "institution" | "taxTreatment">) {
+function kindFields(body: Pick<PortfolioUpdateBody, "accountType" | "institution" | "taxTreatment" | "ownership">) {
     return {
         ...(body.accountType !== undefined ? { accountType: body.accountType } : {}),
         ...(body.institution !== undefined ? { institution: body.institution || null } : {}),
         ...(body.taxTreatment !== undefined ? { taxTreatment: body.taxTreatment } : {}),
+        ...(body.ownership !== undefined ? { ownership: body.ownership } : {}),
+    };
+}
+
+/**
+ * `kind_edited_at` marks the user's say over the account's kind: a Plaid
+ * sync then stops filling in what the account lacks (writeAccountSync), so
+ * a field the user changed or cleared stays as they left it. It moves only
+ * when its type, institution, tax treatment or ownership changes from
+ * what's stored, because the form sends them all with every save: a rename
+ * or a change of cash alone isn't a say over the kind.
+ * Saving a form opened before a sync filled a field in clears that field
+ * again, which is what the user saw and saved.
+ */
+function kindEdited(kind: ReturnType<typeof kindFields>, now: Date) {
+    const changes = (Object.keys(kind) as (keyof typeof kind)[])
+        .map((field) => sql`${portfolios[field]} is distinct from ${kind[field]}`);
+    if (changes.length === 0) return {};
+    return {
+        kindEditedAt: sql`case when (${sql.join(changes, sql` or `)}) then ${now.toISOString()}::timestamp else ${portfolios.kindEditedAt} end`,
     };
 }
 
@@ -158,12 +180,14 @@ export async function createPortfolio(userId: string, body: PortfolioCreateBody,
  * again, leaves it where it was.
  */
 export function buildUpdatePortfolioQuery(userId: string, id: string, body: PortfolioUpdateBody, now: Date, database: Pick<Database, "update"> = db) {
+    const kind = kindFields(body);
     return database
         .update(portfolios)
         .set({
             ...(body.name !== undefined ? { name: body.name } : {}),
             ...(body.description !== undefined ? { description: body.description || null } : {}),
-            ...kindFields(body),
+            ...kind,
+            ...kindEdited(kind, now),
             ...(body.cashBalance !== undefined
                 ? {
                     cashBalance: body.cashBalance,
@@ -206,6 +230,25 @@ export function buildExcludeLinkedAccountQuery(userId: string, plaidAccountId: s
         .update(plaidAccounts)
         .set({ syncStatus: "excluded", updatedAt: now })
         .where(and(eq(plaidAccounts.userId, userId), eq(plaidAccounts.plaidAccountId, plaidAccountId)));
+}
+
+/**
+ * The user's linked accounts that still sync (or the one `portfolioId`
+ * names, when it does): their Plaid account is picked for syncing. One
+ * that was disconnected, deleted or unpicked is 'excluded' and no longer
+ * syncs, so what a sync brought into it is the user's to change.
+ */
+export function buildSyncingAccountsQuery(userId: string, database: Executor = db, portfolioId?: string) {
+    return database
+        .select({ id: portfolios.id })
+        .from(portfolios)
+        .innerJoin(plaidAccounts, and(eq(plaidAccounts.userId, portfolios.userId), eq(plaidAccounts.plaidAccountId, portfolios.externalAccountId)))
+        .where(and(
+            eq(portfolios.userId, userId),
+            eq(portfolios.source, "plaid"),
+            eq(plaidAccounts.syncStatus, "sync_ready"),
+            portfolioId ? eq(portfolios.id, portfolioId) : undefined,
+        ));
 }
 
 /**

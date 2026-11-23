@@ -10,7 +10,7 @@ import { useSettingsStore } from "@/lib/stores/settingsStore";
 
 /**
  * Today before there are any positions (launch item i43): in place of the
- * net worth, the two steps that get a new user to it. Add an account (or
+ * portfolio value, the two steps that get a new user to it. Add an account (or
  * connect a brokerage, where bank linking is set up), then add positions
  * from a broker's CSV. Each step shows as done from the user's own data, so
  * the card moves on by itself, and it goes once there are positions. New

@@ -589,6 +589,42 @@ describe("syncSettings", () => {
         sync.stop();
     });
 
+    test("a bucket chosen for a holding valued by hand is loaded and saved back with the rest", async () => {
+        // A tab from before v17 would drop the key as it loads the document,
+        // then save without it: the version bump keeps that tab from saving.
+        const fund = "manual:00000000-0000-4000-8000-000000000001";
+        const choices = { [fund]: "speculative", TSLA: "core" } as const;
+        const document: StoredSettingsDocument = {
+            version: SETTINGS_VERSION,
+            settings: { ...currentSettingsDocument().settings, riskPolicy: { ...useSettingsStore.getState().riskPolicy, bucketAssignments: choices } },
+            updatedAt: T0,
+        };
+        applySettingsDocument(document);
+        assert.deepEqual(useSettingsStore.getState().riskPolicy.bucketAssignments, choices);
+
+        const bodies: string[] = [];
+        const sync = syncSettings(serverWith(document), { document, push: false, baseUpdatedAt: T0 }, {
+            storage: new FakeStorage(),
+            send: async (sent, { baseUpdatedAt }) => {
+                bodies.push(JSON.stringify({ ...sent, baseUpdatedAt }));
+                return saved();
+            },
+            page: null,
+            delayMs: 0,
+        });
+        // Any edit saves the whole document, the choice with it.
+        useSettingsStore.getState().setTheme("dark");
+        mock.timers.tick(0);
+        await settle();
+
+        assert.equal(bodies.length, 1);
+        const body = JSON.parse(bodies[0]) as SettingsDocument & { baseUpdatedAt: string };
+        assert.equal(body.version, 17);
+        assert.equal(body.baseUpdatedAt, T0);
+        assert.deepEqual((body.settings.riskPolicy as { bucketAssignments: unknown }).bucketAssignments, choices);
+        sync.stop();
+    });
+
     test("regression: never saves over settings from a newer version of the app", () => {
         const storage = new FakeStorage();
         let sends = 0;

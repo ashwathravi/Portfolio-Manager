@@ -4,7 +4,11 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import { ArrowUpRight, ShieldAlert } from "lucide-react";
 import {
+    EMPTY_POLICY_PORTFOLIO,
+    bucketChoiceKey,
     evaluateRiskPolicy,
+    handValuedNames,
+    policyHoldingLabel,
     SELL_DISCIPLINE_ACTION_LABELS,
     type EmployerStockDeRiskingSummary,
     type PolicyPortfolio,
@@ -15,6 +19,7 @@ import {
     type SellDisciplineTask,
     type StressScenarioResult,
 } from "@/lib/risk-policy";
+import { isManualSymbol } from "@/lib/portfolio/manual-symbol";
 import { useSettingsStore } from "@/lib/stores/settingsStore";
 import { useRequestTime } from "@/components/providers/RequestTimeProvider";
 
@@ -43,6 +48,8 @@ export function RiskPolicyDashboardCard({
         [initialSummary, portfolio, riskPolicy, requestTime],
     );
     const headline = buildHeadline(summary);
+    // Holdings valued by hand are listed by name, never by their key.
+    const names = useMemo(() => handValuedNames(portfolio ?? EMPTY_POLICY_PORTFOLIO), [portfolio]);
 
     return (
         <section
@@ -81,6 +88,7 @@ export function RiskPolicyDashboardCard({
                         <RiskPolicyDimensionRow
                             key={dimension.id}
                             dimension={dimension}
+                            names={names}
                         />
                     ))}
                 </div>
@@ -197,8 +205,10 @@ function StressTestPanel({ results }: { results: StressScenarioResult[] }) {
                         key={`${selected.scenarioId}-${contributor.symbol}`}
                         className="pm-stress-contributor"
                         role="listitem"
+                        // Named, not a ticker: shown in full.
+                        data-hand-valued={isManualSymbol(contributor.symbol) ? "true" : undefined}
                     >
-                        <span>{contributor.symbol}</span>
+                        <span>{policyHoldingLabel(contributor.symbol, contributor.name)}</span>
                         <strong>{formatCurrencyOptional(contributor.impactUsd)}</strong>
                         <span>{contributor.effectiveShockPct.toFixed(1)}%</span>
                     </div>
@@ -281,7 +291,14 @@ function SellDisciplineTaskCard({ task }: { task: SellDisciplineTask }) {
     );
 }
 
-function RiskPolicyDimensionRow({ dimension }: { dimension: RiskPolicyDimension }) {
+function RiskPolicyDimensionRow({
+    dimension,
+    names,
+}: {
+    dimension: RiskPolicyDimension;
+    /** The names of the holdings valued by hand, by `bucketChoiceKey`. */
+    names: ReadonlyMap<string, string>;
+}) {
     return (
         <article
             className="pm-risk-policy-row"
@@ -300,7 +317,10 @@ function RiskPolicyDimensionRow({ dimension }: { dimension: RiskPolicyDimension 
                 <p className="pm-risk-policy-explanation">{dimension.explanation}</p>
                 {dimension.impactedSymbols.length > 0 && (
                     <p className="pm-risk-policy-symbols">
-                        {dimension.impactedSymbols.slice(0, 4).join(" · ")}
+                        {dimension.impactedSymbols
+                            .slice(0, 4)
+                            .map((symbol) => policyHoldingLabel(symbol, names.get(bucketChoiceKey(symbol))))
+                            .join(" · ")}
                     </p>
                 )}
             </div>

@@ -1,6 +1,6 @@
 import { Suspense } from 'react';
-import { AllocationCard, type AllocationHolding } from '@/components/dashboard/AllocationCard';
-import { TopHoldingsCard, type TopHoldingsRow } from '@/components/dashboard/TopHoldingsCard';
+import { AllocationCard } from '@/components/dashboard/AllocationCard';
+import { TopHoldingsCard, type TopHoldingsHandValuedRow, type TopHoldingsRow } from '@/components/dashboard/TopHoldingsCard';
 import { RecentActivityCard } from '@/components/dashboard/RecentActivityCard';
 import { WatchlistCard } from '@/components/dashboard/WatchlistCard';
 import { PatternFeed } from '@/components/dashboard/PatternFeed';
@@ -15,8 +15,7 @@ import { PolicyStrip } from '@/components/today/PolicyStrip';
 import { TodayTheses } from '@/components/today/TodayTheses';
 import { TodayEquityCurve } from '@/components/today/TodayEquityCurve';
 import { evaluateRiskPolicy } from '@/lib/risk-policy';
-import { buildPolicyPortfolio, valueHolding } from '@/lib/risk-policy/portfolio';
-import { manualSymbol } from '@/lib/portfolio/manual-symbol';
+import { buildPolicyPortfolio, policyAllocationHoldings, valueHolding } from '@/lib/risk-policy/portfolio';
 import { loadPolicyTheses, loadUserRiskPolicy } from '@/lib/risk-policy/server';
 import type { SellDisciplineThesis } from '@/lib/risk-policy/sell-discipline';
 import { loadDashboardPortfolios } from '@/lib/dashboard-portfolios';
@@ -27,6 +26,8 @@ import { buildDashboardPortfoliosQuery, buildUserTransactionsQuery } from '@/lib
 import { toActivityRows, type TransactionRowInput } from '@/lib/portfolio/activity';
 import { toOptionRiskPosition, type LoadedOptionPosition } from '@/lib/portfolio/option-positions';
 import { loadOptionPositions } from '@/lib/portfolio/option-positions-store';
+import { outsideForToday } from '@/lib/portfolio/net-worth';
+import { loadNetWorthItems, readNetWorthItemsForPage } from '@/lib/portfolio/net-worth-items';
 import { toTodayActivity } from '@/lib/today/rows';
 import { getSecurityProfiles } from '@/lib/markets/price-store';
 import { holdingName, loadSecurityProfiles } from '@/lib/markets/security-profile';
@@ -40,7 +41,9 @@ import { bankLinkingAvailable } from '@/lib/plaid/availability';
  * Today (/).
  *
  * Ordered by what the user needs first:
- *   1. Money — net worth and today's change from their own holdings.
+ *   1. Money — the portfolio value and today's change from their own
+ *      holdings, and the net worth once they add other assets and debts on
+ *      Accounts.
  *   2. Needs your attention — policy breaches, theses due for review, the
  *      weekly review. Each row links to where it gets resolved.
  *   3. A one-line risk-policy strip (full checks behind a disclosure).
@@ -52,7 +55,8 @@ import { bankLinkingAvailable } from '@/lib/plaid/availability';
  *      Atlas tracks any; until then it's one of the examples.
  *   7. Review & research — example-data cards, labelled and hideable.
  *
- * Every figure in 1–4 comes from the user's portfolios and transactions;
+ * Every figure in 1–4 comes from the user's portfolios and transactions
+ * (the net worth also from the other assets and debts they entered);
  * the risk policy is the user's saved one, evaluated on their holdings,
  * cash, trades and the theses they wrote (launch item i52), as Trade and
  * the Settings previews evaluate it (no example data mixed in).
@@ -83,7 +87,7 @@ export default async function Today() {
   // Warm quotes for the first paint; the hero keeps polling client-side.
   // Without market data the stored prices stand.
   const heldSymbols = allPortfolios.flatMap((p) => p.holdings.map((h) => h.symbol));
-  const [liveQuotes, profiles, theses, riskPolicy, { journal }, alphaRadarLive, optionPositions] = await Promise.all([
+  const [liveQuotes, profiles, theses, riskPolicy, { journal }, alphaRadarLive, optionPositions, outside] = await Promise.all([
     loadQuotes(heldSymbols),
     // Company names from the securities master (launch item i34).
     loadSecurityProfiles(heldSymbols, getSecurityProfiles),
@@ -112,6 +116,10 @@ export default async function Today() {
         return [];
       })
       : [],
+    // The other assets and debts the user added on Accounts: with any, the
+    // hero's headline is the net worth; unreadable, the hero says it is the
+    // portfolio value alone. Nothing else on the page reads them.
+    readNetWorthItemsForPage(userId, loadNetWorthItems, { page: 'Today' }).then(outsideForToday),
   ]);
   const closedTrades = journal && journal.entries.length > 0 ? journal.entries : undefined;
   const patternTrades = closedTrades && inPatternWindow(closedTrades, new Date());
@@ -123,7 +131,6 @@ export default async function Today() {
   const allHoldings = allPortfolios.flatMap((p) =>
     p.holdings.map((h) => ({
       id: h.id,
-      portfolio: p.name,
       symbol: h.symbol,
       name: holdingName(h.symbol, h.name, profiles.get(h.symbol.toUpperCase())),
       ...valueHolding(h, liveQuotes[h.symbol.toUpperCase()]?.price),
@@ -134,21 +141,8 @@ export default async function Today() {
     .filter((h) => h.symbol)
     .map(({ symbol, quantity, currentPrice, marketValue }) => ({ symbol, quantity, currentPrice, marketValue }));
 
-  const allocationHoldings: AllocationHolding[] = [
-    ...allHoldings.map((h) => ({
-      symbol: h.symbol,
-      portfolio: h.portfolio,
-      marketValue: h.marketValue,
-    })),
-    // Valued by hand: core and broad, as the policy checks read them.
-    ...allPortfolios.flatMap((p) => (p.manualHoldings ?? []).map((m) => ({
-      symbol: manualSymbol(m.id),
-      portfolio: p.name,
-      policyBucket: 'core' as const,
-      themeWeights: [{ theme: 'broad_core_index' as const, weight: 1, source: 'fallback' as const }],
-      marketValue: Number(m.value) || 0,
-    }))),
-  ];
+  // Each holding, valued by hand or not, in the bucket the policy checks put it in.
+  const allocationHoldings = policyAllocationHoldings({ accounts: allPortfolios, quotes: liveQuotes, profiles }, riskPolicy);
   const cashByPortfolio = Object.fromEntries(allPortfolios.map((p) => [p.name, p.cashBalance || 0]));
   const topHoldingsRows: TopHoldingsRow[] = allHoldings.map((h) => ({
     id: h.id,
@@ -158,6 +152,15 @@ export default async function Today() {
     avgCost: h.avgCost,
     currentPrice: h.currentPrice,
     marketValue: h.marketValue,
+  }));
+  // Listed among them at the value given, so a book of only these (a 401(k)'s
+  // trust funds) never reads as no holdings.
+  const topHandValuedRows: TopHoldingsHandValuedRow[] = manualHoldings.map((m) => ({
+    id: m.id,
+    name: m.name,
+    quantity: m.quantity == null ? null : Number(m.quantity),
+    value: Number(m.value) || 0,
+    costBasis: m.costBasis == null ? null : Number(m.costBasis),
   }));
 
   // The user's saved policy on their own portfolio, as every view evaluates it.
@@ -189,6 +192,7 @@ export default async function Today() {
           // Decided here, on the server: the first-run steps offer to connect
           // a bank only where Settings can (x30).
           bankLinking={bankLinkingAvailable()}
+          outside={outside}
         />
         {/* Policy checks only mean something once there are positions to check. */}
         <TodayTriage
@@ -200,12 +204,12 @@ export default async function Today() {
       {hasPolicyPositions && <PolicyStrip summary={riskPolicySummary} portfolio={policyPortfolio} />}
 
       <Suspense fallback={null}>
-        <TodayEquityCurve userId={userId} />
+        <TodayEquityCurve userId={userId} accountsOnly={outside !== null && outside !== 'unavailable'} />
       </Suspense>
 
       {(allHoldings.length > 0 || manualHoldings.length > 0) && (
         <div className="pm-grid-2-63">
-          <TopHoldingsCard rows={topHoldingsRows} limit={6} />
+          <TopHoldingsCard rows={topHoldingsRows} handValued={topHandValuedRows} limit={6} />
           <AllocationCard holdings={allocationHoldings} cashByPortfolio={cashByPortfolio} />
         </div>
       )}

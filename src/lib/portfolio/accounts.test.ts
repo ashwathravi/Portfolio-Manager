@@ -62,6 +62,20 @@ describe('portfolio accounts', () => {
     test('no accounts means an all-zero summary', () => {
         assert.deepStrictEqual(summarizeAccounts(buildAccountRows([])), { accounts: 0, positions: 0, totalUsd: 0, cashUsd: 0 });
     });
+
+    test("rows carry the account's tax treatment and ownership, or none, and neither changes a total", () => {
+        const rows = buildAccountRows([
+            { ...accounts[0], taxTreatment: 'taxable', ownership: 'joint' },
+            { ...accounts[1], taxTreatment: 'tax_free' },
+            accounts[2],
+        ]);
+        assert.deepStrictEqual(rows.map((r) => [r.id, r.taxTreatment, r.ownership]), [
+            ['p1', 'taxable', 'joint'],
+            ['p2', 'tax_free', null],
+            ['p3', null, null],
+        ]);
+        assert.deepStrictEqual(summarizeAccounts(rows), summarizeAccounts(buildAccountRows(accounts)));
+    });
 });
 
 describe('holdings valued by hand', () => {

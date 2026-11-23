@@ -4,6 +4,7 @@
  * checked against the live navigation in tests.
  */
 
+import { smallPositionsLimits } from '@/lib/holdings/small-positions';
 import { ADD_ACCOUNT_LINK, CONNECT_ACCOUNT_LINK } from '@/lib/portfolio/add-accounts';
 
 export interface GettingStartedStep {
@@ -16,7 +17,7 @@ export interface GettingStartedStep {
 /** Step one where bank linking is set up: connect a brokerage in Settings. */
 const CONNECT_STEP: GettingStartedStep = {
     title: 'Connect an account',
-    body: 'Link a brokerage so holdings, cash, and transactions come from your own data. Until then, example data is labelled “Sample”.',
+    body: 'Link a brokerage so holdings, option positions, cash, and transactions come from your own data. Until then, example data is labelled “Sample”.',
     href: CONNECT_ACCOUNT_LINK.href,
     cta: CONNECT_ACCOUNT_LINK.label,
 };
@@ -36,7 +37,7 @@ const ADD_STEP: GettingStartedStep = {
 const AFTER_ACCOUNTS: readonly GettingStartedStep[] = [
     {
         title: 'Start each day on Today',
-        body: 'Portfolio value and today’s change come first, then “Needs your attention”: policy breaches, theses due for review, and the weekly review.',
+        body: 'Your portfolio value and today’s change come first (your net worth too, once you add other assets and debts on Accounts), then “Needs your attention”: policy breaches, theses due for review, and the weekly review.',
         href: '/',
         cta: 'Open Today',
     },
@@ -74,18 +75,27 @@ export interface GlossaryTerm {
     href?: string;
 }
 
+/** From the rule Holdings groups by, so the two can't drift apart. */
+const SMALL = smallPositionsLimits();
+
 export const GLOSSARY: readonly GlossaryTerm[] = [
     { term: 'Alpha', definition: 'Your return minus the benchmark’s over the same period, in percentage points.', href: '/performance' },
-    { term: 'Bucket', definition: 'A policy group for holdings — core, active, or speculative — each with a target share and a cap.', href: '/settings#risk-policy' },
+    { term: 'Bucket', definition: 'A policy group for holdings, such as core, active or speculative, each with a target share and a cap. Each holding starts in the one its type suggests (one valued by hand in core) until you choose another in Settings.', href: '/settings#risk-policy' },
     { term: 'Churn', definition: 'Repeated buying and selling of the same names inside a window. High churn adds tax friction and is often a sign of reacting rather than following a plan.', href: '/portfolios/activity' },
     { term: 'Concentration', definition: 'The share of your portfolio in a single name or in your top three or five names.', href: '/portfolios/holdings' },
     { term: 'Conviction', definition: 'How strongly you hold a thesis: high, medium, or low. It sets how much evidence you need before acting.', href: '/research' },
     { term: 'Guardrail', definition: 'A rule checked before an order is drafted, such as an approval threshold or a concentration cap.', href: '/settings#trading' },
     { term: 'Missing data', definition: 'A policy check that can’t be evaluated yet because the holdings, trades, or classifications it needs aren’t connected.' },
+    { term: 'Net worth', definition: 'Your portfolio value plus the other assets you add on Accounts (a home, a car, cash in the bank), less your debts (a mortgage, a loan, a card balance). Accounts shows it once you add any, and so does Today once your accounts hold positions; returns and the risk policy never include them.', href: '/portfolios/accounts#other-assets' },
+    { term: 'Ownership', definition: 'Whose name an account is in: individual (one person’s), joint, for a dependent (such as a custodial account or a child’s 529) or a business. You set it on each account, and Accounts splits your value by it.', href: '/portfolios/accounts' },
+    { term: 'Portfolio value', definition: 'What your accounts hold: positions at their latest prices, holdings valued by hand, and cash. Returns and the equity curve measure this. Option positions aren’t in it or in returns yet, but the risk policy’s checks add them: what bought options are worth, less what written ones would cost to buy back.', href: '/' },
     { term: 'Re-underwrite', definition: 'Re-read and update a thesis against current facts. Today asks for this when a thesis hasn’t been reviewed recently.', href: '/research' },
     { term: 'Sample', definition: 'Example data shown so you can explore before adding your accounts. It is always labelled and can be hidden in Settings › Data.', href: '/settings#data' },
     { term: 'Sell discipline', definition: 'Rules that trigger a trim, review, or no-add block when a position crosses a threshold you set.', href: '/settings#risk-policy' },
+    { term: 'Small positions', definition: `On Holdings, positions each worth under ${SMALL.value} and under ${SMALL.share} of your market value are shown together in one row you can open, once there are ${SMALL.minCount} or more. Every total still counts them.`, href: '/portfolios/holdings' },
+    { term: 'Tax treatment', definition: 'How an account is taxed: taxable, like a regular brokerage account; tax-deferred, taxed when money comes out, like a traditional IRA or 401(k); or tax-free, like a Roth IRA. You set it on each account, and Accounts splits your value by it.', href: '/portfolios/accounts' },
     { term: 'Theme', definition: 'A cross-cutting exposure such as AI infrastructure or semiconductors, with its own cap.', href: '/portfolios/holdings' },
     { term: 'TWR', definition: 'Time-weighted return: performance that removes the effect of deposits and withdrawals.', href: '/performance' },
+    { term: 'Valued by hand', definition: 'A holding Atlas can’t price, such as a 401(k) fund with no ticker. It counts at the value given by you, your broker’s positions file or your linked account, as of its date, until the next one.', href: '/portfolios/holdings' },
     { term: '13F', definition: 'Quarterly holdings filing by large investment managers, used by Alpha Radar. Filings are delayed by up to 45 days.', href: '/research?tab=alpha-radar' },
 ];

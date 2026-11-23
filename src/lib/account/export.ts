@@ -22,6 +22,8 @@ import {
     journalEntries,
     manualHoldingValues,
     manualHoldings,
+    netWorthItemValues,
+    netWorthItems,
     optionPositions,
     orderPlans,
     plaidAccounts,
@@ -41,7 +43,9 @@ import {
 import { buildListFollowedFilersQuery } from "@/lib/alpha-radar/follows";
 import { orderFromRow } from "@/lib/execution/orders";
 
-import { manualHoldingId } from "@/lib/portfolio/manual-symbol";
+import { manualHoldingId, manualSymbol } from "@/lib/portfolio/manual-symbol";
+import { chosenBucket } from "@/lib/risk-policy/user-policy";
+import { storedRiskPolicy } from "@/lib/settings/risk-policy";
 import { ACCOUNT_EXPORT_FORMAT, ACCOUNT_EXPORT_VERSION, type AccountExport, type ExportedValuationPosition } from "./export-data";
 
 type Database = typeof db;
@@ -63,6 +67,11 @@ export async function buildAccountExport(userId: string, database: Database = db
     return database.transaction(async (tx) => {
         const [user] = await tx.select({ name: authUsers.name, email: authUsers.email }).from(authUsers).where(eq(authUsers.id, userId)).limit(1);
         const [settings] = await tx.select().from(userSettings).where(eq(userSettings.userId, userId)).limit(1);
+        // Read as every view reads it, for the bucket chosen for each holding valued by hand.
+        const policy = storedRiskPolicy({
+            status: "ok",
+            document: settings ? { version: settings.version, settings: settings.settings, updatedAt: settings.updatedAt.toISOString() } : null,
+        });
 
         const accounts = await tx.select().from(portfolios).where(eq(portfolios.userId, userId)).orderBy(asc(portfolios.name), asc(portfolios.id));
         const ids = accounts.map((a) => a.id);
@@ -129,6 +138,11 @@ export async function buildAccountExport(userId: string, database: Database = db
             .where(and(eq(alertNotifications.userId, userId), eq(alertNotifications.cleared, false)))
             .orderBy(desc(alertNotifications.triggeredAt), asc(alertNotifications.id));
         const [emails] = await tx.select().from(emailPreferences).where(eq(emailPreferences.userId, userId)).limit(1);
+        const owned = await tx.select().from(netWorthItems).where(eq(netWorthItems.userId, userId))
+            .orderBy(asc(netWorthItems.kind), desc(netWorthItems.value), asc(netWorthItems.name), asc(netWorthItems.id));
+        const ownedValues = owned.length === 0 ? [] : await tx.select().from(netWorthItemValues)
+            .where(inArray(netWorthItemValues.netWorthItemId, owned.map((i) => i.id)))
+            .orderBy(asc(netWorthItemValues.date));
 
         return {
             format: ACCOUNT_EXPORT_FORMAT,
@@ -144,6 +158,7 @@ export async function buildAccountExport(userId: string, database: Database = db
                 accountType: account.accountType,
                 institution: account.institution,
                 taxTreatment: account.taxTreatment,
+                ownership: account.ownership,
                 cashBalance: account.cashBalance ?? 0,
                 createdAt: account.createdAt.toISOString(),
                 updatedAt: account.updatedAt.toISOString(),
@@ -166,8 +181,10 @@ export async function buildAccountExport(userId: string, database: Database = db
                     updatedAt: m.updatedAt.toISOString(),
                     values: handValues.filter((v) => v.manualHoldingId === m.id)
                         .map((v) => ({ date: v.date, value: Number(v.value), quantity: num(v.quantity) })),
+                    policyBucket: chosenBucket(policy, manualSymbol(m.id)) ?? null,
                 })),
                 optionPositions: options.filter((o) => o.portfolioId === account.id).map((o) => ({
+                    contract: o.contract,
                     underlying: o.underlying,
                     contractType: o.contractType,
                     strike: Number(o.strike),
@@ -178,6 +195,8 @@ export async function buildAccountExport(userId: string, database: Database = db
                     openedAt: o.openedAt,
                     userMark: num(o.userMark),
                     userMarkDate: o.userMarkDate,
+                    institutionPrice: num(o.institutionPrice),
+                    institutionPriceDate: o.institutionPriceDate,
                     thesisId: o.thesisId,
                     expiryTest: o.expiryTest,
                     exitRule: o.exitRule,
@@ -217,6 +236,18 @@ export async function buildAccountExport(userId: string, database: Database = db
                     subtype: a.subtype,
                     syncing: a.syncStatus === "sync_ready",
                 })),
+            })),
+            // Field by field, so neither the item's ID nor the user's is exported.
+            netWorthItems: owned.map((item) => ({
+                kind: item.kind,
+                category: item.category,
+                name: item.name,
+                value: Number(item.value),
+                valueAsOf: item.valueAsOf,
+                note: item.note,
+                createdAt: item.createdAt.toISOString(),
+                updatedAt: item.updatedAt.toISOString(),
+                values: ownedValues.filter((v) => v.netWorthItemId === item.id).map((v) => ({ date: v.date, value: Number(v.value) })),
             })),
             watchlist: watchlist.map(plain),
             journal: journal.map(plain),

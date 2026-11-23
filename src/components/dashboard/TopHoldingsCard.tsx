@@ -7,6 +7,9 @@ import { useAutoRefreshQuotes } from "@/lib/hooks/useAutoRefreshQuotes";
 import { ArrowUpRight } from "lucide-react";
 import { isTodaysQuote } from "@/lib/markets/quote-session";
 import { useEasternDate } from "@/lib/hooks/useEasternDate";
+import { topHoldings, type TopHoldingsHandValuedRow, type TopHoldingsRow } from "@/lib/today/top-holdings";
+
+const NO_HAND_VALUED: TopHoldingsHandValuedRow[] = [];
 
 /**
  * Phase 3 (AR-72) Top-holdings table card.
@@ -23,21 +26,19 @@ import { useEasternDate } from "@/lib/hooks/useEasternDate";
  * Live quotes from `useAutoRefreshQuotes` drive price / today %. When a
  * quote is missing for a symbol we fall back to the static seed values
  * passed in from the server.
+ *
+ * Holdings valued by hand are listed among them at the value given, by
+ * name, tagged "Valued by hand", with no quantity unless they have units
+ * and no today's move or price history (src/lib/today/top-holdings.ts).
  */
 
-export interface TopHoldingsRow {
-    id: string;
-    symbol: string;
-    name: string;
-    quantity: number;
-    avgCost: number;
-    currentPrice: number;
-    marketValue: number;
-}
+export type { TopHoldingsHandValuedRow, TopHoldingsRow } from "@/lib/today/top-holdings";
 
 export interface TopHoldingsCardProps {
     /** Seed data from the server-side Dashboard fetch. */
     rows: TopHoldingsRow[];
+    /** Holdings valued by hand, across the accounts. */
+    handValued?: TopHoldingsHandValuedRow[];
     /** Max rows to render. Default 6. */
     limit?: number;
     /** Override for the "View all" link. */
@@ -47,6 +48,7 @@ export interface TopHoldingsCardProps {
 
 export function TopHoldingsCard({
     rows,
+    handValued = NO_HAND_VALUED,
     limit = 6,
     viewAllHref = "/portfolios/holdings",
     className,
@@ -58,32 +60,14 @@ export function TopHoldingsCard({
     const { quotes } = useAutoRefreshQuotes(symbols);
     const todayEt = useEasternDate();
 
-    // Sort by MV desc; slice to limit. Compute totals for the allocation bar.
-    const { enriched, totalMV } = useMemo(() => {
-        const withQuote = rows.map((r) => {
-            const q = quotes[r.symbol.toUpperCase()];
-            const price = Number.isFinite(q?.price) ? q!.price : r.currentPrice;
-            const marketValue = r.quantity * price;
-            // An earlier session's closing quote prices the row but isn't
-            // today's move: null, shown as a dash, never "+0.00%".
-            const todayChangePercent: number | null = q && isTodaysQuote(q, todayEt) ? q.changePercent : null;
-            const totalReturnPercent =
-                r.avgCost > 0 ? ((price - r.avgCost) / r.avgCost) * 100 : 0;
-            return {
-                ...r,
-                price,
-                marketValue,
-                todayChangePercent,
-                totalReturnPercent,
-            };
-        });
-
-        const total = withQuote.reduce((sum, r) => sum + r.marketValue, 0);
-        const sorted = [...withQuote]
-            .sort((a, b) => b.marketValue - a.marketValue)
-            .slice(0, limit);
-        return { enriched: sorted, totalMV: total };
-    }, [rows, quotes, limit, todayEt]);
+    // Sorted by value, both kinds together, sliced to the limit, each with its share of them all.
+    const { lines: enriched, total } = useMemo(() => topHoldings(rows, handValued, (symbol) => {
+        const q = quotes[symbol.toUpperCase()];
+        if (!q) return undefined;
+        // An earlier session's closing quote prices the row but isn't
+        // today's move: null, shown as a dash, never "+0.00%".
+        return { price: q.price, todayChangePercent: isTodaysQuote(q, todayEt) ? q.changePercent ?? null : null };
+    }, limit), [rows, handValued, quotes, limit, todayEt]);
 
     return (
         <section
@@ -94,7 +78,7 @@ export function TopHoldingsCard({
                 <div>
                     <h3 className="pm-card-title">Top Holdings</h3>
                     <p className="pm-card-subtitle">
-                        {enriched.length} of {rows.length} positions by market value
+                        {enriched.length} of {total} positions by market value
                     </p>
                 </div>
                 <Link href={viewAllHref} className="pm-card-link">
@@ -124,28 +108,38 @@ export function TopHoldingsCard({
                             </tr>
                         ) : (
                             enriched.map((r) => {
-                                const allocPct =
-                                    totalMV > 0 ? (r.marketValue / totalMV) * 100 : 0;
+                                const allocPct = r.allocationPercent;
                                 const todayClass = r.todayChangePercent === null
                                     ? "pm-num-muted"
                                     : r.todayChangePercent < 0 ? "pm-num-neg" : "pm-num-pos";
+                                const returnClass = r.totalReturnPercent === null
+                                    ? "pm-num-muted"
+                                    : r.totalReturnPercent < 0 ? "pm-num-neg" : "pm-num-pos";
                                 return (
-                                    <tr key={r.id}>
+                                    <tr key={r.id} data-hand-valued={r.handValued ? "true" : undefined}>
                                         <td>
-                                            <div className="pm-holdings-ticker">
-                                                <span className="pm-holdings-sym">{r.symbol}</span>
-                                                <span className="pm-holdings-name" title={r.name}>
-                                                    {r.name}
-                                                </span>
-                                            </div>
+                                            {r.symbol === null ? (
+                                                // No ticker: the name leads, and the tag says how it's valued.
+                                                <div className="pm-holdings-ticker" data-hand-valued="true">
+                                                    <span className="pm-holdings-sym">{r.name}</span>
+                                                    <span className="pm-holdings-tag">Valued by hand</span>
+                                                </div>
+                                            ) : (
+                                                <div className="pm-holdings-ticker">
+                                                    <span className="pm-holdings-sym">{r.symbol}</span>
+                                                    <span className="pm-holdings-name" title={r.name}>
+                                                        {r.name}
+                                                    </span>
+                                                </div>
+                                            )}
                                         </td>
-                                        <td className="num">{fmtQty(r.quantity)}</td>
+                                        <td className="num">{r.quantity === null ? "—" : fmtQty(r.quantity)}</td>
                                         <td className="num">{fmtCurrency(r.marketValue)}</td>
                                         <td className={`num ${todayClass}`} data-testid="top-holding-today">
                                             {r.todayChangePercent === null ? "—" : fmtSignedPct(r.todayChangePercent)}
                                         </td>
-                                        <td className={`num ${r.totalReturnPercent < 0 ? "pm-num-neg" : "pm-num-pos"}`}>
-                                            {fmtSignedPct(r.totalReturnPercent)}
+                                        <td className={`num ${returnClass}`}>
+                                            {r.totalReturnPercent === null ? "—" : fmtSignedPct(r.totalReturnPercent)}
                                         </td>
                                         <td className="pm-alloc-bar-cell">
                                             <div
@@ -167,7 +161,11 @@ export function TopHoldingsCard({
                                             </div>
                                         </td>
                                         <td>
-                                            <PriceSparkline symbol={r.symbol} />
+                                            {r.symbol === null ? (
+                                                <span className="pm-spark-empty" title="No price history: valued by hand">—</span>
+                                            ) : (
+                                                <PriceSparkline symbol={r.symbol} />
+                                            )}
                                         </td>
                                     </tr>
                                 );

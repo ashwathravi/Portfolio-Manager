@@ -10,6 +10,14 @@
  * account syncs count too but are never refused: Plaid brings only what the
  * user's own institutions report, at most 10 of them (MAX_PLAID_CONNECTIONS_PER_USER).
  *
+ * Other assets and debts (net_worth_items) have no dismissed rows: a deleted
+ * one is gone, so every row counts.
+ *
+ * Holdings valued by hand (manual_holdings) count across the user's
+ * accounts, those a linked account syncs included; like transactions, a
+ * sync is never refused. The card's add and an import that brings them in
+ * from a positions file are.
+ *
  * The checks run on the server (records-server.ts); this file is shared with
  * the pages, which say why a save was refused.
  */
@@ -19,6 +27,8 @@ export const RECORD_LIMITS = {
     journal: 2_000,
     theses: 200,
     transactions: 50_000,
+    manualHoldings: 1_000,
+    netWorthItems: 100,
 } as const;
 
 export type RecordKind = keyof typeof RECORD_LIMITS;
@@ -42,6 +52,14 @@ const DETAILS: Record<RecordKind, { code: string; message: (limit: string) => st
         code: "TRANSACTION_LIMIT",
         message: (limit) => `Your accounts hold at most ${limit} transactions. Delete some to add more; nothing was added.`,
     },
+    manualHoldings: {
+        code: "MANUAL_HOLDING_LIMIT",
+        message: (limit) => `You can keep at most ${limit} holdings valued by hand. Delete some to add more; nothing was added.`,
+    },
+    netWorthItems: {
+        code: "NET_WORTH_ITEM_LIMIT",
+        message: (limit) => `You can keep at most ${limit} assets and debts. Delete one to add another.`,
+    },
 };
 
 /** The API error code a route answers with (HTTP 409) when `kind`'s limit refuses a write. */
@@ -64,7 +82,10 @@ export function recordLimitMessageFor(kind: RecordKind, error: unknown): string 
     return code === recordLimitCode(kind) ? recordLimitMessage(kind) : null;
 }
 
-const BROWSER_RECORDS: Record<Exclude<RecordKind, "transactions">, { what: string; cap: (limit: string) => string }> = {
+/** The kinds a browser kept before they moved to the account (launch item i38). */
+export type BrowserRecordKind = Extract<RecordKind, "watchlist" | "journal" | "theses">;
+
+const BROWSER_RECORDS: Record<BrowserRecordKind, { what: string; cap: (limit: string) => string }> = {
     watchlist: { what: "tickers", cap: (limit) => `your watchlist holds at most ${limit}` },
     journal: { what: "journal entries", cap: (limit) => `your journal holds at most ${limit}` },
     theses: { what: "theses", cap: (limit) => `you can keep at most ${limit}` },
@@ -76,7 +97,7 @@ const BROWSER_RECORDS: Record<Exclude<RecordKind, "transactions">, { what: strin
  * another reason. The browser keeps its copy until the account takes it, and
  * the move is tried again on a later visit, so nothing is lost.
  */
-export function browserImportLimitMessageFor(kind: Exclude<RecordKind, "transactions">, error: unknown): string | null {
+export function browserImportLimitMessageFor(kind: BrowserRecordKind, error: unknown): string | null {
     if (recordLimitMessageFor(kind, error) === null) return null;
     const { what, cap } = BROWSER_RECORDS[kind];
     return `Some ${what} saved in this browser weren't added to your account: ${cap(COUNT.format(RECORD_LIMITS[kind]))}. `

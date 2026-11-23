@@ -224,11 +224,24 @@ export const portfolios = pgTable("portfolios", {
     source: text("source").default("manual").notNull(),
     externalAccountId: text("external_account_id"),
     // What kind of account it is, where it's held, and how it's taxed
-    // (src/lib/portfolio/account-kinds.ts). Optional: null is "not said",
-    // never a guess.
+    // (src/lib/portfolio/account-kinds.ts). Optional: null is "not said".
+    // The user sets them, except that a linked account starts with the type
+    // and tax treatment its Plaid subtype usually has, and its institution,
+    // until the user changes any of them (kind_edited_at).
     accountType: text("account_type"),
     institution: text("institution"),
     taxTreatment: text("tax_treatment"),
+    // Whose name it's in (src/lib/portfolio/account-kinds.ts): "individual"
+    // (one person's), "joint", "dependent" (held for someone else, such as a
+    // custodial account or a child's 529) or "business". Optional like the
+    // three above, and only ever the user's choice: a Plaid sync never sets
+    // it. Not the Atlas user the account belongs to, which is user_id.
+    ownership: text("ownership"),
+    // When the user last changed its type, institution, tax treatment or
+    // ownership; null if never. A Plaid sync fills in what a linked account
+    // lacks only while this is null, so what the user chose stays, an empty
+    // field included (writeAccountSync in src/lib/plaid/sync.ts).
+    kindEditedAt: timestamp("kind_edited_at"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (table) => ({
@@ -239,6 +252,7 @@ export const portfolios = pgTable("portfolios", {
     ),
     taxTreatmentCheck: check("portfolios_tax_treatment_check", sql`${table.taxTreatment} in ('taxable', 'tax_deferred', 'tax_free')`),
     institutionCheck: check("portfolios_institution_check", sql`char_length(${table.institution}) between 1 and 80`),
+    ownershipCheck: check("portfolios_ownership_check", sql`${table.ownership} in ('individual', 'joint', 'dependent', 'business')`),
     userExternalAccountIdx: uniqueIndex("portfolios_user_source_external_account_idx")
         .on(table.userId, table.source, table.externalAccountId)
         .where(sql`${table.externalAccountId} is not null`),
@@ -311,9 +325,10 @@ export const transactions = pgTable("transactions", {
 // ---------------------------------------------------------------------------
 
 /**
- * Option contracts the user holds, entered by hand or imported from a
- * broker's positions CSV, for the LEAPS ledger and the options checks of
- * the risk policy. Kept apart from holdings: they aren't in net worth,
+ * Option contracts the user holds, entered by hand, imported from a
+ * broker's positions CSV, or synced from a linked account (i44), for the
+ * LEAPS ledger and the options checks of the risk policy. Kept apart from
+ * holdings: they aren't in the portfolio value (so not in the net worth),
  * returns or the nightly valuations. One row per contract an account
  * holds; it goes with its account.
  */
@@ -341,12 +356,18 @@ export const optionPositions = pgTable("option_positions", {
     // newer close is stored.
     userMark: numeric("user_mark"),
     userMarkDate: date("user_mark_date", { mode: "string" }),
+    // The price per share the linked account last reported for the contract,
+    // and the day it's from (source "plaid", i44): a mark used while no newer
+    // close or price of the user's own is stored.
+    institutionPrice: numeric("institution_price"),
+    institutionPriceDate: date("institution_price_date", { mode: "string" }),
     // One of the user's theses (theses.id); a deleted one reads as none.
     thesisId: text("thesis_id"),
     // What must be true by expiry, and the exit, roll or expire rule.
     expiryTest: text("expiry_test").notNull().default(""),
     exitRule: text("exit_rule").notNull().default(""),
-    // "manual" or "csv".
+    // "manual", "csv" or "plaid" (synced from a linked account: while it
+    // syncs, the contract, contracts and premium are the institution's).
     source: text("source").notNull().default("manual"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
@@ -368,7 +389,11 @@ export const optionPositions = pgTable("option_positions", {
         "option_positions_user_mark_check",
         sql`(${table.userMark} is null) = (${table.userMarkDate} is null) and (${table.userMark} is null or ${table.userMark} >= 0)`,
     ),
-    sourceCheck: check("option_positions_source_check", sql`${table.source} in ('manual', 'csv')`),
+    institutionPriceCheck: check(
+        "option_positions_institution_price_check",
+        sql`(${table.institutionPrice} is null) = (${table.institutionPriceDate} is null) and (${table.institutionPrice} is null or ${table.institutionPrice} >= 0)`,
+    ),
+    sourceCheck: check("option_positions_source_check", sql`${table.source} in ('manual', 'csv', 'plaid')`),
     serverOnlyNoClientAccess: serverOnlyNoClientAccessPolicy(),
     appRuntimeAccess: appRuntimeAccessPolicy(),
 })).enableRLS();
@@ -380,8 +405,9 @@ export const optionPositions = pgTable("option_positions", {
  * What an account holds that Atlas can't price from market data: a fund
  * with no ticker (a 401(k)'s collective trust, a 529 portfolio, known by
  * a CUSIP or a plan's name), a private company, a note. The user (or the
- * institution, through Plaid) gives its value as of a day, and it counts
- * at that value until the next one. No quote is ever looked up for it.
+ * institution through Plaid, or the broker's positions file through
+ * Import CSV) gives its value as of a day, and it counts at that value
+ * until the next one. No quote is ever looked up for it.
  */
 export const manualHoldings = pgTable("manual_holdings", {
     id: uuid("id").default(sql`gen_random_uuid()`).primaryKey(),
@@ -398,10 +424,13 @@ export const manualHoldings = pgTable("manual_holdings", {
     value: numeric("value").notNull(),
     costBasis: numeric("cost_basis"),
     valueAsOf: date("value_as_of", { mode: "string" }).notNull(),
-    // "manual", or "plaid": a linked account's holding with no ticker,
-    // whose value each sync replaces; externalId is the account it was
+    // "manual"; "plaid": a linked account's holding with no ticker, whose
+    // value each sync replaces, and whose externalId is the account it was
     // synced into and Plaid's security_id (institutionValuedKey), kept when
-    // the user edits or moves it.
+    // the user edits or moves it; or "csv": a positions file's row with no
+    // ticker, whose externalId is its import key in its account
+    // (manualImportKey: "csv:id:" and its identifier, or "csv:name:" and
+    // its name), so importing the file again updates it.
     source: text("source").notNull().default("manual"),
     externalId: text("external_id"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
@@ -422,7 +451,7 @@ export const manualHoldings = pgTable("manual_holdings", {
     valueCheck: check("manual_holdings_value_check", sql`${table.value} >= 0`),
     quantityCheck: check("manual_holdings_quantity_check", sql`${table.quantity} is null or ${table.quantity} > 0`),
     costBasisCheck: check("manual_holdings_cost_basis_check", sql`${table.costBasis} is null or ${table.costBasis} >= 0`),
-    sourceCheck: check("manual_holdings_source_check", sql`${table.source} in ('manual', 'plaid')`),
+    sourceCheck: check("manual_holdings_source_check", sql`${table.source} in ('manual', 'plaid', 'csv')`),
     serverOnlyNoClientAccess: serverOnlyNoClientAccessPolicy(),
     appRuntimeAccess: appRuntimeAccessPolicy(),
 })).enableRLS();
@@ -470,6 +499,74 @@ export const optionMarks = pgTable("option_marks", {
     // Which provider answered, e.g. "massive".
     source: text("source").notNull(),
 }, () => ({
+    serverOnlyNoClientAccess: serverOnlyNoClientAccessPolicy(),
+    appRuntimeAccess: appRuntimeAccessPolicy(),
+})).enableRLS();
+
+// ---------------------------------------------------------------------------
+// Net worth: what the user owns and owes outside their accounts
+// ---------------------------------------------------------------------------
+
+/**
+ * Assets and debts the user enters by hand, outside their investment
+ * accounts: a home, a car, cash in the bank, money owed to them; a
+ * mortgage, a car loan, a card balance (src/lib/portfolio/net-worth.ts).
+ * Each has a value as of a day: for a debt, the balance owed, never
+ * negative, which is taken off. Today adds them to the portfolio value for
+ * the net worth. They aren't in any account, the nightly valuations,
+ * returns or the risk policy. An update replaces the value and its date;
+ * each value saved is also kept, by day, in net_worth_item_values. They go
+ * with the user.
+ */
+export const netWorthItems = pgTable("net_worth_items", {
+    id: uuid("id").default(sql`gen_random_uuid()`).primaryKey(),
+    userId: text("user_id")
+        .notNull()
+        .references(() => authUsers.id, { onDelete: "cascade" }),
+    // "asset" or "debt".
+    kind: text("kind").notNull(),
+    // One of the kind's categories (NET_WORTH_CATEGORIES in src/lib/portfolio/net-worth.ts).
+    category: text("category").notNull(),
+    name: text("name").notNull(),
+    // What it's worth or, for a debt, what is owed; never negative.
+    value: numeric("value").notNull(),
+    valueAsOf: date("value_as_of", { mode: "string" }).notNull(),
+    note: text("note"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => ({
+    userIdIdx: index("net_worth_items_user_id_idx").on(table.userId),
+    kindCheck: check("net_worth_items_kind_check", sql`${table.kind} in ('asset', 'debt')`),
+    categoryCheck: check(
+        "net_worth_items_category_check",
+        sql`(${table.kind} = 'asset' and ${table.category} in ('property', 'vehicle', 'bank_cash', 'valuables', 'owed_to_you', 'other_asset')) or (${table.kind} = 'debt' and ${table.category} in ('mortgage', 'auto_loan', 'credit_card', 'student_loan', 'other_debt'))`,
+    ),
+    nameCheck: check("net_worth_items_name_check", sql`char_length(${table.name}) between 1 and 120`),
+    valueCheck: check("net_worth_items_value_check", sql`${table.value} >= 0`),
+    noteCheck: check("net_worth_items_note_check", sql`${table.note} is null or char_length(${table.note}) between 1 and 500`),
+    serverOnlyNoClientAccess: serverOnlyNoClientAccessPolicy(),
+    appRuntimeAccess: appRuntimeAccessPolicy(),
+})).enableRLS();
+
+/**
+ * An asset or debt outside the accounts as it stood on each day it was
+ * valued: one row per item per as-of date, written with every value the
+ * user saves, the way manual_holding_values keeps a hand-valued holding's.
+ * Today reads only the item's current value; this keeps the history, so a
+ * net worth over time can be drawn from it later, and the export lists it.
+ * A saved value stands from its as-of date on: saving it removes later
+ * rows (src/lib/portfolio/net-worth-items.ts). It goes with its item.
+ */
+export const netWorthItemValues = pgTable("net_worth_item_values", {
+    netWorthItemId: uuid("net_worth_item_id")
+        .notNull()
+        .references(() => netWorthItems.id, { onDelete: "cascade" }),
+    date: date("date", { mode: "string" }).notNull(),
+    value: numeric("value").notNull(),
+    recordedAt: timestamp("recorded_at").defaultNow().notNull(),
+}, (table) => ({
+    pk: primaryKey({ columns: [table.netWorthItemId, table.date] }),
+    valueCheck: check("net_worth_item_values_value_check", sql`${table.value} >= 0`),
     serverOnlyNoClientAccess: serverOnlyNoClientAccessPolicy(),
     appRuntimeAccess: appRuntimeAccessPolicy(),
 })).enableRLS();

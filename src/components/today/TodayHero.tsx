@@ -1,11 +1,13 @@
 "use client";
 
 import { useMemo } from "react";
+import Link from "next/link";
 import { useAutoRefreshQuotes } from "@/lib/hooks/useAutoRefreshQuotes";
 import { LiveDataIndicator } from "@/components/data-display/LiveDataIndicator";
 import { formatPct, formatUsd } from "@/lib/format";
 import { isTodaysQuote } from "@/lib/markets/quote-session";
 import { useEasternDate } from "@/lib/hooks/useEasternDate";
+import { todayHeadline, type NetWorthSummary } from "@/lib/portfolio/net-worth";
 import type { ImportAccountOption } from "@/components/holdings/ImportHoldingsDialog";
 import { FirstRunCard } from "./FirstRunCard";
 
@@ -16,22 +18,7 @@ export interface TodayHeroHolding {
     marketValue: number;
 }
 
-/**
- * Today's hero: the money. Net worth and today's change from the user's
- * own holdings (delayed quotes or closes, labelled), with invested / cash /
- * positions beneath. No illustrative sparklines or hardcoded deltas —
- * the old stat row showed "+1.2% vs last month" regardless of data.
- * Without any positions it is the first-run card (FirstRunCard): the
- * steps to an account with positions in it.
- */
-export function TodayHero({
-    holdings,
-    cashTotal,
-    manualTotal = 0,
-    manualCount = 0,
-    accounts,
-    bankLinking,
-}: {
+export interface TodayHeroProps {
     holdings: TodayHeroHolding[];
     cashTotal: number;
     /** Holdings valued by hand: their total, counted as it stands (no today's change). */
@@ -41,7 +28,43 @@ export function TodayHero({
     accounts: readonly ImportAccountOption[];
     /** Whether the first-run steps may offer to connect a bank (x30). */
     bankLinking: boolean;
-}) {
+    /**
+     * The other assets and debts the user added on Accounts, added up
+     * (outsideForToday): with any, the headline is the net worth.
+     * "unavailable" when they couldn't be read; null when there are none, or
+     * no database to keep them in.
+     */
+    outside?: NetWorthSummary | "unavailable" | null;
+}
+
+/**
+ * Today's hero: the money. The portfolio value (positions at delayed
+ * quotes or closes, labelled, plus holdings valued by hand and cash) and
+ * today's change from the user's own holdings, with invested / cash /
+ * positions beneath.
+ *
+ * Once the user has other assets or debts on Accounts (`outside`), the
+ * headline is their net worth instead: the portfolio value plus those
+ * assets, less those debts, with the portfolio value under it and a note on
+ * how old the values given are. Today's change is still the portfolio's.
+ * If they can't be read, the headline stays the portfolio value, labelled as
+ * such, with a line saying why. Which one leads, and what the note and that
+ * line say, is todayHeadline's (net-worth.ts).
+ *
+ * No illustrative sparklines or hardcoded deltas — the old stat row showed
+ * "+1.2% vs last month" regardless of data. Without any positions it is the
+ * first-run card (FirstRunCard), whatever else the user has entered: the
+ * steps to an account with positions in it.
+ */
+export function TodayHero({
+    holdings,
+    cashTotal,
+    manualTotal = 0,
+    manualCount = 0,
+    accounts,
+    bankLinking,
+    outside = null,
+}: TodayHeroProps) {
     const symbols = useMemo(() => holdings.map((h) => h.symbol).filter(Boolean), [holdings]);
     const { quotes, isFetching, isError, refreshMs, refetch, lastUpdatedAt } = useAutoRefreshQuotes(symbols);
 
@@ -75,7 +98,9 @@ export function TodayHero({
     const today = movedToday > 0;
     const complete = today && movedToday === positions;
 
-    const netWorth = invested + manualTotal + cashTotal;
+    const portfolioValue = invested + manualTotal + cashTotal;
+    const headline = todayHeadline(portfolioValue, outside);
+    const worth = headline.netWorth;
     const liveIndicator = (
         <div className="pm-today-hero-live">
             <LiveDataIndicator
@@ -88,15 +113,25 @@ export function TodayHero({
             />
         </div>
     );
-    const changePct = netWorth - change > 0 ? (change / (netWorth - change)) * 100 : 0;
+    // A share of the portfolio value, never of the net worth.
+    const changePct = portfolioValue - change > 0 ? (change / (portfolioValue - change)) * 100 : 0;
 
     if (holdings.length === 0 && manualCount === 0) return <FirstRunCard accounts={accounts} cashTotal={cashTotal} bankLinking={bankLinking} />;
 
     return (
-        <section className="pm-card pm-today-hero" data-testid="today-hero" aria-label="Portfolio value">
+        <section className="pm-card pm-today-hero" data-testid="today-hero" aria-label={headline.label}>
             <div className="pm-today-hero-main">
-                <span className="pm-today-label">Portfolio value</span>
-                <p className="pm-today-networth" data-testid="today-networth">{formatUsd(netWorth)}</p>
+                <span className="pm-today-label">{headline.label}</span>
+                {worth ? (
+                    <>
+                        <p className="pm-today-networth" data-testid="today-net-worth">{formatUsd(worth.value)}</p>
+                        <p className="pm-today-portfolio" data-testid="today-portfolio">
+                            <span>Portfolio value</span> <span data-testid="today-portfolio-value">{formatUsd(portfolioValue)}</span>
+                        </p>
+                    </>
+                ) : (
+                    <p className="pm-today-networth" data-testid="today-portfolio-value">{formatUsd(portfolioValue)}</p>
+                )}
                 <p
                     className={`pm-today-change ${today ? (change > 0 ? "pm-pos" : change < 0 ? "pm-neg" : "") : ""}`}
                     data-testid="today-change"
@@ -124,7 +159,24 @@ export function TodayHero({
                 {manualCount > 0 && (
                     <div data-testid="today-manual"><dt>Valued by hand</dt><dd>{formatUsd(manualTotal, { decimals: 0 })}</dd></div>
                 )}
+                {worth && (
+                    <>
+                        <div data-testid="today-other-assets"><dt>Other assets</dt><dd>{formatUsd(worth.items.otherAssets, { decimals: 0 })}</dd></div>
+                        {/* A debt is owed, not lost: a minus sign, never red. */}
+                        <div data-testid="today-debts"><dt>Debts</dt><dd>{formatUsd(-worth.items.debts, { decimals: 0 })}</dd></div>
+                    </>
+                )}
             </dl>
+            {worth && (
+                <p className="pm-today-hero-note" data-testid="today-net-worth-note">
+                    Other assets and debts are at the values you gave on{" "}
+                    <Link href="/portfolios/accounts#other-assets">Accounts</Link>
+                    {`, ${worth.asOf}.`}
+                </p>
+            )}
+            {headline.unavailable && (
+                <p className="pm-today-hero-note" data-testid="today-net-worth-unavailable">{headline.unavailable}</p>
+            )}
             {liveIndicator}
         </section>
     );

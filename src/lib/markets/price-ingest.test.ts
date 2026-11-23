@@ -68,6 +68,7 @@ function fakeAdapter({
     splits = [],
     references = {},
     optionCloses = {},
+    unpublished,
     rateLimitedOnce = [],
     onCall,
 }: {
@@ -82,6 +83,8 @@ function fakeAdapter({
     references?: Record<string, TickerReference | Error>;
     /** The newest close per option contract; a contract not listed didn't trade. */
     optionCloses?: Record<string, { date: string; close: number } | Error>;
+    /** A session the free plan hasn't published: a range of option bars that ends on it is refused (403). */
+    unpublished?: string;
     /** Calls (as recorded in `calls`) answered with a 429 the first time only. */
     rateLimitedOnce?: string[];
     onCall?: () => void;
@@ -121,6 +124,7 @@ function fakeAdapter({
         },
         async getLatestOptionClose(contract, from, to) {
             record(`option ${contract} ${from} ${to}`);
+            if (unpublished && to >= unpublished) throw new PolygonApiError(403, "Forbidden", "https://api.polygon.io/v2/aggs");
             const value = optionCloses[contract];
             if (value instanceof Error) throw value;
             return value ?? null;
@@ -1503,7 +1507,7 @@ describe("ingestDailyPrices › option marks (launch item i63)", () => {
         assert.deepEqual(optionMarks.get(AAPL_CALL), { checkedSession: "2026-10-16", close: 19.9, closeDate: "2026-10-14" });
     });
 
-    test("a plan without options data (403) ends the step for the run, without failing it or saving anything", async () => {
+    test("a plan without options data (403, for the session before too) ends the step for the run, without failing it or saving anything", async () => {
         const { store, optionMarks } = fakeStore({ ...upToDate, contracts: [AAPL_CALL, RIVN_CALL] });
         const { adapter, calls } = fakeAdapter({
             optionCloses: { [AAPL_CALL]: new PolygonApiError(403, "Forbidden", "https://api.polygon.io/v2/aggs") },
@@ -1511,10 +1515,36 @@ describe("ingestDailyPrices › option marks (launch item i63)", () => {
 
         const detail = await ingestDailyPrices({ adapter, store, ...fakeClock() });
 
-        assert.deepEqual(calls.filter((call) => call.startsWith("option ")), [`option ${AAPL_CALL} 2026-09-16 2026-10-16`]);
+        assert.deepEqual(calls.filter((call) => call.startsWith("option ")), [
+            `option ${AAPL_CALL} 2026-09-16 2026-10-16`,
+            `option ${AAPL_CALL} 2026-09-16 2026-10-15`,
+        ]);
         assert.equal(detail.optionMarks?.notIncluded, true);
         assert.equal(detail.optionMarks?.queue, 2);
         assert.equal(optionMarks.size, 0);
+    });
+
+    test("regression: a range ending on a session the free plan hasn't published is refused, so the session before's close is asked for and stored", async () => {
+        // Massive's free plan publishes a session's bars after midnight Eastern.
+        // Refused for the evening's own session, the step used to take it for a
+        // plan without options and store nothing, every night.
+        const { store, optionMarks } = fakeStore({ ...upToDate, contracts: [AAPL_CALL, RIVN_CALL] });
+        const { adapter, calls } = fakeAdapter({
+            unpublished: "2026-10-16",
+            optionCloses: { [AAPL_CALL]: { date: "2026-10-15", close: 21.4 }, [RIVN_CALL]: { date: "2026-10-15", close: 1.9 } },
+        });
+
+        const detail = await ingestDailyPrices({ adapter, store, ...fakeClock() });
+
+        // Asked once for the evening's session; the rest of the run asks for the session before from the start.
+        assert.deepEqual(calls.filter((call) => call.startsWith("option ")), [
+            `option ${AAPL_CALL} 2026-09-16 2026-10-16`,
+            `option ${AAPL_CALL} 2026-09-16 2026-10-15`,
+            `option ${RIVN_CALL} 2026-09-16 2026-10-15`,
+        ]);
+        assert.deepEqual(detail.optionMarks, { updated: [AAPL_CALL, RIVN_CALL], noTrade: [], errors: [], queue: 0, pruned: 0 });
+        assert.deepEqual(optionMarks.get(AAPL_CALL), { checkedSession: "2026-10-16", close: 21.4, closeDate: "2026-10-15" });
+        assert.deepEqual(optionMarks.get(RIVN_CALL), { checkedSession: "2026-10-16", close: 1.9, closeDate: "2026-10-15" });
     });
 
     test("a failure is recorded as asked, so it's tried next session rather than ahead of the rest every night", async () => {

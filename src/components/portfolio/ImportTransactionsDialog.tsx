@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { decodeCsvBytes } from "@/lib/portfolio/csvImport";
 import { TRANSACTION_TYPE_LABELS } from "@/lib/portfolio/transactions";
 import { parseTransactionsCsv, type TransactionParseResult } from "@/lib/portfolio/transactionsCsv";
 import { formatMoney, formatQty, formatShortDate } from "@/lib/format";
@@ -40,7 +41,7 @@ export function ImportTransactionsDialog({ accounts }: { accounts: readonly Tran
             return;
         }
         setFileName(file.name);
-        setParsed(parseTransactionsCsv(await file.text()));
+        setParsed(parseTransactionsCsv(decodeCsvBytes(await file.arrayBuffer())));
     };
 
     const rows = useMemo(() => parsed?.rows ?? [], [parsed]);

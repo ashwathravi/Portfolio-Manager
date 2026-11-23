@@ -6,9 +6,8 @@ import {
     computeBucketAllocation,
     computeThemeExposure,
     policyBucketLabel,
-    type PolicyBucketId,
-    type ThemeWeight,
 } from "@/lib/risk-policy";
+import type { PolicyAllocationHolding } from "@/lib/risk-policy/portfolio";
 
 /**
  * Phase 3 (AR-71) Allocation donut card.
@@ -35,17 +34,9 @@ const PALETTE = [
     "var(--pm-fg-muted)",
 ] as const;
 
-export interface AllocationHolding {
-    symbol: string;
-    /** Portfolio name (used for the "Account" grouping). */
-    portfolio: string;
-    policyBucket?: PolicyBucketId;
-    themeWeights?: readonly ThemeWeight[];
-    marketValue: number;
-}
-
 export interface AllocationCardProps {
-    holdings: AllocationHolding[];
+    /** Each holding in the bucket the policy checks put it in (`policyAllocationHoldings`). */
+    holdings: readonly PolicyAllocationHolding[];
     /** Extra cash to include in the "Account" grouping buckets. */
     cashByPortfolio?: Record<string, number>;
     className?: string;
@@ -167,7 +158,7 @@ export function AllocationCard({
 // ---------------------------------------------------------------------------
 
 function buildSegments(
-    holdings: AllocationHolding[],
+    holdings: readonly PolicyAllocationHolding[],
     groupBy: GroupBy,
     cashByPortfolio?: Record<string, number>,
 ): DonutSegment[] {
@@ -179,6 +170,7 @@ function buildSegments(
                 symbol: h.symbol,
                 marketValue: h.marketValue,
                 policyBucket: h.policyBucket,
+                defaultBucket: h.defaultBucket,
                 themeWeights: h.themeWeights,
             })),
             ...cashInputs(cashByPortfolio),
@@ -192,6 +184,7 @@ function buildSegments(
                 symbol: h.symbol,
                 marketValue: h.marketValue,
                 policyBucket: h.policyBucket,
+                defaultBucket: h.defaultBucket,
             })),
             ...cashInputs(cashByPortfolio),
         ]);

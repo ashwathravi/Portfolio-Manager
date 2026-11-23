@@ -1,7 +1,8 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 
-import { linkedPortfolioDescription, linkedPortfolioName, plaidConfigFromEnv, transactionsStart, uniqueAccountName } from "./sync";
+import { linkedAccountKind, linkedPortfolioDescription, linkedPortfolioName, plaidConfigFromEnv, plaidSyncAccountResponse, transactionsStart, uniqueAccountName } from "./sync";
+import { plaidSyncMessage } from "./sync-summary";
 
 // The writes and the whole sync run against Postgres in scripts/db/plaid-sync.test.ts.
 describe("Plaid sync", () => {
@@ -34,6 +35,24 @@ describe("Plaid sync", () => {
         assert.equal(uniqueAccountName(long, "1234", [long]), `${"A".repeat(73)} ••1234`);
     });
 
+    test("a linked account's kind is Plaid's subtype mapped, with the connection's institution, and never an ownership", () => {
+        const kind = linkedAccountKind("brokerage", " Example Brokerage ");
+        assert.deepEqual(kind, { accountType: "brokerage", institution: "Example Brokerage", taxTreatment: "taxable" });
+        // Plaid doesn't say whose name an account is in: only the user sets it.
+        assert.deepEqual(Object.keys(kind).sort(), ["accountType", "institution", "taxTreatment"]);
+        assert.equal(linkedAccountKind("brokerage", "B".repeat(90)).institution, "B".repeat(80));
+        assert.equal(linkedAccountKind("brokerage", "  ").institution, null);
+        // Retirement subtypes are kept from Link now (normalizeSubtype), so they arrive with their kind.
+        assert.deepEqual(linkedAccountKind("401k", "Example Brokerage"), { accountType: "401k", institution: "Example Brokerage", taxTreatment: "tax_deferred" });
+        assert.deepEqual(linkedAccountKind("roth 401k", null), { accountType: "401k", institution: null, taxTreatment: "tax_free" });
+    });
+
+    test("a subtype Atlas has no kind for gives no type or tax treatment, never a guess", () => {
+        for (const subtype of ["other", null, "constructor", "__proto__"]) {
+            assert.deepEqual(linkedAccountKind(subtype, "Example Brokerage"), { accountType: null, institution: "Example Brokerage", taxTreatment: null });
+        }
+    });
+
     test("its description says where it comes from", () => {
         assert.equal(linkedPortfolioDescription("Fidelity", "1234"), "Fidelity ••1234 · linked through Plaid");
         assert.equal(linkedPortfolioDescription(null, null), "linked through Plaid");
@@ -47,5 +66,49 @@ describe("Plaid sync", () => {
         assert.equal(plaidConfigFromEnv({ PLAID_CLIENT_ID: "client" })?.environment, undefined);
         assert.equal(plaidConfigFromEnv({ PLAID_CLIENT_ID: "client", PLAID_SECRET: "" }), null);
         assert.equal(plaidConfigFromEnv({ PLAID_CLIENT_ID: "client", PLAID_SECRET: "secret" })?.environment, "sandbox");
+    });
+
+    test("the route's answer for an account carries what the toast says, the reasons and the old totals both", () => {
+        const response = plaidSyncAccountResponse({
+            portfolioId: "p-1",
+            name: "Brokerage Individual",
+            created: false,
+            positions: 12,
+            options: 2,
+            valued: 0,
+            transactionsAdded: 236,
+            transactionsUpdated: 4,
+            plaidAccountId: "acc_1",
+            cashUsd: 1250.5,
+            holdingsSkipped: 3,
+            holdingsSkippedBy: { option: 1, short: 2 },
+            costUnknown: 0,
+            transactionsSkipped: { option: 5, "other-currency": 1 },
+            transactionsPending: false,
+        });
+        assert.deepEqual(response, {
+            portfolioId: "p-1",
+            name: "Brokerage Individual",
+            created: false,
+            positions: 12,
+            options: 2,
+            valued: 0,
+            cashUsd: 1250.5,
+            holdingsSkipped: 3,
+            skipped: { option: 1, short: 2 },
+            costUnknown: 0,
+            transactionsAdded: 236,
+            transactionsUpdated: 4,
+            // The sum, for a page loaded before the reasons came with it.
+            transactionsSkipped: 6,
+            transactionsSkippedBy: { option: 5, "other-currency": 1 },
+            transactionsPending: false,
+        });
+        assert.equal(
+            plaidSyncMessage([response]),
+            "Brokerage Individual: 12 positions, 2 option positions and 236 new transactions. "
+            + "1 option or warrant without clear contract details wasn't brought in. 2 short positions weren't brought in. "
+            + "1 transaction in another currency wasn't recorded.",
+        );
     });
 });

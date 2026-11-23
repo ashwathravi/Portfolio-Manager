@@ -1,6 +1,10 @@
 import { afterEach, describe, test } from "node:test";
 import assert from "node:assert/strict";
+import { inspect } from "node:util";
 
+import { DrizzleQueryError } from "drizzle-orm";
+
+import { DatabaseQueryError } from "./loggable-error";
 import { reportError, setErrorReporterForTests, type ErrorReporter } from "./report-error";
 
 function recordingReporter() {
@@ -31,5 +35,20 @@ describe("reportError", () => {
 
     test("does nothing visible without a DSN, even outside a request", () => {
         assert.doesNotThrow(() => reportError(new Error("no Sentry here")));
+    });
+
+    test("regression: a scheduled job's failed query is reported without its parameters", () => {
+        const { reporter, captured } = recordingReporter();
+        setErrorReporterForTests(reporter);
+        const sql = 'insert into "manual_holdings" ("id", "name", "value") values (default, $1, $2)';
+        const cause = Object.assign(new Error("deadlock detected"), { code: "40P01" });
+
+        reportError(new DrizzleQueryError(sql, ["Sample Stable Value Fund MARKER", "1234.56"], cause), { tags: { job: "plaid-sync" } });
+
+        assert.equal(captured.length, 1);
+        assert.ok(captured[0].error instanceof DatabaseQueryError);
+        assert.equal((captured[0].error as Error).message, `Failed query: ${sql} (code 40P01)`);
+        assert.ok(!inspect(captured[0].error, { showHidden: true, depth: 8 }).includes("MARKER"));
+        assert.deepEqual(captured[0].context, { tags: { job: "plaid-sync" } });
     });
 });

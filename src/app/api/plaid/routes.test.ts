@@ -132,7 +132,7 @@ describe("Plaid API routes", () => {
         assert.equal(refused.status, 500);
         assert.equal((await refused.json()).code, "PLAID_LINK_TOKEN_FAILED");
         assert.equal(calls.length, 1);
-        assert.match(String(logged.mock.calls[0].arguments[1]), /PLAID_REDIRECT_URI must end in \/settings/);
+        assert.match(JSON.parse(String(logged.mock.calls[0].arguments[0])).error.message, /PLAID_REDIRECT_URI must end in \/settings/);
     });
 
     test("does not leak provider error details to Plaid clients", async (t) => {

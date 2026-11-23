@@ -8,14 +8,13 @@ export type PlaidAccountType =
     | "loan"
     | "other";
 
-export type PlaidAccountSubtype =
-    | "brokerage"
-    | "ira"
-    | "roth"
-    | "checking"
-    | "savings"
-    | "credit card"
-    | "other";
+/**
+ * Plaid's subtype, lower-cased, as Atlas stores it: one Atlas has an
+ * account kind for ("brokerage", "401k", "529", "hsa": accountTypeForPlaid
+ * in src/lib/portfolio/account-kinds.ts), "checking", "savings" or
+ * "credit card", or else "other".
+ */
+export type PlaidAccountSubtype = string;
 
 export type PlaidCapability = "balances" | "holdings" | "transactions" | "investments";
 

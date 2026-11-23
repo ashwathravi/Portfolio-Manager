@@ -8,6 +8,7 @@ import {
     buildCreatePortfolioQuery,
     buildDeletePortfolioQuery,
     buildExcludeLinkedAccountQuery,
+    buildSyncingAccountsQuery,
     deletePortfolio,
     buildLockUserAccountsQuery,
     buildUpdatePortfolioQuery,
@@ -23,7 +24,7 @@ const NOW = new Date("2026-10-24T08:00:00.000Z");
 describe("account queries", () => {
     test("create adds an account for the user, its total value its cash", () => {
         const { sql, params } = buildCreatePortfolioQuery(USER, { name: "Roth IRA", description: "Fidelity", cashBalance: 2500 }).toSQL();
-        assert.match(sql, /^insert into "portfolios" \(.*"user_id".*\) values .* returning "id", "name", "description", "cash_balance", "account_type", "institution", "tax_treatment"$/i);
+        assert.match(sql, /^insert into "portfolios" \(.*"user_id".*\) values .* returning "id", "name", "description", "cash_balance", "account_type", "institution", "tax_treatment", "ownership"$/i);
         assert.ok(params.includes(USER));
         assert.ok(params.includes("Roth IRA"));
         assert.equal(params.filter((p) => p === 2500).length, 2);
@@ -53,10 +54,42 @@ describe("account queries", () => {
         for (const value of ["roth_ira", "Fidelity", "tax_free"]) assert.ok(created.params.includes(value), value);
 
         const cleared = buildUpdatePortfolioQuery(USER, ID, { accountType: null, institution: "" }, NOW).toSQL();
-        assert.match(cleared.sql, /set "account_type" = \$1, "institution" = \$2 where/i);
+        assert.match(cleared.sql, /set "account_type" = \$1, "institution" = \$2, "kind_edited_at" = case when .* end where/i);
         assert.deepEqual(cleared.params.slice(0, 2), [null, null]);
         // Not a financial change.
         assert.doesNotMatch(cleared.sql, /updated_at/);
+    });
+
+    test("an ownership is set when given, on create or update, and cleared with null", () => {
+        const created = buildCreatePortfolioQuery(USER, { name: "Joint brokerage", ownership: "joint" }).toSQL();
+        assert.ok(created.params.includes("joint"));
+
+        const set = buildUpdatePortfolioQuery(USER, ID, { ownership: "dependent" }, NOW).toSQL();
+        assert.match(set.sql, /^update "portfolios" set "ownership" = \$1/i);
+        assert.equal(set.params[0], "dependent");
+        const cleared = buildUpdatePortfolioQuery(USER, ID, { ownership: null }, NOW).toSQL();
+        assert.match(cleared.sql, /^update "portfolios" set "ownership" = \$1/i);
+        assert.equal(cleared.params[0], null);
+        assert.doesNotMatch(cleared.sql, /updated_at/);
+    });
+
+    test("regression: the user's say over the kind is marked, so a Plaid sync leaves it, a cleared field included", () => {
+        // Before kind_edited_at, a sync filled a tax treatment the user had
+        // cleared back in. Marked only when a field changes from what's stored.
+        const { sql, params } = buildUpdatePortfolioQuery(USER, ID, { taxTreatment: null, ownership: "joint" }, NOW).toSQL();
+        assert.match(sql, /set "tax_treatment" = \$1, "ownership" = \$2, "kind_edited_at" = case when \("portfolios"\."tax_treatment" is distinct from \$3 or "portfolios"\."ownership" is distinct from \$4\) then \$5::timestamp else "portfolios"\."kind_edited_at" end where/i);
+        assert.deepEqual(params.slice(0, 5), [null, "joint", null, "joint", NOW.toISOString()]);
+
+        // An empty institution is compared as none, as it's stored.
+        const institution = buildUpdatePortfolioQuery(USER, ID, { institution: "" }, NOW).toSQL();
+        assert.match(institution.sql, /"kind_edited_at" = case when \("portfolios"\."institution" is distinct from \$2\) then \$3::timestamp/i);
+        assert.deepEqual(institution.params.slice(0, 3), [null, null, NOW.toISOString()]);
+    });
+
+    test("regression: a rename, a description or a change of cash alone isn't a say over the kind", () => {
+        for (const body of [{ name: "Renamed" }, { description: "Rollover" }, { cashBalance: 10 }, { name: "Renamed", description: "", cashBalance: 10 }]) {
+            assert.doesNotMatch(buildUpdatePortfolioQuery(USER, ID, body, NOW).toSQL().sql, /kind_edited_at/, JSON.stringify(body));
+        }
     });
 
     test("regression: only a change of cash moves the account's last-change time", () => {
@@ -81,6 +114,19 @@ describe("account queries", () => {
         const { sql, params } = buildExcludeLinkedAccountQuery(USER, "plaid-acct-1", NOW).toSQL();
         assert.match(sql, /^update "plaid_accounts" set "sync_status" = \$1, "updated_at" = \$2 where \("plaid_accounts"\."user_id" = \$3 and "plaid_accounts"\."plaid_account_id" = \$4\)$/i);
         assert.deepEqual(params, ["excluded", NOW.toISOString(), USER, "plaid-acct-1"]);
+    });
+
+    test("the accounts that still sync are the user's linked accounts picked for syncing", () => {
+        // What a sync brings in is the institution's only while its account
+        // syncs; an 'excluded' one (disconnected, deleted, unpicked) is the
+        // user's again.
+        const all = buildSyncingAccountsQuery(USER).toSQL();
+        assert.match(all.sql, /^select "portfolios"\."id" from "portfolios" inner join "plaid_accounts" on \("plaid_accounts"\."user_id" = "portfolios"\."user_id" and "plaid_accounts"\."plaid_account_id" = "portfolios"\."external_account_id"\) where \("portfolios"\."user_id" = \$1 and "portfolios"\."source" = \$2 and "plaid_accounts"\."sync_status" = \$3\)$/i);
+        assert.deepEqual(all.params, [USER, "plaid", "sync_ready"]);
+
+        const one = buildSyncingAccountsQuery(USER, undefined, ID).toSQL();
+        assert.match(one.sql, / and "portfolios"\."id" = \$4\)$/i);
+        assert.deepEqual(one.params, [USER, "plaid", "sync_ready", ID]);
     });
 
     test("delete excludes the Plaid account only for a linked account", async () => {

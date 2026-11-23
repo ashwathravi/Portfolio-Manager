@@ -735,6 +735,51 @@ test.describe('Trade › risk policy on the user\'s own portfolio', () => {
         await expect(policy).toContainText(/worsens from 12(\.\d)?%/);
     });
 
+    test('the bucket checks count a holding valued by hand in the bucket chosen for it', async ({ page }) => {
+        // Trade, Settings and Trade again.
+        test.slow();
+        const created = await page.request.post('/api/portfolios', { data: { name: '401(k)', cashBalance: 0 } });
+        expect(created.status()).toBe(201);
+        const { data: { id: portfolioId } } = await created.json() as { data: { id: string } };
+        const added = await page.request.post('/api/portfolio/manual-holdings', {
+            data: { portfolioId, holding: { name: 'Private Co shares', value: 100_000, valueAsOf: '2026-11-19' } },
+        });
+        expect(added.status()).toBe(201);
+
+        /** The speculative share a buy of one TSLA at $250 starts from, as the ticket reads it. */
+        const speculativeBefore = async (): Promise<number> => {
+            await gotoAppPage(page, '/execution');
+            await chooseTicker(page, 'TSLA');
+            await page.getByLabel('Quantity').fill('1');
+            await page.getByLabel('Limit price').fill('250');
+            const check = page.getByTestId('risk-policy-impact').locator('[data-rule-type="bucket_allocation"]')
+                .filter({ hasText: 'Speculative/options cap' });
+            await expect(check).toContainText(/Speculative\/options exposure worsens from \d+(\.\d)?%/);
+            const [, pct] = (await check.textContent())?.match(/exposure worsens from (\d+(?:\.\d)?)%/) ?? [];
+            return Number(pct);
+        };
+
+        // In core, where it starts, it only adds to the portfolio TSLA is a share of.
+        const inCore = await speculativeBefore();
+
+        await gotoAppPage(page, '/settings');
+        const fund = page.getByLabel('Bucket for Private Co shares in 401(k)');
+        const saved = page.waitForResponse((response) => {
+            if (!response.url().endsWith('/api/settings') || response.request().method() !== 'PUT' || !response.ok()) return false;
+            const assignments: Record<string, string> = response.request().postDataJSON()?.settings?.riskPolicy?.bucketAssignments ?? {};
+            return Object.entries(assignments).some(([key, bucket]) => key.startsWith('manual:') && bucket === 'speculative');
+        });
+        await clickUntil(fund, async () => {
+            await fund.selectOption('speculative');
+            await expect(fund).toHaveValue('speculative', { timeout: 1_000 });
+        });
+        await saved;
+
+        // Speculative, its $100,000 joins TSLA's in the bucket.
+        const inSpeculative = await speculativeBefore();
+        expect(inSpeculative).toBeGreaterThan(inCore + 10);
+    });
+
     test('regression: a no-add rule for a ticker without a thesis lifts once the user writes one', async ({ page }) => {
         await gotoAppPage(page, '/settings');
         // Settings sections hydrate inside a Suspense boundary, and a form

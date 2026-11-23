@@ -4,7 +4,10 @@ import assert from "node:assert/strict";
 import type { ActivityRow } from "@/lib/portfolio/activity";
 import type { SecurityProfile } from "@/lib/markets/security-profile";
 
-import { MAX_CHURN_WINDOW_DAYS, buildPolicyPortfolio, valueHolding } from "./portfolio";
+import { computeBucketAllocation } from "./buckets";
+import { DEFAULT_EMPLOYER_STOCK_DERISKING_PLAN } from "./de-risking";
+import { MAX_CHURN_WINDOW_DAYS, buildPolicyPortfolio, policyAllocationHoldings, valueHolding } from "./portfolio";
+import { policyHandValued, policyHoldings, type RiskPolicySettings } from "./user-policy";
 
 const profile = (symbol: string, type: string, sector: SecurityProfile["sector"], name: string): SecurityProfile => ({
     symbol,
@@ -64,6 +67,20 @@ describe("buildPolicyPortfolio", () => {
         ]);
     });
 
+    test("holdings valued by hand carry their account's name; tickers never do", () => {
+        const portfolio = buildPolicyPortfolio({
+            accounts: [
+                { name: "Retirement", holdings: [{ id: "h1", symbol: "VTI", quantity: 1, avgCost: 1 }], manualHoldings: [{ id: "m1", name: "Stable Value Fund", value: 100 }] },
+                { holdings: [], manualHoldings: [{ id: "m2", name: "Private Co", value: 300 }] },
+            ],
+        });
+        const [named, unnamed] = portfolio.handValued ?? [];
+        assert.equal(named.account, "Retirement");
+        // Without an account name there is no account key at all.
+        assert.equal(Object.hasOwn(unnamed, "account"), false);
+        assert.equal(Object.hasOwn(portfolio.holdings[0], "account"), false);
+    });
+
     test("without reference data only the well-known tickers have a bucket", () => {
         const portfolio = buildPolicyPortfolio({
             accounts: [{ holdings: [
@@ -104,5 +121,86 @@ describe("buildPolicyPortfolio", () => {
     test("carries the user's option positions (launch item i63)", () => {
         const call = { id: "o1", underlying: "AAPL", contractType: "call" as const, strike: 250, expiry: "2027-01-15", quantity: 3, premiumPaid: 18.2, currentPremium: 21.4 };
         assert.deepEqual(buildPolicyPortfolio({ accounts: [], options: [call] }).options, [call]);
+    });
+});
+
+describe("policyAllocationHoldings", () => {
+    const fund = "6f1e2c3d-4b5a-4c6d-8e7f-000000000001";
+    const shares = "6f1e2c3d-4b5a-4c6d-8e7f-000000000002";
+    const accounts = [
+        {
+            name: "Brokerage",
+            cashBalance: 500,
+            holdings: [
+                { id: "h1", symbol: "tsla", quantity: 10, avgCost: 150, currentPrice: 200, marketValue: 2_000 },
+                { id: "h2", symbol: "XMPL", quantity: 10, avgCost: 50, currentPrice: 60, marketValue: 600 },
+                { id: "h3", symbol: "WXYZ", quantity: 10, avgCost: 30, currentPrice: 40, marketValue: 400 },
+            ],
+        },
+        {
+            name: "401(k)",
+            holdings: [],
+            manualHoldings: [
+                { id: fund, name: "Target 2055 Trust", value: "9000" },
+                { id: shares, name: "Private Co shares", value: 1_000 },
+            ],
+        },
+    ];
+    const profiles = new Map([["XMPL", profile("XMPL", "ETF", "Funds", "Example Total Market Fund")]]);
+    // TSLA moved to core, and the private shares to speculative.
+    const policy: Pick<RiskPolicySettings, "bucketAssignments" | "employerStockPlan"> = {
+        bucketAssignments: { TSLA: "core", [`manual:${shares}`]: "speculative" },
+        employerStockPlan: { ...DEFAULT_EMPLOYER_STOCK_DERISKING_PLAN, symbols: [] },
+    };
+
+    test("a ticker is in the bucket the user chose, else the one it starts in", () => {
+        const rows = policyAllocationHoldings({ accounts, profiles, quotes: { XMPL: { price: 70 } } }, policy);
+        assert.deepEqual(rows.slice(0, 3), [
+            // Chosen by its ticker in any case; speculative is only where it starts.
+            { symbol: "tsla", portfolio: "Brokerage", marketValue: 2_000, policyBucket: "core", defaultBucket: "speculative" },
+            // No choice: a fund is core, valued at its quote.
+            { symbol: "XMPL", portfolio: "Brokerage", marketValue: 700, policyBucket: undefined, defaultBucket: "core" },
+            // Nothing says what it is: unassigned until the user chooses.
+            { symbol: "WXYZ", portfolio: "Brokerage", marketValue: 400, policyBucket: undefined, defaultBucket: null },
+        ]);
+    });
+
+    test("a holding valued by hand is in the bucket chosen for it, core until then, with the theme that bucket implies", () => {
+        const rows = policyAllocationHoldings({ accounts }, policy);
+        assert.deepEqual(rows.slice(3), [
+            {
+                symbol: `manual:${fund}`,
+                portfolio: "401(k)",
+                marketValue: 9_000,
+                policyBucket: "core",
+                themeWeights: [{ theme: "broad_core_index", weight: 1, source: "fallback" }],
+            },
+            {
+                symbol: `manual:${shares}`,
+                portfolio: "401(k)",
+                marketValue: 1_000,
+                policyBucket: "speculative",
+                themeWeights: [{ theme: "unknown", weight: 1, source: "unknown" }],
+            },
+        ]);
+        // An account without a name has none to group by.
+        const [unnamed] = policyAllocationHoldings({ accounts: [{ holdings: [], manualHoldings: [{ id: fund, name: "Fund", value: 1 }] }] }, policy);
+        assert.equal(unnamed.portfolio, "");
+    });
+
+    test("regression: in the buckets the policy checks put them in, the user's choices applied", () => {
+        const allocation = computeBucketAllocation(policyAllocationHoldings({ accounts, profiles }, policy));
+        const portfolio = buildPolicyPortfolio({ accounts, profiles });
+        const checks = computeBucketAllocation([
+            ...policyHoldings(portfolio.holdings, policy),
+            ...policyHandValued(portfolio.handValued ?? [], policy),
+        ]);
+        const byBucket = (rows: typeof allocation.rows) => rows.map((row) => [row.bucket, row.marketValue]);
+        assert.deepEqual(byBucket(allocation.rows), byBucket(checks.rows));
+        // TSLA counts in core, not in speculative where it starts.
+        const value = (bucket: string) => allocation.rows.find((row) => row.bucket === bucket)?.marketValue;
+        assert.equal(value("core"), 2_000 + 600 + 9_000);
+        assert.equal(value("speculative"), 1_000);
+        assert.equal(value("unassigned"), 400);
     });
 });

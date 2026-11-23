@@ -1,5 +1,8 @@
 import { afterEach, describe, test, mock } from "node:test";
 import assert from "node:assert/strict";
+import { format, inspect } from "node:util";
+
+import { DrizzleQueryError } from "drizzle-orm";
 
 import { setErrorReporterForTests } from "@/lib/observability/report-error";
 
@@ -131,6 +134,69 @@ describe("internalServerError", () => {
         assert.deepEqual(await response.json(), { error: "Unable to import holdings.", code: "PORTFOLIO_IMPORT_FAILED" });
         assert.deepEqual(reports, [{ error, context: { tags: { code: "PORTFOLIO_IMPORT_FAILED" } } }]);
         assert.equal(flushes.length, 1);
+    });
+
+    test("regression: a failed query is logged and reported without its parameters, which hold what the user saved", (t) => {
+        const logged: unknown[][] = [];
+        t.mock.method(console, "error", (...args: unknown[]) => { logged.push(args); });
+        const reports: unknown[] = [];
+        setErrorReporterForTests({
+            capture: (reported) => { reports.push(reported); },
+            afterResponse: () => {},
+        });
+        const sql = 'insert into "net_worth_items" ("id", "user_id", "name", "note") values (default, $1, $2, $3) returning "id"';
+        const cause = Object.assign(new Error("canceling statement due to statement timeout"), {
+            code: "57014",
+            detail: "Failing row contains (u-1, Sample home, MARKER-note).",
+        });
+
+        const response = internalServerError(
+            new DrizzleQueryError(sql, ["u-1", "Sample home", "MARKER-note"], cause),
+            "Unable to add the asset or debt.",
+            "NET_WORTH_ITEM_CREATE_FAILED",
+        );
+
+        assert.equal(response.status, 500);
+        assert.equal(logged.length, 1);
+        const printed = format(...logged[0]);
+        assert.ok(!printed.includes("MARKER"), printed);
+        assert.ok(!printed.includes("Sample home"));
+        const entry = JSON.parse(printed);
+        assert.equal(entry.error.message, `Failed query: ${sql} (code 57014)`);
+        assert.equal(entry.error.code, "57014");
+        assert.equal(reports.length, 1);
+        const reported = inspect(reports[0], { showHidden: true, depth: 8 });
+        assert.ok(!reported.includes("MARKER"), reported);
+        assert.equal((reports[0] as { code?: string }).code, "57014");
+    });
+
+    test("regression: the failure is logged as one line of JSON, so a line break in its message can't start a log line of its own", (t) => {
+        const logged: unknown[][] = [];
+        t.mock.method(console, "error", (...args: unknown[]) => { logged.push(args); });
+        setErrorReporterForTests({ capture: () => {}, afterResponse: () => {} });
+        // A message that quotes what a request sent, such as a symbol.
+        const forged = 'No closing price for "ZZZZ\n{"event":"sign_in","user":"someone-else"}"';
+        const cause = Object.assign(new Error("upstream\r\nanswered 502"), { status: 502 });
+        const error = Object.assign(new Error(forged, { cause }), { code: "PROVIDER_FAILED" });
+
+        const response = internalServerError(error, "Unable to fetch quote.", "MARKET_DATA_QUOTE_FAILED");
+
+        assert.equal(response.status, 500);
+        assert.equal(logged.length, 1);
+        assert.equal(logged[0].length, 1);
+        const line = String(logged[0][0]);
+        assert.ok(!/[\r\n]/.test(line), line);
+        const entry = JSON.parse(line);
+        assert.equal(entry.event, "internal_server_error");
+        assert.equal(entry.code, "MARKET_DATA_QUOTE_FAILED");
+        assert.equal(entry.message, "Unable to fetch quote.");
+        assert.ok(!Number.isNaN(Date.parse(entry.timestamp)));
+        assert.equal(entry.error.name, "Error");
+        assert.equal(entry.error.message, forged);
+        assert.equal(entry.error.code, "PROVIDER_FAILED");
+        assert.ok(entry.error.stack.startsWith(`Error: ${forged}\n    at `), entry.error.stack);
+        assert.equal(entry.error.cause.message, "upstream\r\nanswered 502");
+        assert.equal(entry.error.cause.status, 502);
     });
 });
 

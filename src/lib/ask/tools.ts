@@ -28,6 +28,8 @@ import {
     evaluateRiskPolicy,
     findStressScenario,
     normalizeTicker,
+    policyHandValued,
+    policyHoldingLabel,
     policyHoldings,
     policyPortfolioValue,
     runStressScenario,
@@ -126,11 +128,15 @@ function positions(ctx: AskContext): Position[] {
     return [...bySymbol.values()];
 }
 
-/** The user's holdings as the policy sees them, cash included, as on Today. */
+/**
+ * The user's holdings as the policy sees them, as on Today: those valued
+ * by hand in the bucket chosen for each, and cash.
+ */
 function policyExposureHoldings(ctx: AskContext): ThemeExposureHolding[] {
     const cash = ctx.portfolio.cashTotal;
     return [
         ...policyHoldings(ctx.portfolio.holdings, ctx.policy),
+        ...policyHandValued(ctx.portfolio.handValued ?? [], ctx.policy),
         ...(cash > 0
             ? [{
                 id: 'cash-reserve',
@@ -455,7 +461,10 @@ export function stress_test(
         ? buildCustomStressScenario({ id: 'ticker_40_down', label: `${symbol} -40%`, kind: 'ticker', value: symbol, shockPct: -40 })
         : findStressScenario(wantsEmployer ? 'employer_40_down' : args.scenarioId, employer);
     const result = runStressScenario({
-        holdings: policyHoldings(ctx.portfolio.holdings, ctx.policy),
+        holdings: [
+            ...policyHoldings(ctx.portfolio.holdings, ctx.policy),
+            ...policyHandValued(ctx.portfolio.handValued ?? [], ctx.policy),
+        ],
         cashTotal: ctx.portfolio.cashTotal,
         scenario,
     });
@@ -471,7 +480,8 @@ export function stress_test(
     ];
 
     return rows.concat(result.contributors.slice(0, 5).map((contributor) => ({
-        label: contributor.symbol,
+        // A holding valued by hand by its name, never its key.
+        label: policyHoldingLabel(contributor.symbol, contributor.name),
         value: usdSigned(contributor.impactUsd),
         sub: `${contributor.effectiveShockPct.toFixed(1)}% shock · ${contributor.matchedTargets.join(', ')}`,
         tone: contributor.impactUsd < 0 ? 'neg' : 'neutral',

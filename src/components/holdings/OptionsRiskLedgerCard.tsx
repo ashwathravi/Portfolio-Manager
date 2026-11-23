@@ -10,9 +10,9 @@ import {
 } from "@/lib/risk-policy";
 import {
     describeOptionContract,
+    describeOptionMark,
     toOptionRiskPosition,
     type LoadedOptionPosition,
-    type OptionMark,
 } from "@/lib/portfolio/option-positions";
 import { useSettingsStore } from "@/lib/stores/settingsStore";
 import { OptionPositionDialog, type OptionAccountOption, type OptionThesisOption } from "./OptionPositionDialog";
@@ -34,14 +34,6 @@ const STATUS_LABELS: Record<OptionRiskStatus, string> = {
     breached: "Breached",
     missing_data: "Missing data",
 };
-
-/** Where a mark comes from, as the ledger says it: "Close Oct 1", "Your price Oct 2", "At cost". */
-export function describeOptionMark(mark: OptionMark): string {
-    if (mark.source === "cost") return "At cost: no price yet";
-    const [year, month, day] = mark.date.split("-").map(Number);
-    const date = new Date(Date.UTC(year, month - 1, day)).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
-    return mark.source === "close" ? `Close ${date}` : `Your price ${date}`;
-}
 
 export function OptionsRiskLedgerCard({
     positions,
@@ -78,7 +70,14 @@ export function OptionsRiskLedgerCard({
         setDeleting(position.id);
         try {
             const response = await fetch(`/api/portfolio/options/${position.id}`, { method: "DELETE", credentials: "same-origin" });
-            if (!response.ok && response.status !== 404) throw new Error(String(response.status));
+            if (!response.ok && response.status !== 404) {
+                // Say why, as when the account started syncing after the page loaded.
+                const body = (await response.json().catch(() => null)) as { error?: string } | null;
+                toast.error(body?.error ?? "Couldn't delete the option position. Try again.");
+                // The page is out of date: show the row as the linked account's, without Delete.
+                if (response.status === 409) router.refresh();
+                return;
+            }
             toast.success(`Deleted ${label}.`);
             router.refresh();
         } catch {
@@ -171,6 +170,7 @@ export function OptionsRiskLedgerCard({
                                                 <span className="pm-options-contract-sub">
                                                     {Math.abs(row.quantity)} {row.direction} {row.contractType.toUpperCase()}
                                                     {Math.abs(row.quantity) === 1 ? " contract" : " contracts"} · {position.account}
+                                                    {position.synced && <span data-testid="option-synced"> · from your linked account</span>}
                                                 </span>
                                             </div>
                                         </td>
@@ -214,15 +214,18 @@ export function OptionsRiskLedgerCard({
                                                 >
                                                     Edit
                                                 </button>
-                                                <button
-                                                    type="button"
-                                                    className="pm-btn pm-btn-ghost pm-btn-sm"
-                                                    aria-label={`Delete ${describeOptionContract(position)}`}
-                                                    disabled={deleting === position.id}
-                                                    onClick={() => void remove(position)}
-                                                >
-                                                    Delete
-                                                </button>
+                                                {/* A synced contract goes when the account no longer holds it. */}
+                                                {!position.synced && (
+                                                    <button
+                                                        type="button"
+                                                        className="pm-btn pm-btn-ghost pm-btn-sm"
+                                                        aria-label={`Delete ${describeOptionContract(position)}`}
+                                                        disabled={deleting === position.id}
+                                                        onClick={() => void remove(position)}
+                                                    >
+                                                        Delete
+                                                    </button>
+                                                )}
                                             </div>
                                         </td>
                                     </tr>
@@ -233,8 +236,9 @@ export function OptionsRiskLedgerCard({
                 </table>
             </div>
             <p className="pm-metric-note" data-testid="options-ledger-note">
-                Prices are the latest end-of-day close where Atlas&apos;s data includes the contract, otherwise your own
-                price or what you paid. Option positions aren&apos;t counted in portfolio value or returns yet.
+                Prices are the newest of the contract&apos;s end-of-day close where Atlas&apos;s data includes it, the price a
+                linked account reports, and your own; otherwise what you paid. Option positions aren&apos;t counted in
+                portfolio value or returns yet.
             </p>
 
             <OptionPositionDialog

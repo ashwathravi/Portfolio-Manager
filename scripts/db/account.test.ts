@@ -8,11 +8,15 @@ import postgres from 'postgres';
 import * as schema from '../../src/db/schema';
 import { AccountDeletionBlockedError, deleteAccount } from '../../src/lib/account/delete';
 import { buildAccountExport } from '../../src/lib/account/export';
+import { importHoldings } from '../../src/lib/portfolio/importHoldings';
 import { addManualHolding, updateManualHolding } from '../../src/lib/portfolio/manual-holdings';
 import { manualSymbol } from '../../src/lib/portfolio/manual-symbol';
 import { hasGoogleAccount } from '../../src/lib/auth/new-accounts';
 import { googleWorkspaceDomains } from '../../src/lib/auth/session-access';
 import type { PlaidFetch } from '../../src/lib/plaid/link';
+import { SETTINGS_VERSION } from '../../src/lib/settings/document';
+import { defaultPersistedSettings } from '../../src/lib/stores/settingsStore';
+import { portfolioImportSchema } from '../../src/lib/validators/portfolio-import';
 
 // Launch item i65: deleting an account and exporting its data, against a
 // scratch database with every migration applied and a fake Plaid. Needs a
@@ -82,6 +86,13 @@ describe('account deletion and export', { skip: !DATABASE_URL && 'SCRIPTS_TEST_D
             INSERT INTO alert_notifications (user_id, rule_id, occurrence, rule_name, metric, symbol, comparator, threshold, observed_value, message, href, triggered_at, email_batch)
             VALUES (${user}, ${rule.id}, 'session:2026-10-23', 'AAPL above $95', 'price', 'AAPL', 'gte', 95, 100, 'AAPL closed at $100.00 on Oct 23, at or above $95.00.', '/portfolios/detail/AAPL', '2026-10-23 22:31', ${`alerts/batch-${user}`})`;
         await sql`INSERT INTO email_preferences (user_id, alerts, weekly_review, alerts_since, unsubscribe_token, updated_at) VALUES (${user}, true, false, '2026-10-21 12:00', ${`unsubscribe-secret-${user}`}, '2026-10-21 12:00')`;
+        const [home] = await sql<{ id: string }[]>`
+            INSERT INTO net_worth_items (user_id, kind, category, name, value, value_as_of, note, created_at, updated_at)
+            VALUES (${user}, 'asset', 'property', 'Home', 400000, '2026-10-01', 'estimate', '2026-09-01 12:00', '2026-10-01 12:00') RETURNING id`;
+        const [mortgage] = await sql<{ id: string }[]>`
+            INSERT INTO net_worth_items (user_id, kind, category, name, value, value_as_of, created_at, updated_at)
+            VALUES (${user}, 'debt', 'mortgage', 'Mortgage', 250000, '2026-10-01', '2026-10-01 12:00', '2026-10-01 12:00') RETURNING id`;
+        await sql`INSERT INTO net_worth_item_values (net_worth_item_id, date, value) VALUES (${home.id}, '2026-09-01', 395000), (${home.id}, '2026-10-01', 400000), (${mortgage.id}, '2026-10-01', 250000)`;
         const [item] = await sql<{ id: string }[]>`
             INSERT INTO plaid_items (user_id, plaid_item_id, institution_id, institution_name, access_token_ciphertext, access_token_iv, access_token_auth_tag)
             VALUES (${user}, ${`item-${user}`}, 'ins_1', 'Fidelity', 'secret-cipher', 'i', 't') RETURNING id`;
@@ -102,6 +113,8 @@ describe('account deletion and export', { skip: !DATABASE_URL && 'SCRIPTS_TEST_D
                 (SELECT count(*) FROM portfolio_snapshot_positions s JOIN portfolios p ON p.id = s.portfolio_id WHERE p.user_id = ${user})::int AS snapshot_positions,
                 (SELECT count(*) FROM order_plans WHERE user_id = ${user})::int AS order_plans,
                 (SELECT count(*) FROM option_positions WHERE user_id = ${user})::int AS option_positions,
+                (SELECT count(*) FROM net_worth_items WHERE user_id = ${user})::int AS net_worth_items,
+                (SELECT count(*) FROM net_worth_item_values v JOIN net_worth_items i ON i.id = v.net_worth_item_id WHERE i.user_id = ${user})::int AS net_worth_item_values,
                 (SELECT count(*) FROM user_settings WHERE user_id = ${user})::int AS settings,
                 (SELECT count(*) FROM watchlist_items WHERE user_id = ${user})::int AS watchlist,
                 (SELECT count(*) FROM journal_entries WHERE user_id = ${user})::int AS journal,
@@ -131,6 +144,10 @@ describe('account deletion and export', { skip: !DATABASE_URL && 'SCRIPTS_TEST_D
     test('the export holds everything the user has, as they\'d recognize it, and nothing internal or secret', async () => {
         const portfolioId = await seedUser('u-export');
         await seedUser('u-other');
+        // The account's kind and whose name it's in, as the user set them.
+        await sql`
+            UPDATE portfolios SET account_type = 'brokerage', institution = 'Example Brokerage', tax_treatment = 'taxable', ownership = 'joint', kind_edited_at = now()
+            WHERE id = ${portfolioId}`;
         const data = await buildAccountExport('u-export', database, NOW);
 
         assert.equal(data.format, 'atlas-wealth-export');
@@ -140,6 +157,7 @@ describe('account deletion and export', { skip: !DATABASE_URL && 'SCRIPTS_TEST_D
         assert.equal(data.accounts.length, 1);
         const [account] = data.accounts;
         assert.deepEqual([account.id, account.name, account.source, account.cashBalance], [portfolioId, 'Brokerage', 'manual', 250]);
+        assert.deepEqual([account.accountType, account.institution, account.taxTreatment, account.ownership], ['brokerage', 'Example Brokerage', 'taxable', 'joint']);
         assert.deepEqual(account.holdings.map((h) => [h.symbol, h.quantity, h.avgCost, h.lastPrice]), [['AAPL', 10, 80, 100]]);
         assert.deepEqual(account.transactions.map((t) => [t.date, t.type, t.symbol, t.quantity, t.price, t.amount, t.notes]), [
             ['2026-03-05T12:00:00.000Z', 'BUY', 'AAPL', 10, 80, 800, 'starter'],
@@ -159,6 +177,20 @@ describe('account deletion and export', { skip: !DATABASE_URL && 'SCRIPTS_TEST_D
             ['AAPL', 'buy', 'limit', 5, 95, 'ready', 100, 'add on the dip', '2026-10-24T14:00:00.000Z'],
         ]);
         assert.deepEqual(data.linkedConnections.map((c) => [c.institutionName, c.accounts.map((a) => [a.name, a.mask, a.syncing])]), [['Fidelity', [['Individual', '1234', true]]]]);
+        // Other assets and debts, assets first, each with its values by day,
+        // oldest first; not the other user's, which have the same names.
+        assert.deepEqual(data.netWorthItems.map((i) => [i.kind, i.category, i.name, i.value, i.valueAsOf, i.note]), [
+            ['asset', 'property', 'Home', 400000, '2026-10-01', 'estimate'],
+            ['debt', 'mortgage', 'Mortgage', 250000, '2026-10-01', null],
+        ]);
+        assert.deepEqual(data.netWorthItems.map((i) => [i.createdAt, i.updatedAt]), [
+            ['2026-09-01T12:00:00.000Z', '2026-10-01T12:00:00.000Z'],
+            ['2026-10-01T12:00:00.000Z', '2026-10-01T12:00:00.000Z'],
+        ]);
+        assert.deepEqual(data.netWorthItems.map((i) => i.values), [
+            [{ date: '2026-09-01', value: 395000 }, { date: '2026-10-01', value: 400000 }],
+            [{ date: '2026-10-01', value: 250000 }],
+        ]);
         // A removed watchlist ticker is a marker, not the user's data.
         assert.deepEqual(data.watchlist.map((w) => w.ticker), ['MSFT']);
         assert.deepEqual(data.journal.map((j) => j.rationale), ['cheap']);
@@ -185,7 +217,10 @@ describe('account deletion and export', { skip: !DATABASE_URL && 'SCRIPTS_TEST_D
         assert.deepEqual(data.emailPreferences, { alerts: true, weeklyReview: false, updatedAt: '2026-10-21T12:00:00.000Z' });
 
         const text = JSON.stringify(data);
-        for (const leak of ['userId', 'writeSession', 'writeSeq', 'dismissed', 'cleared', 'occurrence', 'An earlier question', 'secret-cipher', 'item-u-export', 'acc-u-export', 'u-other', 'unsubscribe-secret', 'alertsSince', 'emailClaimedAt', 'emailBatch', 'alerts/batch-']) {
+        // Nor the IDs of the user's other assets and debts.
+        const itemIds = (await sql<{ id: string }[]>`SELECT id FROM net_worth_items WHERE user_id = 'u-export'`).map((r) => r.id);
+        assert.equal(itemIds.length, 2);
+        for (const leak of ['userId', 'writeSession', 'writeSeq', 'dismissed', 'cleared', 'occurrence', 'An earlier question', 'secret-cipher', 'item-u-export', 'acc-u-export', 'u-other', 'unsubscribe-secret', 'alertsSince', 'emailClaimedAt', 'emailBatch', 'alerts/batch-', 'netWorthItemId', 'kindEditedAt', 'kind_edited_at', ...itemIds]) {
             assert.ok(!text.includes(leak), leak);
         }
     });
@@ -206,6 +241,60 @@ describe('account deletion and export', { skip: !DATABASE_URL && 'SCRIPTS_TEST_D
             ['Target 2055 Trust', 1000, [{ date: '2026-10-22', value: 900, quantity: null }, { date: '2026-10-23', value: 1000, quantity: null }]],
         ]);
         assert.deepEqual(account.valuationHistory[0].positions.map((p) => [p.symbol, p.marketValue]), [['AAPL', 1000], ['Target 2055 Trust', 1000]]);
+        // No bucket chosen: in its default, core.
+        assert.deepEqual(account.manualHoldings.map((m) => m.policyBucket), [null]);
+
+        // The bucket chosen for it in Settings › Bucket policy (launch item
+        // i54), by its id; another holding valued by hand has none.
+        await addManualHolding('u-export-fund', portfolioId, {
+            name: 'Private Co shares', identifier: null, quantity: null, value: 500, costBasis: null, valueAsOf: '2026-10-23',
+        }, { database });
+        const settings = {
+            demo: { showSampleData: false },
+            riskPolicy: { ...defaultPersistedSettings().riskPolicy, bucketAssignments: { [manualSymbol(id)]: 'speculative', AAPL: 'core' } },
+        };
+        await sql`UPDATE user_settings SET version = ${SETTINGS_VERSION}, settings = ${JSON.stringify(settings)}::jsonb WHERE user_id = 'u-export-fund'`;
+        const chosen = await buildAccountExport('u-export-fund', database, NOW);
+        assert.deepEqual(chosen.accounts[0].manualHoldings.map((m) => [m.name, m.policyBucket]), [['Private Co shares', null], ['Target 2055 Trust', 'speculative']]);
+        // The settings document itself is exported as it's stored.
+        assert.equal(chosen.settings?.version, SETTINGS_VERSION);
+        assert.deepEqual(chosen.settings?.settings, JSON.parse(JSON.stringify(settings)));
+
+        // Without a settings row, every one is in its default.
+        await sql`DELETE FROM user_settings WHERE user_id = 'u-export-fund'`;
+        const none = await buildAccountExport('u-export-fund', database, NOW);
+        assert.equal(none.settings, null);
+        assert.deepEqual(none.accounts[0].manualHoldings.map((m) => [m.name, m.policyBucket]), [['Private Co shares', null], ['Target 2055 Trust', null]]);
+    });
+
+    test('a synced option position is exported with its contract and the institution\'s dated price; one added by hand has none (i63)', async () => {
+        const portfolioId = await seedUser('u-export-synced');
+        await sql`UPDATE portfolios SET source = 'plaid', external_account_id = 'acc-u-export-synced' WHERE id = ${portfolioId}`;
+        // A weekly, named for its own root: the underlying alone wouldn't say which contract.
+        await sql`
+            INSERT INTO option_positions (user_id, portfolio_id, contract, underlying, contract_type, strike, expiry, quantity, premium, institution_price, institution_price_date, source)
+            VALUES ('u-export-synced', ${portfolioId}, 'O:SPXW261218C05000000', 'SPX', 'call', 5000, '2026-12-18', 1, 18, 21.5, '2026-10-25', 'plaid')`;
+        const [account] = (await buildAccountExport('u-export-synced', database, NOW)).accounts;
+        assert.deepEqual(account.optionPositions.map((o) => [o.contract, o.underlying, o.quantity, o.premium, o.source, o.institutionPrice, o.institutionPriceDate]), [
+            ['O:SPXW261218C05000000', 'SPX', 1, 18, 'plaid', 21.5, '2026-10-25'],
+            ['O:AAPL270115C00250000', 'AAPL', 3, 18.2, 'manual', null, null],
+        ]);
+    });
+
+    test('a holding a positions file brought in is exported as from the CSV, with its values by day, and without its import key', async () => {
+        const portfolioId = await seedUser('u-export-csv');
+        const file = (value: number, valuesAsOf: string) => portfolioImportSchema.parse({
+            portfolioId, rows: [], manual: [{ name: 'Stable Value Fund', identifier: '99ZZ12341', quantity: 100, value, costBasis: 9000 }], valuesAsOf,
+        });
+        await importHoldings('u-export-csv', file(9800, '2026-10-22'), {}, database);
+        await importHoldings('u-export-csv', file(10000, '2026-10-23'), {}, database);
+
+        const exported = await buildAccountExport('u-export-csv', database, NOW);
+        assert.deepEqual(exported.accounts[0].manualHoldings.map((m) => [m.name, m.identifier, m.value, m.valueAsOf, m.source, m.values]), [
+            ['Stable Value Fund', '99ZZ12341', 10000, '2026-10-23', 'csv', [{ date: '2026-10-22', value: 9800, quantity: 100 }, { date: '2026-10-23', value: 10000, quantity: 100 }]],
+        ]);
+        // The key the next file finds it by stays inside Atlas.
+        assert.ok(!JSON.stringify(exported).includes('csv:id:'));
     });
 
     test('deleting ends the user\'s Plaid connections, then removes every row of theirs, and nobody else\'s', async () => {

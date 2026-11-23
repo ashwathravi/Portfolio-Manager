@@ -15,13 +15,16 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { formatQty, formatShortDate, formatUsd } from "@/lib/format";
+import { editedValueAsOf, localDate } from "@/lib/portfolio/value-dates";
 import { MANUAL_HOLDING_LIMITS } from "@/lib/validators/manual-holding";
 
 /**
  * Holdings › Valued by hand: what an account holds that Atlas can't price
  * from market data (a 401(k) fund with no ticker, a 529 portfolio, a
  * private holding). Each counts at the value given, as of its date, in the
- * account's value, Today and the nightly history, until it's updated.
+ * account's value, Today and the nightly history, until it's updated. A
+ * positions file's rows with no ticker come in here too (Import CSV), and
+ * importing the file again updates them.
  */
 
 export interface ManualHoldingRow {
@@ -34,18 +37,17 @@ export interface ManualHoldingRow {
     value: number;
     costBasis: number | null;
     valueAsOf: string;
-    /** "plaid" when a linked account reports it; the next sync updates its value. */
+    /**
+     * "plaid" when a linked account reports it (the next sync updates its
+     * value); "csv" when a positions file brought it in (the next file
+     * updates it).
+     */
     source: string;
 }
 
 interface AccountOption {
     id: string;
     name: string;
-}
-
-function today(): string {
-    const d = new Date();
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
 /** "12,500.00" or "$12,500" → 12500; "" → null; anything else → NaN. */
@@ -88,9 +90,14 @@ function ManualHoldingDialog({
     const [quantity, setQuantity] = useState("");
     const [value, setValue] = useState("");
     const [cost, setCost] = useState("");
-    const [asOf, setAsOf] = useState(today());
+    // The date the user gave; until they give one, the default below.
+    const [typedAsOf, setTypedAsOf] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [saving, setSaving] = useState(false);
+    // A new holding's value is as of today. An edit keeps the holding's
+    // date until the value changes, then it's today, so a new name dates
+    // nothing anew and the earlier value stays kept by its own day.
+    const asOf = typedAsOf ?? (editing ? editedValueAsOf(editing, amount(value), localDate()) : localDate());
 
     useEffect(() => {
         if (!open) return;
@@ -102,8 +109,7 @@ function ManualHoldingDialog({
         setQuantity(editing?.quantity != null ? String(editing.quantity) : "");
         setValue(editing ? String(editing.value) : "");
         setCost(editing?.costBasis != null ? String(editing.costBasis) : "");
-        // An edit is usually a new value: as of today unless changed.
-        setAsOf(today());
+        setTypedAsOf(null);
         setError(null);
     }, [open, editing, accounts]);
 
@@ -175,7 +181,7 @@ function ManualHoldingDialog({
                             </label>
                             <label className="pm-exec-field" htmlFor={`${ids}-asof`}>
                                 <span className="pm-exec-field-label">As of</span>
-                                <input id={`${ids}-asof`} type="date" className="pm-exec-input" value={asOf} required onChange={(e) => setAsOf(e.target.value)} />
+                                <input id={`${ids}-asof`} type="date" className="pm-exec-input" value={asOf} required onChange={(e) => setTypedAsOf(e.target.value)} />
                             </label>
                         </div>
                         <div className="pm-form-pair">
@@ -281,9 +287,12 @@ export function ManualHoldingsCard({ rows, accounts }: { rows: readonly ManualHo
                                 <tr key={r.id}>
                                     <td>
                                         <div>{r.name}</div>
-                                        {(r.identifier || r.source === "plaid") && (
+                                        {(r.identifier || r.source !== "manual") && (
                                             <div className="pm-card-subtitle">
-                                                {[r.identifier, r.source === "plaid" ? "from your linked account" : null].filter(Boolean).join(" · ")}
+                                                {[
+                                                    r.identifier,
+                                                    r.source === "plaid" ? "from your linked account" : r.source === "csv" ? "from your CSV import" : null,
+                                                ].filter(Boolean).join(" · ")}
                                             </div>
                                         )}
                                     </td>

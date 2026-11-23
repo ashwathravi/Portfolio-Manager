@@ -61,4 +61,19 @@ describe('safeText', () => {
         const result = safeText.safeParse(valid);
         assert.strictEqual(result.success, true);
     });
+
+    // Postgres can't store a NUL in a text column: the save would be a 500.
+    test('should reject text with a NUL character, wherever it is', () => {
+        for (const invalid of ['\u0000', 'Sample\u0000note', 'Sample note\u0000']) {
+            const result = safeText.safeParse(invalid);
+            assert.strictEqual(result.success, false);
+            if (!result.success) {
+                assert.strictEqual(result.error.issues[0].message, 'Input contains an invalid character (a null character)');
+            }
+        }
+    });
+
+    test('should accept other control characters and line breaks, as before', () => {
+        assert.strictEqual(safeText.safeParse('Line one\nLine two\ttabbed\u0001').success, true);
+    });
 });
