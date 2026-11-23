@@ -162,6 +162,8 @@ A user keeps at most 10 linked institutions at once (409 `PLAID_CONNECTION_LIMIT
 
 They also keep at most 500 watchlist tickers, 2,000 journal entries, 200 theses, 50,000 transactions across their accounts and 100 other assets and debts (`src/lib/limits/records.ts`: 409 `WATCHLIST_LIMIT`, `JOURNAL_LIMIT`, `THESIS_LIMIT`, `TRANSACTION_LIMIT` or `NET_WORTH_ITEM_LIMIT`, and the page says why). Only live ones count: a removed ticker, entry, thesis, asset or debt frees its place, and editing or removing one is never refused, even past a limit. Each is checked under a per-user lock in the write's transaction, so saves at once can't pass it, and an import that would pass it adds nothing. Transactions a linked account syncs count, but a sync is never refused: Plaid brings only what the user's institutions report.
 
+The values kept by day aren't capped yet. Each save of a holding valued by hand or of another asset or debt with a later as-of date keeps one more value (`manual_holding_values`, `net_worth_item_values`) and removes none, any day to 9999 is accepted, and the JSON export reads them all, so a script within the per-minute rate limits could keep hundreds of thousands a day. Capping them is a follow-up for launch item i77.
+
 Closing sign-up again means unsetting `AUTH_OPEN_SIGNUP` with an invite list in place: everyone not on it is signed out on their next request, so add the people who should stay first.
 
 ## Post-deploy smoke test
