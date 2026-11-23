@@ -4,6 +4,11 @@
  * with what the institution reports, and upserts its transactions by
  * Plaid's ID, so syncing again changes nothing that hasn't changed.
  *
+ * Option contracts sync with the holdings: the ones Plaid reports with
+ * their details become the account's option positions (launch item i63),
+ * the institution's contracts and premium, the user's plan for them kept.
+ * Option trades aren't recorded.
+ *
  * Accounts start as "awaiting_selection" when Link finds them; the user's
  * pick (selectPlaidAccounts) marks them "sync_ready" or "excluded", and
  * only "sync_ready" investment accounts are synced, here on request and by
@@ -13,7 +18,7 @@
 import { and, asc, eq, inArray, isNotNull, isNull, ne, notInArray, sql } from "drizzle-orm";
 
 import { db } from "@/db";
-import { holdings, manualHoldings, plaidAccounts, plaidItems, portfolios, transactions } from "@/db/schema";
+import { holdings, manualHoldings, optionPositions, plaidAccounts, plaidItems, portfolios, transactions } from "@/db/schema";
 import {
     AccountLimitError,
     MAX_ACCOUNTS_PER_USER,
@@ -24,6 +29,7 @@ import {
 import { transactionValues } from "@/lib/portfolio/transactionsWrite";
 import { recordManualValue } from "@/lib/portfolio/manual-holdings";
 import { accountTypeForPlaid, INSTITUTION_MAX_LENGTH, taxTreatmentForPlaid } from "@/lib/portfolio/account-kinds";
+import { OPTION_POSITION_MULTIPLIER } from "@/lib/portfolio/option-positions";
 import { PORTFOLIO_LIMITS } from "@/lib/validators/portfolio";
 import type { TransactionRow } from "@/lib/validators/transaction";
 
@@ -34,7 +40,10 @@ import {
     fetchPlaidHoldings,
     fetchPlaidInvestmentTransactions,
     PlaidDeadlineError,
+    skippedByReason,
     type AccountHoldings,
+    type HoldingSkipReason,
+    type SyncedOptionContract,
     type TransactionSkipReason,
 } from "./investments";
 import {
@@ -49,6 +58,7 @@ import {
     type PlaidFetch,
 } from "./link";
 import { getPlaidAccessTokenForUser } from "./server-token-vault";
+import type { PlaidSyncAccountResponse } from "./sync-summary";
 import type { PlaidEnvironment } from "./types";
 
 type Database = typeof db;
@@ -259,7 +269,11 @@ export interface AccountSyncWrite {
     /** The account number's last four digits, to tell two same-named accounts apart. */
     mask: string | null;
     description: string;
-    holdings: Pick<AccountHoldings, "positions" | "cashUsd"> & Partial<Pick<AccountHoldings, "institutionValued">>;
+    /**
+     * Without `options`, the account's option positions are left as they
+     * are: it isn't a report of none.
+     */
+    holdings: Pick<AccountHoldings, "positions" | "cashUsd"> & Partial<Pick<AccountHoldings, "institutionValued" | "options" | "optionsKept">>;
     /**
      * What kind of account Plaid says it is, and where it's held
      * (linkedAccountKind). A new portfolio takes them; an existing one fills
@@ -289,6 +303,10 @@ export interface AccountSyncWritten {
     name: string;
     created: boolean;
     positions: number;
+    /** Option contracts written. */
+    options: number;
+    /** Holdings with no ticker, at the institution's value. */
+    valued: number;
     transactionsAdded: number;
     transactionsUpdated: number;
 }
@@ -309,6 +327,9 @@ export interface AccountSyncWritten {
  * The portfolio's and its holdings' updated_at move only when a position
  * or the cash changes: the snapshot job (valuation-snapshots.ts) takes them
  * as the last change, so a sync that finds nothing new mustn't look like one.
+ * The account's option positions are replaced with the contracts it reports
+ * (replaceSyncedOptions) without moving the portfolio's: options aren't in
+ * its value, returns or nightly valuations yet.
  */
 export async function writeAccountSync(input: AccountSyncWrite, database: Database = db): Promise<AccountSyncWritten | null> {
     return database.transaction(async (tx) => {
@@ -327,9 +348,11 @@ export async function writeAccountSync(input: AccountSyncWrite, database: Databa
             .where(and(eq(portfolios.userId, input.userId), eq(portfolios.source, "plaid"), eq(portfolios.externalAccountId, input.plaidAccountId)))
             .limit(1);
         let portfolio: { id: string; name: string; created: boolean };
+        let options = 0;
         if (existing) {
             const positionsChanged = await replaceHoldings(tx, existing.id, input.holdings.positions, input.now);
             const valuedChanged = await replaceInstitutionValued(tx, input.userId, existing.id, input.holdings.institutionValued ?? [], input.now);
+            options = await replaceSyncedOptions(tx, input.userId, existing.id, input.holdings, input.now);
             const cashChanged = existing.cash !== input.holdings.cashUsd;
             if (positionsChanged || valuedChanged || cashChanged) {
                 await tx
@@ -372,6 +395,7 @@ export async function writeAccountSync(input: AccountSyncWrite, database: Databa
             portfolio = { ...created, created: true };
             await replaceHoldings(tx, portfolio.id, input.holdings.positions, input.now);
             await replaceInstitutionValued(tx, input.userId, portfolio.id, input.holdings.institutionValued ?? [], input.now);
+            options = await replaceSyncedOptions(tx, input.userId, portfolio.id, input.holdings, input.now);
         }
 
         const written = input.transactions ? await upsertTransactions(tx, portfolio.id, input.transactions) : { added: 0, updated: 0 };
@@ -391,6 +415,8 @@ export async function writeAccountSync(input: AccountSyncWrite, database: Databa
             name: portfolio.name,
             created: portfolio.created,
             positions: input.holdings.positions.length,
+            options,
+            valued: input.holdings.institutionValued?.length ?? 0,
             transactionsAdded: written.added,
             transactionsUpdated: written.updated,
         };
@@ -487,6 +513,103 @@ async function replaceInstitutionValued(
     return changed;
 }
 
+/**
+ * The account's option positions from the contracts Plaid reports (none
+ * written when `options` is absent). A contract the account holds is
+ * added, or takes the institution's contract, contracts, premium and
+ * price, becoming the synced one (source "plaid") if it was added by hand
+ * or from a CSV. The opened date, the user's own price, the thesis and the
+ * rules are the user's and never written. A synced contract the account no
+ * longer reports is deleted, unless it was reported this time without
+ * details clear enough to read (`optionsKept`); ones the user added that
+ * it doesn't report stay. A row's updated_at moves only when it becomes
+ * the synced one or its contracts or premium change: a new price alone
+ * isn't a change in what's held. Returns how many contracts it wrote.
+ */
+async function replaceSyncedOptions(
+    tx: Executor,
+    userId: string,
+    portfolioId: string,
+    { options, optionsKept = [] }: Partial<Pick<AccountHoldings, "options" | "optionsKept">>,
+    now: Date,
+): Promise<number> {
+    if (!options) return 0;
+    const existing = await tx
+        .select({
+            id: optionPositions.id,
+            contract: optionPositions.contract,
+            source: optionPositions.source,
+            underlying: optionPositions.underlying,
+            contractType: optionPositions.contractType,
+            strike: optionPositions.strike,
+            expiry: optionPositions.expiry,
+            quantity: optionPositions.quantity,
+            premium: optionPositions.premium,
+            multiplier: optionPositions.multiplier,
+            institutionPrice: optionPositions.institutionPrice,
+            institutionPriceDate: optionPositions.institutionPriceDate,
+        })
+        .from(optionPositions)
+        .where(and(eq(optionPositions.portfolioId, portfolioId), eq(optionPositions.userId, userId)));
+    const byContract = new Map(existing.map((row) => [row.contract, row]));
+    // A price Plaid doesn't date is the institution's as of this sync.
+    const today = now.toISOString().slice(0, 10);
+    const sameNumber = (stored: string | null, next: number | null) => (stored == null ? next == null : next != null && Number(stored) === next);
+    for (const option of options) {
+        const values = syncedOptionValues(option, today);
+        const before = byContract.get(option.contract);
+        if (!before) {
+            await tx
+                .insert(optionPositions)
+                .values({ userId, portfolioId, contract: option.contract, ...values, updatedAt: now })
+                // The account lock keeps a hand-added one from arriving in
+                // between; if one does, it becomes the synced one.
+                .onConflictDoUpdate({ target: [optionPositions.portfolioId, optionPositions.contract], set: { ...values, updatedAt: now } });
+            continue;
+        }
+        const held = before.source === "plaid" && sameNumber(before.quantity, option.quantity) && sameNumber(before.premium, option.premium);
+        const same = held
+            && before.underlying === values.underlying
+            && before.contractType === values.contractType
+            && sameNumber(before.strike, option.strike)
+            && before.expiry === values.expiry
+            && before.multiplier === values.multiplier
+            && sameNumber(before.institutionPrice, option.price)
+            && before.institutionPriceDate === values.institutionPriceDate;
+        if (same) continue;
+        await tx
+            .update(optionPositions)
+            .set({ ...values, ...(held ? {} : { updatedAt: now }) })
+            .where(and(eq(optionPositions.id, before.id), eq(optionPositions.userId, userId)));
+    }
+    const reported = [...options.map((o) => o.contract), ...optionsKept];
+    await tx
+        .delete(optionPositions)
+        .where(and(
+            eq(optionPositions.portfolioId, portfolioId),
+            eq(optionPositions.userId, userId),
+            eq(optionPositions.source, "plaid"),
+            reported.length > 0 ? notInArray(optionPositions.contract, reported) : undefined,
+        ));
+    return options.length;
+}
+
+/** The columns a sync owns on an option position: the institution's. */
+function syncedOptionValues(option: SyncedOptionContract, today: string) {
+    return {
+        underlying: option.underlying,
+        contractType: option.contractType,
+        strike: String(option.strike),
+        expiry: option.expiry,
+        quantity: String(option.quantity),
+        premium: String(option.premium),
+        multiplier: OPTION_POSITION_MULTIPLIER,
+        institutionPrice: option.price == null ? null : String(option.price),
+        institutionPriceDate: option.price == null ? null : (option.priceDate ?? today),
+        source: "plaid",
+    };
+}
+
 async function replaceHoldings(tx: Executor, portfolioId: string, positions: AccountHoldings["positions"], now: Date): Promise<boolean> {
     const held = new Map(
         (await tx
@@ -577,13 +700,43 @@ async function upsertTransactions(tx: Executor, portfolioId: string, rows: reado
 export interface AccountSyncResult extends AccountSyncWritten {
     plaidAccountId: string;
     cashUsd: number;
-    /** Holdings not brought in (no ticker, an option, another currency, a short). */
+    /**
+     * Holdings not brought in (an option or warrant without clear details,
+     * no ticker and no value, another currency, a short), and how many for
+     * each reason.
+     */
     holdingsSkipped: number;
+    holdingsSkippedBy: Partial<Record<HoldingSkipReason, number>>;
     /** Positions whose cost Plaid didn't report, held at their price. */
     costUnknown: number;
     transactionsSkipped: Partial<Record<TransactionSkipReason, number>>;
     /** Plaid's history wasn't ready; the next sync brings it. */
     transactionsPending: boolean;
+}
+
+/**
+ * An account as POST /api/plaid/sync answers with it: what the toast says
+ * (plaidSyncMessage), the transactions left out added up for a page
+ * loaded before they came by reason.
+ */
+export function plaidSyncAccountResponse(a: AccountSyncResult): PlaidSyncAccountResponse {
+    return {
+        portfolioId: a.portfolioId,
+        name: a.name,
+        created: a.created,
+        positions: a.positions,
+        options: a.options,
+        valued: a.valued,
+        cashUsd: a.cashUsd,
+        holdingsSkipped: a.holdingsSkipped,
+        skipped: a.holdingsSkippedBy,
+        costUnknown: a.costUnknown,
+        transactionsAdded: a.transactionsAdded,
+        transactionsUpdated: a.transactionsUpdated,
+        transactionsSkipped: Object.values(a.transactionsSkipped).reduce((sum, n) => sum + (n ?? 0), 0),
+        transactionsSkippedBy: a.transactionsSkipped,
+        transactionsPending: a.transactionsPending,
+    };
 }
 
 export type ItemSyncResult =
@@ -668,6 +821,7 @@ export async function syncPlaidItem(userId: string, itemId: string, deps: SyncDe
                 plaidAccountId: account.plaidAccountId,
                 cashUsd: held.cashUsd,
                 holdingsSkipped: held.skipped.length,
+                holdingsSkippedBy: skippedByReason(held.skipped),
                 costUnknown: held.costUnknown.length,
                 transactionsSkipped: activity?.skipped ?? {},
                 transactionsPending: activity === null,
@@ -898,7 +1052,7 @@ export async function syncAllPlaidItems({
         ))
         .orderBy(sql`${plaidItems.lastSyncAttemptAt} asc nulls first`, sql`${plaidItems.lastSuccessfulSyncAt} asc nulls first`);
 
-    const counts = { synced: 0, loginRequired: 0, noToken: 0, timedOut: 0, failed: 0, accounts: 0, positions: 0, transactionsAdded: 0 };
+    const counts = { synced: 0, loginRequired: 0, noToken: 0, timedOut: 0, failed: 0, accounts: 0, positions: 0, options: 0, transactionsAdded: 0 };
     let done = 0;
     for (const { userId, itemId } of items) {
         if (clock() >= deadline) break;
@@ -913,6 +1067,7 @@ export async function syncAllPlaidItems({
         counts.accounts += result.accounts.length;
         for (const account of result.accounts) {
             counts.positions += account.positions;
+            counts.options += account.options;
             counts.transactionsAdded += account.transactionsAdded;
         }
     }

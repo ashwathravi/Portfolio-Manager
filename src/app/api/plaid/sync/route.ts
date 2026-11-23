@@ -7,7 +7,13 @@
  * Link, with the accounts the user picked, and by "Sync now".
  *
  * Body:     { itemId, plaidAccountIds? }
- * Response: 200 { data: { itemId, accounts: [...] } }; 400 INVALID_PLAID_SYNC;
+ * Response: 200 { data: { itemId, accounts: [...], overLimit } }, each account
+ *           { portfolioId, name, created, positions, options (option
+ *           positions, i63), valued (holdings valued by the institution),
+ *           cashUsd, holdingsSkipped, skipped (by reason), costUnknown,
+ *           transactionsAdded, transactionsUpdated, transactionsSkipped,
+ *           transactionsSkippedBy (by reason), transactionsPending }
+ *           (plaidSyncAccountResponse); 400 INVALID_PLAID_SYNC;
  *           404 PLAID_ITEM_NOT_FOUND; 409 PLAID_LOGIN_REQUIRED or
  *           PLAID_TOKEN_MISSING; 429 DAILY_QUOTA_REACHED (the day's syncs; the
  *           nightly sync isn't counted); 502 PLAID_SYNC_FAILED; 503 PLAID_NOT_CONFIGURED or
@@ -23,7 +29,7 @@ import { apiError, internalServerError, logApiEvent } from "@/lib/api/security";
 import { requireSessionApiUserScope } from "@/lib/api/session-security";
 import { requestIdFrom } from "@/lib/observability/request-id";
 import { plaidAvailability } from "@/lib/plaid/availability";
-import { PlaidItemNotFoundError, refreshPlaidItem, selectPlaidAccounts, syncPlaidItem } from "@/lib/plaid/sync";
+import { PlaidItemNotFoundError, plaidSyncAccountResponse, refreshPlaidItem, selectPlaidAccounts, syncPlaidItem } from "@/lib/plaid/sync";
 import { plaidSyncSchema } from "@/lib/validators/plaid-sync";
 
 export const dynamic = "force-dynamic";
@@ -90,19 +96,7 @@ export async function POST(request: Request) {
         return NextResponse.json({
             data: {
                 itemId,
-                accounts: result.accounts.map((a) => ({
-                    portfolioId: a.portfolioId,
-                    name: a.name,
-                    created: a.created,
-                    positions: a.positions,
-                    cashUsd: a.cashUsd,
-                    holdingsSkipped: a.holdingsSkipped,
-                    costUnknown: a.costUnknown,
-                    transactionsAdded: a.transactionsAdded,
-                    transactionsUpdated: a.transactionsUpdated,
-                    transactionsSkipped: Object.values(a.transactionsSkipped).reduce((sum, n) => sum + (n ?? 0), 0),
-                    transactionsPending: a.transactionsPending,
-                })),
+                accounts: result.accounts.map(plaidSyncAccountResponse),
                 overLimit: result.overLimit,
             },
         });

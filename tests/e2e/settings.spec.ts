@@ -157,7 +157,7 @@ test.describe('Settings page', () => {
                             itemId: 'item-plaid-sandbox-investments',
                             accounts: [
                                 { name: 'Plaid Sandbox Investments Plaid Growth Brokerage', positions: 7, transactionsAdded: 100, transactionsPending: false, holdingsSkipped: 0, costUnknown: 0 },
-                                { name: 'Plaid Sandbox Investments Plaid Roth IRA', positions: 2, transactionsAdded: 20, transactionsPending: false, holdingsSkipped: 1, costUnknown: 0 },
+                                { name: 'Plaid Sandbox Investments Plaid Roth IRA', positions: 2, options: 2, transactionsAdded: 20, transactionsPending: false, holdingsSkipped: 1, skipped: { option: 1 }, costUnknown: 0 },
                             ],
                             overLimit: [],
                         },
@@ -189,7 +189,9 @@ test.describe('Settings page', () => {
         await card.getByRole('button', { name: 'Connect selected' }).click();
 
         // Only the accounts picked sync: the checking account was unticked.
-        await expect(page.getByText("2 accounts: 9 positions and 120 new transactions. 1 holding without a ticker, or in another currency, wasn't brought in.")).toBeVisible();
+        // The option contracts the IRA holds come in as option positions;
+        // what wasn't brought in says why.
+        await expect(page.getByText("2 accounts: 9 positions, 2 option positions and 120 new transactions. 1 option or warrant without clear contract details wasn't brought in.")).toBeVisible();
         expect(syncRequests[0]).toEqual({ itemId: 'item-plaid-sandbox-investments', plaidAccountIds: ['plaid-growth-brokerage', 'plaid-roth-ira'] });
 
         // The connection as the server has it: what each account syncs into.

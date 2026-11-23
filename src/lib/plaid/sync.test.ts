@@ -1,7 +1,8 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 
-import { linkedPortfolioDescription, linkedPortfolioName, plaidConfigFromEnv, transactionsStart, uniqueAccountName } from "./sync";
+import { linkedPortfolioDescription, linkedPortfolioName, plaidConfigFromEnv, plaidSyncAccountResponse, transactionsStart, uniqueAccountName } from "./sync";
+import { plaidSyncMessage } from "./sync-summary";
 
 // The writes and the whole sync run against Postgres in scripts/db/plaid-sync.test.ts.
 describe("Plaid sync", () => {
@@ -47,5 +48,49 @@ describe("Plaid sync", () => {
         assert.equal(plaidConfigFromEnv({ PLAID_CLIENT_ID: "client" })?.environment, undefined);
         assert.equal(plaidConfigFromEnv({ PLAID_CLIENT_ID: "client", PLAID_SECRET: "" }), null);
         assert.equal(plaidConfigFromEnv({ PLAID_CLIENT_ID: "client", PLAID_SECRET: "secret" })?.environment, "sandbox");
+    });
+
+    test("the route's answer for an account carries what the toast says, the reasons and the old totals both", () => {
+        const response = plaidSyncAccountResponse({
+            portfolioId: "p-1",
+            name: "Brokerage Individual",
+            created: false,
+            positions: 12,
+            options: 2,
+            valued: 0,
+            transactionsAdded: 236,
+            transactionsUpdated: 4,
+            plaidAccountId: "acc_1",
+            cashUsd: 1250.5,
+            holdingsSkipped: 3,
+            holdingsSkippedBy: { option: 1, short: 2 },
+            costUnknown: 0,
+            transactionsSkipped: { option: 5, "other-currency": 1 },
+            transactionsPending: false,
+        });
+        assert.deepEqual(response, {
+            portfolioId: "p-1",
+            name: "Brokerage Individual",
+            created: false,
+            positions: 12,
+            options: 2,
+            valued: 0,
+            cashUsd: 1250.5,
+            holdingsSkipped: 3,
+            skipped: { option: 1, short: 2 },
+            costUnknown: 0,
+            transactionsAdded: 236,
+            transactionsUpdated: 4,
+            // The sum, for a page loaded before the reasons came with it.
+            transactionsSkipped: 6,
+            transactionsSkippedBy: { option: 5, "other-currency": 1 },
+            transactionsPending: false,
+        });
+        assert.equal(
+            plaidSyncMessage([response]),
+            "Brokerage Individual: 12 positions, 2 option positions and 236 new transactions. "
+            + "1 option or warrant without clear contract details wasn't brought in. 2 short positions weren't brought in. "
+            + "1 transaction in another currency wasn't recorded.",
+        );
     });
 });

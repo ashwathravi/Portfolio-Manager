@@ -8,6 +8,8 @@ import {
     fetchPlaidHoldings,
     fetchPlaidInvestmentTransactions,
     mapPlaidTransaction,
+    optionContractsHeld,
+    skippedByReason,
     transactionTypeForPlaid,
     PlaidDeadlineError,
     type PlaidHolding,
@@ -70,6 +72,9 @@ describe("accountHoldings", () => {
             { reason: "other-currency", name: "btc Inc" },
             { reason: "short", name: "short Inc" },
         ]);
+        // Its contract's synced row, if a sync wrote one, stays as it was.
+        assert.deepEqual(result.optionsKept, ["O:AAPL260116C00200000"]);
+        assert.deepEqual(result.options, []);
     });
 
     test("regression: a holding with no ticker counts at the institution's value, valued by hand; with no value it can't", () => {
@@ -94,6 +99,170 @@ describe("accountHoldings", () => {
         const result = accountHoldings(ACCOUNT, [holding("vti", { quantity: 4, institution_price: 250, cost_basis: null })], [security("vti")]);
         assert.deepEqual(result.positions, [{ symbol: "VTI", name: "vti Inc", quantity: 4, avgCost: 250, price: 250 }]);
         assert.deepEqual(result.costUnknown, ["VTI"]);
+    });
+});
+
+describe("accountHoldings: option contracts (launch item i63)", () => {
+    const CALL_DETAILS = { contract_type: "call", expiration_date: "2027-01-15", strike_price: 150, underlying_security_ticker: "ACME" };
+    const acmeCall = (fields: Partial<PlaidSecurity> = {}) => security("acme_c", {
+        type: "derivative", ticker_symbol: "ACME270115C00150000", name: "ACME Jan 15 2027 150 Call", option_contract: CALL_DETAILS, ...fields,
+    });
+    // Plaid's usual report: the quantity in shares (3 contracts × 100), the price per share.
+    const acmeHolding = (fields: Partial<PlaidHolding> = {}) => holding("acme_c", {
+        quantity: 300, institution_price: 4.2, institution_value: 1260, cost_basis: 1050, ...fields,
+    });
+    const ACME = {
+        contract: "O:ACME270115C00150000", underlying: "ACME", contractType: "call", strike: 150, expiry: "2027-01-15",
+        quantity: 3, premium: 3.5, price: 4.2, priceDate: null,
+    };
+    const only = (h: PlaidHolding, s: PlaidSecurity = acmeCall()) => accountHoldings(ACCOUNT, [h], [s]);
+    const LEFT_OUT = { reason: "option", name: "ACME Jan 15 2027 150 Call" };
+
+    test("an option with its contract's details is an option position: its contracts, the premium per share it cost, the institution's price", () => {
+        const result = only(acmeHolding());
+        assert.deepEqual(result.options, [ACME]);
+        assert.deepEqual(
+            [result.positions, result.institutionValued, result.skipped, result.costUnknown, result.optionsKept],
+            [[], [], [], [], []],
+        );
+    });
+
+    test("the number of contracts is read through the value the institution reports", () => {
+        // Contracts at a price per share, and contracts at a price per contract.
+        for (const fields of [{ quantity: 3, institution_price: 4.2 }, { quantity: 3, institution_price: 420 }]) {
+            const result = only(acmeHolding({ ...fields, institution_value: 1260 }));
+            assert.deepEqual(result.options, [ACME], JSON.stringify(fields));
+        }
+    });
+
+    test("regression: a quantity no reading agrees with isn't guessed: the contract is left out, and its synced row kept", () => {
+        // 2.5 contracts? 250 at $420? Neither comes to the reported value.
+        const result = only(acmeHolding({ quantity: 250, institution_value: 2000 }));
+        assert.deepEqual(result.options, []);
+        assert.deepEqual(result.skipped, [LEFT_OUT]);
+        assert.deepEqual(result.optionsKept, ["O:ACME270115C00150000"]);
+    });
+
+    test("without a price and a value to check against, only whole hundreds of shares read", () => {
+        const hundreds = only(acmeHolding({ institution_price: null, institution_value: null }));
+        assert.deepEqual(hundreds.options, [{ ...ACME, price: null, priceDate: null }]);
+        const three = only(acmeHolding({ quantity: 3, institution_price: null, institution_value: null }));
+        assert.deepEqual([three.options, three.skipped], [[], [LEFT_OUT]]);
+    });
+
+    test("a written contract is negative, at the premium received", () => {
+        const result = only(acmeHolding({ quantity: -200, institution_price: 3, institution_value: -600, cost_basis: -500 }));
+        assert.deepEqual(result.options, [{ ...ACME, quantity: -2, premium: 2.5, price: 3 }]);
+    });
+
+    test("without a cost basis it's held at the institution's price; with neither, it's left out", () => {
+        const atPrice = only(acmeHolding({ cost_basis: null }));
+        assert.deepEqual(atPrice.options, [{ ...ACME, premium: 4.2 }]);
+        assert.deepEqual(atPrice.costUnknown, ["ACME Jan 15 2027 150 call"]);
+
+        const neither = only(acmeHolding({ cost_basis: null, institution_price: null }));
+        assert.deepEqual([neither.options, neither.skipped, neither.optionsKept], [[], [LEFT_OUT], ["O:ACME270115C00150000"]]);
+    });
+
+    test("a contract's lots are added up; long and short lots that cancel out are none", () => {
+        const lots = accountHoldings(ACCOUNT, [
+            acmeHolding({ quantity: 100, institution_value: 420, cost_basis: 350 }),
+            acmeHolding({ quantity: 200, institution_value: 840, cost_basis: 700 }),
+        ], [acmeCall()]);
+        assert.deepEqual(lots.options, [ACME]);
+
+        const closed = accountHoldings(ACCOUNT, [
+            acmeHolding({ quantity: 100, institution_value: 420, cost_basis: 350 }),
+            acmeHolding({ quantity: -100, institution_value: -420, cost_basis: -350 }),
+        ], [acmeCall()]);
+        assert.deepEqual([closed.options, closed.skipped, closed.optionsKept], [[], [], []]);
+    });
+
+    test("regression: a lot that can't be read leaves its whole contract out, not a part of it", () => {
+        const result = accountHoldings(ACCOUNT, [
+            acmeHolding({ quantity: 100, institution_value: 420, cost_basis: 350 }),
+            acmeHolding({ quantity: 250, institution_value: 2000 }),
+        ], [acmeCall()]);
+        assert.deepEqual(result.options, []);
+        assert.deepEqual(result.skipped, [LEFT_OUT, LEFT_OUT]);
+        assert.deepEqual(result.optionsKept, ["O:ACME270115C00150000"]);
+    });
+
+    test("regression: details that aren't all there and valid leave the option out, its contract kept", () => {
+        const cases: Record<string, unknown> = {
+            "a type that isn't a call or put": { ...CALL_DETAILS, contract_type: "straddle" },
+            "no strike": { ...CALL_DETAILS, strike_price: 0 },
+            "a date that doesn't exist": { ...CALL_DETAILS, expiration_date: "2027-02-30" },
+            "no underlying": { ...CALL_DETAILS, underlying_security_ticker: null },
+            "no details": null,
+            "a strike as text": { ...CALL_DETAILS, strike_price: "150" },
+        };
+        for (const [label, details] of Object.entries(cases)) {
+            const result = only(acmeHolding(), acmeCall({ option_contract: details }));
+            assert.deepEqual([result.options, result.skipped, result.optionsKept], [[], [LEFT_OUT], ["O:ACME270115C00150000"]], label);
+        }
+    });
+
+    test("a symbol that disagrees with the details isn't read", () => {
+        const result = only(acmeHolding(), acmeCall({ ticker_symbol: "ACME270115P00150000" }));
+        assert.deepEqual([result.options, result.skipped], [[], [LEFT_OUT]]);
+    });
+
+    test("an adjusted contract isn't read; a weekly keeps its root, and BRK.B is BRKB", () => {
+        const adjusted = only(acmeHolding(), acmeCall({ ticker_symbol: "ACME1270115C00150000" }));
+        assert.deepEqual([adjusted.options, adjusted.skipped], [[], [LEFT_OUT]]);
+
+        const weekly = only(
+            acmeHolding({ quantity: 100, institution_price: 21.5, institution_value: 2150, cost_basis: 1800 }),
+            acmeCall({ ticker_symbol: "SPXW261218C05000000", option_contract: { contract_type: "Call", expiration_date: "2026-12-18", strike_price: 5000, underlying_security_ticker: "SPX" } }),
+        );
+        assert.deepEqual(weekly.options.map((o) => [o.contract, o.underlying, o.quantity, o.premium]), [["O:SPXW261218C05000000", "SPX", 1, 18]]);
+
+        const dotted = only(
+            acmeHolding(),
+            acmeCall({ ticker_symbol: "BRKB270115C00500000", option_contract: { ...CALL_DETAILS, strike_price: 500, underlying_security_ticker: "BRK.B" } }),
+        );
+        assert.deepEqual(dotted.options.map((o) => [o.contract, o.underlying]), [["O:BRKB270115C00500000", "BRK.B"]]);
+    });
+
+    test("regression: an option Plaid gives no type is never a holding the institution values", () => {
+        const result = only(acmeHolding(), acmeCall({ type: null, option_contract: undefined }));
+        assert.deepEqual([result.institutionValued, result.options, result.skipped], [[], [], [LEFT_OUT]]);
+        assert.deepEqual(result.optionsKept, ["O:ACME270115C00150000"]);
+    });
+
+    test("an option in another currency is counted as one", () => {
+        const result = only(acmeHolding({ iso_currency_code: "CAD" }));
+        assert.deepEqual([result.options, result.skipped], [[], [{ reason: "other-currency", name: "ACME Jan 15 2027 150 Call" }]]);
+    });
+
+    test("the day of the institution's price is kept when Plaid gives a real one", () => {
+        assert.equal(only(acmeHolding({ institution_price_as_of: "2026-10-23" })).options[0]?.priceDate, "2026-10-23");
+        assert.equal(only(acmeHolding({ institution_price_as_of: "2026-10-23T20:00:00Z" })).options[0]?.priceDate, "2026-10-23");
+        assert.equal(only(acmeHolding({ institution_price_as_of: "yesterday" })).options[0]?.priceDate, null);
+        // A day without its price is no price.
+        assert.equal(only(acmeHolding({ institution_price: null, institution_value: null, institution_price_as_of: "2026-10-23" })).options[0]?.priceDate, null);
+    });
+
+    test("an option with no contracts is dropped, not counted", () => {
+        const result = only(acmeHolding({ quantity: 0, institution_value: 0 }));
+        assert.deepEqual([result.options, result.skipped, result.optionsKept], [[], [], []]);
+    });
+
+    test("optionContractsHeld: within rounding of the value it reads, further off it doesn't, and never a fraction of a contract", () => {
+        assert.deepEqual(optionContractsHeld(300, 4.2, 1260 * 1.01), { contracts: 3, perShare: 4.2 });
+        assert.equal(optionContractsHeld(300, 4.2, 1260 * 1.1), null);
+        assert.equal(optionContractsHeld(2.5, 4.2, 1050), null);
+        assert.equal(optionContractsHeld(250, null, null), null);
+        // A price of 0 is no price to check against.
+        assert.deepEqual(optionContractsHeld(-500, 0, 0), { contracts: -5, perShare: null });
+    });
+
+    test("skippedByReason counts each reason", () => {
+        assert.deepEqual(
+            skippedByReason([{ reason: "option" }, { reason: "short" }, { reason: "option" }]),
+            { option: 2, short: 1 },
+        );
     });
 });
 
@@ -215,6 +384,28 @@ describe("Plaid investment transactions", () => {
         assert.deepEqual(mapPlaidTransaction(transaction({}), security("aapl", { ticker_symbol: null })), { skipped: "no-symbol" });
     });
 
+    test("regression: an option trade isn't recorded, even when Plaid gives the contract a short ticker; a fee on one is", () => {
+        // A derivative Plaid tickers "ACME" was recorded as a trade of ACME
+        // shares; one with its contract's symbol was left out as having none.
+        const shortTicker = security("acme_c", { type: "derivative", ticker_symbol: "ACME" });
+        const occ = security("acme_c", { type: "derivative", ticker_symbol: "ACME270115C00150000" });
+        for (const option of [shortTicker, occ]) {
+            assert.deepEqual(mapPlaidTransaction(transaction({ security_id: "acme_c", quantity: 2, price: 4.2, amount: 840.65 }), option), { skipped: "option" });
+            assert.deepEqual(mapPlaidTransaction(transaction({ type: "sell", subtype: "sell", security_id: "acme_c", quantity: -2 }), option), { skipped: "option" });
+        }
+        const fee = mapPlaidTransaction(transaction({ type: "fee", subtype: "fee", security_id: "acme_c", quantity: 0, price: 0, amount: 0.65, fees: null }), occ);
+        assert.ok("row" in fee);
+        assert.deepEqual([fee.row.type, fee.row.symbol, fee.row.amount], ["FEE", null, 0.65]);
+
+        const counted = accountTransactions(ACCOUNT, [
+            transaction({ investment_transaction_id: "o1", security_id: "acme_c" }),
+            transaction({ investment_transaction_id: "o2", security_id: "acme_c", type: "sell", subtype: "sell", quantity: -10 }),
+            transaction({ investment_transaction_id: "s1" }),
+        ], [occ, security("aapl")]);
+        assert.deepEqual(counted.rows.map((r) => r.externalId), ["plaid:s1"]);
+        assert.deepEqual(counted.skipped, { option: 2 });
+    });
+
     test("another currency is kept; a description becomes a note the API accepts", () => {
         const cad = mapPlaidTransaction(transaction({ iso_currency_code: "CAD", name: "=HYPERLINK(<evil>)" }), security("shop"));
         assert.ok("row" in cad);
@@ -312,6 +503,21 @@ describe("Plaid investments requests", () => {
         let signal: AbortSignal | null | undefined = null;
         await fetchPlaidHoldings({ ...config, fetchImpl: async (_url, init) => { signal = init.signal; return { ok: true, status: 200, json: async () => ({ holdings: [], securities: [] }) }; } });
         assert.equal(signal, undefined);
+    });
+
+    test("regression: an option's details in a shape Atlas doesn't read leave that option out, not the sync", async () => {
+        const fetchImpl: PlaidFetch = async () => ({
+            ok: true,
+            status: 200,
+            json: async () => ({
+                holdings: [holding("acme_c", { quantity: 300, institution_price: 4.2, institution_value: 1260, institution_price_as_of: 20261023 }), holding("aapl")],
+                securities: [security("acme_c", { type: "derivative", ticker_symbol: "ACME270115C00150000", option_contract: "n/a" }), security("aapl")],
+            }),
+        });
+        const response = await fetchPlaidHoldings({ ...config, fetchImpl });
+        const result = accountHoldings(ACCOUNT, response.holdings, response.securities);
+        assert.deepEqual(result.positions.map((p) => p.symbol), ["AAPL"]);
+        assert.deepEqual([result.options, result.skipped], [[], [{ reason: "option", name: "acme_c Inc" }]]);
     });
 
     test("holdings in a shape Atlas doesn't read are refused, not half-read", async () => {
