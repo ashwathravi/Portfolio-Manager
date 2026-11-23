@@ -537,7 +537,14 @@ test.describe('Settings page', () => {
         // Launch item i65: the export is the account's data, not this browser's settings.
         test.skip(!databaseAuthEnabled, 'requires the database-auth E2E mode');
         const data = page.getByTestId('data-management');
-        const [json] = await Promise.all([page.waitForEvent('download'), data.getByRole('button', { name: 'Everything (JSON)' }).click()]);
+        // The sections hydrate inside a Suspense boundary, so a click as the
+        // page arrives can be lost: click until the download has gone.
+        const [json] = await Promise.all([
+            page.waitForEvent('download'),
+            clickUntil(data.getByRole('button', { name: 'Everything (JSON)' }), async () => {
+                await expect(page.getByText('Your data was downloaded.')).toBeVisible({ timeout: 5_000 });
+            }),
+        ]);
         expect(json.suggestedFilename()).toMatch(/^atlas-wealth-export-\d{4}-\d{2}-\d{2}\.json$/);
         const exported = JSON.parse(readFileSync(await json.path(), 'utf8')) as { format: string; accounts: Array<{ name: string; transactions: unknown[] }> };
         expect(exported.format).toBe('atlas-wealth-export');
