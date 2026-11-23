@@ -115,12 +115,19 @@ test.describe('Browser data per user', () => {
         await gotoAppPage(page, '/');
         await page.evaluate((key) => window.localStorage.setItem(key, JSON.stringify({ history: [], dayBucket: '2026-01-01', dayCount: 0 })), userKey('pm-ask-v1'));
         // Keep the fixture session: answer the sign-out call without ending it.
-        await page.route('**/api/auth/signout', (route) =>
-            route.fulfill({ json: { url: 'http://localhost:3000/login' } }));
+        let answered = false;
+        await page.route('**/api/auth/signout', async (route) => {
+            await route.fulfill({ json: { url: 'http://localhost:3000/login' } });
+            answered = true;
+        });
 
         await page.getByRole('button', { name: /^Account menu for / }).click();
         await page.getByRole('menuitem', { name: 'Sign out' }).click();
 
         await expect.poll(() => stored(page, 'pm-ask-v1')).toBeNull();
+        // The browser is cleared before the sign-out call is sent. Ending the
+        // test before it's answered here would let it reach the server, which
+        // ends user A's session for every spec after this one.
+        await expect.poll(() => answered).toBe(true);
     });
 });
