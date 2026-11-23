@@ -505,6 +505,30 @@ describe("accountHoldings: option contracts (launch item i63)", () => {
         assert.deepEqual(result.options, [{ ...ACME, quantity: 3, premium: 0.1, price: 0.4, priceDate: DAY }]);
     });
 
+    test("regression: a night its lots have no price, a contract whose synced row is read per contract is left out and its row kept", () => {
+        // Lots with no price and value to check them against read only as Plaid's shares.
+        const contract = "O:ACME270115C00150000";
+        const row = (contracts: number, perShare: number | null) => new Map([[ACCOUNT, new Map([[contract, { contracts, perShare }]])]]);
+        const read = (lots: PlaidHolding[], syncedOptions?: ReturnType<typeof row>) => {
+            const result = accountHoldings(ACCOUNT, lots, [acmeCall()], { syncedOptions });
+            return [result.options.map((o) => [o.quantity, o.premium, o.price]), result.skipped, result.optionsKept];
+        };
+        for (const unpriced of [perContract(300, { institution_price: 0, institution_value: 0 }), perContract(300, { institution_price: null, institution_value: null })]) {
+            const label = String(unpriced.institution_price);
+            assert.deepEqual(read([unpriced], row(300, 4.2)), [[], [LEFT_OUT], [contract]], label);
+            assert.deepEqual(read([unpriced], row(300, null)), [[], [LEFT_OUT], [contract]], label);
+            // With a row in Plaid's shares, or none, they're its shares, at no price.
+            assert.deepEqual(read([unpriced], row(3, 420)), [[[3, 350, null]], [], []], label);
+            assert.deepEqual(read([unpriced]), [[[3, 350, null]], [], []], label);
+        }
+        // So are lots as Plaid documents them, 30,000 shares for the row's 300 contracts.
+        const documented = acmeHolding({ quantity: 30_000, institution_price: 0, institution_value: 0, cost_basis: 105_000 });
+        assert.deepEqual(read([documented], row(300, 4.2)), [[[300, 3.5, null]], [], []]);
+        // One lot with no price is enough to leave the contract out.
+        const lots = [perContract(200), perContract(100, { institution_price: 0, institution_value: 0 })];
+        assert.deepEqual(read(lots, row(300, 4.2)), [[], [LEFT_OUT, LEFT_OUT], [contract]]);
+    });
+
     test("an institution that prices its other contracts per contract settles one that reads two ways", () => {
         // 50 puts at $420 each read only as contracts at a price per contract.
         const put = holding("acme_p", { quantity: 50, institution_price: 420, institution_value: 21_000, cost_basis: 17_500 });

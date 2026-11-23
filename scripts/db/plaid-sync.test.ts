@@ -834,6 +834,29 @@ describe('Plaid sync into portfolios', { skip: !DATABASE_URL && 'SCRIPTS_TEST_DA
         }
     });
 
+    test('regression: a night Plaid gives a contract read per contract no price, its row stays as it was', async () => {
+        const { sync } = await linkedAccount('u-noprice');
+        const PER_CONTRACT: [string, number, number, number] = ['sec_acme_c150', 300, 420, 105_000];
+        const held = async () => (await optionRows('u-noprice')).map((r) => [r.quantity, r.premium, r.price, r.priceDate]);
+        try {
+            // Monday's sync reads 300 at $420 as 300 contracts by Thursday's close.
+            await sql`INSERT INTO option_marks (contract, close, close_date, checked_session, checked_at, source)
+                VALUES (${ACME_CALL}, 4.25, '2026-10-22', '2026-10-23', now(), 'test')`;
+            await sync([AAPL_LOT, PER_CONTRACT], new Date('2026-10-26T22:30:00.000Z'));
+            assert.deepEqual(await held(), [[300, 3.5, 4.2, '2026-10-26']]);
+            // On Tuesday Plaid gives the lot no price or value, so it reads only as
+            // Plaid's shares, 3 contracts: the contract is left out and its row stays.
+            const tuesday = await sync([AAPL_LOT, ['sec_acme_c150', 300, 0, 105_000]], new Date('2026-10-27T22:30:00.000Z'));
+            assert.deepEqual(tuesday.accounts.map((a) => [a.options, a.holdingsSkippedBy]), [[0, { option: 1 }]]);
+            assert.deepEqual(await held(), [[300, 3.5, 4.2, '2026-10-26']]);
+            // Priced again on Wednesday, its close now too old to settle it, it reads as its row.
+            await sync([AAPL_LOT, PER_CONTRACT], new Date('2026-10-28T22:30:00.000Z'));
+            assert.deepEqual(await held(), [[300, 3.5, 4.2, '2026-10-28']]);
+        } finally {
+            await sql`DELETE FROM option_marks WHERE contract = ${ACME_CALL}`;
+        }
+    });
+
     /**
      * Massive's free plan as the nightly prices job finds it, at 22:31 UTC on
      * a weekday: the contract traded every session at $4.25 a share, but the

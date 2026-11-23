@@ -593,8 +593,9 @@ function rowReading(lots: readonly OptionLot[], readings: readonly OptionReading
  * stored close from about the session of its price (closeForPriceDay), the
  * institution pricing its other contracts per contract, or the account's
  * synced row for it (`synced`) being in the other reading (rowReading). Null
- * when the lots don't agree, or what says how they read disagrees, so a
- * guess is never stored.
+ * when the lots don't agree, or what says how they read disagrees, as when
+ * lots with no price read only as shares and the row is in the other
+ * reading, so a guess is never stored.
  */
 function contractReading(
     { details, lots }: ContractLots,
@@ -606,7 +607,15 @@ function contractReading(
     },
 ): OptionReading | null {
     const fits = sharedReadings(lots);
-    if (fits.length <= 1) return fits[0] ?? null;
+    if (fits.length <= 1) {
+        // Only Plaid's shares fit when a lot has no price and value to check
+        // it against (optionLotReadings). When the account's synced row is in
+        // the other reading, the lots aren't shares, and with no price they
+        // can't be read per contract: the contract is left out, and its row
+        // stays as the last sync that could read it wrote it.
+        if (fits[0] === "shares" && rowReading(lots, ["shares", "per-contract"], synced) === "per-contract") return null;
+        return fits[0] ?? null;
+    }
     // Each lot reads more than one way, so each has a price.
     const price = lots[0].price ?? 0;
     const perShare = (reading: OptionReading) => readOptionLot(1, price, reading).perShare ?? 0;
