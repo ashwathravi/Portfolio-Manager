@@ -14,7 +14,7 @@ test.describe('Privacy policy', () => {
     await expect(page.getByRole('heading', { level: 1 })).toHaveCount(1);
     await expect(page.getByRole('heading', { level: 1, name: 'Privacy Policy' })).toBeVisible();
     // The page's LAST_UPDATED, which moves whenever its text changes.
-    await expect(page.getByText('Last updated November 14, 2026', { exact: true })).toBeVisible();
+    await expect(page.getByText('Last updated November 23, 2026', { exact: true })).toBeVisible();
     await expect(page.getByRole('navigation', { name: 'Main navigation' })).toHaveCount(0);
   });
 
@@ -43,6 +43,9 @@ test.describe('Privacy policy', () => {
     await expect(added).toContainText('the option positions you add or import (with the thesis, exit rule and price you give them)');
     // Launch item i53: orders drafted on Trade are kept with the account too.
     await expect(added).toContainText('orders you draft on Trade');
+    // The other assets and debts behind the net worth on Today, with each value given.
+    await expect(added).toContainText('the other assets and debts you add on Accounts (what each is, each value you give it and its date, and any note)');
+    await expect(page.getByRole('region', { name: 'How we use it' })).toContainText('show your portfolio value and net worth');
     // Launch item i56.
     await expect(added).toContainText('the questions you ask Ask and its answers (the last 25 of each)');
     // Launch items i55 and i57.
@@ -61,7 +64,7 @@ test.describe('Privacy policy', () => {
 
   test('says what stays when you remove a watchlist ticker, journal entry or thesis', async ({ page }) => {
     const retention = page.getByRole('region', { name: 'Keeping and deleting your data' });
-    await expect(retention).toContainText('portfolios, holdings, option positions, transactions, drafted orders, value history, watchlist, journal, theses, strategies, alert rules and alerts, email choices, the filers you follow, Ask questions and settings');
+    await expect(retention).toContainText('portfolios, holdings, option positions, transactions, other assets and debts, drafted orders, value history, watchlist, journal, theses, strategies, alert rules and alerts, email choices, the filers you follow, Ask questions and settings');
     await expect(retention).toContainText('Your alert rules are checked each weekday evening, on our servers');
     await expect(retention).toContainText('Clearing your alerts removes them and erases their text straight away; a short record of which rule fired, for what and when stays');
     await expect(retention).toContainText('alerts are otherwise deleted once they’re 180 days old');

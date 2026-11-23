@@ -82,6 +82,13 @@ describe('account deletion and export', { skip: !DATABASE_URL && 'SCRIPTS_TEST_D
             INSERT INTO alert_notifications (user_id, rule_id, occurrence, rule_name, metric, symbol, comparator, threshold, observed_value, message, href, triggered_at, email_batch)
             VALUES (${user}, ${rule.id}, 'session:2026-10-23', 'AAPL above $95', 'price', 'AAPL', 'gte', 95, 100, 'AAPL closed at $100.00 on Oct 23, at or above $95.00.', '/portfolios/detail/AAPL', '2026-10-23 22:31', ${`alerts/batch-${user}`})`;
         await sql`INSERT INTO email_preferences (user_id, alerts, weekly_review, alerts_since, unsubscribe_token, updated_at) VALUES (${user}, true, false, '2026-10-21 12:00', ${`unsubscribe-secret-${user}`}, '2026-10-21 12:00')`;
+        const [home] = await sql<{ id: string }[]>`
+            INSERT INTO net_worth_items (user_id, kind, category, name, value, value_as_of, note, created_at, updated_at)
+            VALUES (${user}, 'asset', 'property', 'Home', 400000, '2026-10-01', 'estimate', '2026-09-01 12:00', '2026-10-01 12:00') RETURNING id`;
+        const [mortgage] = await sql<{ id: string }[]>`
+            INSERT INTO net_worth_items (user_id, kind, category, name, value, value_as_of, created_at, updated_at)
+            VALUES (${user}, 'debt', 'mortgage', 'Mortgage', 250000, '2026-10-01', '2026-10-01 12:00', '2026-10-01 12:00') RETURNING id`;
+        await sql`INSERT INTO net_worth_item_values (net_worth_item_id, date, value) VALUES (${home.id}, '2026-09-01', 395000), (${home.id}, '2026-10-01', 400000), (${mortgage.id}, '2026-10-01', 250000)`;
         const [item] = await sql<{ id: string }[]>`
             INSERT INTO plaid_items (user_id, plaid_item_id, institution_id, institution_name, access_token_ciphertext, access_token_iv, access_token_auth_tag)
             VALUES (${user}, ${`item-${user}`}, 'ins_1', 'Fidelity', 'secret-cipher', 'i', 't') RETURNING id`;
@@ -102,6 +109,8 @@ describe('account deletion and export', { skip: !DATABASE_URL && 'SCRIPTS_TEST_D
                 (SELECT count(*) FROM portfolio_snapshot_positions s JOIN portfolios p ON p.id = s.portfolio_id WHERE p.user_id = ${user})::int AS snapshot_positions,
                 (SELECT count(*) FROM order_plans WHERE user_id = ${user})::int AS order_plans,
                 (SELECT count(*) FROM option_positions WHERE user_id = ${user})::int AS option_positions,
+                (SELECT count(*) FROM net_worth_items WHERE user_id = ${user})::int AS net_worth_items,
+                (SELECT count(*) FROM net_worth_item_values v JOIN net_worth_items i ON i.id = v.net_worth_item_id WHERE i.user_id = ${user})::int AS net_worth_item_values,
                 (SELECT count(*) FROM user_settings WHERE user_id = ${user})::int AS settings,
                 (SELECT count(*) FROM watchlist_items WHERE user_id = ${user})::int AS watchlist,
                 (SELECT count(*) FROM journal_entries WHERE user_id = ${user})::int AS journal,
@@ -159,6 +168,20 @@ describe('account deletion and export', { skip: !DATABASE_URL && 'SCRIPTS_TEST_D
             ['AAPL', 'buy', 'limit', 5, 95, 'ready', 100, 'add on the dip', '2026-10-24T14:00:00.000Z'],
         ]);
         assert.deepEqual(data.linkedConnections.map((c) => [c.institutionName, c.accounts.map((a) => [a.name, a.mask, a.syncing])]), [['Fidelity', [['Individual', '1234', true]]]]);
+        // Other assets and debts, assets first, each with its values by day,
+        // oldest first; not the other user's, which have the same names.
+        assert.deepEqual(data.netWorthItems.map((i) => [i.kind, i.category, i.name, i.value, i.valueAsOf, i.note]), [
+            ['asset', 'property', 'Home', 400000, '2026-10-01', 'estimate'],
+            ['debt', 'mortgage', 'Mortgage', 250000, '2026-10-01', null],
+        ]);
+        assert.deepEqual(data.netWorthItems.map((i) => [i.createdAt, i.updatedAt]), [
+            ['2026-09-01T12:00:00.000Z', '2026-10-01T12:00:00.000Z'],
+            ['2026-10-01T12:00:00.000Z', '2026-10-01T12:00:00.000Z'],
+        ]);
+        assert.deepEqual(data.netWorthItems.map((i) => i.values), [
+            [{ date: '2026-09-01', value: 395000 }, { date: '2026-10-01', value: 400000 }],
+            [{ date: '2026-10-01', value: 250000 }],
+        ]);
         // A removed watchlist ticker is a marker, not the user's data.
         assert.deepEqual(data.watchlist.map((w) => w.ticker), ['MSFT']);
         assert.deepEqual(data.journal.map((j) => j.rationale), ['cheap']);
@@ -185,7 +208,10 @@ describe('account deletion and export', { skip: !DATABASE_URL && 'SCRIPTS_TEST_D
         assert.deepEqual(data.emailPreferences, { alerts: true, weeklyReview: false, updatedAt: '2026-10-21T12:00:00.000Z' });
 
         const text = JSON.stringify(data);
-        for (const leak of ['userId', 'writeSession', 'writeSeq', 'dismissed', 'cleared', 'occurrence', 'An earlier question', 'secret-cipher', 'item-u-export', 'acc-u-export', 'u-other', 'unsubscribe-secret', 'alertsSince', 'emailClaimedAt', 'emailBatch', 'alerts/batch-']) {
+        // Nor the IDs of the user's other assets and debts.
+        const itemIds = (await sql<{ id: string }[]>`SELECT id FROM net_worth_items WHERE user_id = 'u-export'`).map((r) => r.id);
+        assert.equal(itemIds.length, 2);
+        for (const leak of ['userId', 'writeSession', 'writeSeq', 'dismissed', 'cleared', 'occurrence', 'An earlier question', 'secret-cipher', 'item-u-export', 'acc-u-export', 'u-other', 'unsubscribe-secret', 'alertsSince', 'emailClaimedAt', 'emailBatch', 'alerts/batch-', 'netWorthItemId', ...itemIds]) {
             assert.ok(!text.includes(leak), leak);
         }
     });

@@ -36,7 +36,7 @@ const ADD_STEP: GettingStartedStep = {
 const AFTER_ACCOUNTS: readonly GettingStartedStep[] = [
     {
         title: 'Start each day on Today',
-        body: 'Portfolio value and today’s change come first, then “Needs your attention”: policy breaches, theses due for review, and the weekly review.',
+        body: 'Your portfolio value and today’s change come first (your net worth too, once you add other assets and debts on Accounts), then “Needs your attention”: policy breaches, theses due for review, and the weekly review.',
         href: '/',
         cta: 'Open Today',
     },
@@ -82,6 +82,8 @@ export const GLOSSARY: readonly GlossaryTerm[] = [
     { term: 'Conviction', definition: 'How strongly you hold a thesis: high, medium, or low. It sets how much evidence you need before acting.', href: '/research' },
     { term: 'Guardrail', definition: 'A rule checked before an order is drafted, such as an approval threshold or a concentration cap.', href: '/settings#trading' },
     { term: 'Missing data', definition: 'A policy check that can’t be evaluated yet because the holdings, trades, or classifications it needs aren’t connected.' },
+    { term: 'Net worth', definition: 'Your portfolio value plus the other assets you add on Accounts (a home, a car, cash in the bank), less your debts (a mortgage, a loan, a card balance). Today shows it once you add any; returns and the risk policy never include them.', href: '/portfolios/accounts#other-assets' },
+    { term: 'Portfolio value', definition: 'What your accounts hold: positions at their latest prices, holdings valued by hand, and cash. Returns, the equity curve and the risk policy measure this. Option positions are not yet in the portfolio value or returns.', href: '/' },
     { term: 'Re-underwrite', definition: 'Re-read and update a thesis against current facts. Today asks for this when a thesis hasn’t been reviewed recently.', href: '/research' },
     { term: 'Sample', definition: 'Example data shown so you can explore before adding your accounts. It is always labelled and can be hidden in Settings › Data.', href: '/settings#data' },
     { term: 'Sell discipline', definition: 'Rules that trigger a trim, review, or no-add block when a position crosses a threshold you set.', href: '/settings#risk-policy' },

@@ -133,6 +133,25 @@ export interface ExportedConnection {
     accounts: { name: string; mask: string | null; type: string; subtype: string; syncing: boolean }[];
 }
 
+/**
+ * An asset or debt outside the accounts (net_worth_items), as entered on
+ * Accounts: a home, a car, a mortgage. For a debt, the value is the balance
+ * owed, never negative.
+ */
+export interface ExportedNetWorthItem {
+    /** "asset" or "debt". */
+    kind: string;
+    category: string;
+    name: string;
+    value: number;
+    valueAsOf: string;
+    note: string | null;
+    createdAt: string;
+    updatedAt: string;
+    /** Its value on each day it was valued, oldest first. */
+    values: { date: string; value: number }[];
+}
+
 export interface AccountExport {
     format: typeof ACCOUNT_EXPORT_FORMAT;
     version: typeof ACCOUNT_EXPORT_VERSION;
@@ -141,6 +160,8 @@ export interface AccountExport {
     settings: { version: number; settings: unknown; updatedAt: string } | null;
     accounts: ExportedAccount[];
     linkedConnections: ExportedConnection[];
+    /** Assets and debts outside the accounts, assets first, largest first. */
+    netWorthItems: ExportedNetWorthItem[];
     watchlist: Record<string, unknown>[];
     journal: Record<string, unknown>[];
     theses: Record<string, unknown>[];

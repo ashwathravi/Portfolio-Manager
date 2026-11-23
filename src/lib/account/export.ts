@@ -22,6 +22,8 @@ import {
     journalEntries,
     manualHoldingValues,
     manualHoldings,
+    netWorthItemValues,
+    netWorthItems,
     optionPositions,
     orderPlans,
     plaidAccounts,
@@ -129,6 +131,11 @@ export async function buildAccountExport(userId: string, database: Database = db
             .where(and(eq(alertNotifications.userId, userId), eq(alertNotifications.cleared, false)))
             .orderBy(desc(alertNotifications.triggeredAt), asc(alertNotifications.id));
         const [emails] = await tx.select().from(emailPreferences).where(eq(emailPreferences.userId, userId)).limit(1);
+        const owned = await tx.select().from(netWorthItems).where(eq(netWorthItems.userId, userId))
+            .orderBy(asc(netWorthItems.kind), desc(netWorthItems.value), asc(netWorthItems.name), asc(netWorthItems.id));
+        const ownedValues = owned.length === 0 ? [] : await tx.select().from(netWorthItemValues)
+            .where(inArray(netWorthItemValues.netWorthItemId, owned.map((i) => i.id)))
+            .orderBy(asc(netWorthItemValues.date));
 
         return {
             format: ACCOUNT_EXPORT_FORMAT,
@@ -220,6 +227,18 @@ export async function buildAccountExport(userId: string, database: Database = db
                     subtype: a.subtype,
                     syncing: a.syncStatus === "sync_ready",
                 })),
+            })),
+            // Field by field, so neither the item's ID nor the user's is exported.
+            netWorthItems: owned.map((item) => ({
+                kind: item.kind,
+                category: item.category,
+                name: item.name,
+                value: Number(item.value),
+                valueAsOf: item.valueAsOf,
+                note: item.note,
+                createdAt: item.createdAt.toISOString(),
+                updatedAt: item.updatedAt.toISOString(),
+                values: ownedValues.filter((v) => v.netWorthItemId === item.id).map((v) => ({ date: v.date, value: Number(v.value) })),
             })),
             watchlist: watchlist.map(plain),
             journal: journal.map(plain),

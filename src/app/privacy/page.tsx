@@ -7,7 +7,7 @@ export const metadata: Metadata = {
     description: "What Atlas Wealth collects, why, who it is shared with, and how to have it deleted.",
 };
 
-const LAST_UPDATED = "November 14, 2026";
+const LAST_UPDATED = "November 23, 2026";
 const PLAID_PRIVACY_URL = "https://plaid.com/legal/#end-user-privacy-policy";
 
 export default function PrivacyPage({ searchParams }: { searchParams: LegalSearchParams }) {
@@ -48,7 +48,9 @@ export default function PrivacyPage({ searchParams }: { searchParams: LegalSearc
                     </li>
                     <li>
                         <strong>Data you add.</strong> Portfolios, holdings and transactions you import from
-                        CSV or enter by hand, the option positions you add or import (with the thesis, exit rule
+                        CSV or enter by hand, the other assets and debts you add on Accounts (what each is, each
+                        value you give it and its date, and any note), the option positions you add or import
+                        (with the thesis, exit rule
                         and price you give them), orders you draft on Trade (with the reasons and risk-policy
                         overrides you record for them), your watchlist (tickers, why they&rsquo;re on it, target
                         prices and notes), your decision journal, your research theses (with their catalysts and
@@ -86,7 +88,7 @@ export default function PrivacyPage({ searchParams }: { searchParams: LegalSearc
             <section aria-labelledby="privacy-use">
                 <h2 id="privacy-use">How we use it</h2>
                 <ul>
-                    <li>To run the app: show your portfolio value, holdings, activity and performance, and check trade ideas against your risk policy.</li>
+                    <li>To run the app: show your portfolio value and net worth, holdings, activity and performance, and check trade ideas against your risk policy.</li>
                     <li>To keep it secure: sign-in, limiting request rates, and investigating misuse.</li>
                     <li>
                         To send the emails you turn on in Settings: your alerts each weekday evening, and the
@@ -170,7 +172,8 @@ export default function PrivacyPage({ searchParams }: { searchParams: LegalSearc
                     We keep your data while your account is open. Download a copy of it at any time in
                     Settings (one JSON file, or your transactions and holdings as CSV). Delete your account in
                     Settings and we remove, straight away, your account, portfolios, holdings, option positions, transactions,
-                    drafted orders, value history, watchlist, journal, theses, strategies, alert rules and
+                    other assets and debts, drafted orders, value history, watchlist, journal, theses,
+                    strategies, alert rules and
                     alerts, email choices, the filers you follow, Ask questions and settings from
                     our database, end our access to your linked institutions at Plaid and erase our encrypted
                     access to them, and clear what this browser kept for you. You can also email{" "}

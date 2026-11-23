@@ -10,7 +10,8 @@
  * accounts (their holdings, transactions and valuation history cascade)
  * and the user row, which takes everything else that cascades from it:
  * sign-in records and sessions, settings, watchlist, journal, theses, Ask
- * history, Plaid connections and the Alpha Radar filers they follow. Alpha
+ * history, other assets and debts (with their values by day), Plaid
+ * connections and the Alpha Radar filers they follow. Alpha
  * Radar's tracked filers are shared by every account, not the user's, so they
  * stay.
  */
