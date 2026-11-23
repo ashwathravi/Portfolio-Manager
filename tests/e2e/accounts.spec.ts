@@ -132,15 +132,18 @@ test.describe('Portfolio › Accounts — managing accounts', () => {
     });
 
     test("the accounts' value is split by tax treatment and by ownership once any account has one, and the rest are Not set", async ({ page }) => {
-        /** A split's labels in order, then each group's value and the accounts its label names. */
+        /** Each group's accounts, under its value. */
+        const accountsOf = (strip: Locator, key: string) => strip.locator(`[data-group="${key}"]`).getByTestId('account-group-accounts');
+        /** A split's labels in order, then each group's value and the accounts it names. */
         async function expectSplit(id: string, groups: [key: string, label: string, value: string, accounts: string][]) {
             const strip = page.getByTestId(id);
             await expect(strip.locator('dt')).toHaveText(groups.map(([, label]) => label));
             for (const [key, , value, accounts] of groups) {
-                await expect(strip.locator(`[data-group="${key}"] dd`)).toContainText(value);
-                await expect(strip.locator(`[data-group="${key}"] dt`)).toHaveAttribute('title', accounts);
-                // The same names for a screen reader, which may not read the title out.
-                await expect(strip.locator(`[data-group="${key}"] dd .sr-only`)).toHaveText(`(${accounts})`);
+                await expect(strip.locator(`[data-group="${key}"] dd`).first()).toContainText(value);
+                await expect(accountsOf(strip, key)).toHaveText(accounts);
+                // On screen, not in a tooltip a keyboard or a phone can't open,
+                // nor clipped to the pixel a screen-reader-only line gets.
+                expect((await accountsOf(strip, key).boundingBox())?.height ?? 0).toBeGreaterThan(1);
             }
         }
         async function expectBothSplits() {
@@ -186,7 +189,7 @@ test.describe('Portfolio › Accounts — managing accounts', () => {
         await expect(row(page, 'Growth Portfolio').getByTestId('account-kind')).toHaveCount(0);
         const ownership = page.getByTestId('accounts-by-ownership');
         await expect(ownership.locator('dt')).toHaveText(['For a dependent', 'Not set']);
-        await expect(ownership.locator('[data-group="not_set"] dt')).toHaveAttribute('title', 'Main Portfolio, Growth Portfolio');
+        await expect(accountsOf(ownership, 'not_set')).toHaveText('Main Portfolio, Growth Portfolio');
         // Growth keeps its tax treatment.
         await expect(page.getByTestId('accounts-by-tax').locator('dt')).toHaveText(['Tax-deferred', 'Tax-free', 'Not set']);
 
@@ -202,6 +205,8 @@ test.describe('Portfolio › Accounts — managing accounts', () => {
             });
             expect(overflow).toBeLessThanOrEqual(1);
         }).toPass({ timeout: 5_000 });
+        // And a phone, with no hover, still sees which accounts a group holds.
+        expect((await accountsOf(ownership, 'not_set').boundingBox())?.height ?? 0).toBeGreaterThan(1);
     });
 
     test('an account can be renamed and its cash changed', async ({ page }) => {

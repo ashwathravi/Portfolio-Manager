@@ -1010,6 +1010,8 @@ a.pm-watchlist-sym:hover .pm-watchlist-ticker { text-decoration: underline; }
 /* Muted, not subtle: the groups' small labels and shares need 4.5:1. */
 .pm-account-group .pm-metric-strip dt { color: var(--pm-fg-muted); }
 .pm-account-group-share { font-size: 12px; font-weight: 400; color: var(--pm-fg-muted); }
+/* Each group's accounts, under its value; a long list wraps rather than widen the page. */
+.pm-metric-strip .pm-account-group-accounts { font-size: 12px; font-weight: 400; letter-spacing: normal; font-variant-numeric: normal; color: var(--pm-fg-muted); overflow-wrap: anywhere; }
 
 /* Portfolio › Activity: add a transaction (launch item i40). */
 .pm-form-pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }

@@ -59,9 +59,11 @@ interface AccountGroupStripsProps {
 }
 
 /**
- * A strip for each split an account says anything for, each label's
- * tooltip naming its accounts; with neither said anywhere, a line on how.
- * The ids are fixed: the view renders once on its page.
+ * A strip for each split an account says anything for, each group naming
+ * its accounts under its value: on screen, not in a tooltip, so a keyboard,
+ * a phone and a screen reader get them as a mouse does. With neither said
+ * anywhere, a line on how. The ids are fixed: the view renders once on its
+ * page.
  */
 function AccountGroupStrips({ groups, accounts }: AccountGroupStripsProps) {
     const strips = [
@@ -84,13 +86,12 @@ function AccountGroupStrips({ groups, accounts }: AccountGroupStripsProps) {
                     <dl className="pm-metric-strip">
                         {strip.groups.map((g) => (
                             <div key={g.key} data-group={g.key}>
-                                <dt title={g.accountNames.join(", ")}>{g.label}</dt>
+                                <dt>{g.label}</dt>
                                 <dd>
                                     {formatUsd(g.totalUsd)}
                                     {g.sharePct !== null && <> <span className="pm-account-group-share">{formatPct(g.sharePct)}</span></>}
-                                    {/* The tooltip's accounts, read out: a title on plain text often isn't. */}
-                                    <span className="sr-only"> ({g.accountNames.join(", ")})</span>
                                 </dd>
+                                <dd className="pm-account-group-accounts" data-testid="account-group-accounts">{g.accountNames.join(", ")}</dd>
                             </div>
                         ))}
                     </dl>
