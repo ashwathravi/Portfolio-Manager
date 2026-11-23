@@ -224,8 +224,10 @@ export const portfolios = pgTable("portfolios", {
     source: text("source").default("manual").notNull(),
     externalAccountId: text("external_account_id"),
     // What kind of account it is, where it's held, and how it's taxed
-    // (src/lib/portfolio/account-kinds.ts). Optional: null is "not said",
-    // never a guess.
+    // (src/lib/portfolio/account-kinds.ts). Optional: null is "not said".
+    // The user sets them, except that a linked account starts with the type
+    // and tax treatment its Plaid subtype usually has, and its institution,
+    // until the user changes any of them (kind_edited_at).
     accountType: text("account_type"),
     institution: text("institution"),
     taxTreatment: text("tax_treatment"),
@@ -553,7 +555,7 @@ export const netWorthItems = pgTable("net_worth_items", {
  * Today reads only the item's current value; this keeps the history, so a
  * net worth over time can be drawn from it later, and the export lists it.
  * A saved value stands from its as-of date on: saving it removes later
- * rows (src/lib/portfolio/net-worth.ts). It goes with its item.
+ * rows (src/lib/portfolio/net-worth-items.ts). It goes with its item.
  */
 export const netWorthItemValues = pgTable("net_worth_item_values", {
     netWorthItemId: uuid("net_worth_item_id")
