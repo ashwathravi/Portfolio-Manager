@@ -71,9 +71,11 @@ export function isOwnership(value: string | null | undefined): value is Ownershi
 
 /**
  * How an account of each kind is usually taxed: what the account form
- * suggests when the kind is picked, never stored without the user seeing
- * it. A 401(k) can hold Roth money, and "other" can be anything, so these
- * are a starting point the user can change.
+ * suggests when the kind is picked, for the user to keep or change before
+ * saving, and what a linked account is given for its Plaid subtype
+ * (taxTreatmentForPlaid) until the user changes its kind or ownership. A
+ * 401(k) or 403(b) can hold Roth money, and "other" can be anything, so
+ * these are a starting point the user can change.
  */
 export const DEFAULT_TAX_TREATMENT: Record<AccountType, TaxTreatment | null> = {
     brokerage: 'taxable',

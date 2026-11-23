@@ -132,8 +132,9 @@ function kindFields(body: Pick<PortfolioUpdateBody, "accountType" | "institution
  * `kind_edited_at` marks the user's say over the account's kind: a Plaid
  * sync then stops filling in what the account lacks (writeAccountSync), so
  * a field the user changed or cleared stays as they left it. It moves only
- * when one of the fields changes, because the form sends them all with
- * every save: a rename or a change of cash alone isn't a say over the kind.
+ * when its type, institution, tax treatment or ownership changes from
+ * what's stored, because the form sends them all with every save: a rename
+ * or a change of cash alone isn't a say over the kind.
  * Saving a form opened before a sync filled a field in clears that field
  * again, which is what the user saw and saved.
  */

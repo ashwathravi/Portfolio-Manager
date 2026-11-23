@@ -279,9 +279,10 @@ export interface AccountSyncWrite {
      * What kind of account Plaid says it is, and where it's held
      * (linkedAccountKind). A new portfolio takes them; an existing one fills
      * in only what it has none of, and only until the user changes any of
-     * them, so the user's own choice stands, an empty one included.
-     * Ownership isn't among them: Plaid doesn't say whose name an account is
-     * in, so only the user sets it.
+     * them or its ownership (kind_edited_at, stamped by updatePortfolio), so
+     * the user's own choice stands, an empty one included. Ownership itself
+     * is never written here: Plaid doesn't say whose name an account is in,
+     * so only the user sets it.
      */
     kind?: LinkedAccountKind;
     /** Null when Plaid's history isn't ready yet: transactions wait for the next sync. */
