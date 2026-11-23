@@ -33,6 +33,12 @@ export interface ImportResult {
  * those positions; other positions are untouched. Option rows go to the
  * account's option positions the same way (importOptionRows).
  *
+ * Every import takes the user's account-write lock first, as a Plaid sync
+ * does: an import into a linked account locks the portfolio row (FOR
+ * UPDATE) and then its holdings and option rows, the opposite order to
+ * writeAccountSync, so without it the two could deadlock; and
+ * importOptionRows reads which contracts the sync owns.
+ *
  * `prices` (upper-case symbol → last price, from the price store) gives
  * the rows it covers a stored price, so an imported position shows its
  * worth straight away instead of $0. No market value is stored with it:
@@ -47,7 +53,10 @@ export async function importHoldings(
     prices: Readonly<Record<string, number>> = {},
     database: typeof db = db,
 ): Promise<ImportResult> {
-    return database.transaction((tx) => importInto(tx, userId, body, quoteFrom(prices)));
+    return database.transaction(async (tx) => {
+        await buildLockUserAccountsQuery(userId, tx);
+        return importInto(tx, userId, body, quoteFrom(prices));
+    });
 }
 
 type Transaction = Parameters<Parameters<typeof db['transaction']>[0]>[0];
@@ -74,11 +83,11 @@ export async function importHoldingsToAccounts(
 ): Promise<ImportResult[]> {
     const quote = quoteFrom(prices);
     return database.transaction(async (tx) => {
-        // A batch that creates an account takes the user's account-write
-        // lock first, as a Plaid sync does, before any account's rows: taken
-        // midway (by the new account's name check) it would wait on a sync
-        // holding it while the sync waits on rows this import already locked.
-        if (groups.some((g) => !g.portfolioId)) await buildLockUserAccountsQuery(userId, tx);
+        // The user's account-write lock first, as a Plaid sync takes it,
+        // before any account's rows: taken midway (by a new account's name
+        // check) or not at all, the import would hold rows a sync waits on
+        // while it waits on the sync (see importHoldings).
+        await buildLockUserAccountsQuery(userId, tx);
         const results: ImportResult[] = [];
         for (const group of groups) results.push(await importInto(tx, userId, group, quote));
         return results;

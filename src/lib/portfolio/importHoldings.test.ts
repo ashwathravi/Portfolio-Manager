@@ -114,11 +114,14 @@ describe("importHoldings into a new account", () => {
     const rows = [{ symbol: "MSFT", name: "Microsoft", quantity: 4, avgCost: 300 }];
 
     test("creates it under the user's account lock", async () => {
+        // Taken once by the import before anything else, and again (it's
+        // re-entrant) by the name check for the new account.
         const fake = fakeDatabase();
         const result = await importHoldings(USER, { newPortfolioName: "Joint", rows }, {}, fake.database);
         assert.equal(result.createdPortfolio, true);
         assert.equal(result.portfolioId, "p-new");
-        assert.equal(fake.locks(), 1);
+        assert.equal(fake.locks(), 2);
+        assert.equal(fake.order[0], "account lock");
         assert.deepEqual(fake.createdAccounts.map((a) => a.name), ["Joint"]);
     });
 
@@ -140,10 +143,15 @@ describe("importHoldings into a new account", () => {
         assert.deepEqual([fake.createdAccounts.length, fake.inserted.length], [0, 0]);
     });
 
-    test("importing into an existing account doesn't take the lock or check names", async () => {
+    test("regression: importing into an existing account takes the account lock first, then the row lock", async () => {
+        // A Plaid sync takes the user's account lock and then writes the
+        // account's holdings and option positions; an import into that
+        // linked account that locked its row first would take the two the
+        // other way round, and the two could deadlock.
         const fake = fakeDatabase([]);
         await importHoldings(USER, { portfolioId: PORTFOLIO, rows }, {}, fake.database);
-        assert.equal(fake.locks(), 0);
+        assert.equal(fake.locks(), 1);
+        assert.deepEqual(fake.order, ["account lock", "row lock"]);
     });
 
     test("regression: a batch that creates an account takes the account lock before any account's rows", async () => {
@@ -156,9 +164,10 @@ describe("importHoldings into a new account", () => {
         assert.ok(fake.order.indexOf("row lock") > 0);
     });
 
-    test("a batch into existing accounts only takes no account lock", async () => {
+    test("a batch into existing accounts only takes the account lock once, first", async () => {
         const fake = fakeDatabase([]);
-        await importHoldingsToAccounts(USER, [{ portfolioId: PORTFOLIO, rows }], {}, fake.database);
-        assert.equal(fake.locks(), 0);
+        await importHoldingsToAccounts(USER, [{ portfolioId: PORTFOLIO, rows }, { portfolioId: PORTFOLIO, rows }], {}, fake.database);
+        assert.equal(fake.locks(), 1);
+        assert.deepEqual(fake.order, ["account lock", "row lock", "row lock"]);
     });
 });
