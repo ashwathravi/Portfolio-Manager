@@ -23,7 +23,16 @@ import { optionPositionSchema, type OptionPositionInput } from '../../src/lib/va
 import { createSnapshotStore, readManualHistory } from '../../src/lib/portfolio/valuation-snapshots';
 import { MAX_PLAID_CONNECTIONS_PER_USER, PlaidTokenUnavailableError, disconnectPlaidItem, handlePlaidWebhook, listPlaidConnections } from '../../src/lib/plaid/connections';
 import { createDrizzlePlaidTokenRegistryStore, resetPlaidTokenVaultForTests, setPlaidTokenRegistryStoreForTests, storePlaidConnection } from '../../src/lib/plaid/server-token-vault';
-import { PlaidItemNotFoundError, connectedAccountFingerprints, refreshPlaidItem, selectPlaidAccounts, syncAllPlaidItems, syncPlaidItem, writeAccountSync } from '../../src/lib/plaid/sync';
+import {
+    PlaidItemNotFoundError,
+    connectedAccountFingerprints,
+    loadOptionPriceEvidence,
+    refreshPlaidItem,
+    selectPlaidAccounts,
+    syncAllPlaidItems,
+    syncPlaidItem,
+    writeAccountSync,
+} from '../../src/lib/plaid/sync';
 
 // Launch item i44: Plaid's holdings and investment transactions synced into
 // portfolios, against a scratch database with every migration applied and a
@@ -787,15 +796,28 @@ describe('Plaid sync into portfolios', { skip: !DATABASE_URL && 'SCRIPTS_TEST_DA
                 VALUES (${ACME_CALL}, 4.25, '2026-10-23', '2026-10-23', now(), 'test')`;
             await sync([AAPL_LOT, PER_CONTRACT], new Date('2026-10-26T22:30:00.000Z'));
             assert.deepEqual(await held(), [[300, 3.5, 4.2]]);
-            // Lots as Plaid usually reports them still read as shares.
-            await sync([AAPL_LOT, ACME_LOT], new Date('2026-10-27T22:30:00.000Z'));
+            // The next night the close is two sessions old, the prices job (which
+            // runs after the plaid job, and checks a few contracts a run) not
+            // having stored a newer one: too old to settle the contract, it keeps
+            // the reading the row is in rather than going back to 3.
+            const tuesday = await sync([AAPL_LOT, PER_CONTRACT], new Date('2026-10-27T22:30:00.000Z'));
+            assert.deepEqual([tuesday.status, await held()], ['synced', [[300, 3.5, 4.2]]]);
+            // The rows read are the user's own, of the accounts the sync asks about.
+            const synced = async (user: string, account: string) =>
+                (await loadOptionPriceEvidence(user, [account], SECURITIES, new Date('2026-10-27T22:30:00.000Z'), database)).syncedContracts;
+            assert.deepEqual(await synced('u-percontract', 'acc-u-percontract'), new Map([['acc-u-percontract', new Map([[ACME_CALL, 300]])]]));
+            assert.deepEqual(await synced('u-other', 'acc-u-percontract'), new Map());
+            assert.deepEqual(await synced('u-percontract', 'acc-other'), new Map());
+            // Lots as Plaid usually reports them still read as shares: the old
+            // close is near their price a share, not the row's reading.
+            await sync([AAPL_LOT, ACME_LOT], new Date('2026-10-28T22:30:00.000Z'));
             assert.deepEqual(await held(), [[3, 3.5, 4.2]]);
 
             // Without a close, the underlying's: a call is never worth more than ACME's $145 a share.
             await sql`DELETE FROM option_marks WHERE contract = ${ACME_CALL}`;
             await sql`INSERT INTO securities (symbol) VALUES ('ACME') ON CONFLICT DO NOTHING`;
             await sql`INSERT INTO price_bars (symbol, date, open, high, low, close, volume, source) VALUES ('ACME', '2026-10-23', 145, 145, 145, 145, 1000, 'test')`;
-            await sync([AAPL_LOT, PER_CONTRACT], new Date('2026-10-28T22:30:00.000Z'));
+            await sync([AAPL_LOT, PER_CONTRACT], new Date('2026-10-29T22:30:00.000Z'));
             assert.deepEqual(await held(), [[300, 3.5, 4.2]]);
         } finally {
             await sql`DELETE FROM option_marks WHERE contract = ${ACME_CALL}`;

@@ -791,9 +791,18 @@ export interface SyncDeps {
  * close in option_marks with its session, and each underlying's latest
  * close; and the day a price Plaid doesn't date is from, the last session
  * that ended by `now`, which a close is checked against. Both tables are
- * shared and say nothing about who holds what.
+ * shared and say nothing about who holds what. With them, how the last sync
+ * read the contracts of the user's accounts (Plaid's `accountIds`): the
+ * contracts of the option positions it wrote, whose reading a close too old
+ * to settle a contract keeps.
  */
-export async function loadOptionPriceEvidence(securities: readonly PlaidSecurity[], now: Date, database: Database = db): Promise<OptionPriceEvidence> {
+export async function loadOptionPriceEvidence(
+    userId: string,
+    accountIds: readonly string[],
+    securities: readonly PlaidSecurity[],
+    now: Date,
+    database: Database = db,
+): Promise<OptionPriceEvidence> {
     const { contracts, underlyings } = optionContractsIn(securities);
     if (contracts.length === 0) return {};
     const marks = await database
@@ -801,11 +810,30 @@ export async function loadOptionPriceEvidence(securities: readonly PlaidSecurity
         .from(optionMarks)
         .where(and(inArray(optionMarks.contract, contracts), isNotNull(optionMarks.close)));
     const closes = await getLatestCloses(underlyings, undefined, database);
+    const synced = accountIds.length === 0 ? [] : await database
+        .select({ account: portfolios.externalAccountId, contract: optionPositions.contract, quantity: optionPositions.quantity })
+        .from(optionPositions)
+        .innerJoin(portfolios, and(eq(portfolios.id, optionPositions.portfolioId), eq(portfolios.userId, userId)))
+        .where(and(
+            eq(optionPositions.userId, userId),
+            eq(optionPositions.source, "plaid"),
+            eq(portfolios.source, "plaid"),
+            inArray(portfolios.externalAccountId, [...accountIds]),
+            inArray(optionPositions.contract, contracts),
+        ));
+    const syncedContracts = new Map<string, Map<string, number>>();
+    for (const { account, contract, quantity } of synced) {
+        if (account == null) continue;
+        const held = syncedContracts.get(account) ?? new Map<string, number>();
+        held.set(contract, Number(quantity));
+        syncedContracts.set(account, held);
+    }
     return {
         contractCloses: new Map(marks.flatMap(({ contract, close, date }) => (close == null ? [] : [[contract, { close, date }] as const]))),
         underlyingPrices: new Map([...closes].map(([symbol, { close }]) => [symbol, close] as const)),
         // As replaceSyncedOptions dates such a price.
         undatedPriceDay: lastCompletedSession(now),
+        syncedContracts,
     };
 }
 
@@ -839,7 +867,7 @@ export async function syncPlaidItem(userId: string, itemId: string, deps: SyncDe
             if (!(error instanceof PlaidApiError && error.errorCode === "PRODUCT_NOT_READY")) throw error;
         }
 
-        const evidence = await loadOptionPriceEvidence(holdingsPayload.securities, now, database);
+        const evidence = await loadOptionPriceEvidence(userId, call.accountIds, holdingsPayload.securities, now, database);
         const results: AccountSyncResult[] = [];
         const overLimit: string[] = [];
         for (const account of accounts) {
