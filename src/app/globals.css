@@ -1952,6 +1952,56 @@
   white-space: nowrap;
 }
 
+/* Small positions: one row after the others that opens in place. Scoped
+   under .pm-table-full to outweigh its cell padding; its hover rule still
+   wins. Its 10px padding, against a row's 12px, makes up for the 24px
+   button, so it's as tall as the rows around it. */
+.pm-table-full .pm-small-positions-group td {
+  background: color-mix(in oklab, var(--pm-bg-2) 55%, transparent);
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+
+.pm-small-positions-label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.pm-small-positions-toggle {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 24px;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--pm-fg);
+  font: inherit;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+}
+
+.pm-small-positions-toggle:focus-visible {
+  outline: 2px solid var(--pm-accent);
+  outline-offset: 2px;
+}
+
+.pm-small-positions-note {
+  font-size: 11px;
+  color: var(--pm-fg-subtle);
+  padding-left: 20px;
+}
+
+.pm-table-full .pm-small-position-row td:first-child {
+  padding-left: 30px;
+}
+
 .pm-policy-chip,
 .pm-theme-chip {
   display: inline-flex;

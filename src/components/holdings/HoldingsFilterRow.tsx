@@ -3,6 +3,7 @@
 import { type ChangeEvent } from "react";
 import type { Sector } from "@/lib/holdings/sector";
 import type { HoldingsRowView } from "@/lib/holdings/combine";
+import type { HoldingsSortKey } from "@/lib/holdings/sort";
 import {
     POLICY_BUCKETS,
     THEME_IDS,
@@ -23,11 +24,8 @@ import {
  * Stateless — the parent holds `sectorFilter` and `sortKey`.
  */
 
-export type HoldingsSortKey =
-    | "marketValue"
-    | "totalReturnPct"
-    | "todayPct"
-    | "allocationPct";
+// The sort lives in src/lib/holdings/sort.ts; its key is still offered from here.
+export type { HoldingsSortKey };
 
 export interface HoldingsFilterRowProps {
     /** Which sector chip is currently active. "All" means no filter. */

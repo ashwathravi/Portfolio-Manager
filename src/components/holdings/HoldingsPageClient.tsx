@@ -21,12 +21,9 @@ import {
     type ThemeId,
     type ThemeWeight,
 } from "@/lib/risk-policy";
-import {
-    HoldingsFilterRow,
-    type HoldingsSortKey,
-} from "./HoldingsFilterRow";
+import { HoldingsFilterRow } from "./HoldingsFilterRow";
 import { useSettingsStore } from "@/lib/stores/settingsStore";
-import { HoldingsFullTable, type HoldingsTableRow } from "./HoldingsFullTable";
+import { HoldingsFullTable, type HoldingsTableRow, type SmallPositionsTableGroup } from "./HoldingsFullTable";
 import { HoldingsSummaryStrip } from "./HoldingsSummaryStrip";
 import { OptionsRiskLedgerCard } from "./OptionsRiskLedgerCard";
 import type { OptionThesisOption } from "./OptionPositionDialog";
@@ -34,6 +31,8 @@ import { toOptionRiskPosition, type LoadedOptionPosition } from "@/lib/portfolio
 import { isTodaysQuote } from "@/lib/markets/quote-session";
 import { useEasternDate } from "@/lib/hooks/useEasternDate";
 import { combineBySymbol, hasSymbolInSeveralAccounts, type HoldingsRowView } from "@/lib/holdings/combine";
+import { smallPositionsLimitLabel, splitSmallPositions } from "@/lib/holdings/small-positions";
+import { sortHoldings, type HoldingsSortKey } from "@/lib/holdings/sort";
 
 /**
  * Phase 4 (AR-74) Holdings page wrapper.
@@ -41,10 +40,12 @@ import { combineBySymbol, hasSymbolInSeveralAccounts, type HoldingsRowView } fro
  * This component owns:
  *   - quote polling via `useAutoRefreshQuotes`, labelled delayed or close
  *   - the filter + sort state, and one row per account position or per symbol
+ *   - which positions are small (src/lib/holdings/small-positions.ts)
  *   - the derived summary metrics
  *
- * The server page just fetches the seed + hands it here. Everything
- * downstream (summary strip, filter row, table) is stateless.
+ * The server page just fetches the seed + hands it here. The summary strip
+ * and filter row downstream are stateless, and the table keeps only how
+ * it's drawn: its scroll position and whether the small positions are open.
  */
 
 export interface HoldingsSeed {
@@ -241,8 +242,8 @@ export function HoldingsPageClient({
     // (those valued by hand too), cash and options together.
     const totalPolicyValue = summary.marketValue + handValuedTotal + cashTotal + optionsNetValue;
 
-    // ---- Filter + sort for the table ----
-    const tableRows = useMemo<HoldingsTableRow[]>(() => {
+    // ---- Filter, sort and small positions for the table ----
+    const table = useMemo<{ rows: HoldingsTableRow[]; smallPositions: SmallPositionsTableGroup | null }>(() => {
         const filtered = rows.filter((r) => {
             if (sectorFilter !== "All" && r.sector !== sectorFilter) return false;
             if (bucketFilter !== "All" && r.policyBucket !== bucketFilter) return false;
@@ -255,22 +256,12 @@ export function HoldingsPageClient({
         // combining keeps or drops every account's position in it together.
         const shown = bySymbol
             ? combineBySymbol(filtered)
-            : filtered.map((r) => ({ ...r, accounts: [r.account], partlyAtCost: false }));
-        const sorted = [...shown].sort((a, b) => {
-            switch (sortKey) {
-                case "marketValue":
-                    return b.marketValue - a.marketValue;
-                case "totalReturnPct":
-                    // Rows without a price sort last.
-                    return (b.totalReturnPct ?? -Infinity) - (a.totalReturnPct ?? -Infinity) || 0;
-                case "todayPct":
-                    // Rows without a move today sort last.
-                    return (b.todayPct ?? -Infinity) - (a.todayPct ?? -Infinity) || 0;
-                case "allocationPct":
-                    return b.allocationPct - a.allocationPct;
-            }
-        });
-        return sorted.map((r) => ({
+            : filtered.map((r) => ({ ...r, accounts: [r.account], accountIds: [r.accountId], partlyAtCost: false }));
+        // Small against every position's value, not the filtered rows': a
+        // filter never changes which positions are small, and the summary,
+        // buckets, themes and ledger above are over every row already.
+        const { shown: individual, small } = splitSmallPositions(sortHoldings(shown, sortKey), totalMV);
+        const toTableRow = (r: (typeof shown)[number]): HoldingsTableRow => ({
             id: r.id,
             symbol: r.symbol,
             name: r.name,
@@ -288,8 +279,22 @@ export function HoldingsPageClient({
             account: r.account,
             accounts: r.accounts,
             partlyAtCost: r.partlyAtCost,
-        }));
-    }, [rows, bySymbol, sectorFilter, bucketFilter, themeFilter, sortKey, policySummary]);
+        });
+        return {
+            rows: individual.map(toTableRow),
+            smallPositions: small && {
+                rows: small.rows.map(toTableRow),
+                marketValue: small.marketValue,
+                atCost: small.atCost,
+                partlyAtCost: small.partlyAtCost,
+                todayPct: small.todayPct,
+                totalReturnPct: small.totalReturnPct,
+                allocationPct: small.allocationPct,
+                accounts: small.accounts.map((a) => a.name),
+                limitLabel: smallPositionsLimitLabel(small.limitedBy),
+            },
+        };
+    }, [rows, totalMV, bySymbol, sectorFilter, bucketFilter, themeFilter, sortKey, policySummary]);
 
     const ledger = (
         <OptionsRiskLedgerCard
@@ -376,7 +381,7 @@ export function HoldingsPageClient({
                 onRowViewChange={hasSharedSymbols ? changeRowView : undefined}
             />
 
-            <HoldingsFullTable rows={tableRows} />
+            <HoldingsFullTable rows={table.rows} smallPositions={table.smallPositions} />
         </div>
     );
 }

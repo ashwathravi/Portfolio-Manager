@@ -17,7 +17,7 @@ test.describe('Help page', () => {
         await expect(steps.first().getByRole('link', { name: /Add an account/ })).toHaveAttribute('href', '/portfolios/accounts');
         await expect(page.getByTestId('help-getting-started').locator('a[href="/settings#accounts"]')).toHaveCount(0);
         const glossary = page.getByTestId('help-glossary');
-        for (const term of ['Bucket', 'Churn', 'Re-underwrite', 'Sample']) {
+        for (const term of ['Bucket', 'Churn', 'Re-underwrite', 'Sample', 'Small positions']) {
             await expect(glossary.locator('dt', { hasText: new RegExp(`^${term}$`) })).toBeVisible();
         }
         // Regression: nested <main> landmarks.

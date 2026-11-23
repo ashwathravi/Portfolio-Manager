@@ -4,6 +4,7 @@
  * checked against the live navigation in tests.
  */
 
+import { smallPositionsLimits } from '@/lib/holdings/small-positions';
 import { ADD_ACCOUNT_LINK, CONNECT_ACCOUNT_LINK } from '@/lib/portfolio/add-accounts';
 
 export interface GettingStartedStep {
@@ -74,6 +75,9 @@ export interface GlossaryTerm {
     href?: string;
 }
 
+/** From the rule Holdings groups by, so the two can't drift apart. */
+const SMALL = smallPositionsLimits();
+
 export const GLOSSARY: readonly GlossaryTerm[] = [
     { term: 'Alpha', definition: 'Your return minus the benchmark’s over the same period, in percentage points.', href: '/performance' },
     { term: 'Bucket', definition: 'A policy group for holdings — core, active, or speculative — each with a target share and a cap.', href: '/settings#risk-policy' },
@@ -88,6 +92,7 @@ export const GLOSSARY: readonly GlossaryTerm[] = [
     { term: 'Re-underwrite', definition: 'Re-read and update a thesis against current facts. Today asks for this when a thesis hasn’t been reviewed recently.', href: '/research' },
     { term: 'Sample', definition: 'Example data shown so you can explore before adding your accounts. It is always labelled and can be hidden in Settings › Data.', href: '/settings#data' },
     { term: 'Sell discipline', definition: 'Rules that trigger a trim, review, or no-add block when a position crosses a threshold you set.', href: '/settings#risk-policy' },
+    { term: 'Small positions', definition: `On Holdings, positions each worth under ${SMALL.value} and under ${SMALL.share} of your market value are shown together in one row you can open, once there are ${SMALL.minCount} or more. Every total still counts them.`, href: '/portfolios/holdings' },
     { term: 'Tax treatment', definition: 'How an account is taxed: taxable, like a regular brokerage account; tax-deferred, taxed when money comes out, like a traditional IRA or 401(k); or tax-free, like a Roth IRA. You set it on each account, and Accounts splits your value by it.', href: '/portfolios/accounts' },
     { term: 'Theme', definition: 'A cross-cutting exposure such as AI infrastructure or semiconductors, with its own cap.', href: '/portfolios/holdings' },
     { term: 'TWR', definition: 'Time-weighted return: performance that removes the effect of deposits and withdrawals.', href: '/performance' },

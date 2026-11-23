@@ -1,5 +1,6 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert';
+import { SMALL_POSITIONS_RULE } from '@/lib/holdings/small-positions';
 import { activeDestination } from '@/lib/navigation';
 import { GLOSSARY, gettingStarted } from './content';
 
@@ -52,5 +53,16 @@ describe('help content', () => {
             assert.strictEqual(entry.href, '/portfolios/accounts', t);
             assert.match(entry.definition, /Accounts splits your value by it\.$/, t);
         }
+    });
+
+    test('defines Small positions with the rule\'s own limits, linking to Holdings', () => {
+        const entry = GLOSSARY.find((g) => g.term === 'Small positions');
+        assert.ok(entry);
+        assert.strictEqual(entry.href, '/portfolios/holdings');
+        assert.deepStrictEqual({ ...SMALL_POSITIONS_RULE }, { maxValue: 500, maxShare: 0.005, minCount: 3 });
+        assert.strictEqual(
+            entry.definition,
+            'On Holdings, positions each worth under $500 and under 0.5% of your market value are shown together in one row you can open, once there are three or more. Every total still counts them.',
+        );
     });
 });

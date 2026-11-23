@@ -727,6 +727,227 @@ test.describe('Holdings › By symbol', () => {
     });
 });
 
+test.describe('Holdings › Small positions', () => {
+    // Positions worth very little are one row after the rest that opens in
+    // place (src/lib/holdings/small-positions.ts): each under $500 and under
+    // 0.5% of the table's market value, three or more, never every position
+    // shown. The made-up tickers (ZQA…ZQE, ZQ001…ZQ080) have no reference
+    // data or stored prices, so they're valued at cost unless a quote prices
+    // them, and their sector is Other.
+    test.skip(!databaseAuthEnabled, 'positions are imported into the database');
+
+    const group = (page: Page) => page.getByTestId('small-positions-group');
+    const toggle = (page: Page) => group(page).getByRole('button');
+    const members = (page: Page) => page.getByTestId('small-position-row');
+    const bodyRows = (page: Page) => page.getByTestId('holdings-table').locator('tbody > tr:not([aria-hidden])');
+    const symbols = (page: Page) => bodyRows(page).locator('.pm-holdings-sym');
+    const summaryValue = (page: Page, label: string) =>
+        page.locator('.pm-summary-cell').filter({ hasText: label }).locator('.pm-summary-value');
+    // $20,000 and $16,000 at cost, and five positions worth $10 to $15 at cost.
+    const ROBO_ROWS = [
+        { symbol: 'AAPL', name: 'Apple Inc.', quantity: 100, avgCost: 200 },
+        { symbol: 'MSFT', name: 'Microsoft Corp', quantity: 40, avgCost: 400 },
+        { symbol: 'ZQA', name: 'Fund A', quantity: 2, avgCost: 5 },
+        { symbol: 'ZQB', name: 'Fund B', quantity: 1, avgCost: 12 },
+        { symbol: 'ZQC', name: 'Fund C', quantity: 2, avgCost: 7 },
+        { symbol: 'ZQD', name: 'Fund D', quantity: 0.5, avgCost: 30 },
+        { symbol: 'ZQE', name: 'Fund E', quantity: 0.25, avgCost: 44 },
+    ];
+
+    async function importInto(page: Page, newPortfolioName: string, rows: readonly object[]): Promise<string> {
+        const res = await page.request.post('/api/portfolio/import', { data: { newPortfolioName, rows } });
+        expect(res.status()).toBe(200);
+        return (await res.json()).data.portfolioId;
+    }
+
+    /** Opens the group with Enter, pressed again if the first lands before the page hydrates. */
+    async function openWithKeyboard(page: Page) {
+        await expect(async () => {
+            if ((await toggle(page).getAttribute('aria-expanded')) !== 'true') {
+                await toggle(page).focus();
+                await page.keyboard.press('Enter');
+            }
+            await expect(toggle(page)).toHaveAttribute('aria-expanded', 'true', { timeout: 1_000 });
+        }).toPass({ timeout: 10_000 });
+    }
+
+    /** Opens the group with a click, again if the first lands before the page hydrates. */
+    async function openWithClick(page: Page) {
+        await expect(async () => {
+            if ((await toggle(page).getAttribute('aria-expanded')) !== 'true') await toggle(page).click();
+            await expect(toggle(page)).toHaveAttribute('aria-expanded', 'true', { timeout: 1_000 });
+        }).toPass({ timeout: 10_000 });
+    }
+
+    test.beforeEach(async ({ context, page }) => {
+        // A new user, so the book is exactly what each test imports.
+        await signInAsNewUser(context, { firstSignIn: true });
+        await page.route('**/api/market-data/historical**', (route) => route.fulfill({ status: 200, json: { data: [] } }));
+    });
+
+    test('positions worth very little are one row after the rest, which opens from the keyboard, and every total still counts them', async ({ page }) => {
+        // MSFT and ZQD have closes from three days ago: priced, with no move today.
+        const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
+        const close = (symbol: string, price: number) => ({ symbol, price, change: 0, changePercent: 0, timestamp: threeDaysAgo, kind: 'close', isRealtime: false });
+        await page.route('**/api/market-data/quotes**', (route) => route.fulfill({ status: 200, json: { data: [close('MSFT', 440), close('ZQD', 46)] } }));
+        const accountId = await importInto(page, 'Robo account', ROBO_ROWS);
+        const fund = await page.request.post('/api/portfolio/manual-holdings', {
+            data: { portfolioId: accountId, holding: { name: 'Plan fund', value: 5, valueAsOf: new Date().toISOString().slice(0, 10) } },
+        });
+        expect(fund.status()).toBe(201);
+        await gotoAppPage(page, '/portfolios/holdings');
+
+        // $37,670 in all: AAPL $20,000 at cost, MSFT $17,600, and five
+        // positions worth $10 to $23, each under 0.5% of it ($188.35). They're
+        // at cost until the quotes arrive ($62), then ZQD is at $46.
+        await expect(group(page).getByTestId('holding-value')).toHaveText('$70 partly at cost');
+        await expect(group(page).getByRole('button', { name: '5 small positions', exact: true })).toHaveAttribute('aria-expanded', 'false');
+        await expect(group(page).locator('.pm-small-positions-note')).toHaveText('Each under 0.5% of market value');
+        await expect(group(page).getByTestId('holding-today')).toHaveText('—');
+        // ZQD's $23 on $15; the others have no price, so no return.
+        await expect(group(page).getByRole('cell').nth(3)).toHaveText('+53.33%');
+        await expect(group(page).locator('.pm-alloc-bar-cell')).toHaveText('0.2%');
+        await expect(group(page).locator('.pm-account-pill')).toHaveText('Robo account');
+        // Closed, its positions aren't drawn, and it comes after every other row.
+        await expect(members(page)).toHaveCount(0);
+        await expect(symbols(page)).toHaveText(['AAPL', 'MSFT']);
+        await expect(bodyRows(page)).toHaveCount(3);
+        await expect(bodyRows(page).last()).toHaveAttribute('data-testid', 'small-positions-group');
+        // Every total still counts them.
+        await expect(summaryValue(page, 'Market value')).toHaveText('$37,670');
+        await expect(summaryValue(page, 'Positions')).toHaveText('7');
+        // A holding valued by hand stays in its own card, never in the group.
+        await expect(page.getByTestId('manual-holdings-table').getByRole('row').filter({ hasText: 'Plan fund' })).toContainText('$5.00');
+        await expect(toggle(page)).toHaveText('5 small positions');
+
+        // Enter opens it in place, its positions in the table's order, and
+        // the button keeps focus.
+        await openWithKeyboard(page);
+        await expect(toggle(page)).toBeFocused();
+        await expect(bodyRows(page)).toHaveCount(8);
+        await expect(bodyRows(page).nth(2)).toHaveAttribute('data-testid', 'small-positions-group');
+        await expect(symbols(page)).toHaveText(['AAPL', 'MSFT', 'ZQD', 'ZQC', 'ZQB', 'ZQE', 'ZQA']);
+        await expect(members(page).getByTestId('holding-value')).toHaveText(['$23', '$14 at cost', '$12 at cost', '$11 at cost', '$10 at cost']);
+
+        // Sorted by total return (MSFT +10.00%; AAPL has no price, so none),
+        // the group stays last and its positions follow the sort.
+        await page.getByLabel('Sort holdings by').selectOption('totalReturnPct');
+        await expect(symbols(page)).toHaveText(['MSFT', 'AAPL', 'ZQD', 'ZQA', 'ZQB', 'ZQC', 'ZQE']);
+        await expect(bodyRows(page).nth(2)).toHaveAttribute('data-testid', 'small-positions-group');
+
+        // Space closes it, focus staying on the button.
+        await toggle(page).focus();
+        await page.keyboard.press('Space');
+        await expect(toggle(page)).toHaveAttribute('aria-expanded', 'false');
+        await expect(toggle(page)).toBeFocused();
+        await expect(members(page)).toHaveCount(0);
+
+        // A filter that leaves only small positions lists them: a group
+        // never holds every position shown.
+        const sectors = page.getByRole('radiogroup', { name: 'Filter by sector' });
+        await sectors.getByRole('radio', { name: 'Other' }).click();
+        await expect(symbols(page)).toHaveText(['ZQD', 'ZQA', 'ZQB', 'ZQC', 'ZQE']);
+        await expect(group(page)).toHaveCount(0);
+        await sectors.getByRole('radio', { name: 'All' }).click();
+        await expect(toggle(page)).toHaveText('5 small positions');
+
+        // Left open, it's closed again on the next visit.
+        await openWithClick(page);
+        await reloadAppPage(page);
+        await expect(toggle(page)).toHaveAttribute('aria-expanded', 'false');
+        await expect(members(page)).toHaveCount(0);
+
+        // The account export keeps every holding, the one valued by hand too.
+        const exported = await (await page.request.get('/api/account/export')).json() as {
+            accounts: Array<{ name: string; holdings: Array<{ symbol: string }>; manualHoldings: Array<{ name: string }> }>;
+        };
+        const robo = exported.accounts.find((a) => a.name === 'Robo account');
+        expect(robo?.holdings.map((h) => h.symbol).sort()).toEqual(['AAPL', 'MSFT', 'ZQA', 'ZQB', 'ZQC', 'ZQD', 'ZQE']);
+        expect(robo?.manualHoldings.map((m) => m.name)).toEqual(['Plan fund']);
+    });
+
+    test('By symbol judges a symbol across its accounts, and an open group stays open across the switch', async ({ page }) => {
+        // No quotes: everything is valued at cost.
+        await page.route('**/api/market-data/quotes**', (route) => route.fulfill({ status: 200, json: { data: [] } }));
+        await importInto(page, 'Robo account', ROBO_ROWS);
+        await importInto(page, 'Brokerage', [{ symbol: 'ZQA', name: 'Fund A', quantity: 100, avgCost: 5 }]);
+        await gotoAppPage(page, '/portfolios/holdings');
+
+        // $36,562 in all, so a small position is under $182.81: Robo
+        // account's $10 of ZQA is, Brokerage's $500 isn't.
+        const zqa = bodyRows(page).filter({ has: page.getByText('ZQA', { exact: true }) });
+        await expect(symbols(page)).toHaveText(['AAPL', 'MSFT', 'ZQA']);
+        await expect(zqa.getByTestId('holding-value')).toHaveText('$500 at cost');
+        await expect(zqa.locator('.pm-account-pill')).toHaveText('Brokerage');
+        await expect(toggle(page)).toHaveText('5 small positions');
+        await expect(group(page).getByTestId('holding-value')).toHaveText('$62 at cost');
+        await expect(group(page).locator('.pm-account-pill')).toHaveText('Robo account');
+        await openWithClick(page);
+        await expect(members(page)).toHaveCount(5);
+        await expect(members(page).filter({ has: page.getByText('ZQA', { exact: true }) }).getByTestId('holding-value')).toHaveText('$10 at cost');
+
+        // By symbol, ZQA is worth $510 across its two accounts: a row of its
+        // own. The group is still open.
+        await page.getByRole('radiogroup', { name: 'Show holdings' }).getByRole('radio', { name: 'By symbol' }).click();
+        await expect(page).toHaveURL(/[?&]view=symbol(&|$)/);
+        await expect(toggle(page)).toHaveText('4 small positions');
+        await expect(toggle(page)).toHaveAttribute('aria-expanded', 'true');
+        await expect(group(page).getByTestId('holding-value')).toHaveText('$52 at cost');
+        await expect(members(page).locator('.pm-holdings-sym')).toHaveText(['ZQD', 'ZQC', 'ZQB', 'ZQE']);
+        await expect(zqa).toHaveCount(1);
+        await expect(zqa.getByTestId('holding-value')).toHaveText('$510 at cost');
+        await expect(zqa.getByRole('link', { name: '2 accounts: Brokerage, Robo account' })).toHaveAttribute('href', '/portfolios/detail/ZQA');
+    });
+
+    test('a long open group scrolls inside its card with focus kept on its button, and fits a phone', async ({ page }) => {
+        await page.route('**/api/market-data/quotes**', (route) => route.fulfill({ status: 200, json: { data: [] } }));
+        // Eighty positions worth $2 each, as a robo-advisor's fractional shares can be.
+        const funds = Array.from({ length: 80 }, (_, i) => ({ symbol: `ZQ${String(i + 1).padStart(3, '0')}`, name: `Fund ${i + 1}`, quantity: 1, avgCost: 2 }));
+        await importInto(page, 'Robo account', [...ROBO_ROWS.slice(0, 2), ...funds]);
+        await gotoAppPage(page, '/portfolios/holdings');
+
+        const card = page.locator('[data-virtualized]').filter({ has: page.getByTestId('holdings-table') });
+        await expect(toggle(page)).toHaveText('80 small positions');
+        await expect(group(page).getByTestId('holding-value')).toHaveText('$160 at cost');
+        await expect(group(page).locator('.pm-alloc-bar-cell')).toHaveText('0.4%');
+        await expect(card).toHaveAttribute('data-virtualized', 'false');
+
+        // Open, the table's 83 rows scroll inside the card, which draws only
+        // the rows around the group's: its button stays, with focus.
+        await openWithKeyboard(page);
+        await expect(card).toHaveAttribute('data-virtualized', 'true');
+        await expect(toggle(page)).toBeFocused();
+        await expect(toggle(page)).toBeInViewport();
+        await expect(members(page).first()).toBeVisible();
+        const drawn = await members(page).count();
+        expect(drawn).toBeGreaterThan(0);
+        expect(drawn).toBeLessThan(80);
+
+        await page.keyboard.press('Enter');
+        await expect(toggle(page)).toHaveAttribute('aria-expanded', 'false');
+        await expect(card).toHaveAttribute('data-virtualized', 'false');
+        await expect(toggle(page)).toBeFocused();
+        await expect(members(page)).toHaveCount(0);
+
+        // On a phone (loaded at that width, as smoke.spec.ts's phone checks
+        // are), it opens without the page scrolling sideways.
+        await page.setViewportSize({ width: 390, height: 844 });
+        await reloadAppPage(page);
+        await expect(toggle(page)).toBeVisible();
+        await openWithClick(page);
+        await expect(members(page).first()).toBeVisible();
+        const overflow = await page.evaluate(() => {
+            const main = document.querySelector('main');
+            return {
+                doc: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+                main: main ? main.scrollWidth - main.clientWidth : 0,
+            };
+        });
+        expect(overflow.doc).toBeLessThanOrEqual(1);
+        expect(overflow.main).toBeLessThanOrEqual(1);
+    });
+});
+
 test.describe('Holdings prices', () => {
     // Launch item i33: one line under the summary says what the prices are.
     test.beforeEach(async ({ page }) => {

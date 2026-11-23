@@ -35,3 +35,16 @@ test('transactionsCsvRows - every account\'s transactions, oldest first, dates a
     ]);
     assert.deepEqual(transactionsCsvRows(exported([])), []);
 });
+
+test('holdingsCsvRows - keeps a position worth a few dollars beside a large one: Holdings groups small positions only on screen', () => {
+    const data = exported([
+        account('Robo account', { holdings: [
+            { symbol: 'AAPL', name: 'Apple', quantity: 100, avgCost: 200, lastPrice: 210, updatedAt: '' },
+            { symbol: 'ZQA', name: 'Fund A', quantity: 2, avgCost: 1.5, lastPrice: 1.5, updatedAt: '' },
+        ] }),
+    ]);
+    assert.deepEqual(holdingsCsvRows(data), [
+        { account: 'Robo account', symbol: 'AAPL', name: 'Apple', quantity: 100, avg_cost: 200, cost_basis: 20000, last_price: 210 },
+        { account: 'Robo account', symbol: 'ZQA', name: 'Fund A', quantity: 2, avg_cost: 1.5, cost_basis: 3, last_price: 1.5 },
+    ]);
+});

@@ -74,6 +74,11 @@ describe("holdings / combineBySymbol", () => {
         assert.equal(aapl.totalReturnPct?.toFixed(2), "11.06");
         assert.equal(aapl.partlyAtCost, false);
         assert.deepEqual(aapl.accounts, ["Main Portfolio", "Roth IRA"]);
+        // The accounts' IDs line up with their names (here each ID is its name).
+        assert.deepEqual(aapl.accountIds, ["Main Portfolio", "Roth IRA"]);
+        // Every share has a price, so all of it is priced.
+        assert.equal(aapl.pricedValue, 114_000);
+        assert.equal(aapl.pricedCost, 102_650);
     });
 
     it("keeps a symbol held in one account as it was, under the symbol's ID", () => {
@@ -112,8 +117,10 @@ describe("holdings / combineBySymbol", () => {
         // By symbol E2E test failed about one run in four).
         for (const order of [["Roth IRA", "Main Portfolio", "brokerage"], ["Main Portfolio", "brokerage", "Roth IRA"]]) {
             const [row] = combineBySymbol(order.map((account, i) =>
-                position({ id: `h${i}`, symbol: "AAPL", accountId: account, account, quantity: 1 }, 1)));
+                position({ id: `h${i}`, symbol: "AAPL", accountId: `id-${account}`, account, quantity: 1 }, 1)));
             assert.deepEqual(row.accounts, ["brokerage", "Main Portfolio", "Roth IRA"], order.join(", "));
+            // The IDs follow the names, so each still matches its account.
+            assert.deepEqual(row.accountIds, ["id-brokerage", "id-Main Portfolio", "id-Roth IRA"], order.join(", "));
         }
     });
 
@@ -124,6 +131,7 @@ describe("holdings / combineBySymbol", () => {
         ]);
         assert.equal(row.quantity, 3);
         assert.deepEqual(row.accounts, ["Brokerage", "Brokerage"]);
+        assert.deepEqual(row.accountIds, ["p1", "p2"]);
     });
 
     it("adds up allocation and today's P&L, and keeps the symbol's move today", () => {
@@ -153,6 +161,8 @@ describe("holdings / combineBySymbol", () => {
         assert.equal(row.marketValue, 200);
         assert.equal(row.totalReturnPct, null);
         assert.equal(row.partlyAtCost, false);
+        assert.equal(row.pricedValue, 0);
+        assert.equal(row.pricedCost, 0);
     });
 
     it("with a price for some shares only, says so and returns over the priced shares", () => {
@@ -165,6 +175,9 @@ describe("holdings / combineBySymbol", () => {
         // 10 at $120 plus 10 at their $150 cost.
         assert.equal(row.marketValue, 2700);
         assert.equal(row.totalReturnPct, 20);
+        // The shares at cost are left out of what's priced.
+        assert.equal(row.pricedValue, 1200);
+        assert.equal(row.pricedCost, 1000);
     });
 
     it("with different stored prices, prices it at what its value implies", () => {
