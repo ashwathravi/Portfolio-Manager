@@ -1251,8 +1251,8 @@ test.describe('Holdings › Import CSV', () => {
     });
 
     test('regression: a file saved as UTF-16 previews and sends its names as written', async ({ page }) => {
-        // Read as UTF-8, its letters past ASCII came in garbled (é as U+FFFD),
-        // and 本 (U+672C) put a comma in its row.
+        // Read as UTF-8, as File.text() reads a file with no byte-order mark,
+        // its é came in as U+FFFD, and 本 (U+672C) put a comma in its row.
         let sent: Record<string, unknown> = {};
         await page.route('**/api/portfolio/import', async (route) => {
             sent = route.request().postDataJSON();
@@ -1262,12 +1262,13 @@ test.describe('Holdings › Import CSV', () => {
             } } });
         });
         await gotoAppPage(page, '/portfolios/holdings');
-        // As PowerShell's Export-Csv -Encoding Unicode saves a CSV: little-endian, after a byte-order mark.
-        await openImport(page, Buffer.from(`﻿${[
+        // Little-endian with no byte-order mark, as some exports save it: Chrome's
+        // File.text() reads a file that starts with a UTF-16 mark as UTF-16 already.
+        await openImport(page, Buffer.from([
             'Symbol,Description,Quantity,Average Cost,Market Value',
             'ACME,Sample 日本 Fund,10,200.00,2900.00',
             ',Sample Fonds Équilibré,120.5,,12500.00',
-        ].join('\r\n')}`, 'utf16le'));
+        ].join('\r\n'), 'utf16le'));
         const dialog = page.getByTestId('import-dialog');
         await expect(page.getByTestId('import-preview')).toContainText('positions.csv: 1 position and 1 valued by hand ready.');
         await expect(dialog.getByRole('table', { name: 'Positions to import' }).locator('tbody tr')).toContainText('Sample 日本 Fund');

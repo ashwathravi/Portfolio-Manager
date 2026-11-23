@@ -286,12 +286,13 @@ function utf16ByteOrder(data: Uint8Array): 'utf-16le' | 'utf-16be' | null {
  * A chosen file's bytes as text, for the parsers. A CSV saved as UTF-16
  * (by PowerShell's Export-Csv -Encoding Unicode, by Notepad saving it again
  * as UTF-16 LE or BE, by some exports) is read as UTF-16, by its byte-order
- * mark or, without one, by its zero bytes (utf16ByteOrder): read as UTF-8,
- * as File.text() reads every file, each character would come with a NUL,
- * and every letter past ASCII garbled. Anything else is read as UTF-8, a
- * byte that isn't valid in it becoming U+FFFD as before. Excel saves UTF-16
- * only as Unicode Text, whose cells are separated by tabs, which the
- * parsers don't read.
+ * mark or, without one, by its zero bytes (utf16ByteOrder). File.text()
+ * reads a file as UTF-8, Chrome's switching to UTF-16 only at a UTF-16
+ * byte-order mark, and a UTF-16 file read as UTF-8 comes in with a NUL
+ * after each character and every letter past ASCII garbled. Anything else
+ * is read as UTF-8, a byte that isn't valid in it becoming U+FFFD as
+ * before. Excel saves UTF-16 only as Unicode Text, whose cells are
+ * separated by tabs, which the parsers don't read.
  */
 export function decodeCsvBytes(bytes: ArrayBuffer | Uint8Array): string {
     const data = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
