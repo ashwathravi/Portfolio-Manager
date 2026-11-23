@@ -470,6 +470,24 @@ interface ContractLots {
     lots: OptionLot[];
 }
 
+/**
+ * The order a contract's lots are read in, whatever order Plaid lists them
+ * in: those with a price first, the newest price first, then the lowest. A
+ * price Plaid doesn't date is as of `undatedPriceDay`, as the sync dates
+ * it, or the newest without that day. The first lot's price is the one the
+ * readings are checked against (contractReading), and the one the row
+ * keeps, with its day.
+ */
+function lotOrder(undatedPriceDay: string | undefined): (a: OptionLot, b: OptionLot) => number {
+    const day = (lot: OptionLot) => lot.priceDate ?? undatedPriceDay ?? null;
+    return (a, b) => {
+        if ((a.price == null) !== (b.price == null)) return a.price == null ? 1 : -1;
+        const [dayA, dayB] = [day(a), day(b)];
+        if (dayA !== dayB) return dayA == null ? -1 : dayB == null ? 1 : dayB.localeCompare(dayA);
+        return (a.price ?? 0) - (b.price ?? 0);
+    };
+}
+
 /** The readings every lot of a contract reads in. */
 function sharedReadings(lots: readonly Pick<OptionLot, "readings">[]): OptionReading[] {
     return OPTION_READINGS.filter((reading) => lots.every((lot) => lot.readings.includes(reading)));
@@ -768,6 +786,8 @@ export function accountHoldings(
     const syncedContracts = evidence.syncedContracts?.get(accountId);
     const synced: { option: SyncedOptionContract; costKnown: boolean; label: string }[] = [];
     for (const [contract, held] of options) {
+        // The newest price first, so the lots read the same in any order Plaid lists them.
+        held.lots.sort(lotOrder(evidence.undatedPriceDay));
         const leaveOut = () => {
             for (const lot of held.lots) skipped.push({ reason: "option", name: lot.name });
             unread.add(contract);
@@ -778,7 +798,7 @@ export function accountHoldings(
         }
         const { underlying } = held.details;
         const stored = evidence.contractCloses?.get(contract);
-        // The readings are checked against the first lot's price: a close counts only from about its day.
+        // The readings are checked against the newest price, the first lot's: a close counts only from about its day.
         const close = closeForPriceDay(stored, held.lots[0].priceDate ?? evidence.undatedPriceDay ?? null);
         const reading = contractReading(held, {
             close,
@@ -807,7 +827,7 @@ export function accountHoldings(
             costKnown &&= lot.cost != null;
             long ||= lotContracts > 0;
             short ||= lotContracts < 0;
-            // The price and its day come from the same lot.
+            // The price and its day come from the same lot: the newest price (lotOrder).
             if (perShare == null && read.perShare != null) {
                 perShare = read.perShare;
                 priceDate = lot.priceDate;

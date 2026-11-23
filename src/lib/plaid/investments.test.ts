@@ -278,12 +278,18 @@ describe("accountHoldings: option contracts (launch item i63)", () => {
         ], [acmeCall()]);
         assert.deepEqual(dayWithoutPrice.options, [{ ...ACME, priceDate: "2026-10-23" }]);
 
-        // The first lot's price has no day: a later lot's day isn't its day.
-        const priceWithoutDay = accountHoldings(ACCOUNT, [
-            acmeHolding({ quantity: 100, institution_value: 420, cost_basis: 350 }),
-            acmeHolding({ quantity: 200, institution_price: 4.3, institution_value: 860, cost_basis: 700, institution_price_as_of: "2026-10-23" }),
-        ], [acmeCall()]);
-        assert.deepEqual(priceWithoutDay.options, [ACME]);
+        // A price with no day is the sync's, the newest: another lot's day isn't its day.
+        const undated = acmeHolding({ quantity: 100, institution_value: 420, cost_basis: 350 });
+        const dated = acmeHolding({ quantity: 200, institution_price: 4.3, institution_value: 860, cost_basis: 700, institution_price_as_of: "2026-10-23" });
+        for (const lots of [[undated, dated], [dated, undated]]) {
+            assert.deepEqual(accountHoldings(ACCOUNT, lots, [acmeCall()]).options, [ACME], String(lots[0].institution_price_as_of ?? "undated"));
+        }
+
+        // Prices of different days, in either order: the newest, with its day.
+        const tuesdays = acmeHolding({ quantity: 100, institution_value: 420, cost_basis: 350, institution_price_as_of: "2026-10-20" });
+        for (const lots of [[tuesdays, dated], [dated, tuesdays]]) {
+            assert.deepEqual(accountHoldings(ACCOUNT, lots, [acmeCall()]).options, [{ ...ACME, price: 4.3, priceDate: "2026-10-23" }], String(lots[0].institution_price_as_of));
+        }
     });
 
     test("an option with no contracts is dropped, not counted", () => {
@@ -303,6 +309,9 @@ describe("accountHoldings: option contracts (launch item i63)", () => {
         quantity: contracts, institution_price: 420, institution_value: contracts * 420, cost_basis: contracts * 350, ...fields,
     });
     const acmeStock = (price: number) => holding("acme", { quantity: 10, institution_price: price, institution_value: price * 10, cost_basis: 1000 });
+    // The day of the institution's price, and a session weeks before it.
+    const DAY = "2026-10-23";
+    const WEEKS_BEFORE = "2026-09-25";
 
     test("regression: a written put of 300 contracts priced per contract is 300 contracts at $4.20 a share, not 3 at $420", () => {
         // $420 a share on a $150 put is a price no put can have.
@@ -316,6 +325,15 @@ describe("accountHoldings: option contracts (launch item i63)", () => {
         for (const lots of [[perContract(100), perContract(50)], [perContract(50), perContract(100)]]) {
             const result = accountHoldings(ACCOUNT, lots, [acmeCall()]);
             assert.deepEqual(result.options, [{ ...ACME, quantity: 150, premium: 3.5, price: 4.2 }], JSON.stringify(lots.map((l) => l.quantity)));
+        }
+        // Lots priced on different days: a close is checked against the newest
+        // price, whichever lot Plaid lists first. Friday's close is from that
+        // price's session, two weeks after the other lot's.
+        const fridays = perContract(100, { institution_price_as_of: DAY });
+        const older = perContract(200, { institution_price_as_of: "2026-10-09" });
+        for (const lots of [[fridays, older], [older, fridays]]) {
+            const result = accountHoldings(ACCOUNT, lots, [acmeCall()], { contractCloses: new Map([["O:ACME270115C00150000", { close: 4.25, date: DAY }]]) });
+            assert.deepEqual(result.options, [{ ...ACME, quantity: 300, premium: 3.5, price: 4.2, priceDate: DAY }], lots.map((l) => l.institution_price_as_of).join());
         }
     });
 
@@ -337,10 +355,6 @@ describe("accountHoldings: option contracts (launch item i63)", () => {
         const exercised = accountHoldings(ACCOUNT, [acmeHolding({ institution_price: 10.5, institution_value: 3150 }), put, acmeStock(160)], [acmeCall(), acmePut(), security("acme")]);
         assert.deepEqual(exercised.options[0], { ...ACME, price: 10.5 });
     });
-
-    // The day of the institution's price, and a session weeks before it.
-    const DAY = "2026-10-23";
-    const WEEKS_BEFORE = "2026-09-25";
 
     test("the stored close and the underlying's stored price settle a contract that reads two ways", () => {
         const contract = "O:ACME270115C00150000";
