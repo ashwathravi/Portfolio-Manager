@@ -160,7 +160,7 @@ Every ID from a URL or body is checked against the session's user, in the WHERE 
 - In GitHub, the owner connection and the Vercel token live in the `production` environment, which admits only master.
 - Secret scanning and push protection are on, with no open alerts.
 - Errors reaching Sentry lose cookies, bodies and query strings, and keep only five harmless request headers. Secrets are masked anywhere in an event (`src/lib/observability/sentry-options.ts`).
-- API errors answer a fixed message (`internalServerError`).
+- API errors answer a fixed message, and are logged as one line of JSON, so a line break in an error's message can't start a log line of its own (`internalServerError`).
 
 **Browser**
 - **Content-Security-Policy:** a fresh nonce on every response, with `'strict-dynamic'` and no `'unsafe-inline'` for scripts (`content-security-policy.spec.ts`).
