@@ -1,8 +1,11 @@
 import Link from "next/link";
+import { DataUnavailableNotice } from "@/components/data-display/DataUnavailableNotice";
 import { accountKindLine } from "@/lib/portfolio/account-kinds";
 import type { AccountRow, AccountsSummary } from "@/lib/portfolio/accounts";
+import type { NetWorthItemRow } from "@/lib/portfolio/net-worth";
 import { formatPct, formatShortDate, formatUsd } from "@/lib/format";
 import { AccountRowActions, NewAccountButton } from "./AccountControls";
+import { NetWorthItemsCard } from "./NetWorthItemsCard";
 
 /**
  * Portfolio › Accounts. Every figure comes from the user's portfolios in
@@ -14,8 +17,36 @@ import { AccountRowActions, NewAccountButton } from "./AccountControls";
  * x30). Without it Settings says bank linking isn't set up and points back
  * here, so the empty state leads with adding an account by hand and has no
  * Connect link.
+ *
+ * Under the accounts, even before there are any, the Other assets and debts
+ * card (NetWorthItemsCard) holds what the user owns and owes outside them,
+ * which Today adds up as the net worth.
  */
-export function AccountsView({ rows, summary, bankLinking }: { rows: AccountRow[]; summary: AccountsSummary; bankLinking: boolean }) {
+export interface AccountsViewProps {
+    rows: AccountRow[];
+    summary: AccountsSummary;
+    bankLinking: boolean;
+    /**
+     * The user's other assets and debts; "unavailable" when they couldn't be
+     * read, and null (or left out) without a database, with nowhere to keep
+     * them, so there is no card.
+     */
+    netWorth?: { items: NetWorthItemRow[] } | "unavailable" | null;
+}
+
+interface OtherAssetsAndDebtsProps {
+    netWorth: AccountsViewProps["netWorth"];
+    accountsTotal: number;
+}
+
+/** The Other assets and debts card, its outage notice, or nothing. */
+function OtherAssetsAndDebts({ netWorth, accountsTotal }: OtherAssetsAndDebtsProps) {
+    if (netWorth === "unavailable") return <DataUnavailableNotice what="your other assets and debts" />;
+    if (!netWorth) return null;
+    return <NetWorthItemsCard items={netWorth.items} accountsTotal={accountsTotal} />;
+}
+
+export function AccountsView({ rows, summary, bankLinking, netWorth = null }: AccountsViewProps) {
     if (rows.length === 0) {
         return (
             <div className="pm-page" data-testid="accounts-view">
@@ -40,6 +71,7 @@ export function AccountsView({ rows, summary, bankLinking }: { rows: AccountRow[
                         </div>
                     )}
                 </section>
+                <OtherAssetsAndDebts netWorth={netWorth} accountsTotal={0} />
             </div>
         );
     }
@@ -106,6 +138,7 @@ export function AccountsView({ rows, summary, bankLinking }: { rows: AccountRow[
                     </table>
                 </div>
             </section>
+            <OtherAssetsAndDebts netWorth={netWorth} accountsTotal={summary.totalUsd} />
         </div>
     );
 }

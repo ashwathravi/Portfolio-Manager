@@ -1,10 +1,12 @@
 import { test, expect, type Page } from '@playwright/test';
 import { gotoAppPage, reloadAppPage } from './helpers/app';
-import { signInAsFreshUser, signInAsNewUser } from './helpers/users';
+import { e2eDatabase, signInAsFreshUser, signInAsNewUser } from './helpers/users';
 
 const databaseAuthEnabled = Boolean(process.env.CI || process.env.E2E_DATABASE_AUTH === '1');
 // User B's account, which no one else may see or change.
 const OTHER_USERS_ACCOUNT = '00000000-0000-4000-8000-000000000009';
+// User B's one other asset ("Other User Asset Sentinel"), the same.
+const OTHER_USERS_ITEM = '00000000-0000-4000-8000-000000000701';
 
 /**
  * Portfolio › Accounts (/portfolios/accounts). Replaces the retired
@@ -219,3 +221,224 @@ test.describe('Portfolio › Accounts — managing accounts', () => {
     });
 });
 
+
+// Other assets and debts: what the user owns and owes outside their
+// accounts, which Today adds up as the net worth.
+test.describe('Portfolio › Accounts — other assets and debts', () => {
+    test.skip(!databaseAuthEnabled, 'requires the database-auth E2E mode');
+
+    const HOME = { kind: 'asset', category: 'property', name: 'Home', value: 300_000, valueAsOf: '2026-11-01' };
+    let userId = '';
+
+    test.beforeEach(async ({ context }) => {
+        // Each test adds its own: a user of its own, with nothing yet.
+        userId = (await signInAsNewUser(context, { firstSignIn: true })) ?? '';
+    });
+
+    /** A "Brokerage" account with $1,000 of cash, made through the API. */
+    async function brokerage(page: Page) {
+        const created = await page.request.post('/api/portfolios', { data: { name: 'Brokerage', cashBalance: 1_000 } });
+        expect(created.status()).toBe(201);
+    }
+    const card = (page: Page) => page.getByTestId('net-worth-items');
+    const item = (page: Page, name: string) => page.getByTestId('net-worth-items-table').getByRole('row').filter({ hasText: name });
+    /** The figure under a label in the card's strip. */
+    const figure = (page: Page, label: string) => page.getByTestId('net-worth-summary').locator('div').filter({ has: page.getByText(label, { exact: true }) }).locator('dd');
+
+    async function add(page: Page, kind: 'asset' | 'debt', fields: { type?: string; name?: string; value?: string; asOf?: string; note?: string }) {
+        await card(page).getByRole('button', { name: kind === 'asset' ? 'Add asset' : 'Add debt' }).click();
+        const dialog = page.getByRole('dialog');
+        await expect(dialog.getByRole('heading', { name: kind === 'asset' ? 'Add an asset' : 'Add a debt' })).toBeVisible();
+        if (fields.type !== undefined) await dialog.getByLabel('Type').selectOption({ label: fields.type });
+        if (fields.name !== undefined) await dialog.getByLabel('Name').fill(fields.name);
+        if (fields.value !== undefined) await dialog.getByLabel(kind === 'asset' ? 'Value ($)' : 'Balance owed ($)').fill(fields.value);
+        if (fields.asOf !== undefined) await dialog.getByLabel('As of').fill(fields.asOf);
+        if (fields.note !== undefined) await dialog.getByLabel('Note (optional)').fill(fields.note);
+        await dialog.getByRole('button', { name: kind === 'asset' ? 'Add asset' : 'Add debt' }).click();
+        return dialog;
+    }
+
+    test('an asset and a debt added from the card are totalled with the accounts, and still there after a reload', async ({ page }) => {
+        await brokerage(page);
+        await gotoAppPage(page, '/portfolios/accounts');
+        await expect(card(page)).toContainText('What you own and owe outside your accounts');
+
+        // The name starts as the type until one is typed.
+        await card(page).getByRole('button', { name: 'Add asset' }).click();
+        const dialog = page.getByRole('dialog');
+        await expect(dialog.getByLabel('Name')).toHaveValue('Home or property');
+        await dialog.getByLabel('Type').selectOption({ label: 'Vehicle' });
+        await expect(dialog.getByLabel('Name')).toHaveValue('Vehicle');
+        await dialog.getByRole('button', { name: 'Cancel' }).click();
+
+        await expect(await add(page, 'asset', { type: 'Home or property', name: 'Home', value: '300,000', asOf: '2026-11-01', note: 'Estimate' })).toBeHidden();
+        await expect(page.getByText('Home added.')).toBeVisible();
+        await expect(await add(page, 'debt', { value: '200000', asOf: '2026-10-15' })).toBeHidden();
+
+        for (const reloaded of [false, true]) {
+            if (reloaded) await reloadAppPage(page);
+            await expect(item(page, 'Home')).toContainText('Home or property');
+            await expect(item(page, 'Home')).toContainText('$300,000.00');
+            await expect(item(page, 'Home')).toContainText('Estimate');
+            await expect(item(page, 'Home')).toContainText('Nov 1, 2026');
+            // The debt's name was left as its type.
+            await expect(item(page, 'Mortgage')).toContainText('−$200,000.00');
+            await expect(item(page, 'Mortgage')).toContainText('Oct 15, 2026');
+            // A debt is owed, not a loss: never in red.
+            await expect(card(page).locator('.pm-neg')).toHaveCount(0);
+            await expect(card(page)).toContainText('1 asset and 1 debt, at the values and dates you gave');
+            await expect(figure(page, 'Your accounts')).toHaveText('$1,000.00');
+            await expect(figure(page, 'Other assets')).toHaveText('$300,000.00');
+            await expect(figure(page, 'Debts')).toHaveText('−$200,000.00');
+            await expect(figure(page, 'Net worth')).toHaveText('$101,000.00');
+        }
+
+        // Another user's item is never among them.
+        await expect(page.getByText('Other User Asset Sentinel')).toHaveCount(0);
+
+        // The card fits a phone's width: its table scrolls inside it.
+        await page.setViewportSize({ width: 390, height: 844 });
+        await expect(async () => {
+            const overflow = await page.evaluate(() => {
+                const main = document.querySelector('main');
+                return Math.max(document.documentElement.scrollWidth - document.documentElement.clientWidth, main ? main.scrollWidth - main.clientWidth : 0);
+            });
+            expect(overflow).toBeLessThanOrEqual(1);
+        }).toPass({ timeout: 5_000 });
+    });
+
+    test('an item\'s value and date are updated, keeping the earlier value; deleting one asks first', async ({ page }) => {
+        await brokerage(page);
+        for (const data of [HOME, { kind: 'debt', category: 'auto_loan', name: 'Car loan', value: 12_000, valueAsOf: '2026-11-01' }]) {
+            expect((await page.request.post('/api/portfolio/net-worth-items', { data })).status()).toBe(201);
+        }
+        await gotoAppPage(page, '/portfolios/accounts');
+
+        await page.getByRole('button', { name: 'Actions for Home' }).click();
+        await page.getByRole('menuitem', { name: 'Update' }).click();
+        const dialog = page.getByRole('dialog');
+        await expect(dialog.getByRole('heading', { name: 'Update Home' })).toBeVisible();
+        await expect(dialog.getByLabel('Value ($)')).toHaveValue('300000');
+        await dialog.getByLabel('Value ($)').fill('320,000');
+        await dialog.getByLabel('As of').fill('2026-11-20');
+        await dialog.getByRole('button', { name: 'Save' }).click();
+        await expect(dialog).toBeHidden();
+        await expect(page.getByText('Home updated.')).toBeVisible();
+        await expect(item(page, 'Home')).toContainText('$320,000.00');
+        await expect(item(page, 'Home')).toContainText('Nov 20, 2026');
+        await expect(figure(page, 'Net worth')).toHaveText('$309,000.00');
+        // Each value is kept as of its day.
+        const values = await e2eDatabase()<{ date: string; value: string }[]>`
+            SELECT to_char(v.date, 'YYYY-MM-DD') AS date, v.value::text AS value
+            FROM net_worth_item_values v JOIN net_worth_items i ON i.id = v.net_worth_item_id
+            WHERE i.user_id = ${userId} AND i.name = 'Home'
+            ORDER BY v.date`;
+        expect(values.map((v) => [v.date, Number(v.value)])).toEqual([['2026-11-01', 300_000], ['2026-11-20', 320_000]]);
+
+        const asked: string[] = [];
+        page.on('dialog', (confirm) => {
+            asked.push(confirm.message());
+            void confirm.accept();
+        });
+        await page.getByRole('button', { name: 'Actions for Car loan' }).click();
+        await page.getByRole('menuitem', { name: 'Delete' }).click();
+        await expect(item(page, 'Car loan')).toHaveCount(0);
+        expect(asked).toEqual(['Delete Car loan? It stops counting in your net worth.']);
+        await expect(figure(page, 'Debts')).toHaveText('$0.00');
+        await expect(figure(page, 'Net worth')).toHaveText('$321,000.00');
+        await expect(card(page)).toContainText('1 asset, at the value and date you gave');
+
+        await page.getByRole('button', { name: 'Actions for Home' }).click();
+        await page.getByRole('menuitem', { name: 'Delete' }).click();
+        await expect(page.getByTestId('net-worth-items-table')).toHaveCount(0);
+        await expect(page.getByTestId('net-worth-summary')).toHaveCount(0);
+        await expect(card(page)).toContainText('Add one and Today shows your net worth.');
+    });
+
+    test('a bad entry is explained in the form, and nothing is saved', async ({ page }) => {
+        await brokerage(page);
+        await gotoAppPage(page, '/portfolios/accounts');
+
+        const dialog = await add(page, 'asset', { name: '  ', value: '5000' });
+        const error = dialog.getByTestId('net-worth-item-error');
+        await expect(error).toHaveText('Name the asset or debt');
+        await dialog.getByLabel('Name').fill('Car');
+        await dialog.getByLabel('Value ($)').fill('-5');
+        await dialog.getByRole('button', { name: 'Add asset' }).click();
+        await expect(error).toHaveText("Enter what it's worth, in dollars");
+        await dialog.getByLabel('Value ($)').fill('5000');
+        await dialog.getByLabel('As of').fill('');
+        await dialog.getByRole('button', { name: 'Add asset' }).click();
+        await expect(error).toHaveText('Enter the date of the value');
+        // What the server refuses is said the same way.
+        await dialog.getByLabel('As of').fill('2026-11-01');
+        await dialog.getByLabel('Name').fill('<b>Car</b>');
+        await dialog.getByRole('button', { name: 'Add asset' }).click();
+        await expect(error).toHaveText('Input contains invalid characters (< or >)');
+        await expect(dialog).toBeVisible();
+        await dialog.getByRole('button', { name: 'Cancel' }).click();
+
+        const debt = await add(page, 'debt', { value: 'lots' });
+        await expect(debt.getByTestId('net-worth-item-error')).toHaveText('Enter the balance owed, in dollars');
+        await debt.getByRole('button', { name: 'Cancel' }).click();
+
+        await reloadAppPage(page);
+        await expect(page.getByTestId('net-worth-items-table')).toHaveCount(0);
+        await expect(card(page)).toContainText('Add one and Today shows your net worth.');
+    });
+
+    test('before any account, the card is under the empty state, and the net worth is the assets less the debts', async ({ page }) => {
+        expect((await page.request.post('/api/portfolio/net-worth-items', { data: HOME })).status()).toBe(201);
+        expect((await page.request.post('/api/portfolio/net-worth-items', {
+            data: { kind: 'debt', category: 'credit_card', name: 'Card', value: 4_999.5, valueAsOf: '2026-11-20' },
+        })).status()).toBe(201);
+        await gotoAppPage(page, '/portfolios/accounts');
+        await expect(page.getByTestId('accounts-empty')).toBeVisible();
+        await expect(page.getByTestId('accounts-view').locator('[data-testid="accounts-empty"] + [data-testid="net-worth-items"]')).toBeVisible();
+        await expect(figure(page, 'Your accounts')).toHaveText('$0.00');
+        await expect(figure(page, 'Debts')).toHaveText('−$4,999.50');
+        await expect(figure(page, 'Net worth')).toHaveText('$295,000.50');
+    });
+
+    test('the API changes only your own items', async ({ page, playwright }) => {
+        const created = await page.request.post('/api/portfolio/net-worth-items', { data: HOME });
+        expect(created.status()).toBe(201);
+        const { data: { id } } = await created.json() as { data: { id: string } };
+        const saved = await page.request.put(`/api/portfolio/net-worth-items/${id}`, { data: { ...HOME, value: 310_000, valueAsOf: '2026-11-15' } });
+        expect(saved.status()).toBe(200);
+        expect(await saved.json()).toEqual({ data: { id } });
+
+        // Another user's item, or an ID that can't be one, is not found, and stays as it was.
+        for (const response of [
+            await page.request.put(`/api/portfolio/net-worth-items/${OTHER_USERS_ITEM}`, { data: HOME }),
+            await page.request.delete(`/api/portfolio/net-worth-items/${OTHER_USERS_ITEM}`),
+            await page.request.put('/api/portfolio/net-worth-items/not-a-uuid', { data: HOME }),
+            await page.request.delete('/api/portfolio/net-worth-items/not-a-uuid'),
+        ]) {
+            expect(response.status()).toBe(404);
+            expect(await response.json()).toEqual({ error: 'Asset or debt not found', code: 'NET_WORTH_ITEM_NOT_FOUND' });
+        }
+        const [sentinel] = await e2eDatabase()<{ name: string; value: string }[]>`SELECT name, value::text AS value FROM net_worth_items WHERE id = ${OTHER_USERS_ITEM}`;
+        expect({ ...sentinel }).toEqual({ name: 'Other User Asset Sentinel', value: '999.00' });
+
+        const mismatched = await page.request.post('/api/portfolio/net-worth-items', { data: { ...HOME, category: 'mortgage' } });
+        expect(mismatched.status()).toBe(400);
+        expect(await mismatched.json()).toEqual({ error: 'Choose a kind of asset', code: 'INVALID_NET_WORTH_ITEM' });
+        expect((await page.request.post('/api/portfolio/net-worth-items', { data: { ...HOME, userId: 'someone-else' } })).status()).toBe(400);
+        expect((await page.request.post('/api/portfolio/net-worth-items', { data: { ...HOME, note: 'n'.repeat(5 * 1024) } })).status()).toBe(413);
+
+        expect((await page.request.delete(`/api/portfolio/net-worth-items/${id}`)).status()).toBe(204);
+        expect((await page.request.delete(`/api/portfolio/net-worth-items/${id}`)).status()).toBe(404);
+
+        // A request context of its own: the page's background requests keep
+        // setting the session cookie on the shared one.
+        const anonymous = await playwright.request.newContext({
+            baseURL: 'http://localhost:3000',
+            storageState: { cookies: [], origins: [] },
+        });
+        expect((await anonymous.post('/api/portfolio/net-worth-items', { data: HOME })).status()).toBe(401);
+        expect((await anonymous.put(`/api/portfolio/net-worth-items/${OTHER_USERS_ITEM}`, { data: HOME })).status()).toBe(401);
+        expect((await anonymous.delete(`/api/portfolio/net-worth-items/${OTHER_USERS_ITEM}`)).status()).toBe(401);
+        await anonymous.dispose();
+    });
+});

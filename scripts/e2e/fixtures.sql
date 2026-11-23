@@ -69,6 +69,17 @@ VALUES
   ('00000000-0000-4000-8000-000000000209', '00000000-0000-4000-8000-000000000009', now(), 'BUY', 'XUSR', 1, 999.00, 999.00, 'Cross tenant sentinel')
 ON CONFLICT (id) DO NOTHING;
 
+-- User B's one other asset, with its value kept for its day: user A must
+-- never see, change or delete it. User A has none, so A's Today stays the
+-- portfolio value, and a fresh copy of A (signInAsFreshUser) starts with none.
+INSERT INTO net_worth_items (id, user_id, kind, category, name, value, value_as_of)
+VALUES ('00000000-0000-4000-8000-000000000701', '00000000-0000-4000-8000-00000000a002', 'asset', 'other_asset', 'Other User Asset Sentinel', 999.00, '2026-10-01')
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO net_worth_item_values (net_worth_item_id, date, value)
+VALUES ('00000000-0000-4000-8000-000000000701', '2026-10-01', 999.00)
+ON CONFLICT (net_worth_item_id, date) DO NOTHING;
+
 -- Two stored closes for a symbol nobody holds, ending on the Eastern date the
 -- fixtures were applied: the position detail page has a closing quote from
 -- "today" to label, and to stop labelling once the date moves on.
