@@ -6403,6 +6403,13 @@
   font-weight: 700;
 }
 
+/* "By hand" where a holding valued by hand has no ticker: a tag, not a symbol. */
+.pm-bucket-holding-symbol[data-hand-valued="true"] {
+  color: var(--pm-fg-muted);
+  font-family: inherit;
+  font-weight: 600;
+}
+
 .pm-bucket-holding-name {
   overflow: hidden;
   color: var(--pm-fg-muted);

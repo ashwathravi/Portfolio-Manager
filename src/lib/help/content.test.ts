@@ -44,6 +44,8 @@ describe('help content', () => {
 
     test('defines the policy terms the review found unexplained', () => {
         for (const t of ['Bucket', 'Churn', 'Re-underwrite']) assert.ok(GLOSSARY.some((g) => g.term === t), t);
+        // A holding valued by hand takes a bucket too, core until one is chosen.
+        assert.match(GLOSSARY.find((g) => g.term === 'Bucket')?.definition ?? '', /\(one valued by hand in core\) until you choose another in Settings\.$/);
     });
 
     test('defines the terms Accounts splits your value by, each linking there', () => {

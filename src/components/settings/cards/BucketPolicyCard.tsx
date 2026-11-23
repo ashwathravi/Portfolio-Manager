@@ -7,8 +7,11 @@ import {
     DEFAULT_BUCKET_POLICIES,
     POLICY_BUCKETS,
     POLICY_BUCKET_META,
+    bucketChoiceKey,
     computeBucketAllocation,
     normalizeTicker,
+    policyHandValued,
+    policyHoldingLabel,
     policyHoldings,
     withBucketChoice,
     type AssignablePolicyBucket,
@@ -21,10 +24,18 @@ import { useSettingsStore } from "@/lib/stores/settingsStore";
 
 type BucketPolicyField = "targetPct" | "minPct" | "maxPct";
 
-/** One ticker the user holds (in any account), with the bucket it starts in. */
-interface HeldTicker {
-    symbol: string;
+/**
+ * One row of Your holdings: a ticker the user holds (in any account), or a
+ * holding valued by hand, with the bucket it starts in.
+ */
+interface HoldingRow {
+    /** What the choice for it goes by (`bucketChoiceKey`). */
+    key: string;
+    /** Null for a holding valued by hand. */
+    ticker: string | null;
     name: string;
+    /** The account a holding valued by hand is in. */
+    account?: string;
     marketValue: number;
     defaultBucket: PolicyBucketId | null;
 }
@@ -32,8 +43,9 @@ interface HeldTicker {
 /**
  * Bucket policy (launch item i54): the targets and caps for each bucket,
  * and which bucket each of the user's holdings is in. A holding starts in
- * the bucket its type suggests (funds core, single stocks active ideas…)
- * until the user chooses one; the preview is their own portfolio.
+ * the bucket its type suggests (funds core, single stocks active ideas…),
+ * and one valued by hand in core, until the user chooses one; the preview
+ * is their own portfolio.
  */
 export function BucketPolicyCard() {
     const riskPolicy = useSettingsStore((s) => s.riskPolicy);
@@ -45,9 +57,11 @@ export function BucketPolicyCard() {
         () => new Map(policies.map((policy) => [policy.bucket, policy])),
         [policies],
     );
-    // Cash counts as the cash reserve, as in the policy checks on Today.
+    // Holdings valued by hand count in the bucket chosen for each, and cash
+    // as the cash reserve, as in the policy checks on Today.
     const holdings = useMemo<PolicyClassifiableHolding[]>(() => [
         ...policyHoldings(portfolio.holdings, riskPolicy),
+        ...policyHandValued(portfolio.handValued ?? [], riskPolicy),
         ...(portfolio.cashTotal > 0
             ? [{ id: "cash-reserve", symbol: "USD", name: "Cash", marketValue: portfolio.cashTotal, policyBucket: "cash_reserve" as const }]
             : []),
@@ -56,23 +70,33 @@ export function BucketPolicyCard() {
         () => computeBucketAllocation(holdings, policies),
         [holdings, policies],
     );
-    const held = useMemo<HeldTicker[]>(() => {
-        const bySymbol = new Map<string, HeldTicker>();
+    const rows = useMemo<HoldingRow[]>(() => {
+        const bySymbol = new Map<string, HoldingRow>();
         for (const holding of portfolio.holdings) {
             const symbol = normalizeTicker(holding.symbol);
             const existing = bySymbol.get(symbol);
             if (existing) existing.marketValue += holding.marketValue;
-            else bySymbol.set(symbol, { symbol, name: holding.name, marketValue: holding.marketValue, defaultBucket: holding.defaultBucket });
+            else bySymbol.set(symbol, { key: bucketChoiceKey(symbol), ticker: symbol, name: holding.name, marketValue: holding.marketValue, defaultBucket: holding.defaultBucket });
         }
-        return [...bySymbol.values()].sort((a, b) => b.marketValue - a.marketValue);
-    }, [portfolio.holdings]);
+        // Each holding valued by hand is its own row, even beside another of the same name.
+        const handValued = (portfolio.handValued ?? []).map((holding): HoldingRow => ({
+            key: bucketChoiceKey(holding.symbol),
+            ticker: null,
+            name: holding.name,
+            account: holding.account,
+            marketValue: holding.marketValue,
+            defaultBucket: "core",
+        }));
+        return [...bySymbol.values(), ...handValued].sort((a, b) => b.marketValue - a.marketValue);
+    }, [portfolio.holdings, portfolio.handValued]);
+    const anyHandValued = rows.some((row) => row.ticker === null);
 
-    const chooseBucket = (symbol: string, value: string) => {
+    const chooseBucket = (key: string, value: string) => {
         const bucket = (ASSIGNABLE_POLICY_BUCKETS as readonly string[]).includes(value)
             ? (value as AssignablePolicyBucket)
             : null;
         updateRiskPolicy({
-            bucketAssignments: withBucketChoice(assignments, symbol, bucket, held.map((ticker) => ticker.symbol)),
+            bucketAssignments: withBucketChoice(assignments, key, bucket, rows.map((row) => row.key)),
         });
     };
     const rowByBucket = useMemo(
@@ -172,7 +196,7 @@ export function BucketPolicyCard() {
                                     <p className="pm-bucket-policy-current">
                                         Current {formatPct(row?.percentOfPortfolio ?? 0)}
                                         {row && row.contributors.length > 0
-                                            ? ` from ${row.contributors.slice(0, 3).map((item) => item.symbol).join(", ")}`
+                                            ? ` from ${row.contributors.slice(0, 3).map((item) => policyHoldingLabel(item.symbol, item.name)).join(", ")}`
                                             : ""}
                                     </p>
                                 </div>
@@ -204,7 +228,7 @@ export function BucketPolicyCard() {
                         <p className="pm-churn-policy-note" data-testid="bucket-holdings-unavailable">
                             Your holdings couldn&apos;t be loaded, so there&apos;s nothing to sort into buckets right now.
                         </p>
-                    ) : held.length === 0 ? (
+                    ) : rows.length === 0 ? (
                         <p className="pm-churn-policy-note" data-testid="bucket-holdings-empty">
                             Once an account has holdings, they&apos;re listed here and you choose the bucket each one is in.
                         </p>
@@ -212,32 +236,40 @@ export function BucketPolicyCard() {
                         <>
                             <p className="pm-churn-policy-note">
                                 Each holding starts in the bucket its type suggests: funds and bonds core, single stocks
-                                active ideas, crypto and warrants speculative. Choose another where that&apos;s wrong.
+                                active ideas, crypto and warrants speculative.
+                                {anyHandValued ? " Holdings valued by hand start in core." : ""} Choose another where
+                                that&apos;s wrong.
                             </p>
                             <ul className="pm-bucket-holding-list" aria-label="Bucket for each holding">
-                                {held.map((ticker) => {
+                                {rows.map((holding) => {
                                     const total = allocation.totalMarketValue;
+                                    const byHand = holding.ticker === null ? "true" : undefined;
                                     return (
                                         <li
-                                            key={ticker.symbol}
+                                            key={holding.key}
                                             className="pm-bucket-holding-row"
                                             data-testid="bucket-holding"
-                                            data-symbol={ticker.symbol}
+                                            data-symbol={holding.key}
+                                            data-hand-valued={byHand}
                                         >
-                                            <span className="pm-bucket-holding-symbol">{ticker.symbol}</span>
-                                            <span className="pm-bucket-holding-name">{ticker.name}</span>
+                                            <span className="pm-bucket-holding-symbol" data-hand-valued={byHand}>
+                                                {holding.ticker ?? "By hand"}
+                                            </span>
+                                            <span className="pm-bucket-holding-name">
+                                                {holding.account ? `${holding.name} · ${holding.account}` : holding.name}
+                                            </span>
                                             <span className="pm-bucket-holding-pct">
-                                                {formatPct(total > 0 ? (ticker.marketValue / total) * 100 : 0)}
+                                                {formatPct(total > 0 ? (holding.marketValue / total) * 100 : 0)}
                                             </span>
                                             <select
                                                 className="pm-settings-select"
-                                                value={assignments[ticker.symbol] ?? ""}
-                                                onChange={(event) => chooseBucket(ticker.symbol, event.target.value)}
-                                                aria-label={`${ticker.symbol} bucket`}
+                                                value={assignments[holding.key] ?? ""}
+                                                onChange={(event) => chooseBucket(holding.key, event.target.value)}
+                                                aria-label={bucketSelectLabel(holding)}
                                             >
                                                 <option value="">
-                                                    {ticker.defaultBucket
-                                                        ? `${POLICY_BUCKET_META[ticker.defaultBucket].label} (default)`
+                                                    {holding.defaultBucket
+                                                        ? `${POLICY_BUCKET_META[holding.defaultBucket].label} (default)`
                                                         : "Unassigned"}
                                                 </option>
                                                 {ASSIGNABLE_POLICY_BUCKETS.map((bucket) => (
@@ -264,6 +296,12 @@ export function BucketPolicyCard() {
             </div>
         </section>
     );
+}
+
+/** A ticker's select is "<TICKER> bucket"; a holding valued by hand's names it and its account. */
+function bucketSelectLabel(holding: HoldingRow): string {
+    if (holding.ticker !== null) return `${holding.ticker} bucket`;
+    return holding.account ? `Bucket for ${holding.name} in ${holding.account}` : `Bucket for ${holding.name}`;
 }
 
 function NumberField({

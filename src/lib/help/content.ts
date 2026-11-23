@@ -80,7 +80,7 @@ const SMALL = smallPositionsLimits();
 
 export const GLOSSARY: readonly GlossaryTerm[] = [
     { term: 'Alpha', definition: 'Your return minus the benchmark’s over the same period, in percentage points.', href: '/performance' },
-    { term: 'Bucket', definition: 'A policy group for holdings — core, active, or speculative — each with a target share and a cap.', href: '/settings#risk-policy' },
+    { term: 'Bucket', definition: 'A policy group for holdings, such as core, active or speculative, each with a target share and a cap. Each holding starts in the one its type suggests (one valued by hand in core) until you choose another in Settings.', href: '/settings#risk-policy' },
     { term: 'Churn', definition: 'Repeated buying and selling of the same names inside a window. High churn adds tax friction and is often a sign of reacting rather than following a plan.', href: '/portfolios/activity' },
     { term: 'Concentration', definition: 'The share of your portfolio in a single name or in your top three or five names.', href: '/portfolios/holdings' },
     { term: 'Conviction', definition: 'How strongly you hold a thesis: high, medium, or low. It sets how much evidence you need before acting.', href: '/research' },

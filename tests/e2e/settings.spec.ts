@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { test, expect, type Page } from '@playwright/test';
 import { clickUntil, gotoAppPage, openPolicyChecks, reloadAppPage } from './helpers/app';
-import { accountRowsLeft, databaseAuthEnabled, signInAsFreshUser } from './helpers/users';
+import { accountRowsLeft, databaseAuthEnabled, signInAsFreshUser, signInAsNewUser } from './helpers/users';
 
 /** The next save of the user's settings whose risk policy passes `check`. */
 function savedRiskPolicy(page: Page, check: (riskPolicy: Record<string, unknown>) => boolean) {
@@ -996,6 +996,85 @@ function plaidE2EAccount({
         verificationStatus: 'automatically_verified',
     };
 }
+
+// Launch item i54: a holding valued by hand takes a bucket the way a ticker does.
+test.describe('Settings › buckets for holdings valued by hand', () => {
+    test.skip(!databaseAuthEnabled, 'holdings valued by hand are saved in the database');
+
+    /** The buckets `riskPolicy` keeps for holdings valued by hand, keyed by their ids. */
+    const handValuedChoices = (riskPolicy: Record<string, unknown>) =>
+        Object.entries((riskPolicy.bucketAssignments as Record<string, string>) ?? {})
+            .filter(([key]) => /^manual:[0-9a-f-]{36}$/.test(key))
+            .map(([, bucket]) => bucket);
+
+    test('each is listed by name and account and starts in core; the bucket chosen for it moves Today\'s checks', async ({ context, page }) => {
+        // Settings, Today and Settings again.
+        test.slow();
+        await signInAsNewUser(context, { firstSignIn: true });
+        const created = await page.request.post('/api/portfolios', { data: { name: '401(k)', cashBalance: 0 } });
+        expect(created.status()).toBe(201);
+        const { data: { id } } = await created.json() as { data: { id: string } };
+        for (const [name, value] of [['Target 2055 Trust', 90_000], ['Private Co shares', 10_000]] as const) {
+            const added = await page.request.post('/api/portfolio/manual-holdings', {
+                data: { portfolioId: id, holding: { name, value, valueAsOf: '2026-11-19' } },
+            });
+            expect(added.status()).toBe(201);
+        }
+        const bucketRow = (bucket: string) => page.locator(`[data-testid="bucket-policy-row"][data-bucket="${bucket}"]`);
+
+        await gotoAppPage(page, '/settings');
+        const rows = page.getByTestId('bucket-holding');
+        await expect(rows).toHaveCount(2);
+        await expect(rows.locator('.pm-bucket-holding-symbol')).toHaveText(['By hand', 'By hand']);
+        await expect(rows.first()).toContainText('Target 2055 Trust · 401(k)');
+        await expect(page.getByTestId('bucket-holdings')).toContainText('Holdings valued by hand start in core.');
+        const fund = page.getByLabel('Bucket for Private Co shares in 401(k)');
+        await expect(fund).toHaveValue('');
+        await expect(fund.locator('option:checked')).toHaveText('Core (default)');
+        await expect(bucketRow('core')).toContainText('from Target 2055 Trust, Private Co shares');
+
+        const saved = savedRiskPolicy(page, (riskPolicy) => handValuedChoices(riskPolicy).includes('speculative'));
+        await clickUntil(fund, async () => {
+            await fund.selectOption('speculative');
+            await expect(fund).toHaveValue('speculative', { timeout: 1000 });
+        });
+        await saved;
+        // $10,000 of $100,000: over the 5% cap.
+        await expect(bucketRow('speculative')).toHaveAttribute('data-status', 'breached');
+        await expect(bucketRow('speculative')).toContainText('Private Co shares');
+        await expect(bucketRow('core')).not.toContainText('Private Co shares');
+
+        await reloadAppPage(page);
+        await expect(page.getByLabel('Bucket for Private Co shares in 401(k)')).toHaveValue('speculative');
+
+        // Today evaluates the saved policy, and names the holding rather than its key.
+        await gotoAppPage(page, '/');
+        await expect(page.getByTestId('today-triage-item').filter({ hasText: 'Speculative/options' })).toHaveCount(1);
+        expect(await openPolicyChecks(page)).toBe(true);
+        const dimension = (policyId: string) => page.locator(`[data-testid="risk-policy-dimension"][data-policy-id="${policyId}"]`);
+        await expect(dimension('speculative_options_exposure')).toHaveAttribute('data-status', 'breached');
+        await expect(dimension('speculative_options_exposure')).toContainText('Private Co shares');
+        await expect(dimension('missing_policy_metadata')).toHaveAttribute('data-status', 'inside');
+        await expect(dimension('single_name_concentration')).not.toHaveAttribute('data-status', 'breached');
+        await expect(page.getByTestId('risk-policy-dashboard')).not.toContainText(/manual:/i);
+        const allocation = page.getByRole('region', { name: 'Allocation' });
+        const byPolicy = allocation.getByRole('radio', { name: 'Policy' });
+        await clickUntil(byPolicy, async () => {
+            await expect(byPolicy).toHaveAttribute('aria-checked', 'true', { timeout: 1000 });
+        });
+        await expect(allocation.getByText('Speculative/options', { exact: true })).toBeVisible();
+
+        await gotoAppPage(page, '/settings');
+        const back = savedRiskPolicy(page, (riskPolicy) => handValuedChoices(riskPolicy).length === 0);
+        const fundAgain = page.getByLabel('Bucket for Private Co shares in 401(k)');
+        // The saved choice shows once the page has hydrated with the user's settings.
+        await expect(fundAgain).toHaveValue('speculative');
+        await fundAgain.selectOption('');
+        await back;
+        await expect(fundAgain.locator('option:checked')).toHaveText('Core (default)');
+        await expect(bucketRow('core')).toContainText('from Target 2055 Trust, Private Co shares');
+    });
+});
 
 test.describe('Settings card layout', () => {
     test('regression: guardrail and execution rows are inset from the card edge', async ({ page }) => {
