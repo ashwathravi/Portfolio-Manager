@@ -229,6 +229,17 @@ export const portfolios = pgTable("portfolios", {
     accountType: text("account_type"),
     institution: text("institution"),
     taxTreatment: text("tax_treatment"),
+    // Whose name it's in (src/lib/portfolio/account-kinds.ts): "individual"
+    // (one person's), "joint", "dependent" (held for someone else, such as a
+    // custodial account or a child's 529) or "business". Optional like the
+    // three above, and only ever the user's choice: a Plaid sync never sets
+    // it. Not the Atlas user the account belongs to, which is user_id.
+    ownership: text("ownership"),
+    // When the user last changed its type, institution, tax treatment or
+    // ownership; null if never. A Plaid sync fills in what a linked account
+    // lacks only while this is null, so what the user chose stays, an empty
+    // field included (writeAccountSync in src/lib/plaid/sync.ts).
+    kindEditedAt: timestamp("kind_edited_at"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (table) => ({
@@ -239,6 +250,7 @@ export const portfolios = pgTable("portfolios", {
     ),
     taxTreatmentCheck: check("portfolios_tax_treatment_check", sql`${table.taxTreatment} in ('taxable', 'tax_deferred', 'tax_free')`),
     institutionCheck: check("portfolios_institution_check", sql`char_length(${table.institution}) between 1 and 80`),
+    ownershipCheck: check("portfolios_ownership_check", sql`${table.ownership} in ('individual', 'joint', 'dependent', 'business')`),
     userExternalAccountIdx: uniqueIndex("portfolios_user_source_external_account_idx")
         .on(table.userId, table.source, table.externalAccountId)
         .where(sql`${table.externalAccountId} is not null`),

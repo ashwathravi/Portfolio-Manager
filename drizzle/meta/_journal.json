@@ -274,6 +274,13 @@
       "when": 1795404481188,
       "tag": "0038_plaid_option_positions",
       "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1795404498116,
+      "tag": "0039_account_ownership",
+      "breakpoints": true
     }
   ]
 }
