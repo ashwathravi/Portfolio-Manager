@@ -2509,6 +2509,14 @@
   white-space: nowrap;
 }
 
+/* A holding valued by hand goes by its name, not a ticker: in the UI font, wrapped rather than cut off. */
+.pm-stress-contributor[data-hand-valued="true"] span:first-child {
+  font-family: inherit;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
 .pm-stress-contributor strong {
   color: var(--pm-danger);
   font-variant-numeric: tabular-nums;

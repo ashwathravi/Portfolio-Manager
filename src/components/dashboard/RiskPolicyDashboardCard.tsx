@@ -19,6 +19,7 @@ import {
     type SellDisciplineTask,
     type StressScenarioResult,
 } from "@/lib/risk-policy";
+import { isManualSymbol } from "@/lib/portfolio/manual-symbol";
 import { useSettingsStore } from "@/lib/stores/settingsStore";
 import { useRequestTime } from "@/components/providers/RequestTimeProvider";
 
@@ -204,6 +205,8 @@ function StressTestPanel({ results }: { results: StressScenarioResult[] }) {
                         key={`${selected.scenarioId}-${contributor.symbol}`}
                         className="pm-stress-contributor"
                         role="listitem"
+                        // Named, not a ticker: shown in full.
+                        data-hand-valued={isManualSymbol(contributor.symbol) ? "true" : undefined}
                     >
                         <span>{policyHoldingLabel(contributor.symbol, contributor.name)}</span>
                         <strong>{formatCurrencyOptional(contributor.impactUsd)}</strong>
