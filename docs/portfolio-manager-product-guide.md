@@ -179,7 +179,7 @@ Use Dashboard first each day.
 Before you have any positions, Today shows two steps in place of your portfolio value:
 
 1. **Add an account**: **New account** (a name and the cash it holds), or **Connect an account** for a brokerage where bank linking is set up (Plaid's keys and a database; without them the link isn't offered, here or anywhere else, since Settings would only say bank linking isn't set up). Once done, the step shows how many accounts and how much cash.
-2. **Add your positions**: **Import CSV** with your broker's positions export (symbol, quantity, and average cost or cost basis). You see what was read before anything is saved, and it goes into your account (or a new one).
+2. **Add your positions**: **Import CSV** with your broker's positions export (symbol, quantity, and average cost or cost basis). A fund with no ticker, such as a 401(k) trust, comes in valued by hand at the file's market value. You see what was read before anything is saved, and it goes into your account (or a new one).
 
 When the first positions are in, the steps give way to your portfolio value. A new sign-in starts with example data off, so every number is your own; **Show example data** on the card (or Settings) turns the labelled examples on to look around first.
 
@@ -222,6 +222,8 @@ Important fields:
 - Policy bucket: core, satellite, speculative/options, special situation, cash reserve, or unassigned.
 - Theme/factor tags: AI infrastructure, semiconductors, mega-cap growth, cloud/platform, crypto/risk-on, employer-linked, broad core, bonds/cash.
 - Options risk: premium at risk, notional equivalent, expiry, thesis and max-loss policy.
+
+**Valued by hand** keeps the holdings Atlas can't price (a 401(k) fund with no ticker, a 529 portfolio, a private company): each counts at the value given, as of its date. Add one with **Add holding**, or import your broker's positions file: a row with no ticker but a market value comes in valued by hand, listed on its own in the preview, as of the day you choose in **Values as of**. Importing the file again updates the same holding (found by its CUSIP or other code, else its name) and keeps each day's value in its history; a file older than the value saved only adds its day. A holding the file no longer lists stays until you delete it. A linked account's holdings without a ticker come from your bank, so a file's can't be imported into it. In **Update value** a new value is dated today unless you give another day, and a new name or note leaves the date as it was. You can keep up to 1,000, a linked account's included.
 
 ## Portfolios
 

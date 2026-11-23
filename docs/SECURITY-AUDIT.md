@@ -187,7 +187,7 @@ Every ID from a URL or body is checked against the session's user, in the WHERE 
 | Market data | 120 a minute | 240 a minute |
 | Everything else | 180 a minute | 300 a minute |
 
-- **Daily quotas** (`src/lib/api/daily-quota.ts`, launch item i77): per user, on top of these, for what costs more than a request: 20 CSV imports, 10 bank links, 20 syncs on request and 100 backtests a day, in the same Upstash store; Ask keeps its own 30 questions a day. A user keeps at most 10 linked institutions, counted under a per-user lock as each is saved, and at most 500 watchlist tickers, 2,000 journal entries, 200 theses, 50,000 transactions and 100 other assets and debts (`src/lib/limits/records.ts`), checked the same way in each write's transaction. `docs/deployment.md` › Opening sign-up has the table.
+- **Daily quotas** (`src/lib/api/daily-quota.ts`, launch item i77): per user, on top of these, for what costs more than a request: 20 CSV imports, 10 bank links, 20 syncs on request and 100 backtests a day, in the same Upstash store; Ask keeps its own 30 questions a day. A user keeps at most 10 linked institutions, counted under a per-user lock as each is saved, and at most 500 watchlist tickers, 2,000 journal entries, 200 theses, 50,000 transactions, 1,000 holdings valued by hand and 100 other assets and debts (`src/lib/limits/records.ts`), checked the same way in each write's transaction. `docs/deployment.md` › Opening sign-up has the table.
 
 **Delivery**
 - **Actions:** every one is pinned to a commit SHA, and the default token is read-only.
