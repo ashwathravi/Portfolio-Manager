@@ -176,16 +176,16 @@ Use Dashboard first each day.
 
 ### First run
 
-Before you have any positions, Today shows two steps in place of your net worth:
+Before you have any positions, Today shows two steps in place of your portfolio value:
 
 1. **Add an account**: **New account** (a name and the cash it holds), or **Connect an account** for a brokerage where bank linking is set up (Plaid's keys and a database; without them the link isn't offered, here or anywhere else, since Settings would only say bank linking isn't set up). Once done, the step shows how many accounts and how much cash.
 2. **Add your positions**: **Import CSV** with your broker's positions export (symbol, quantity, and average cost or cost basis). You see what was read before anything is saved, and it goes into your account (or a new one).
 
-When the first positions are in, the steps give way to your net worth. A new sign-in starts with example data off, so every number is your own; **Show example data** on the card (or Settings) turns the labelled examples on to look around first.
+When the first positions are in, the steps give way to your portfolio value. A new sign-in starts with example data off, so every number is your own; **Show example data** on the card (or Settings) turns the labelled examples on to look around first.
 
 What to review:
 
-- Portfolio value and daily movement.
+- Net worth (once you add other assets and debts on Accounts), portfolio value and daily movement.
 - Allocation.
 - Top holdings.
 - Recent activity.
@@ -237,6 +237,8 @@ Use it to:
 On **Portfolio › Accounts**, **New account** adds an account with its cash and an optional description, and each row's **⋯** menu edits or deletes one. Deleting an account deletes its positions, transactions and valuation history.
 
 Account names are unique, ignoring case and surrounding spaces: creating an account, renaming one, or importing a CSV into a new account with a name you already use is refused, so the import's account picker and the Returns account switcher can tell your accounts apart. You can have up to 50 accounts.
+
+Below your accounts, **Other assets and debts** keeps what you own and owe outside them: a home, a vehicle, cash in the bank, valuables or money owed to you, and a mortgage, auto loan, credit card, student loan or other debt. Give each a value (for a debt, the balance owed) and the date of it; **Update** changes both, and each value you give is kept by its date. Once you have any, Today's headline is your net worth (your accounts plus other assets, minus debts), with your portfolio value beside it. Returns, the equity curve and the risk policy still measure your accounts only. Investment and retirement accounts belong in Accounts, so don't add them here too. You can keep up to 100.
 
 ## Trade Log
 
