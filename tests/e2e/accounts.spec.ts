@@ -131,6 +131,79 @@ test.describe('Portfolio › Accounts — managing accounts', () => {
         await expect(row(page, 'Old 401k').getByTestId('account-kind')).toHaveCount(0);
     });
 
+    test("the accounts' value is split by tax treatment and by ownership once any account has one, and the rest are Not set", async ({ page }) => {
+        /** A split's labels in order, then each group's value and the accounts its label names. */
+        async function expectSplit(id: string, groups: [key: string, label: string, value: string, accounts: string][]) {
+            const strip = page.getByTestId(id);
+            await expect(strip.locator('dt')).toHaveText(groups.map(([, label]) => label));
+            for (const [key, , value, accounts] of groups) {
+                await expect(strip.locator(`[data-group="${key}"] dd`)).toContainText(value);
+                await expect(strip.locator(`[data-group="${key}"] dt`)).toHaveAttribute('title', accounts);
+                // The same names for a screen reader, which may not read the title out.
+                await expect(strip.locator(`[data-group="${key}"] dd .sr-only`)).toHaveText(`(${accounts})`);
+            }
+        }
+        async function expectBothSplits() {
+            // Main Portfolio says neither, so Not set is its value, as its row shows it.
+            const main = (await row(page, 'Main Portfolio').locator('td').nth(1).innerText()).trim();
+            expect(main).toMatch(/^\$[\d,]+\.\d\d$/);
+            await expectSplit('accounts-by-tax', [
+                ['tax_deferred', 'Tax-deferred', '$5,240.00', 'Growth Portfolio'],
+                ['tax_free', 'Tax-free', '$3,120.00', 'Dividend Income'],
+                ['not_set', 'Not set', main, 'Main Portfolio'],
+            ]);
+            await expectSplit('accounts-by-ownership', [
+                ['joint', 'Joint', '$5,240.00', 'Growth Portfolio'],
+                ['dependent', 'For a dependent', '$3,120.00', 'Dividend Income'],
+                ['not_set', 'Not set', main, 'Main Portfolio'],
+            ]);
+        }
+
+        // Three accounts and none says either: a line on how, and no split.
+        await expect(page.getByTestId('accounts-groups-hint')).toBeVisible();
+        await expect(page.getByTestId('accounts-by-tax')).toHaveCount(0);
+        await expect(page.getByTestId('accounts-by-ownership')).toHaveCount(0);
+
+        await editAccount(page, 'Growth Portfolio', async (dialog) => {
+            await dialog.getByLabel('Tax treatment (optional)').selectOption({ label: 'Tax-deferred' });
+            await dialog.getByLabel('Ownership (optional)').selectOption({ label: 'Joint' });
+        });
+        await editAccount(page, 'Dividend Income', async (dialog) => {
+            await dialog.getByLabel('Tax treatment (optional)').selectOption({ label: 'Tax-free' });
+            await dialog.getByLabel('Ownership (optional)').selectOption({ label: 'For a dependent' });
+        });
+        await expect(row(page, 'Growth Portfolio').getByTestId('account-kind')).toHaveText('Joint');
+        await expect(row(page, 'Dividend Income').getByTestId('account-kind')).toHaveText('For a dependent');
+        await expect(page.getByTestId('accounts-groups-hint')).toHaveCount(0);
+        await expectBothSplits();
+
+        await reloadAppPage(page);
+        await expectBothSplits();
+
+        await editAccount(page, 'Growth Portfolio', async (dialog) => {
+            await dialog.getByLabel('Ownership (optional)').selectOption('');
+        });
+        await expect(row(page, 'Growth Portfolio').getByTestId('account-kind')).toHaveCount(0);
+        const ownership = page.getByTestId('accounts-by-ownership');
+        await expect(ownership.locator('dt')).toHaveText(['For a dependent', 'Not set']);
+        await expect(ownership.locator('[data-group="not_set"] dt')).toHaveAttribute('title', 'Main Portfolio, Growth Portfolio');
+        // Growth keeps its tax treatment.
+        await expect(page.getByTestId('accounts-by-tax').locator('dt')).toHaveText(['Tax-deferred', 'Tax-free', 'Not set']);
+
+        // The strips fit a phone's width.
+        await page.setViewportSize({ width: 390, height: 844 });
+        await expect(async () => {
+            const overflow = await page.evaluate(() => {
+                const main = document.querySelector('main');
+                return Math.max(
+                    document.documentElement.scrollWidth - document.documentElement.clientWidth,
+                    main ? main.scrollWidth - main.clientWidth : 0,
+                );
+            });
+            expect(overflow).toBeLessThanOrEqual(1);
+        }).toPass({ timeout: 5_000 });
+    });
+
     test('an account can be renamed and its cash changed', async ({ page }) => {
         await page.getByRole('button', { name: 'Actions for Dividend Income' }).click();
         await page.getByRole('menuitem', { name: 'Edit' }).click();

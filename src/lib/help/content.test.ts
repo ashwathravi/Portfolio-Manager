@@ -44,4 +44,13 @@ describe('help content', () => {
     test('defines the policy terms the review found unexplained', () => {
         for (const t of ['Bucket', 'Churn', 'Re-underwrite']) assert.ok(GLOSSARY.some((g) => g.term === t), t);
     });
+
+    test('defines the terms Accounts splits your value by, each linking there', () => {
+        for (const t of ['Tax treatment', 'Ownership']) {
+            const entry = GLOSSARY.find((g) => g.term === t);
+            assert.ok(entry, t);
+            assert.strictEqual(entry.href, '/portfolios/accounts', t);
+            assert.match(entry.definition, /Accounts splits your value by it\.$/, t);
+        }
+    });
 });

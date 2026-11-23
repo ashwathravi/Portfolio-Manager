@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { DataUnavailableNotice } from "@/components/data-display/DataUnavailableNotice";
+import type { AccountGroups } from "@/lib/portfolio/account-groups";
 import { accountKindLine } from "@/lib/portfolio/account-kinds";
 import type { AccountRow, AccountsSummary } from "@/lib/portfolio/accounts";
 import type { NetWorthItemsRead } from "@/lib/portfolio/net-worth";
@@ -18,6 +19,9 @@ import { NetWorthItemsCard } from "./NetWorthItemsCard";
  * here, so the empty state leads with adding an account by hand and has no
  * Connect link.
  *
+ * Under the totals, the accounts' value by tax treatment and by ownership
+ * (groupAccounts), each once any account says.
+ *
  * Under the accounts, even before there are any, the Other assets and debts
  * card (NetWorthItemsCard) holds what the user owns and owes outside them,
  * which Today adds up as the net worth.
@@ -25,6 +29,8 @@ import { NetWorthItemsCard } from "./NetWorthItemsCard";
 export interface AccountsViewProps {
     rows: AccountRow[];
     summary: AccountsSummary;
+    /** The rows' value by tax treatment and by ownership (groupAccounts). */
+    groups: AccountGroups;
     bankLinking: boolean;
     /**
      * The user's other assets and debts (readNetWorthItemsForPage);
@@ -46,7 +52,55 @@ function OtherAssetsAndDebts({ netWorth, accountsTotal }: OtherAssetsAndDebtsPro
     return <NetWorthItemsCard items={netWorth} accountsTotal={accountsTotal} />;
 }
 
-export function AccountsView({ rows, summary, bankLinking, netWorth = null }: AccountsViewProps) {
+interface AccountGroupStripsProps {
+    groups: AccountGroups;
+    /** How many accounts there are: the hint is for two or more, which a split could tell apart. */
+    accounts: number;
+}
+
+/**
+ * A strip for each split an account says anything for, each label's
+ * tooltip naming its accounts; with neither said anywhere, a line on how.
+ * The ids are fixed: the view renders once on its page.
+ */
+function AccountGroupStrips({ groups, accounts }: AccountGroupStripsProps) {
+    const strips = [
+        { id: "accounts-by-tax", title: "By tax treatment", groups: groups.byTaxTreatment },
+        { id: "accounts-by-ownership", title: "By ownership", groups: groups.byOwnership },
+    ].filter((strip) => strip.groups.length > 0);
+    if (strips.length === 0) {
+        if (accounts < 2) return null;
+        return (
+            <p className="pm-empty-line" data-testid="accounts-groups-hint">
+                Set a tax treatment or ownership on your accounts (Edit, in each row&apos;s menu) to see your value split by them.
+            </p>
+        );
+    }
+    return (
+        <div className="pm-account-groups" data-testid="accounts-groups">
+            {strips.map((strip) => (
+                <section key={strip.id} className="pm-account-group" aria-labelledby={`${strip.id}-title`} data-testid={strip.id}>
+                    <h2 id={`${strip.id}-title`} className="pm-account-group-title">{strip.title}</h2>
+                    <dl className="pm-metric-strip">
+                        {strip.groups.map((g) => (
+                            <div key={g.key} data-group={g.key}>
+                                <dt title={g.accountNames.join(", ")}>{g.label}</dt>
+                                <dd>
+                                    {formatUsd(g.totalUsd)}
+                                    {g.sharePct !== null && <> <span className="pm-account-group-share">{formatPct(g.sharePct)}</span></>}
+                                    {/* The tooltip's accounts, read out: a title on plain text often isn't. */}
+                                    <span className="sr-only"> ({g.accountNames.join(", ")})</span>
+                                </dd>
+                            </div>
+                        ))}
+                    </dl>
+                </section>
+            ))}
+        </div>
+    );
+}
+
+export function AccountsView({ rows, summary, groups, bankLinking, netWorth = null }: AccountsViewProps) {
     if (rows.length === 0) {
         return (
             <div className="pm-page" data-testid="accounts-view">
@@ -88,6 +142,7 @@ export function AccountsView({ rows, summary, bankLinking, netWorth = null }: Ac
                     <div><dt>Accounts</dt><dd>{summary.accounts}</dd></div>
                     <div><dt>Positions</dt><dd>{summary.positions}</dd></div>
                 </dl>
+                <AccountGroupStrips groups={groups} accounts={rows.length} />
                 <div className="pm-table-scroll">
                     <table className="pm-table-full" data-testid="accounts-table">
                         <thead>

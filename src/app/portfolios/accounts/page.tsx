@@ -2,6 +2,7 @@ import { requirePageUserId } from "@/lib/auth/request-user";
 import { loadQuotes } from "@/lib/services/market-data-service";
 import { loadDashboardPortfolios } from "@/lib/dashboard-portfolios";
 import { buildDashboardPortfoliosQuery } from "@/lib/portfolio-repository";
+import { groupAccounts } from "@/lib/portfolio/account-groups";
 import { buildAccountRows, summarizeAccounts } from "@/lib/portfolio/accounts";
 import { loadNetWorthItems, readNetWorthItemsForPage } from "@/lib/portfolio/net-worth-items";
 import { AccountsView } from "@/components/portfolio/AccountsView";
@@ -11,7 +12,8 @@ import { bankLinkingAvailable } from "@/lib/plaid/availability";
 
 /**
  * Portfolio › Accounts — per-account value, cash, and positions from the
- * database, then the user's other assets and debts.
+ * database, split by tax treatment and ownership once any account says,
+ * then the user's other assets and debts.
  */
 
 export const dynamic = "force-dynamic";
@@ -53,7 +55,7 @@ export default async function AccountsPage() {
             {header}
             {/* Decided here, on the server: the empty state offers to connect
                 a bank only where Settings can (x30). */}
-            <AccountsView rows={rows} summary={summarizeAccounts(rows)} netWorth={netWorth} bankLinking={bankLinkingAvailable()} />
+            <AccountsView rows={rows} summary={summarizeAccounts(rows)} groups={groupAccounts(rows)} netWorth={netWorth} bankLinking={bankLinkingAvailable()} />
         </>
     );
 }
