@@ -419,6 +419,22 @@ describe("accountHoldings: option contracts (launch item i63)", () => {
         assert.deepEqual([result.skipped, result.optionsKept], [[], []]);
     });
 
+    test("a close is from a price's session by the market's days: a weekend's or a holiday's price is the session's before it", () => {
+        const contract = "O:ACME270115C00150000";
+        const read = (priceDay: string, closeDay: string) => accountHoldings(ACCOUNT, [perContract(300, { institution_price_as_of: priceDay })], [acmeCall()], {
+            contractCloses: new Map([[contract, { close: 4.25, date: closeDay }]]),
+        }).options.map((o) => o.quantity);
+        // Saturday's price is Friday's: Thursday's close to Monday's is asked, and none further.
+        for (const day of ["2026-10-22", "2026-10-23", "2026-10-26"]) assert.deepEqual(read("2026-10-24", day), [300], day);
+        for (const day of ["2026-10-21", "2026-10-27"]) assert.deepEqual(read("2026-10-24", day), [3], day);
+        // Thanksgiving's is Wednesday's: Tuesday's close to Friday's, the market shut between.
+        for (const day of ["2026-11-24", "2026-11-25", "2026-11-27"]) assert.deepEqual(read("2026-11-26", day), [300], day);
+        assert.deepEqual(read("2026-11-26", "2026-11-30"), [3]);
+        // A day before the market's calendar starts says nothing, and doesn't stop the sync: Plaid's shares stand.
+        for (const day of ["2017-12-29", "0001-01-01"]) assert.deepEqual(read(day, DAY), [3], day);
+        assert.deepEqual(read(DAY, "2017-12-29"), [3]);
+    });
+
     test("regression: a close too old to settle a contract keeps the reading its synced row is in, and turns none into the other", () => {
         // An institution that prices per contract: its close of $4.25 a share, from
         // Friday, read 300 at $420 as 300 contracts on Monday. On Tuesday's sync the
