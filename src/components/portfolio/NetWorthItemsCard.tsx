@@ -32,10 +32,11 @@ import { NET_WORTH_ITEM_LIMITS } from "@/lib/validators/net-worth-item";
 /**
  * Portfolio › Accounts › Other assets and debts: what the user owns and owes
  * outside their accounts (a home, a car, cash in the bank, a mortgage, a
- * loan), at the values and dates they give. Once there is one, Today's
- * headline is the net worth: the accounts plus these assets, less these
- * debts. A debt is the balance owed, shown with a minus sign and never in
- * red: owing money isn't a loss.
+ * loan), at the values and dates they give. Once there is one, the card
+ * shows the net worth: the portfolio value plus these assets, less these
+ * debts. So does Today's headline once the accounts hold positions; before
+ * then Today shows the first-run steps. A debt is the balance owed, shown
+ * with a minus sign and never in red: owing money isn't a loss.
  *
  * Changes go to /api/portfolio/net-worth-items, then the page reloads its
  * data. Each save also keeps the value as of its day; no chart reads those
@@ -45,7 +46,7 @@ import { NET_WORTH_ITEM_LIMITS } from "@/lib/validators/net-worth-item";
 
 export interface NetWorthItemsCardProps {
     items: readonly NetWorthItemRow[];
-    /** The accounts' total value, which the net worth starts from. */
+    /** The portfolio value (the accounts' total), which the net worth starts from. */
     accountsTotal: number;
 }
 
@@ -251,7 +252,7 @@ export function NetWorthItemsCard({ items, accountsTotal }: NetWorthItemsCardPro
                     <h2 id="net-worth-items-title" className="pm-card-title">Other assets and debts</h2>
                     <p className="pm-card-subtitle">
                         {describeNetWorthCounts(summary)
-                            ?? "What you own and owe outside your accounts, such as a home, a car, cash in the bank, a mortgage or a loan, at the values you give. Add one and Today shows your net worth."}
+                            ?? "What you own and owe outside your accounts, such as a home, a car, cash in the bank, a mortgage or a loan, at the values you give. Add one to see your net worth here, and on Today once your accounts hold positions."}
                     </p>
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -268,7 +269,7 @@ export function NetWorthItemsCard({ items, accountsTotal }: NetWorthItemsCardPro
             {items.length > 0 && (
                 <>
                     <dl className="pm-metric-strip" data-testid="net-worth-summary">
-                        <div><dt>Your accounts</dt><dd>{formatUsd(accountsTotal)}</dd></div>
+                        <div><dt>Portfolio value</dt><dd>{formatUsd(accountsTotal)}</dd></div>
                         <div><dt>Other assets</dt><dd>{formatUsd(summary.otherAssets)}</dd></div>
                         <div><dt>Debts</dt><dd>{formatUsd(-summary.debts)}</dd></div>
                         <div><dt>Net worth</dt><dd>{formatUsd(netWorthOf(accountsTotal, summary))}</dd></div>

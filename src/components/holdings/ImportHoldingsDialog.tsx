@@ -16,6 +16,7 @@ import {
     describeImportCounts,
     describeImportResult,
     describeImportTotal,
+    describeLinkedAccountRefusal,
     describeManualChange,
     describeNotInFile,
     groupImportByAccount,
@@ -533,8 +534,7 @@ export function ImportHoldingsDialog({
                         )}
                         {linkedTargets.map((account) => (
                             <p key={account.id} className="pm-import-error" role="alert">
-                                {account.name} is linked to your bank, so its holdings without a ticker come from there. Import this
-                                file into another account.
+                                {describeLinkedAccountRefusal(account.name)}
                             </p>
                         ))}
 

@@ -5,6 +5,7 @@ import {
     describeImportCounts,
     describeImportResult,
     describeImportTotal,
+    describeLinkedAccountRefusal,
     describeManualChange,
     describeNotInFile,
     groupImportByAccount,
@@ -800,6 +801,15 @@ describe('countNotInFile and describeNotInFile', () => {
         assert.strictEqual(
             describeNotInFile('Brokerage', 2),
             "2 holdings valued by hand that an earlier file brought into Brokerage aren't in this one. They stay as they are; delete them on Holdings if they're gone.",
+        );
+    });
+});
+
+describe('describeLinkedAccountRefusal', () => {
+    test('says the account is linked and its holdings without a ticker come with each sync, never that it is linked to a bank', () => {
+        assert.strictEqual(
+            describeLinkedAccountRefusal('Brokerage Link'),
+            'Brokerage Link is a linked account, so its holdings without a ticker come in with each sync. Import this file into another account.',
         );
     });
 });

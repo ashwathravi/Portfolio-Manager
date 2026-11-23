@@ -4,7 +4,7 @@ import { db } from '@/db';
 import { holdings, portfolios } from '@/db/schema';
 import { withinRecordLimit } from '@/lib/limits/records-server';
 import type { PortfolioImportBody } from '@/lib/validators/portfolio-import';
-import { planHoldingsImport, summarizePlan } from './csvImport';
+import { describeLinkedAccountRefusal, planHoldingsImport, summarizePlan } from './csvImport';
 import { buildLockUserAccountsQuery, buildSyncingAccountsQuery, checkAccountName } from './manage';
 import { importManualRows, type ManualImportResult } from './manual-holdings';
 import { importOptionRows, type OptionImportResult } from './option-positions-store';
@@ -18,13 +18,13 @@ export class ImportAccessError extends Error {
 
 /**
  * Holdings valued by hand aimed at a linked account that still syncs. Its
- * bank reports the account's holdings without a ticker, and a sync
+ * institution reports the account's holdings without a ticker, and a sync
  * replaces only its own, so a file's copies would be counted twice and
  * never removed.
  */
 export class LinkedAccountImportError extends Error {
     constructor(readonly accountName: string) {
-        super(`${accountName} is linked to your bank, so its holdings without a ticker come from there. Import this file into another account.`);
+        super(describeLinkedAccountRefusal(accountName));
         this.name = 'LinkedAccountImportError';
     }
 }

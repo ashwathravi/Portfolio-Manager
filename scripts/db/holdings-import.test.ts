@@ -181,7 +181,7 @@ describe('positions files with holdings valued by hand', { skip: !DATABASE_URL &
 
         const before = await handValued('u-linked');
         await assert.rejects(importFile('u-linked', linked, file(APPLE, trust('12500.00')), '2026-11-03'),
-            (e: unknown) => e instanceof LinkedAccountImportError && e.message === 'Brokerage Link is linked to your bank, so its holdings without a ticker come from there. Import this file into another account.');
+            (e: unknown) => e instanceof LinkedAccountImportError && e.message === 'Brokerage Link is a linked account, so its holdings without a ticker come in with each sync. Import this file into another account.');
         assert.deepEqual(await handValued('u-linked'), before);
         assert.deepEqual(await positions(linked), []);
         // The file's positions alone still go in.

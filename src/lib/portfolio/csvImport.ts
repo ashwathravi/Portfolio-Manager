@@ -1015,6 +1015,16 @@ export function describeNotInFile(account: string, left: number): string {
 }
 
 /**
+ * Why a file's holdings without a ticker can't go into a linked account that
+ * still syncs: each sync brings that account's own, so the file's would be
+ * counted twice. The import refuses with it (LinkedAccountImportError), and
+ * the dialog says it before the file is sent, in the same words.
+ */
+export function describeLinkedAccountRefusal(account: string): string {
+    return `${account} is a linked account, so its holdings without a ticker come in with each sync. Import this file into another account.`;
+}
+
+/**
  * What an import brings in, as its button and each account's label count
  * it: positions (option positions among them), or holdings once some are
  * valued by hand, which aren't positions.

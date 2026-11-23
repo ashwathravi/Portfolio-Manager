@@ -57,6 +57,19 @@ describe('help content', () => {
         }
     });
 
+    test('says what the portfolio value counts, and that the risk policy adds option positions to it', () => {
+        const definition = GLOSSARY.find((g) => g.term === 'Portfolio value')?.definition ?? '';
+        // As policyPortfolioValue measures it: bought options at their worth, written ones less their cost to buy back.
+        assert.match(definition, /^What your accounts hold: positions at their latest prices, holdings valued by hand, and cash\./);
+        assert.match(definition, /the risk policy’s checks add them: what bought options are worth, less what written ones would cost to buy back\.$/);
+        assert.doesNotMatch(definition, /the risk policy measure this/);
+    });
+
+    test('names every source of a value given by hand: the user, a positions file and a linked account', () => {
+        const definition = GLOSSARY.find((g) => g.term === 'Valued by hand')?.definition ?? '';
+        assert.match(definition, /given by you, your broker’s positions file or your linked account, as of its date/);
+    });
+
     test('defines Small positions with the rule\'s own limits, linking to Holdings', () => {
         const entry = GLOSSARY.find((g) => g.term === 'Small positions');
         assert.ok(entry);

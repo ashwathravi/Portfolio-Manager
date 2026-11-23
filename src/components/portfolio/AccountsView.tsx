@@ -138,7 +138,7 @@ export function AccountsView({ rows, summary, groups, bankLinking, netWorth = nu
                     <NewAccountButton />
                 </div>
                 <dl className="pm-metric-strip" data-testid="accounts-summary">
-                    <div><dt>Total value</dt><dd>{formatUsd(summary.totalUsd)}</dd></div>
+                    <div><dt>Portfolio value</dt><dd>{formatUsd(summary.totalUsd)}</dd></div>
                     <div><dt>Cash</dt><dd>{formatUsd(summary.cashUsd)}</dd></div>
                     <div><dt>Accounts</dt><dd>{summary.accounts}</dd></div>
                     <div><dt>Positions</dt><dd>{summary.positions}</dd></div>
@@ -175,7 +175,7 @@ export function AccountsView({ rows, summary, groups, bankLinking, netWorth = nu
                                     </td>
                                     <td className="num">{r.positions}</td>
                                     <td>
-                                        <span className="pm-share-bar" title={`${r.sharePct}% of total value`}>
+                                        <span className="pm-share-bar" title={`${r.sharePct}% of your portfolio value`}>
                                             <span style={{ width: `${r.sharePct}%` }} />
                                         </span>
                                     </td>

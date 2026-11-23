@@ -1404,7 +1404,7 @@ test.describe('POST /api/portfolio/import', () => {
         test.skip(!dbMode, 'needs the seeded E2E database');
         const userId = await signInAsFreshUser(context);
         const { linked } = await seedLinkedAccount(userId, 'sync_ready');
-        const refusal = 'Brokerage Link is linked to your bank, so its holdings without a ticker come from there. Import this file into another account.';
+        const refusal = 'Brokerage Link is a linked account, so its holdings without a ticker come in with each sync. Import this file into another account.';
         await gotoAppPage(page, '/portfolios/holdings');
         await openImport(page, LINKED_FILE);
         const dialog = page.getByTestId('import-dialog');

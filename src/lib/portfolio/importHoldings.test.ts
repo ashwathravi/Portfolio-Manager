@@ -273,7 +273,7 @@ describe("importHoldings with holdings valued by hand", () => {
         await assert.rejects(
             importHoldings(USER, { portfolioId: PORTFOLIO, rows: [position], manual: [fund] }, {}, fake.database),
             (err: unknown) => err instanceof LinkedAccountImportError
-                && err.message === "Brokerage is linked to your bank, so its holdings without a ticker come from there. Import this file into another account.",
+                && err.message === "Brokerage is a linked account, so its holdings without a ticker come in with each sync. Import this file into another account.",
         );
         assert.deepEqual([fake.inserted.length, fake.manualInserted.length, fake.values.length, fake.touched.length], [0, 0, 0, 0]);
         // Asked of this account, the user's, under the locks.

@@ -389,10 +389,13 @@ test.describe('Portfolio › Accounts — other assets and debts', () => {
             // A debt is owed, not a loss: never in red.
             await expect(card(page).locator('.pm-neg')).toHaveCount(0);
             await expect(card(page)).toContainText('1 asset and 1 debt, at the values and dates you gave');
-            await expect(figure(page, 'Your accounts')).toHaveText('$1,000.00');
+            await expect(figure(page, 'Portfolio value')).toHaveText('$1,000.00');
             await expect(figure(page, 'Other assets')).toHaveText('$300,000.00');
             await expect(figure(page, 'Debts')).toHaveText('−$200,000.00');
             await expect(figure(page, 'Net worth')).toHaveText('$101,000.00');
+            // One figure, one name: the accounts' strip calls it what the card, Today and the glossary do.
+            await expect(page.getByTestId('accounts-summary').locator('div').filter({ has: page.getByText('Portfolio value', { exact: true }) }).locator('dd'))
+                .toHaveText('$1,000.00');
         }
 
         // Another user's item is never among them.
@@ -454,7 +457,7 @@ test.describe('Portfolio › Accounts — other assets and debts', () => {
         await page.getByRole('menuitem', { name: 'Delete' }).click();
         await expect(page.getByTestId('net-worth-items-table')).toHaveCount(0);
         await expect(page.getByTestId('net-worth-summary')).toHaveCount(0);
-        await expect(card(page)).toContainText('Add one and Today shows your net worth.');
+        await expect(card(page)).toContainText('Add one to see your net worth here, and on Today once your accounts hold positions.');
     });
 
     test('a new name or note keeps the value\'s date and adds no value; a new value is as of today until another day is given', async ({ page }) => {
@@ -535,7 +538,7 @@ test.describe('Portfolio › Accounts — other assets and debts', () => {
 
         await reloadAppPage(page);
         await expect(page.getByTestId('net-worth-items-table')).toHaveCount(0);
-        await expect(card(page)).toContainText('Add one and Today shows your net worth.');
+        await expect(card(page)).toContainText('Add one to see your net worth here, and on Today once your accounts hold positions.');
     });
 
     test('before any account, the card is under the empty state, and the net worth is the assets less the debts', async ({ page }) => {
@@ -546,7 +549,7 @@ test.describe('Portfolio › Accounts — other assets and debts', () => {
         await gotoAppPage(page, '/portfolios/accounts');
         await expect(page.getByTestId('accounts-empty')).toBeVisible();
         await expect(page.getByTestId('accounts-view').locator('[data-testid="accounts-empty"] + [data-testid="net-worth-items"]')).toBeVisible();
-        await expect(figure(page, 'Your accounts')).toHaveText('$0.00');
+        await expect(figure(page, 'Portfolio value')).toHaveText('$0.00');
         await expect(figure(page, 'Debts')).toHaveText('−$4,999.50');
         await expect(figure(page, 'Net worth')).toHaveText('$295,000.50');
     });
