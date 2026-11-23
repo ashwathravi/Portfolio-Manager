@@ -427,6 +427,17 @@ export interface StoredOptionClose {
 }
 
 /**
+ * An option position an earlier sync wrote (source "plaid"), in the reading
+ * that sync read the contract's lots in.
+ */
+export interface SyncedOptionRow {
+    /** Contracts; negative when written. */
+    contracts: number;
+    /** The institution's price per share it wrote; null when it had none. */
+    perShare: number | null;
+}
+
+/**
  * What else says how an institution prices its options, for a contract
  * whose lots read two ways: the database's prices, looked up for the
  * contracts a holdings response has (optionContractsIn), and how the last
@@ -444,12 +455,11 @@ export interface OptionPriceEvidence {
      */
     undatedPriceDay?: string;
     /**
-     * The contracts of the option positions an earlier sync wrote (source
-     * "plaid"), by Plaid's account_id, then by contract: the reading that
-     * sync read the lots in. A close too far from the price's session to
-     * settle the reading keeps that one, and no other (contractReading).
+     * The option positions an earlier sync wrote, by Plaid's account_id,
+     * then by contract: the reading nearest the account's row stands when
+     * nothing else settles a contract (contractReading).
      */
-    syncedContracts?: ReadonlyMap<string, ReadonlyMap<string, number>>;
+    syncedOptions?: ReadonlyMap<string, ReadonlyMap<string, SyncedOptionRow>>;
 }
 
 /** One lot of an option contract, as Plaid reports it. */
@@ -550,17 +560,27 @@ function closeForPriceDay(stored: StoredOptionClose | undefined, priceDay: strin
 }
 
 /**
- * Whether the account's synced row for a contract, of `synced` contracts,
- * is in `reading`: within ten times of the contracts the lots read as in
- * it. A contract's two readings are a hundred times apart, so the row is in
- * one at most, and contracts bought or sold since the sync that wrote it
- * don't take it out of that one.
+ * The reading in which a contract's lots come nearest the account's synced
+ * row for it (`row`): the one whose contracts and price per share differ
+ * least from the row's, each counted in powers of ten, squared and added.
+ * The two readings are a hundred times apart in both, so the lots stay
+ * nearest the row's reading through contracts bought or sold and the
+ * market moving between syncs, unless the two together come to a
+ * hundredfold; lots an institution starts reporting the other way, the
+ * same contracts at the same price, come nearest the other. Null without a
+ * row, or when the lots are as near it either way.
  */
-function syncedIn(lots: readonly OptionLot[], reading: OptionReading, synced: number | null): boolean {
-    if (synced == null || !Number.isFinite(synced) || synced === 0) return false;
-    const contracts = lots.reduce((sum, lot) => sum + Math.round(readOptionLot(lot.quantity, lot.price, reading).contracts), 0);
-    const ratio = contracts / synced;
-    return ratio > 0.1 && ratio < 10;
+function rowReading(lots: readonly OptionLot[], readings: readonly OptionReading[], row: SyncedOptionRow | null): OptionReading | null {
+    if (row == null) return null;
+    // How far apart two amounts are in powers of ten, squared; nothing to compare is no distance.
+    const apart = (a: number | null, b: number | null) => (a != null && b != null && a > 0 && b > 0 ? Math.log10(a / b) ** 2 : 0);
+    const distance = (reading: OptionReading) => {
+        const contracts = lots.reduce((sum, lot) => sum + Math.round(readOptionLot(lot.quantity, lot.price, reading).contracts), 0);
+        return apart(Math.abs(contracts), Math.abs(row.contracts)) + apart(readOptionLot(1, lots[0].price, reading).perShare, row.perShare);
+    };
+    const [nearest, next] = readings.map((reading) => ({ reading, distance: distance(reading) })).sort((a, b) => a.distance - b.distance);
+    // As near either way, short of rounding, says nothing.
+    return nearest && (!next || next.distance - nearest.distance > 1e-9) ? nearest.reading : null;
 }
 
 /**
@@ -570,19 +590,17 @@ function syncedIn(lots: readonly OptionLot[], reading: OptionReading, synced: nu
  * shares stand unless something says otherwise: a price per share the
  * option can't have (a put's above its strike, a call's above its
  * underlying's price, either's well under what it's worth exercised), its
- * stored close from about the session of its price (closeForPriceDay), or
- * the institution pricing its other contracts per contract. A close from
- * further off (`distantClose`) changes nothing, but keeps the reading the
- * account's synced row is in when it's near that one (`synced`, its
- * contracts). Null when the lots don't agree, or what says how they read
- * disagrees, so a guess is never stored.
+ * stored close from about the session of its price (closeForPriceDay), the
+ * institution pricing its other contracts per contract, or the account's
+ * synced row for it (`synced`) being in the other reading (rowReading). Null
+ * when the lots don't agree, or what says how they read disagrees, so a
+ * guess is never stored.
  */
 function contractReading(
     { details, lots }: ContractLots,
-    { close, distantClose, synced, underlying, pricesPerContract }: {
+    { close, synced, underlying, pricesPerContract }: {
         close: number | null;
-        distantClose: number | null;
-        synced: number | null;
+        synced: SyncedOptionRow | null;
         underlying: number | null;
         pricesPerContract: boolean;
     },
@@ -592,24 +610,20 @@ function contractReading(
     // Each lot reads more than one way, so each has a price.
     const price = lots[0].price ?? 0;
     const perShare = (reading: OptionReading) => readOptionLot(1, price, reading).perShare ?? 0;
-    const readingNear = (storedClose: number | null) =>
-        (storedClose == null ? null : fits.find((reading) => nearClose(perShare(reading), storedClose)) ?? null);
-    const byClose = readingNear(close);
+    const byClose = close == null ? null : fits.find((reading) => nearClose(perShare(reading), close)) ?? null;
     let possible = fits.filter((reading) => couldBePriced(perShare(reading), details, underlying));
     // An underlying's price of another day can rule both out; a put's strike still bounds it.
     if (possible.length === 0) possible = fits.filter((reading) => couldBePriced(perShare(reading), details, null));
     if (byClose) return possible.includes(byClose) ? byClose : null;
     if (possible.length === 1) return possible[0];
-    // A close too far off to settle the contract still keeps the reading the
-    // account's synced row is in. The prices job checks a few contracts a run,
-    // and one that doesn't trade keeps its close, so without this a row a
-    // close read per contract would go back to Plaid's shares, a hundred times
-    // fewer contracts, each night its close isn't refreshed. It never turns a
-    // row into the other reading.
-    const kept = readingNear(distantClose);
-    if (kept && possible.includes(kept) && syncedIn(lots, kept, synced)) return kept;
     if (pricesPerContract && possible.includes("per-contract")) return "per-contract";
-    return possible.includes("shares") ? "shares" : possible[0] ?? null;
+    // Nothing settles it tonight: no close from about its price's session (the
+    // prices job checks a few contracts a run, and one that doesn't trade keeps
+    // an old close), or one the option has moved too far from to fit either
+    // reading. The reading nearest the account's synced row stands, so a row
+    // read per contract doesn't go back to Plaid's shares, a hundred times
+    // fewer contracts, on such a night.
+    return rowReading(lots, possible, synced) ?? (possible.includes("shares") ? "shares" : possible[0] ?? null);
 }
 
 /**
@@ -787,7 +801,7 @@ export function accountHoldings(
     // else the latest stored close.
     const pricesPerContract = institutionPricesPerContract(holdings, bySecurity);
     const underlyingPrices = institutionPrices(holdings, bySecurity);
-    const syncedContracts = evidence.syncedContracts?.get(accountId);
+    const syncedRows = evidence.syncedOptions?.get(accountId);
     const synced: { option: SyncedOptionContract; costKnown: boolean; label: string }[] = [];
     for (const [contract, held] of options) {
         // The newest price first, so the lots read the same in any order Plaid lists them.
@@ -801,13 +815,10 @@ export function accountHoldings(
             continue;
         }
         const { underlying } = held.details;
-        const stored = evidence.contractCloses?.get(contract);
-        // The readings are checked against the newest price, the first lot's: a close counts only from about its day.
-        const close = closeForPriceDay(stored, held.lots[0].priceDate ?? evidence.undatedPriceDay ?? null);
         const reading = contractReading(held, {
-            close,
-            distantClose: close == null ? positivePrice(stored?.close) : null,
-            synced: syncedContracts?.get(contract) ?? null,
+            // The readings are checked against the newest price, the first lot's: a close counts only from about its day.
+            close: closeForPriceDay(evidence.contractCloses?.get(contract), held.lots[0].priceDate ?? evidence.undatedPriceDay ?? null),
+            synced: syncedRows?.get(contract) ?? null,
             underlying: underlyingPrices.get(underlying) ?? positivePrice(evidence.underlyingPrices?.get(underlying)),
             pricesPerContract,
         });

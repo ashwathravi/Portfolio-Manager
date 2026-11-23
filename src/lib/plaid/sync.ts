@@ -50,6 +50,7 @@ import {
     type OptionPriceEvidence,
     type PlaidSecurity,
     type SyncedOptionContract,
+    type SyncedOptionRow,
     type TransactionSkipReason,
 } from "./investments";
 import {
@@ -793,8 +794,8 @@ export interface SyncDeps {
  * that ended by `now`, which a close is checked against. Both tables are
  * shared and say nothing about who holds what. With them, how the last sync
  * read the contracts of the user's accounts (Plaid's `accountIds`): the
- * contracts of the option positions it wrote, whose reading a close too old
- * to settle a contract keeps.
+ * contracts and price per share of the option positions it wrote, whose
+ * reading stands when nothing else settles a contract.
  */
 export async function loadOptionPriceEvidence(
     userId: string,
@@ -811,7 +812,12 @@ export async function loadOptionPriceEvidence(
         .where(and(inArray(optionMarks.contract, contracts), isNotNull(optionMarks.close)));
     const closes = await getLatestCloses(underlyings, undefined, database);
     const synced = accountIds.length === 0 ? [] : await database
-        .select({ account: portfolios.externalAccountId, contract: optionPositions.contract, quantity: optionPositions.quantity })
+        .select({
+            account: portfolios.externalAccountId,
+            contract: optionPositions.contract,
+            quantity: optionPositions.quantity,
+            price: optionPositions.institutionPrice,
+        })
         .from(optionPositions)
         .innerJoin(portfolios, and(eq(portfolios.id, optionPositions.portfolioId), eq(portfolios.userId, userId)))
         .where(and(
@@ -821,19 +827,19 @@ export async function loadOptionPriceEvidence(
             inArray(portfolios.externalAccountId, [...accountIds]),
             inArray(optionPositions.contract, contracts),
         ));
-    const syncedContracts = new Map<string, Map<string, number>>();
-    for (const { account, contract, quantity } of synced) {
+    const syncedOptions = new Map<string, Map<string, SyncedOptionRow>>();
+    for (const { account, contract, quantity, price } of synced) {
         if (account == null) continue;
-        const held = syncedContracts.get(account) ?? new Map<string, number>();
-        held.set(contract, Number(quantity));
-        syncedContracts.set(account, held);
+        const held = syncedOptions.get(account) ?? new Map<string, SyncedOptionRow>();
+        held.set(contract, { contracts: Number(quantity), perShare: price == null ? null : Number(price) });
+        syncedOptions.set(account, held);
     }
     return {
         contractCloses: new Map(marks.flatMap(({ contract, close, date }) => (close == null ? [] : [[contract, { close, date }] as const]))),
         underlyingPrices: new Map([...closes].map(([symbol, { close }]) => [symbol, close] as const)),
         // As replaceSyncedOptions dates such a price.
         undatedPriceDay: lastCompletedSession(now),
-        syncedContracts,
+        syncedOptions,
     };
 }
 

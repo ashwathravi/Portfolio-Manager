@@ -446,40 +446,61 @@ describe("accountHoldings: option contracts (launch item i63)", () => {
         const contract = "O:ACME270115C00150000";
         const read = (undatedPriceDay: string) => accountHoldings(ACCOUNT, [perContract(300)], [acmeCall()], {
             contractCloses: new Map([[contract, { close: 4.25, date: DAY }]]), undatedPriceDay,
-            syncedContracts: new Map([[ACCOUNT, new Map([[contract, 3]])]]),
+            syncedOptions: new Map([[ACCOUNT, new Map([[contract, { contracts: 3, perShare: 420 }]])]]),
         }).options.map((o) => [o.quantity, o.premium, o.price]);
         assert.deepEqual(read("2026-10-27"), [[300, 3.5, 4.2]]);
         // Three sessions before is too old to settle it: the row's shares stand.
         assert.deepEqual(read("2026-10-28"), [[3, 350, 420]]);
     });
 
-    test("regression: a close too old to settle a contract keeps the reading its synced row is in, and turns none into the other", () => {
+    test("regression: when nothing else settles a contract, the reading nearest its synced row's contracts and price stands", () => {
         // An institution that prices per contract: its close of $4.25 a share, from
         // Friday, read 300 at $420 as 300 contracts on Monday. On Wednesday's sync the
         // close is three sessions old, the nightly job not having stored a newer one.
         const contract = "O:ACME270115C00150000";
-        const synced = (contracts?: number) => (contracts == null ? undefined : new Map([[ACCOUNT, new Map([[contract, contracts]])]]));
-        const wednesday = (lots: PlaidHolding[], row?: number) => accountHoldings(ACCOUNT, lots, [acmeCall()], {
-            contractCloses: new Map([[contract, { close: 4.25, date: DAY }]]), undatedPriceDay: "2026-10-28", syncedContracts: synced(row),
-        }).options.map((o) => [o.quantity, o.premium, o.price]);
-        assert.deepEqual(wednesday([perContract(300)], 300), [[300, 3.5, 4.2]]);
-        // Contracts bought since don't take the row out of its reading.
-        assert.deepEqual(wednesday([perContract(400)], 300), [[400, 3.5, 4.2]]);
-        // A row in Plaid's shares stays in them, and so does a contract with no row.
-        assert.deepEqual(wednesday([perContract(300)], 3), [[3, 350, 420]]);
-        assert.deepEqual(wednesday([perContract(300)]), [[3, 350, 420]]);
-        // Another account's row says nothing about this one's.
-        const elsewhere = accountHoldings(ACCOUNT, [perContract(300)], [acmeCall()], {
-            contractCloses: new Map([[contract, { close: 4.25, date: DAY }]]), undatedPriceDay: "2026-10-28",
-            syncedContracts: new Map([["acc_other", new Map([[contract, 300]])]]),
-        });
-        assert.deepEqual(elsewhere.options.map((o) => o.quantity), [3]);
+        const row = (contracts: number, perShare: number | null, account = ACCOUNT) => new Map([[account, new Map([[contract, { contracts, perShare }]])]]);
+        const wednesday = (lots: PlaidHolding[], syncedOptions?: ReturnType<typeof row>, close = { close: 4.25, date: DAY }) =>
+            accountHoldings(ACCOUNT, lots, [acmeCall()], { contractCloses: new Map([[contract, close]]), undatedPriceDay: "2026-10-28", syncedOptions })
+                .options.map((o) => [o.quantity, o.premium, o.price]);
+        assert.deepEqual(wednesday([perContract(300)], row(300, 4.2)), [[300, 3.5, 4.2]]);
+        // Contracts bought or sold since, however many and on either side, don't take the row out of its reading.
+        assert.deepEqual(wednesday([perContract(400)], row(300, 4.2)), [[400, 3.5, 4.2]]);
+        assert.deepEqual(wednesday([perContract(100)], row(10, 4.2)), [[100, 3.5, 4.2]]);
+        assert.deepEqual(wednesday([perContract(100)], row(2000, 4.2)), [[100, 3.5, 4.2]]);
+        assert.deepEqual(wednesday([perContract(-300)], row(300, 4.2)), [[-300, 3.5, 4.2]]);
+        // Nor does the option moving more than three times from its close, one from
+        // about its price's session or a weeks-old one: 300 contracts at $0.50 a share
+        // are $2.00 a share tonight.
+        const quadrupled = perContract(300, { institution_price: 200, institution_value: 60_000 });
+        for (const date of ["2026-10-27", "2026-10-26", WEEKS_BEFORE]) {
+            assert.deepEqual(wednesday([quadrupled], row(300, 0.5), { close: 0.5, date }), [[300, 3.5, 2]], date);
+        }
+        // Or sliding so far from a weeks-old close of $0.50 that the close fits the
+        // other reading: $1 a contract is within three times of it read a share.
+        const slid = perContract(300, { institution_price: 1, institution_value: 300 });
+        assert.deepEqual(wednesday([slid], row(300, 0.012), { close: 0.5, date: WEEKS_BEFORE }), [[300, 3.5, 0.01]]);
 
-        // The cheap call a weeks-old close of $0.01 used to read as 300 contracts:
-        // with its row of 3 contracts, it stays 3 at $0.40 a share.
+        // A row in Plaid's shares stays in them, and so does a contract with no row, or
+        // only another account's.
+        assert.deepEqual(wednesday([perContract(300)], row(3, 420)), [[3, 350, 420]]);
+        assert.deepEqual(wednesday([perContract(300)]), [[3, 350, 420]]);
+        assert.deepEqual(wednesday([perContract(300)], row(300, 4.2, "acc_other")), [[3, 350, 420]]);
+        // A row with no price is read by its contracts alone.
+        assert.deepEqual(wednesday([perContract(300)], row(300, null)), [[300, 3.5, 4.2]]);
+        assert.deepEqual(wednesday([perContract(300)], row(3, null)), [[3, 350, 420]]);
+        // The same 300 contracts at $4.20 a share read as the row however the
+        // institution reports them, as Plaid documents them too.
+        const documented = acmeHolding({ quantity: 30_000, institution_value: 126_000, cost_basis: 105_000 });
+        assert.deepEqual(wednesday([documented], row(300, 4.2)), [[300, 3.5, 4.2]]);
+        // Lots as near the row either way, a hundredth of its contracts or of its
+        // price, say nothing: Plaid's shares stand.
+        assert.deepEqual(wednesday([acmeHolding()], row(300, 4.2)), [[3, 3.5, 4.2]]);
+
+        // The cheap call a weeks-old close of $0.01 fits read per contract: its row of
+        // 3 contracts at $0.40 a share keeps it 3.
         const cheap = acmeHolding({ institution_price: 0.4, institution_value: 120, cost_basis: 30, institution_price_as_of: DAY });
         const result = accountHoldings(ACCOUNT, [cheap], [acmeCall()], {
-            contractCloses: new Map([[contract, { close: 0.01, date: WEEKS_BEFORE }]]), underlyingPrices: new Map([["ACME", 100]]), syncedContracts: synced(3),
+            contractCloses: new Map([[contract, { close: 0.01, date: WEEKS_BEFORE }]]), underlyingPrices: new Map([["ACME", 100]]), syncedOptions: row(3, 0.4),
         });
         assert.deepEqual(result.options, [{ ...ACME, quantity: 3, premium: 0.1, price: 0.4, priceDate: DAY }]);
     });

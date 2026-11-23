@@ -803,26 +803,30 @@ describe('Plaid sync into portfolios', { skip: !DATABASE_URL && 'SCRIPTS_TEST_DA
             assert.deepEqual(await held(), [[300, 3.5, 4.2]]);
             // The next night the close is three sessions old, the prices job (which
             // runs after the plaid job, and checks a few contracts a run) not
-            // having stored a newer one: too old to settle the contract, it keeps
-            // the reading the row is in rather than going back to 3.
+            // having stored a newer one: too old to settle the contract, so the
+            // reading nearest the row stands rather than going back to 3.
             const tuesday = await sync([AAPL_LOT, PER_CONTRACT], new Date('2026-10-27T22:30:00.000Z'));
             assert.deepEqual([tuesday.status, await held()], ['synced', [[300, 3.5, 4.2]]]);
             // The rows read are the user's own, of the accounts the sync asks about.
             const synced = async (user: string, account: string) =>
-                (await loadOptionPriceEvidence(user, [account], SECURITIES, new Date('2026-10-27T22:30:00.000Z'), database)).syncedContracts;
-            assert.deepEqual(await synced('u-percontract', 'acc-u-percontract'), new Map([['acc-u-percontract', new Map([[ACME_CALL, 300]])]]));
+                (await loadOptionPriceEvidence(user, [account], SECURITIES, new Date('2026-10-27T22:30:00.000Z'), database)).syncedOptions;
+            assert.deepEqual(await synced('u-percontract', 'acc-u-percontract'), new Map([['acc-u-percontract', new Map([[ACME_CALL, { contracts: 300, perShare: 4.2 }]])]]));
             assert.deepEqual(await synced('u-other', 'acc-u-percontract'), new Map());
             assert.deepEqual(await synced('u-percontract', 'acc-other'), new Map());
-            // Lots as Plaid usually reports them still read as shares: the old
-            // close is near their price a share, not the row's reading.
-            await sync([AAPL_LOT, ACME_LOT], new Date('2026-10-28T22:30:00.000Z'));
+            // The next night the option has quadrupled, to $16.80 a share, far
+            // from the old close: it's still the row's 300 contracts.
+            await sync([AAPL_LOT, ['sec_acme_c150', 300, 1680, 105_000]], new Date('2026-10-28T22:30:00.000Z'));
+            assert.deepEqual(await held(), [[300, 3.5, 16.8]]);
+            // Lots as Plaid usually reports them read as shares: 3 contracts at
+            // $4.20 a share are nearer the row than 300 at $0.042.
+            await sync([AAPL_LOT, ACME_LOT], new Date('2026-10-29T22:30:00.000Z'));
             assert.deepEqual(await held(), [[3, 3.5, 4.2]]);
 
             // Without a close, the underlying's: a call is never worth more than ACME's $145 a share.
             await sql`DELETE FROM option_marks WHERE contract = ${ACME_CALL}`;
             await sql`INSERT INTO securities (symbol) VALUES ('ACME') ON CONFLICT DO NOTHING`;
             await sql`INSERT INTO price_bars (symbol, date, open, high, low, close, volume, source) VALUES ('ACME', '2026-10-23', 145, 145, 145, 145, 1000, 'test')`;
-            await sync([AAPL_LOT, PER_CONTRACT], new Date('2026-10-29T22:30:00.000Z'));
+            await sync([AAPL_LOT, PER_CONTRACT], new Date('2026-10-30T22:30:00.000Z'));
             assert.deepEqual(await held(), [[300, 3.5, 4.2]]);
         } finally {
             await sql`DELETE FROM option_marks WHERE contract = ${ACME_CALL}`;
