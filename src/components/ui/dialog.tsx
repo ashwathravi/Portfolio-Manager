@@ -38,10 +38,20 @@ function keepsDialogOpen(target: EventTarget | null): boolean {
 
 /**
  * What had the focus as the dialog opened: the control that opened it, or
- * null without a document (the server's render).
+ * null without a document (the server's render). An item of a menu (Update in
+ * a row's actions menu) leaves the page as the menu closes, so the button that
+ * opened the menu, which names it, stands in for it. A submenu's button is
+ * itself an item of a menu, so this climbs until the control is in none.
  */
 function focusedElement(): Element | null {
-    return typeof document === "undefined" ? null : document.activeElement
+    if (typeof document === "undefined") return null
+    let opener = document.activeElement
+    for (let depth = 0; opener && depth < 4; depth += 1) {
+        const menuButtonId = opener.closest('[role="menu"]')?.getAttribute("aria-labelledby")
+        if (!menuButtonId) break
+        opener = opener.ownerDocument.getElementById(menuButtonId)
+    }
+    return opener
 }
 
 /**
@@ -83,9 +93,10 @@ const DialogContentBody = React.forwardRef<React.ElementRef<typeof DialogPrimiti
                     onCloseAutoFocus?.(event);
                     if (event.defaultPrevented) return;
                     // A dialog opened from state (Add asset, New account, Add
-                    // holding) has no DialogTrigger, so Radix would leave the
-                    // focus on the page's body, and the next Tab would start
-                    // at the top of the page. Back to the control that opened it.
+                    // holding, Update in a row's menu) has no DialogTrigger, so
+                    // Radix would leave the focus on the page's body, and the
+                    // next Tab would start at the top of the page. Back to the
+                    // control that opened it.
                     const target = focusReturnTarget(opener);
                     if (!target) return;
                     event.preventDefault();

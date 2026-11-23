@@ -490,7 +490,7 @@ test.describe('Portfolio › Accounts — other assets and debts', () => {
         await expect(card(page).getByRole('button', { name: 'Actions for Credit card', exact: true })).toHaveCount(1);
     });
 
-    test('closing the add dialog, by Escape, Cancel or a save, gives the focus back to the button that opened it', async ({ page }) => {
+    test('closing a dialog, by Escape, Cancel or a save, gives the focus back to the button that opened it', async ({ page }) => {
         await brokerage(page);
         await gotoAppPage(page, '/portfolios/accounts');
         const dialog = page.getByRole('dialog');
@@ -516,6 +516,20 @@ test.describe('Portfolio › Accounts — other assets and debts', () => {
         await expect(dialog).toBeHidden();
         await expect(page.getByText('Home or property added.')).toBeVisible();
         await expect(addAsset).toBeFocused();
+
+        // Update in an item's menu: the menu has closed, so its button.
+        const actions = card(page).getByRole('button', { name: 'Actions for Home or property' });
+        await actions.focus();
+        await page.keyboard.press('Enter');
+        await expect(page.getByRole('menuitem', { name: 'Update' })).toBeFocused();
+        await page.keyboard.press('Enter');
+        await expect(dialog.getByRole('heading', { name: 'Update Home or property' })).toBeVisible();
+        // The menu has left the page, as it has by the time a person acts:
+        // while it fades out, its item is still there to take the focus back.
+        await expect(page.locator('[role="menu"]')).toHaveCount(0);
+        await page.keyboard.press('Escape');
+        await expect(dialog).toBeHidden();
+        await expect(actions).toBeFocused();
 
         // The same for the page's other dialogs opened from a button, not a trigger.
         const newAccount = page.getByRole('button', { name: 'New account' });
