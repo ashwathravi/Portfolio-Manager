@@ -17,6 +17,8 @@ const PORTFOLIO = "0b9d3c1e-6a3c-4c7e-9f3a-2f4d8a1b2c3d";
 interface FakeDatabaseOptions {
     /** The target account's source: "plaid" for a linked one. */
     source?: string;
+    /** Whether a linked target account still syncs (its Plaid account picked and not revoked). */
+    syncing?: boolean;
     /** The account's holdings valued by hand that an import may update, as stored. */
     handValued?: Array<Record<string, unknown>>;
     /** The account's positions besides AAPL. */
@@ -29,11 +31,12 @@ interface FakeDatabaseOptions {
  * A database that holds AAPL already, and records what it was asked to
  * write. `accounts` are the user's accounts a new one is checked against.
  * Each lock it's asked for is named by its key: the user's account lock,
- * or the records lock of holdings valued by hand.
+ * or the records lock of holdings valued by hand. `syncingQueries` are the
+ * questions it was asked about which linked accounts still sync.
  */
 function fakeDatabase(
     accounts: Array<{ id: string; name: string }> = [{ id: PORTFOLIO, name: "Brokerage" }],
-    { source = "manual", handValued = [], positions = [], kept = 0 }: FakeDatabaseOptions = {},
+    { source = "manual", syncing = true, handValued = [], positions = [], kept = 0 }: FakeDatabaseOptions = {},
 ) {
     const inserted: Record<string, unknown>[] = [];
     const updated: Record<string, unknown>[] = [];
@@ -43,6 +46,7 @@ function fakeDatabase(
     const values: Record<string, unknown>[] = [];
     const deleted: { sql: string; params: unknown[] }[] = [];
     const touched: Record<string, unknown>[] = [];
+    const syncingQueries: { sql: string; params: unknown[] }[] = [];
     let locks = 0;
     const order: string[] = [];
     const dialect = new PgDialect();
@@ -59,6 +63,14 @@ function fakeDatabase(
         },
         select: (fields: Record<string, unknown>) => ({
             from: (table: unknown) => ({
+                // Linked accounts that still sync (buildSyncingAccountsQuery).
+                innerJoin: () => ({
+                    where: async (condition: SQL) => {
+                        assert.equal(table, portfolios);
+                        syncingQueries.push(dialect.sqlToQuery(condition));
+                        return syncing ? [{ id: PORTFOLIO }] : [];
+                    },
+                }),
                 where: () => {
                     // The records limit's count.
                     if ("n" in fields) return Promise.resolve([{ n: kept + manualInserted.length }]);
@@ -109,7 +121,7 @@ function fakeDatabase(
         }),
     };
     const database = { transaction: async (fn: (t: typeof tx) => Promise<unknown>) => fn(tx) } as unknown as typeof db;
-    return { database, inserted, updated, createdAccounts, manualInserted, manualUpdated, values, deleted, touched, locks: () => locks, order };
+    return { database, inserted, updated, createdAccounts, manualInserted, manualUpdated, values, deleted, touched, syncingQueries, locks: () => locks, order };
 }
 
 describe("importHoldings", () => {
@@ -256,7 +268,7 @@ describe("importHoldings with holdings valued by hand", () => {
         assert.equal(fake.manualInserted.length, 1);
     });
 
-    test("into a linked account they're refused and nothing is written; the file's positions alone still import", async () => {
+    test("into a linked account that still syncs they're refused and nothing is written; the file's positions alone still import", async () => {
         const fake = fakeDatabase(undefined, { source: "plaid" });
         await assert.rejects(
             importHoldings(USER, { portfolioId: PORTFOLIO, rows: [position], manual: [fund] }, {}, fake.database),
@@ -264,8 +276,35 @@ describe("importHoldings with holdings valued by hand", () => {
                 && err.message === "Brokerage is linked to your bank, so its holdings without a ticker come from there. Import this file into another account.",
         );
         assert.deepEqual([fake.inserted.length, fake.manualInserted.length, fake.values.length, fake.touched.length], [0, 0, 0, 0]);
+        // Asked of this account, the user's, under the locks.
+        assert.equal(fake.syncingQueries.length, 1);
+        assert.deepEqual(fake.syncingQueries[0].params, [USER, "plaid", "sync_ready", PORTFOLIO]);
+        assert.deepEqual(fake.order, ["account lock", "records lock", "row lock"]);
         const positions = fakeDatabase(undefined, { source: "plaid" });
         assert.equal((await importHoldings(USER, { portfolioId: PORTFOLIO, rows: [position] }, {}, positions.database)).insert, 1);
+        assert.equal(positions.syncingQueries.length, 0);
+    });
+
+    test("regression: once a linked account no longer syncs (disconnected, revoked), they import, and update what its last sync brought in", async () => {
+        // It stays a linked account in Atlas, but no sync replaces its
+        // holdings any more: refusing the file left no way to update them.
+        const synced = { ...saved, id: "m-synced", externalId: `${PORTFOLIO}:sec_trust`, value: "11000" };
+        const fake = fakeDatabase(undefined, { source: "plaid", syncing: false, handValued: [synced] });
+        const result = await importHoldings(USER, { portfolioId: PORTFOLIO, rows: [position], manual: [fund], valuesAsOf: "2026-11-02" }, {}, fake.database);
+        assert.equal(fake.syncingQueries.length, 1);
+        assert.deepEqual(result.manual, { insert: 0, update: 1, unchanged: 0, replacedPositions: 0 });
+        assert.deepEqual(fake.manualInserted, []);
+        // Found by its name, and the file's from now on: the next file finds it by its key.
+        assert.deepEqual(fake.manualUpdated.map(({ externalId, source, value, valueAsOf }) => ({ externalId, source, value, valueAsOf })), [
+            { externalId: "csv:name:target 2055 trust", source: "csv", value: "12345.67", valueAsOf: "2026-11-02" },
+        ]);
+        assert.deepEqual(fake.values.map((v) => [v.manualHoldingId, v.date, v.value]), [["m-synced", "2026-11-02", "12345.67"]]);
+    });
+
+    test("an account that was never linked isn't asked whether it syncs", async () => {
+        const fake = fakeDatabase();
+        await importHoldings(USER, { portfolioId: PORTFOLIO, rows: [], manual: [fund] }, {}, fake.database);
+        assert.deepEqual([fake.syncingQueries.length, fake.manualInserted.length], [0, 1]);
     });
 
     test("a new one marks the account changed; a new value alone doesn't, new units or a new cost do", async () => {

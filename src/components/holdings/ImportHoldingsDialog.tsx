@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useId, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
@@ -12,23 +12,31 @@ import {
     DialogTitle,
 } from "@/components/ui/dialog";
 import {
+    countNotInFile,
     describeImportCounts,
+    describeImportResult,
+    describeImportTotal,
+    describeManualChange,
+    describeNotInFile,
     groupImportByAccount,
     parseHoldingsCsv,
     planManualImport,
     type AccountImportGroup,
     type ExistingManualHolding,
     type ParseResult,
-    type PlannedManualChange,
 } from "@/lib/portfolio/csvImport";
 import { describeOptionContract } from "@/lib/portfolio/option-positions";
 import { localDate } from "@/lib/portfolio/value-dates";
-import { formatQty, formatShortDate, formatUsd } from "@/lib/format";
+import { formatQty, formatUsd } from "@/lib/format";
 
 export interface ImportAccountOption {
     id: string;
     name: string;
-    /** Linked to a bank through Plaid, which reports its holdings without a ticker, so a file's can't be imported into it. */
+    /**
+     * A linked account that still syncs: its bank reports its holdings
+     * without a ticker, so a file's can't be imported into it. One that
+     * no longer syncs (disconnected) takes them like any other.
+     */
     linked?: boolean;
 }
 
@@ -72,20 +80,6 @@ function initialTargets(groups: readonly AccountImportGroup[], accounts: readonl
     }));
 }
 
-/** A day as the preview shows it: "Nov 20, 2026". */
-const formatDay = (day: string) => formatShortDate(`${day}T12:00:00Z`);
-
-/** What importing a row valued by hand does to what Atlas holds, as the preview's In Atlas column says it. */
-function inAtlas(change: PlannedManualChange): string {
-    let text: string;
-    if (change.kind === "insert") text = "New";
-    else if (change.olderThanSaved) text = `Keeps the newer value from ${formatDay(change.savedValueAsOf)}`;
-    else if (change.kind === "unchanged") text = "No change";
-    // The holding keeps its name: say which one when the file calls it something else.
-    else text = change.savedName.trim() === change.row.name.trim() ? "Updates" : `Updates “${change.savedName}”`;
-    return change.replacesPosition ? `${text}, replaces position ${change.replacesPosition}` : text;
-}
-
 /**
  * Holdings › Import CSV. Choose a positions export from your broker, check
  * what was read (and what was not), pick the account, then import. Nothing
@@ -93,7 +87,8 @@ function inAtlas(change: PlannedManualChange): string {
  * ledger (launch item i63). Rows with no ticker Atlas can price come in
  * valued by hand at the file's market value, as of the day the user gives
  * (`existing` lets the preview say which holdings they update or which
- * positions they replace); a linked account can't take them.
+ * positions they replace); a linked account that still syncs can't take
+ * them.
  */
 export function ImportHoldingsDialog({
     accounts,
@@ -119,6 +114,7 @@ export function ImportHoldingsDialog({
     const [accountTargets, setAccountTargets] = useState<Record<string, AccountTarget>>({});
     // The day the file's values are from: the browser's today once a file is read.
     const [valuesAsOf, setValuesAsOf] = useState("");
+    const valuesDateAlertId = useId();
 
     const reset = () => {
         setFileName(null);
@@ -182,24 +178,36 @@ export function ImportHoldingsDialog({
     });
     const planned = handValued.flatMap((g) => g.plan.map((change) => ({ account: g.label, change })));
     // Holdings an earlier file brought into a target account that this one leaves out: they stay.
-    const claimed = new Set(planned.flatMap(({ change }) => (change.kind === "insert" ? [] : [change.id])));
     const notInFile = accounts.flatMap((account) => {
         if (!(multiAccount ? chosen.some((t) => t.target === account.id) : target === account.id)) return [];
-        const left = existing.handValued.filter((h) => h.portfolioId === account.id && h.importKey !== null && !claimed.has(h.id)).length;
-        return left > 0 ? [{ account: account.name, left }] : [];
+        const left = countNotInFile(existing.handValued, planned.map((p) => p.change), account.id);
+        return left > 0 ? [{ account: account.name, note: describeNotInFile(account.name, left) }] : [];
     });
-    // A linked account's holdings without a ticker come from its bank (LinkedAccountImportError).
+    // A linked account's holdings without a ticker come from its bank while it syncs (LinkedAccountImportError).
     const linkedTargets = accounts.filter((a) => a.linked && handValued.some((g) => g.accountId === a.id));
     const canImport = total > 0 && parsed?.issues.length === 0 && !submitting && targetsReady
         && (manual.length === 0 || (datedOk && linkedTargets.length === 0));
+    // Why the day keeps Import off: a later one, or none (cleared, or half typed).
+    const valuesDateAlert = manual.length === 0 || datedOk ? null
+        : valuesAsOf > today ? "Choose a date that isn't in the future." : "Choose the day these values are from.";
     // With rows valued by hand, the day their values are from: by the
     // browser's calendar, no later than its today.
     const valuesDateField = manual.length > 0 && (
         <label className="pm-exec-field">
             <span className="pm-exec-field-label">Values as of</span>
-            <input type="date" className="pm-exec-input" value={valuesAsOf} max={today} required onChange={(e) => setValuesAsOf(e.target.value)} />
+            <input
+                type="date"
+                className="pm-exec-input"
+                value={valuesAsOf}
+                max={today}
+                required
+                aria-describedby={valuesDateAlert ? valuesDateAlertId : undefined}
+                onChange={(e) => setValuesAsOf(e.target.value)}
+            />
         </label>
     );
+    // What the file brings in: positions, or holdings once some are valued by hand.
+    const totalLabel = describeImportTotal({ positions: rows.length + options.length, handValued: manual.length });
     const setAccountTarget = (account: string, change: Partial<AccountTarget>) =>
         setAccountTargets((current) => ({ ...current, [account]: { ...(current[account] ?? { target: NEW_ACCOUNT, newName: account }), ...change } }));
 
@@ -239,31 +247,19 @@ export function ImportHoldingsDialog({
             };
             const results: Counts[] = multiAccount ? body.data.accounts : [body.data];
             const sum = (pick: (c: Counts) => number) => results.reduce((n, c) => n + pick(c), 0);
-            const d = {
-                insert: sum((c) => c.insert),
-                update: sum((c) => c.update),
-                unchanged: sum((c) => c.unchanged),
-                options: { insert: sum((c) => c.options?.insert ?? 0), update: sum((c) => c.options?.update ?? 0), unchanged: sum((c) => c.options?.unchanged ?? 0) },
-            };
-            const m = {
-                insert: sum((c) => c.manual?.insert ?? 0),
-                update: sum((c) => c.manual?.update ?? 0),
-                unchanged: sum((c) => c.manual?.unchanged ?? 0),
-                replacedPositions: sum((c) => c.manual?.replacedPositions ?? 0),
-            };
-            const across = multiAccount ? ` across ${groups.length} account${groups.length === 1 ? "" : "s"}` : "";
-            const optionsNote = options.length > 0
-                ? ` Option positions: ${d.options.insert} new, ${d.options.update} updated${d.options.unchanged ? `, ${d.options.unchanged} unchanged` : ""}.`
-                : "";
-            const replaced = m.replacedPositions
-                ? `; ${m.replacedPositions} ${m.replacedPositions === 1 ? "replaces a position" : "replace positions"} Atlas couldn't price`
-                : "";
-            const manualNote = manual.length > 0
-                ? ` Valued by hand: ${m.insert} new, ${m.update} updated${m.unchanged ? `, ${m.unchanged} unchanged` : ""}${replaced}.`
-                : "";
-            toast.success(
-                `Imported ${total} position${total === 1 ? "" : "s"}${across}: ${d.insert} new, ${d.update} updated${d.unchanged ? `, ${d.unchanged} unchanged` : ""}.${optionsNote}${manualNote}`,
-            );
+            toast.success(describeImportResult(
+                { positions: rows.length, options: options.length, handValued: manual.length, accounts: multiAccount ? groups.length : 1 },
+                {
+                    positions: { insert: sum((c) => c.insert), update: sum((c) => c.update), unchanged: sum((c) => c.unchanged) },
+                    options: { insert: sum((c) => c.options?.insert ?? 0), update: sum((c) => c.options?.update ?? 0), unchanged: sum((c) => c.options?.unchanged ?? 0) },
+                    handValued: {
+                        insert: sum((c) => c.manual?.insert ?? 0),
+                        update: sum((c) => c.manual?.update ?? 0),
+                        unchanged: sum((c) => c.manual?.unchanged ?? 0),
+                        replacedPositions: sum((c) => c.manual?.replacedPositions ?? 0),
+                    },
+                },
+            ));
             setOpen(false);
             reset();
             router.refresh();
@@ -419,7 +415,7 @@ export function ImportHoldingsDialog({
                                                             <td className="num">{change.row.quantity == null ? "—" : formatQty(change.row.quantity)}</td>
                                                             <td className="num">{formatUsd(change.row.value)}</td>
                                                             <td className="num">{change.row.costBasis == null ? "—" : formatUsd(change.row.costBasis)}</td>
-                                                            <td>{inAtlas(change)}</td>
+                                                            <td>{describeManualChange(change)}</td>
                                                         </tr>
                                                     ))}
                                                 </tbody>
@@ -429,11 +425,9 @@ export function ImportHoldingsDialog({
                                         <p className="pm-import-note">
                                             Atlas can&apos;t price these, so each counts at the file&apos;s value until the next import or your own update.
                                         </p>
-                                        {notInFile.map(({ account, left }) => (
+                                        {notInFile.map(({ account, note }) => (
                                             <p key={account} className="pm-import-note" data-testid="import-not-in-file">
-                                                {left === 1
-                                                    ? `1 holding valued by hand that an earlier file brought into ${account} isn't in this one. It stays as it is; delete it on Holdings if it's gone.`
-                                                    : `${left} holdings valued by hand that an earlier file brought into ${account} aren't in this one. They stay as they are; delete them on Holdings if they're gone.`}
+                                                {note}
                                             </p>
                                         ))}
                                     </>
@@ -458,12 +452,11 @@ export function ImportHoldingsDialog({
                                 <p className="pm-exec-field-label">Where each account goes</p>
                                 {groups.map((g, i) => {
                                     const t = chosen[i];
-                                    const count = g.rows.length + g.options.length + g.manual.length;
                                     return (
                                         <div key={g.account} className="pm-form-pair" data-testid="import-account-target">
                                             <label className="pm-exec-field">
                                                 <span className="pm-exec-field-label">
-                                                    {g.account} ({count} position{count === 1 ? "" : "s"})
+                                                    {g.account} ({describeImportTotal({ positions: g.rows.length + g.options.length, handValued: g.manual.length })})
                                                 </span>
                                                 <select
                                                     className="pm-exec-input"
@@ -535,8 +528,8 @@ export function ImportHoldingsDialog({
                             </div>
                         )}
 
-                        {manual.length > 0 && valuesAsOf > today && (
-                            <p className="pm-import-error" role="alert">Choose a date that isn&apos;t in the future.</p>
+                        {valuesDateAlert && (
+                            <p id={valuesDateAlertId} className="pm-import-error" role="alert">{valuesDateAlert}</p>
                         )}
                         {linkedTargets.map((account) => (
                             <p key={account.id} className="pm-import-error" role="alert">
@@ -557,7 +550,7 @@ export function ImportHoldingsDialog({
                             Cancel
                         </button>
                         <button type="button" className="pm-btn pm-btn-primary" disabled={!canImport} onClick={submit}>
-                            {submitting ? "Importing…" : total > 0 ? `Import ${total} position${total === 1 ? "" : "s"}` : "Import"}
+                            {submitting ? "Importing…" : total > 0 ? `Import ${totalLabel}` : "Import"}
                         </button>
                     </DialogFooter>
                 </DialogContent>

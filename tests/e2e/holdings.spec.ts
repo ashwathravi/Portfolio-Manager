@@ -945,15 +945,24 @@ test.describe('Holdings › Import CSV', () => {
             return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
         });
         const date = dialog.getByLabel('Values as of');
+        // Holdings, not positions: two of the three are valued by hand.
+        const importButton = dialog.getByRole('button', { name: 'Import 3 holdings' });
         await expect(date).toHaveValue(today);
         await date.fill('2099-01-02');
         await expect(dialog.getByRole('alert')).toHaveText("Choose a date that isn't in the future.");
-        await expect(dialog.getByRole('button', { name: 'Import 3 positions' })).toBeDisabled();
+        await expect(date).toHaveAccessibleDescription("Choose a date that isn't in the future.");
+        await expect(importButton).toBeDisabled();
+        // Cleared, the day is asked for rather than Import just turning off.
+        await date.fill('');
+        await expect(dialog.getByRole('alert')).toHaveText('Choose the day these values are from.');
+        await expect(date).toHaveAccessibleDescription('Choose the day these values are from.');
+        await expect(importButton).toBeDisabled();
         await date.fill('2026-11-02');
         await expect(dialog.getByRole('alert')).toHaveCount(0);
+        await expect(date).not.toHaveAttribute('aria-describedby');
 
-        await dialog.getByRole('button', { name: 'Import 3 positions' }).click();
-        await expect(page.getByText('Imported 3 positions: 1 new, 0 updated. Valued by hand: 2 new, 0 updated.')).toBeVisible();
+        await importButton.click();
+        await expect(page.getByText('Imported 1 position: 1 new, 0 updated. Valued by hand: 2 new, 0 updated.')).toBeVisible();
         expect(sent.rows).toEqual([{ symbol: 'NVDA', name: 'NVIDIA Corp', quantity: 10, avgCost: 450.25 }]);
         expect(sent.manual).toEqual([
             { name: 'Target 2055 Trust', identifier: null, quantity: 120.5, value: 12345.67, costBasis: null },
@@ -993,8 +1002,8 @@ test.describe('Holdings › Import CSV', () => {
         await expect(planned).toContainText('New');
         await dialog.getByLabel('New account name').fill('Workplace 401k');
         await dialog.getByLabel('Values as of').fill('2026-11-02');
-        await dialog.getByRole('button', { name: 'Import 1 position' }).click();
-        await expect(page.getByText('Imported 1 position: 0 new, 0 updated. Valued by hand: 1 new, 0 updated.')).toBeVisible();
+        await dialog.getByRole('button', { name: 'Import 1 holding' }).click();
+        await expect(page.getByText('Imported 1 holding valued by hand: 1 new, 0 updated.')).toBeVisible();
         // Nothing with a ticker yet; the trust is on its own card.
         await expect(page.getByTestId('holdings-empty').getByRole('heading')).toHaveText('No holdings with a ticker yet');
         const rows = page.getByTestId('manual-holdings-table').getByRole('row').filter({ hasText: 'Target 2055 Trust' });
@@ -1007,8 +1016,8 @@ test.describe('Holdings › Import CSV', () => {
         await openImport(page, statement('12,500.00'));
         await expect(planned).toContainText('Updates');
         await dialog.getByLabel('Values as of').fill('2026-11-03');
-        await dialog.getByRole('button', { name: 'Import 1 position' }).click();
-        await expect(page.getByText('Imported 1 position: 0 new, 0 updated. Valued by hand: 0 new, 1 updated.')).toBeVisible();
+        await dialog.getByRole('button', { name: 'Import 1 holding' }).click();
+        await expect(page.getByText('Imported 1 holding valued by hand: 0 new, 1 updated.')).toBeVisible();
         await expect(rows).toContainText('$12,500.00');
         await expect(rows).toHaveCount(1);
         const values = await e2eDatabase()<{ date: string; value: string }[]>`
@@ -1017,6 +1026,15 @@ test.describe('Holdings › Import CSV', () => {
             WHERE m.user_id = ${userId}
             ORDER BY v.date`;
         expect(values.map((v) => [v.date, Number(v.value)])).toEqual([['2026-11-02', 12345.67], ['2026-11-03', 12500]]);
+
+        // A file without the trust says it stays.
+        await openImport(page, 'Symbol,Description,Quantity,Market Value\n99ZZ12341,Stable Value Fund,,"$10,000.00"');
+        await expect(planned).toContainText('New');
+        await expect(dialog.getByTestId('import-not-in-file')).toHaveText(
+            "1 holding valued by hand that an earlier file brought into Workplace 401k isn't in this one. It stays as it is; delete it on Holdings if it's gone.",
+        );
+        await dialog.getByRole('button', { name: 'Cancel' }).click();
+        await expect(rows).toHaveCount(1);
     });
 
     test('database: a holding added by hand is the one the next file updates', async ({ context, page }) => {
@@ -1039,8 +1057,8 @@ test.describe('Holdings › Import CSV', () => {
         const dialog = page.getByTestId('import-dialog');
         await dialog.getByLabel('Import into').selectOption({ label: 'Main Portfolio' });
         await expect(dialog.getByRole('table', { name: 'Holdings valued by hand to import' }).locator('tbody tr')).toContainText('Updates');
-        await dialog.getByRole('button', { name: 'Import 1 position' }).click();
-        await expect(page.getByText('Valued by hand: 0 new, 1 updated.', { exact: false })).toBeVisible();
+        await dialog.getByRole('button', { name: 'Import 1 holding' }).click();
+        await expect(page.getByText('Imported 1 holding valued by hand: 0 new, 1 updated.')).toBeVisible();
         await expect(rows).toContainText('$12,345.67');
         await expect(rows).toHaveCount(1);
         await expect(rows).toContainText('from your CSV import');
@@ -1077,23 +1095,50 @@ test.describe('POST /api/portfolio/import', () => {
         if (dbMode) expect((await e2eDatabase()`SELECT 1 FROM portfolios WHERE name = 'Refused import'`).length).toBe(0);
     });
 
-    test('database: holdings valued by hand into a linked account are refused, the dialog says so first, and its positions alone still import', async ({ context, page }) => {
+    /**
+     * A linked account, "Brokerage Link", with the fund its sync brought in
+     * (a holding valued by hand that Plaid keys), set up in the database
+     * without Plaid. `syncStatus` is its Plaid account's: "sync_ready" while
+     * it syncs, "excluded" once disconnected.
+     */
+    async function seedLinkedAccount(userId: string, syncStatus: 'sync_ready' | 'excluded') {
+        const sql = e2eDatabase();
+        return sql.begin(async (transaction) => {
+            // postgres.js types a transaction without its tagged-template call.
+            const tx = transaction as unknown as typeof sql;
+            const [item] = await tx<{ id: string }[]>`
+                INSERT INTO plaid_items (user_id, plaid_item_id, institution_name, access_token_ciphertext, access_token_iv, access_token_auth_tag)
+                VALUES (${userId}, ${`item-${userId}`}, 'Example Brokerage', 'x', 'x', 'x') RETURNING id`;
+            await tx`
+                INSERT INTO plaid_accounts (user_id, plaid_item_record_id, plaid_account_id, name, type, subtype, capabilities, verification_status, sync_status)
+                VALUES (${userId}, ${item.id}, ${`acc-${userId}`}, 'Individual', 'investment', 'brokerage', '[]', 'automatically_verified', ${syncStatus})`;
+            const [linked] = await tx<{ id: string }[]>`
+                INSERT INTO portfolios (user_id, name, source, external_account_id)
+                VALUES (${userId}, 'Brokerage Link', 'plaid', ${`acc-${userId}`}) RETURNING id`;
+            const [fund] = await tx<{ id: string }[]>`
+                INSERT INTO manual_holdings (user_id, portfolio_id, name, value, value_as_of, source, external_id)
+                VALUES (${userId}, ${linked.id}, 'Target 2055 Trust', 11000, '2026-10-30', 'plaid', ${`${linked.id}:sec_fund`}) RETURNING id`;
+            return { linked, fund };
+        });
+    }
+    const LINKED_FILE = 'Symbol,Description,Quantity,Average Cost,Market Value\nNVDA,NVIDIA Corp,10,450.25,4600.00\n,Target 2055 Trust,120.5,,"12,345.67"\n';
+
+    test('database: holdings valued by hand into a linked account that still syncs are refused, the dialog says so first, and its positions alone still import', async ({ context, page }) => {
         test.skip(!dbMode, 'needs the seeded E2E database');
         const userId = await signInAsFreshUser(context);
-        const [linked] = await e2eDatabase()<{ id: string }[]>`
-            INSERT INTO portfolios (user_id, name, source, external_account_id)
-            VALUES (${userId}, 'Brokerage Link', 'plaid', ${`acc-${userId}`}) RETURNING id`;
+        const { linked } = await seedLinkedAccount(userId, 'sync_ready');
         const refusal = 'Brokerage Link is linked to your bank, so its holdings without a ticker come from there. Import this file into another account.';
         await gotoAppPage(page, '/portfolios/holdings');
-        await openImport(page, 'Symbol,Description,Quantity,Average Cost,Market Value\nNVDA,NVIDIA Corp,10,450.25,4600.00\n,Target 2055 Trust,120.5,,"12,345.67"\n');
+        await openImport(page, LINKED_FILE);
         const dialog = page.getByTestId('import-dialog');
         await dialog.getByLabel('Import into').selectOption({ label: 'Brokerage Link' });
         await expect(dialog.getByRole('alert')).toHaveText(refusal);
-        await expect(dialog.getByRole('button', { name: 'Import 2 positions' })).toBeDisabled();
+        await expect(dialog.getByRole('button', { name: 'Import 2 holdings' })).toBeDisabled();
 
         const rows = [{ symbol: 'NVDA', name: 'NVIDIA Corp', quantity: 10, avgCost: 450.25 }];
         const written = async () => (await e2eDatabase()<{ n: number }[]>`
-            SELECT ((SELECT count(*) FROM holdings WHERE portfolio_id = ${linked.id}) + (SELECT count(*) FROM manual_holdings WHERE portfolio_id = ${linked.id}))::int AS n`)[0].n;
+            SELECT ((SELECT count(*) FROM holdings WHERE portfolio_id = ${linked.id})
+                + (SELECT count(*) FROM manual_holdings WHERE portfolio_id = ${linked.id} AND source <> 'plaid'))::int AS n`)[0].n;
         const refused = await page.request.post('/api/portfolio/import', {
             data: { portfolioId: linked.id, rows, manual: [{ name: 'Target 2055 Trust', quantity: 120.5, value: 12345.67 }], valuesAsOf: '2026-11-02' },
         });
@@ -1105,6 +1150,31 @@ test.describe('POST /api/portfolio/import', () => {
         expect(positionsOnly.status()).toBe(200);
         expect((await positionsOnly.json()).data).toMatchObject({ insert: 1, manual: { insert: 0, update: 0, unchanged: 0, replacedPositions: 0 } });
         expect(await written()).toBe(1);
+    });
+
+    test('database: once a linked account no longer syncs, a file updates the fund its last sync brought in', async ({ context, page }) => {
+        test.skip(!dbMode, 'needs the seeded E2E database');
+        const userId = await signInAsFreshUser(context);
+        const { fund } = await seedLinkedAccount(userId, 'excluded');
+        await gotoAppPage(page, '/portfolios/holdings');
+        const rows = page.getByTestId('manual-holdings-table').getByRole('row').filter({ hasText: 'Target 2055 Trust' });
+        await expect(rows).toContainText('from your linked account');
+
+        await openImport(page, LINKED_FILE);
+        const dialog = page.getByTestId('import-dialog');
+        await dialog.getByLabel('Import into').selectOption({ label: 'Brokerage Link' });
+        await expect(dialog.getByRole('alert')).toHaveCount(0);
+        await expect(dialog.getByRole('table', { name: 'Holdings valued by hand to import' }).locator('tbody tr')).toContainText('Updates');
+        await dialog.getByLabel('Values as of').fill('2026-11-02');
+        await dialog.getByRole('button', { name: 'Import 2 holdings' }).click();
+        await expect(page.getByText('Imported 1 position: 1 new, 0 updated. Valued by hand: 0 new, 1 updated.')).toBeVisible();
+        // The same holding, now the file's: one row, at the file's value.
+        await expect(rows).toHaveCount(1);
+        await expect(rows).toContainText('$12,345.67');
+        await expect(rows).toContainText('from your CSV import');
+        const [saved] = await e2eDatabase()<{ id: string; source: string }[]>`
+            SELECT id, source FROM manual_holdings WHERE user_id = ${userId} AND name = 'Target 2055 Trust'`;
+        expect(saved).toEqual({ id: fund.id, source: 'csv' });
     });
 
     test('database: another user\'s account is a 404 and nothing is written', async ({ page }) => {

@@ -139,13 +139,18 @@ describe("loadManualHoldings", () => {
             { id: "m-2", portfolioId: ACCOUNT, name: "Imported", identifier: null, quantity: null, value: "1", costBasis: null, valueAsOf: "2026-11-19", source: "csv", externalId: "csv:name:imported" },
             { id: "m-3", portfolioId: ACCOUNT, name: "Synced", identifier: null, quantity: null, value: "1", costBasis: null, valueAsOf: "2026-11-19", source: "plaid", externalId: `${ACCOUNT}:sec_1` },
             { id: "m-4", portfolioId: ACCOUNT, name: "Synced, then edited", identifier: null, quantity: null, value: "1", costBasis: null, valueAsOf: "2026-11-19", source: "manual", externalId: `${ACCOUNT}:sec_2` },
+            { id: "m-5", portfolioId: ACCOUNT, name: "Moved from another linked account", identifier: null, quantity: null, value: "1", costBasis: null, valueAsOf: "2026-11-19", source: "manual", externalId: `${OTHER_ACCOUNT}:sec_3` },
         ]]);
         const rows = await loadManualHoldings(USER, database);
+        // Its own account's syncs' holdings are a file's to update once it
+        // no longer syncs (the page leaves out an account that still does);
+        // another account's key keeps that account's sync from adding it again.
         assert.deepEqual(rows.map((r) => [r.id, r.importKey, r.importable]), [
             ["m-1", null, true],
             ["m-2", "csv:name:imported", true],
-            ["m-3", null, false],
-            ["m-4", null, false],
+            ["m-3", null, true],
+            ["m-4", null, true],
+            ["m-5", null, false],
         ]);
         for (const r of rows) assert.equal("externalId" in r, false, r.id);
     });
@@ -252,11 +257,32 @@ describe("importManualRows", () => {
         assert.deepEqual(writes[1].values, [{ manualHoldingId: "m-new", date: "2026-11-02", value: "12345.67", quantity: "250.5", recordedAt: now }]);
     });
 
-    test("only the account's holdings added by hand or by a file are read, never one a linked account keys", async () => {
+    test("only the account's holdings added by hand, by a file or by its own syncs are read, never one another account's sync keys", async () => {
         const { database, wheres } = fakeDatabase([[]]);
         await importManualRows(database, USER, ACCOUNT, [trust], { asOf: "2026-11-02", positions: [], now });
-        assert.equal(wheres[0].sql, '("manual_holdings"."portfolio_id" = $1 and "manual_holdings"."user_id" = $2 and ("manual_holdings"."external_id" is null or "manual_holdings"."external_id" like $3))');
-        assert.deepEqual(wheres[0].params, [ACCOUNT, USER, "csv:%"]);
+        assert.equal(wheres[0].sql, '("manual_holdings"."portfolio_id" = $1 and "manual_holdings"."user_id" = $2 and ("manual_holdings"."external_id" is null or "manual_holdings"."external_id" like $3 or "manual_holdings"."external_id" like $4))');
+        assert.deepEqual(wheres[0].params, [ACCOUNT, USER, "csv:%", `${ACCOUNT}:%`]);
+    });
+
+    test("regression: a holding the account's last sync brought in is found by its name or identifier, and becomes the file's", async () => {
+        // A linked account that no longer syncs: its sync's key isn't a
+        // file's key, so the row finds the holding the way it finds one
+        // added by hand, and keys it as from the file from then on.
+        const synced = saved({ id: "m-7", identifier: "99ZZ12341", externalId: `${ACCOUNT}:sec_trust` });
+        const byIdentifier = fakeDatabase([[synced]]);
+        const result = await importManualRows(byIdentifier.database, USER, ACCOUNT, [{ ...trust, name: "Target 2055 Trust Fund", identifier: "99ZZ12341" }], { asOf: "2026-11-02", positions: [], now });
+        assert.deepEqual([result.insert, result.update], [0, 1]);
+        assert.deepEqual(byIdentifier.writes.map((w) => w.op), ["update", "record value"]);
+        assert.deepEqual(byIdentifier.writes[0].values, {
+            externalId: "csv:id:99ZZ12341", source: "csv", identifier: "99ZZ12341", updatedAt: now,
+            value: "12345.67", quantity: "250.5", costBasis: "9000", valueAsOf: "2026-11-02",
+        });
+        const byName = fakeDatabase([[saved({ id: "m-8", externalId: `${ACCOUNT}:sec_trust` })]]);
+        await importManualRows(byName.database, USER, ACCOUNT, [trust], { asOf: "2026-11-02", positions: [], now });
+        assert.deepEqual(
+            [byName.writes[0].op, (byName.writes[0].values as Record<string, unknown>).externalId, (byName.writes[1].values as Record<string, unknown>[])[0].manualHoldingId],
+            ["update", "csv:name:target 2055 trust", "m-8"],
+        );
     });
 
     test("an update takes the file's value, units and day, keeps the saved cost, name and identifier, and is keyed as from the file", async () => {

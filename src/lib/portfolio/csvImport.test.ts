@@ -1,7 +1,12 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert';
 import {
+    countNotInFile,
     describeImportCounts,
+    describeImportResult,
+    describeImportTotal,
+    describeManualChange,
+    describeNotInFile,
     groupImportByAccount,
     isCusip,
     isSummaryLabel,
@@ -179,10 +184,14 @@ describe('parseHoldingsCsv', () => {
     });
 
     test('a free-text note in the symbol column is skipped; a lone ticker is still an issue', () => {
-        const r = parseHoldingsCsv('Symbol,Description,Quantity,Average Cost\nAAPL,Apple,10,100\nDate downloaded 10/13/2026\nMSFT');
+        const r = parseHoldingsCsv('Symbol,Description,Quantity,Average Cost\nAAPL,Apple,10,100\nDate downloaded 10/13/2026\nMSFT\nBRK/B\nn/a');
         assert.deepStrictEqual(r.rows.map((x) => x.symbol), ['AAPL']);
-        assert.deepStrictEqual(r.issues.map((i) => i.line), [4]);
-        assert.strictEqual(r.skipped, 1);
+        // A class share as Schwab writes it is a ticker too; "n/a" says there's none.
+        assert.deepStrictEqual(r.issues.map((i) => [i.line, i.message]), [
+            [4, 'MSFT: quantity must be a positive number.'],
+            [5, 'BRK.B: quantity must be a positive number.'],
+        ]);
+        assert.strictEqual(r.skipped, 2);
     });
 
     test('combines two lots of the same symbol at the weighted average cost', () => {
@@ -432,6 +441,38 @@ describe('parseHoldingsCsv › rows with no ticker, valued by hand', () => {
         const r = parseHoldingsCsv(['Symbol,Description,Quantity,Average Cost,Market Value', 'ZZZQ,Unpriced Corp,5,10,$60'].join('\n'));
         assert.deepStrictEqual(r.rows, [{ symbol: 'ZZZQ', name: 'Unpriced Corp', quantity: 5, avgCost: 10 }]);
         assert.deepStrictEqual(r.manual, []);
+    });
+
+    test('regression: a class share written BRK/B (Schwab) or BRK B is the position BRK.B, with a value column or without', () => {
+        // Read as a code, a Schwab file's BRK/B came in valued by hand at
+        // the file's value, never moving with the market; without a value
+        // column it was listed as no ticker Atlas can price.
+        const schwab = parseHoldingsCsv([header, 'BRK/B,BERKSHIRE HATHAWAY INC CLASS B,10,3000,4500', 'BF/B,BROWN FORMAN CORP CLASS B,4,200,160'].join('\n'));
+        assert.deepStrictEqual([schwab.rows.map((r) => r.symbol), schwab.manual, schwab.issues], [['BRK.B', 'BF.B'], [], []]);
+        const noValue = parseHoldingsCsv(['Symbol,Description,Quantity,Cost Basis', 'BRK/B,BERKSHIRE HATHAWAY INC CLASS B,10,3000', 'BRK B,BERKSHIRE HATHAWAY INC CLASS B,2,800'].join('\n'));
+        assert.deepStrictEqual(noValue.issues, []);
+        // One position, written two ways: the lots combine.
+        assert.deepStrictEqual(noValue.rows, [{ symbol: 'BRK.B', name: 'BERKSHIRE HATHAWAY INC CLASS B', quantity: 12, avgCost: 316.6667 }]);
+        assert.deepStrictEqual(readSymbolCell('brk/b'), { ticker: 'BRK.B' });
+        // A space counts only in capitals and before one class letter, so a
+        // short fund name stays words; and N/A says there's no symbol.
+        assert.deepStrictEqual(readSymbolCell('Fund A'), { ticker: null, identifier: null, text: 'Fund A', placeholder: false });
+        assert.deepStrictEqual(readSymbolCell('BOND FD'), { ticker: null, identifier: null, text: 'BOND FD', placeholder: false });
+        assert.deepStrictEqual(readSymbolCell('N/A'), { ticker: null, identifier: null, text: null, placeholder: true });
+    });
+
+    test('regression: the ticker NA stays a position, alone, beside a description or with a value column', () => {
+        // Read as "n/a", it was skipped with nothing listed, or came in
+        // valued by hand under its description.
+        const alone = parseHoldingsCsv('Symbol,Quantity,Average Cost\nNA,100,2\nAAPL,1,100');
+        assert.deepStrictEqual([alone.rows.map((r) => r.symbol), alone.issues, alone.skipped], [['NA', 'AAPL'], [], 0]);
+        const valued = parseHoldingsCsv([header, 'NA,Nano Labs Ltd,100,200,150'].join('\n'));
+        assert.deepStrictEqual([valued.rows, valued.manual, valued.issues], [[{ symbol: 'NA', name: 'Nano Labs Ltd', quantity: 100, avgCost: 2 }], [], []]);
+        const described = parseHoldingsCsv('Symbol,Description,Quantity,Average Cost\nNA,Nano Labs Ltd,100,2');
+        assert.deepStrictEqual([described.rows.map((r) => r.symbol), described.issues], [['NA'], []]);
+        // In a name or identifier cell, NA still says there's none.
+        const fund = parseHoldingsCsv(['Symbol,Description,CUSIP,Quantity,Market Value', ',Target 2055 Trust,NA,100,150', 'n/a,NA,,1,10'].join('\n'));
+        assert.deepStrictEqual([fund.manual, fund.issues, fund.skipped], [[{ name: 'Target 2055 Trust', identifier: null, quantity: 100, value: 150, costBasis: null }], [], 1]);
     });
 
     test('each value alias is read, a CUSIP column fills the identifier, and Investment Name and Fund Name name the rows', () => {
@@ -691,5 +732,112 @@ describe('describeImportCounts', () => {
             [{ positions: 0, handValued: 2, options: 0, accounts: 2 }, '2 holdings valued by hand in 2 accounts'],
         ];
         for (const [counts, text] of cases) assert.strictEqual(describeImportCounts(counts), text);
+    });
+});
+
+describe('describeManualChange', () => {
+    const saved = (over: Partial<ExistingManualHolding> & Pick<ExistingManualHolding, 'id' | 'name'>): ExistingManualHolding => ({
+        identifier: null, importKey: null, quantity: null, value: 0, costBasis: null, valueAsOf: '2026-11-01', ...over,
+    });
+    const row = (over: Partial<ManualImportRow> & Pick<ManualImportRow, 'name' | 'value'>): ManualImportRow => ({ identifier: null, quantity: null, costBasis: null, ...over });
+    const trust = saved({ id: 'm1', name: 'Target 2055 Trust', importKey: 'csv:name:target 2055 trust', quantity: 10, value: 1000 });
+    const stable = saved({ id: 'm2', name: 'Stable Value Fund', identifier: '99ZZ12341', value: 500 });
+
+    test("says what each row does to the holding it finds, naming the holding when the file calls it something else", () => {
+        const plan = planManualImport([trust, stable], [
+            row({ name: 'Target 2055 Trust ', quantity: 12, value: 1300 }),
+            row({ name: 'Stable Value Fund II', identifier: '99ZZ12341', value: 550 }),
+            row({ name: 'Bond Fund', value: 60 }),
+        ], { asOf: '2026-11-02' });
+        assert.deepStrictEqual(plan.map(describeManualChange), ['Updates', 'Updates “Stable Value Fund”', 'New']);
+        const [same] = planManualImport([trust], [row({ name: 'Target 2055 Trust', quantity: 10, value: 1000 })], { asOf: '2026-11-02' });
+        assert.strictEqual(describeManualChange(same), 'No change');
+    });
+
+    test("a file older than the saved value keeps it, with the saved day; a row that takes a position's place says which", () => {
+        const [older] = planManualImport([trust], [row({ name: 'Target 2055 Trust', quantity: 12, value: 5 })], { asOf: '2026-10-20' });
+        assert.strictEqual(describeManualChange(older), 'Keeps the newer value from Nov 1, 2026');
+        const plan = planManualImport([stable], [
+            row({ name: 'Plan Fund', identifier: '123456782', value: 10 }),
+            row({ name: 'Stable Value Fund', identifier: '99ZZ12341', value: 550 }),
+        ], { asOf: '2026-11-02', positions: ['123456782', '99ZZ12341'] });
+        assert.deepStrictEqual(plan.map(describeManualChange), ['New, replaces position 123456782', 'Updates, replaces position 99ZZ12341']);
+    });
+});
+
+describe('countNotInFile and describeNotInFile', () => {
+    const existing = [
+        { id: 'm1', importKey: 'csv:name:target 2055 trust', portfolioId: 'acct-1' },
+        { id: 'm2', importKey: 'csv:id:99ZZ12341', portfolioId: 'acct-1' },
+        { id: 'm3', importKey: null, portfolioId: 'acct-1' },
+        { id: 'm4', importKey: 'csv:name:bond fund', portfolioId: 'acct-2' },
+    ];
+    const held = existing.map((h) => ({ ...h, name: h.id, identifier: null, quantity: null, value: 1, costBasis: null, valueAsOf: '2026-11-01' }));
+
+    test("counts an account's holdings an earlier file brought in that this plan leaves out, never one added by hand", () => {
+        const plan = planManualImport(held, [{ name: 'Target 2055 Trust', identifier: null, quantity: null, value: 2, costBasis: null }], { asOf: '2026-11-02' });
+        assert.strictEqual(plan[0].kind === 'update' && plan[0].id, 'm1');
+        assert.strictEqual(countNotInFile(existing, plan, 'acct-1'), 1);
+        assert.strictEqual(countNotInFile(existing, plan, 'acct-2'), 1);
+        assert.strictEqual(countNotInFile(existing, [], 'acct-1'), 2);
+        assert.strictEqual(countNotInFile(existing, [], 'acct-3'), 0);
+    });
+
+    test('says they stay, in the singular or the plural', () => {
+        assert.strictEqual(
+            describeNotInFile('Brokerage', 1),
+            "1 holding valued by hand that an earlier file brought into Brokerage isn't in this one. It stays as it is; delete it on Holdings if it's gone.",
+        );
+        assert.strictEqual(
+            describeNotInFile('Brokerage', 2),
+            "2 holdings valued by hand that an earlier file brought into Brokerage aren't in this one. They stay as they are; delete them on Holdings if they're gone.",
+        );
+    });
+});
+
+describe('describeImportTotal and describeImportResult', () => {
+    const none = { insert: 0, update: 0, unchanged: 0 };
+
+    test('the button counts positions, or holdings once some are valued by hand', () => {
+        assert.strictEqual(describeImportTotal({ positions: 1, handValued: 0 }), '1 position');
+        assert.strictEqual(describeImportTotal({ positions: 3, handValued: 0 }), '3 positions');
+        assert.strictEqual(describeImportTotal({ positions: 0, handValued: 1 }), '1 holding');
+        assert.strictEqual(describeImportTotal({ positions: 1, handValued: 2 }), '3 holdings');
+    });
+
+    test('reads as before without holdings valued by hand', () => {
+        assert.strictEqual(
+            describeImportResult({ positions: 2, options: 0, handValued: 0, accounts: 1 }, { positions: { insert: 1, update: 1, unchanged: 0 }, options: none, handValued: { ...none, replacedPositions: 0 } }),
+            'Imported 2 positions: 1 new, 1 updated.',
+        );
+        assert.strictEqual(
+            describeImportResult(
+                { positions: 2, options: 1, handValued: 0, accounts: 2 },
+                { positions: { insert: 1, update: 0, unchanged: 1 }, options: { insert: 1, update: 0, unchanged: 0 }, handValued: { ...none, replacedPositions: 0 } },
+            ),
+            'Imported 3 positions across 2 accounts: 1 new, 0 updated, 1 unchanged. Option positions: 1 new, 0 updated.',
+        );
+    });
+
+    test('holdings valued by hand are counted apart from the positions, and alone when the file has no positions', () => {
+        assert.strictEqual(
+            describeImportResult({ positions: 1, options: 0, handValued: 2, accounts: 1 }, { positions: { insert: 1, update: 0, unchanged: 0 }, options: none, handValued: { insert: 2, update: 0, unchanged: 0, replacedPositions: 0 } }),
+            'Imported 1 position: 1 new, 0 updated. Valued by hand: 2 new, 0 updated.',
+        );
+        assert.strictEqual(
+            describeImportResult({ positions: 0, options: 0, handValued: 1, accounts: 1 }, { positions: none, options: none, handValued: { insert: 1, update: 0, unchanged: 0, replacedPositions: 0 } }),
+            'Imported 1 holding valued by hand: 1 new, 0 updated.',
+        );
+        assert.strictEqual(
+            describeImportResult({ positions: 0, options: 0, handValued: 3, accounts: 2 }, { positions: none, options: none, handValued: { insert: 2, update: 1, unchanged: 0, replacedPositions: 1 } }),
+            "Imported 3 holdings valued by hand across 2 accounts: 2 new, 1 updated; 1 replaces a position Atlas couldn't price.",
+        );
+        assert.strictEqual(
+            describeImportResult(
+                { positions: 1, options: 1, handValued: 3, accounts: 1 },
+                { positions: { insert: 0, update: 1, unchanged: 0 }, options: { insert: 1, update: 0, unchanged: 0 }, handValued: { insert: 1, update: 1, unchanged: 1, replacedPositions: 2 } },
+            ),
+            "Imported 2 positions: 0 new, 1 updated. Option positions: 1 new, 0 updated. Valued by hand: 1 new, 1 updated, 1 unchanged; 2 replace positions Atlas couldn't price.",
+        );
     });
 });

@@ -1,3 +1,4 @@
+import { formatShortDate } from '@/lib/format';
 import { normalizeTicker } from '@/lib/research/watchlist';
 import { MANUAL_HOLDING_LIMITS } from '@/lib/validators/manual-holding';
 import { describeOptionContract, OPTION_POSITION_MULTIPLIER, optionContractTicker, parseOptionContract, type OptionContract } from './option-positions';
@@ -119,8 +120,13 @@ type Columns = Record<Column, number>;
 const CORE_POSITION = /^(spaxx|fdrxx|core)\*\*$/i;
 const OPTION_ASSET_TYPE = /^(option|options|equity option|equity options|call|put|listed option)s?$/i;
 const SUMMARY_SYMBOL = /^(pending|pending activity|account total|total|--)$/i;
-/** A symbol cell that says there is no symbol. */
-const PLACEHOLDER_SYMBOL = /^(|-+|—|–|n\/?a|none|null|unknown|not available)$/i;
+/** A name or identifier cell that says it's empty. */
+const PLACEHOLDER = /^(|-+|—|–|n\/?a|none|null|unknown|not available)$/i;
+/**
+ * A symbol cell that says there is no symbol. Bare NA isn't one: it's a
+ * ticker (Nano Labs), and exports write a missing symbol as "n/a".
+ */
+const PLACEHOLDER_SYMBOL = /^(|-+|—|–|n\/a|none|null|unknown|not available)$/i;
 /**
  * Labels of rows that add up or head other rows, or hold cash, in a file's
  * rows with no ticker. Exact phrases only: a fund called "Total Stock Market
@@ -178,10 +184,24 @@ export type SymbolCell =
     | { ticker: string }
     | { ticker: null; identifier: string | null; text: string | null; placeholder: boolean };
 
+/**
+ * A symbol cell's text as a ticker, or null when it can't be one. A class
+ * share some brokers write as BRK/B (Schwab) or BRK B (Interactive
+ * Brokers) is read as the price store keeps it, BRK.B, as ticker search
+ * reads it (searchTextAsTicker). The space form is narrower than search's,
+ * since a file's fund names sit in the same column: capitals and a single
+ * class letter only, so "Fund A" and "BOND FD" stay words.
+ */
+function symbolAsTicker(text: string): string | null {
+    if (PLACEHOLDER_SYMBOL.test(text)) return null;
+    const classShare = /^([A-Z]{1,5})\/([A-Z]{1,2})$/i.exec(text) ?? /^([A-Z]{1,5}) ([A-Z])$/.exec(text);
+    return normalizeTicker(classShare ? `${classShare[1]}.${classShare[2]}` : text);
+}
+
 export function readSymbolCell(raw: string): SymbolCell {
     const value = unwrapCell(raw).replace(/\*+$/, '').trim();
     if (PLACEHOLDER_SYMBOL.test(value)) return { ticker: null, identifier: null, text: null, placeholder: true };
-    const ticker = normalizeTicker(value);
+    const ticker = symbolAsTicker(value);
     if (ticker && !looksLikeSecurityCode(ticker)) return { ticker };
     // A code has no spaces and fits an identifier; anything longer is words.
     const code = !/[\s<>]/.test(value) && value.length <= MANUAL_HOLDING_LIMITS.identifier;
@@ -193,7 +213,7 @@ export function readSymbolCell(raw: string): SymbolCell {
 /** An identifier column's cell: unwrapped, upper case, at most 40 characters; null when blank or a placeholder. */
 function identifierCell(raw: string | undefined): string | null {
     const value = unwrapCell(raw ?? '');
-    if (PLACEHOLDER_SYMBOL.test(value) || /[<>]/.test(value) || value.length > MANUAL_HOLDING_LIMITS.identifier) return null;
+    if (PLACEHOLDER.test(value) || /[<>]/.test(value) || value.length > MANUAL_HOLDING_LIMITS.identifier) return null;
     return value.toUpperCase();
 }
 
@@ -335,7 +355,7 @@ function isNoteRow(cells: string[], symbolColumn: number): boolean {
     const filled = cells.flatMap((cell, index) => (cell ? [index] : []));
     if (filled.length !== 1) return false;
     if (filled[0] !== symbolColumn) return true;
-    return !normalizeTicker(cells[symbolColumn].replace(/\*+$/, ''));
+    return !symbolAsTicker(cells[symbolColumn].replace(/\*+$/, ''));
 }
 
 /**
@@ -471,7 +491,7 @@ export function parseHoldingsCsv(text: string): ParseResult {
         const nameCell = col.name >= 0 ? (cells[col.name] ?? '').trim() : '';
         let label = '';
         if (!optionRow && cell.ticker === null) {
-            label = (PLACEHOLDER_SYMBOL.test(nameCell) ? '' : nameCell) || cell.text || cell.identifier || '';
+            label = (PLACEHOLDER.test(nameCell) ? '' : nameCell) || cell.text || cell.identifier || '';
             if (!label || isSummaryLabel(label)) {
                 skipped++;
                 continue;
@@ -944,4 +964,81 @@ export function describeImportCounts({ positions, handValued, options, accounts 
     ];
     parts[0] += across;
     return parts.length === 1 ? parts[0] : `${parts.slice(0, -1).join(', ')} and ${parts.at(-1)}`;
+}
+
+/**
+ * What importing a row valued by hand does to what Atlas holds, as the
+ * preview's In Atlas column says it: "New"; "Updates", naming the holding
+ * when the file calls it something else, since it keeps its own name; "No
+ * change"; or, for a file older than the saved value, that the newer one
+ * stays. A row that takes a position's place says which.
+ */
+export function describeManualChange(change: PlannedManualChange): string {
+    let text: string;
+    if (change.kind === 'insert') text = 'New';
+    else if (change.olderThanSaved) text = `Keeps the newer value from ${formatShortDate(`${change.savedValueAsOf}T12:00:00Z`)}`;
+    else if (change.kind === 'unchanged') text = 'No change';
+    else text = change.savedName.trim() === change.row.name.trim() ? 'Updates' : `Updates “${change.savedName}”`;
+    return change.replacesPosition ? `${text}, replaces position ${change.replacesPosition}` : text;
+}
+
+/**
+ * How many of an account's holdings an earlier file brought in (those with
+ * an import key) the plan for this file leaves out. They stay as they are,
+ * and the preview says so: a fund the broker renamed, or one sold, is the
+ * user's to delete. Holdings added by hand aren't counted, since no file
+ * is expected to list them.
+ */
+export function countNotInFile(
+    existing: readonly (Pick<ExistingManualHolding, 'id' | 'importKey'> & { portfolioId: string })[],
+    plan: readonly PlannedManualChange[],
+    accountId: string,
+): number {
+    const claimed = new Set(plan.flatMap((change) => (change.kind === 'insert' ? [] : [change.id])));
+    return existing.filter((h) => h.portfolioId === accountId && h.importKey !== null && !claimed.has(h.id)).length;
+}
+
+/** The preview's note on the holdings an earlier file brought into an account that this one leaves out (countNotInFile). */
+export function describeNotInFile(account: string, left: number): string {
+    return left === 1
+        ? `1 holding valued by hand that an earlier file brought into ${account} isn't in this one. It stays as it is; delete it on Holdings if it's gone.`
+        : `${left} holdings valued by hand that an earlier file brought into ${account} aren't in this one. They stay as they are; delete them on Holdings if they're gone.`;
+}
+
+/**
+ * What an import brings in, as its button and each account's label count
+ * it: positions (option positions among them), or holdings once some are
+ * valued by hand, which aren't positions.
+ */
+export function describeImportTotal({ positions, handValued }: { positions: number; handValued: number }): string {
+    return handValued > 0 ? plural(positions + handValued, 'holding') : plural(positions, 'position');
+}
+
+export interface ImportedCounts {
+    insert: number;
+    update: number;
+    unchanged: number;
+}
+
+/**
+ * What an import did, as its toast says it from the server's counts: the
+ * file's positions (option positions among them, as they have always been
+ * counted) with how many are new and updated, then the option positions
+ * and the holdings valued by hand on their own. A file of holdings valued
+ * by hand alone names only those: "Imported 1 holding valued by hand: 1
+ * new, 0 updated."
+ */
+export function describeImportResult(
+    file: { positions: number; options: number; handValued: number; accounts: number },
+    done: { positions: ImportedCounts; options: ImportedCounts; handValued: ImportedCounts & { replacedPositions: number } },
+): string {
+    const counts = ({ insert, update, unchanged }: ImportedCounts) => `${insert} new, ${update} updated${unchanged ? `, ${unchanged} unchanged` : ''}`;
+    const across = file.accounts > 1 ? ` across ${file.accounts} accounts` : '';
+    const replaced = done.handValued.replacedPositions;
+    const handValued = `${counts(done.handValued)}${replaced ? `; ${replaced} ${replaced === 1 ? 'replaces a position' : 'replace positions'} Atlas couldn't price` : ''}.`;
+    const positions = file.positions + file.options;
+    if (positions === 0) return `Imported ${plural(file.handValued, 'holding')} valued by hand${across}: ${handValued}`;
+    return `Imported ${plural(positions, 'position')}${across}: ${counts(done.positions)}.`
+        + (file.options > 0 ? ` Option positions: ${counts(done.options)}.` : '')
+        + (file.handValued > 0 ? ` Valued by hand: ${handValued}` : '');
 }

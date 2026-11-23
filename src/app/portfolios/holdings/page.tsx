@@ -18,6 +18,7 @@ import { loadOptionPositions, loadThesisChoices } from "@/lib/portfolio/option-p
 import { bankLinkingAvailable } from "@/lib/plaid/availability";
 import { parseHoldingsRowView, type HoldingsRowView } from "@/lib/holdings/combine";
 import { looksLikeSecurityCode } from "@/lib/portfolio/csvImport";
+import { buildSyncingAccountsQuery } from "@/lib/portfolio/manage";
 
 /**
  * Phase 4 (AR-74) Holdings page.
@@ -43,19 +44,22 @@ async function HoldingsContent({ rowView }: { rowView: HoldingsRowView }) {
         portfolioId: string;
         portfolioName: string;
     }> = [];
-    let accounts: Array<{ id: string; name: string; cashBalance: number | null; source: string }> = [];
+    let accounts: Array<{ id: string; name: string; cashBalance: number | null }> = [];
     let optionPositions: LoadedOptionPosition[] = [];
     let optionTheses: Array<{ id: string; ticker: string; title: string }> = [];
     let manual: ManualHolding[] = [];
+    let syncing: Array<{ id: string }> = [];
     let unavailable = false;
     try {
-        [dbHoldings, accounts, optionPositions, optionTheses, manual] = await Promise.all([
+        [dbHoldings, accounts, optionPositions, optionTheses, manual, syncing] = await Promise.all([
             buildUserHoldingsQuery(userId),
             buildUserPortfolioOptionsQuery(userId),
             // The LEAPS ledger (launch item i63), the underlyings priced as the holdings are.
             loadOptionPositions(userId, { quotes: loadQuotes }),
             loadThesisChoices(userId),
             loadManualHoldings(userId),
+            // Linked accounts that still sync, whose bank reports their holdings without a ticker.
+            buildSyncingAccountsQuery(userId),
         ]);
     } catch (e) {
         // With a configured database a failure is an outage, not an empty
@@ -123,13 +127,14 @@ async function HoldingsContent({ rowView }: { rowView: HoldingsRowView }) {
     });
 
     // The import dialog warns before rows with no ticker go to a linked
-    // account, and previews what they update: holdings valued by hand an
-    // import may change, and positions held under a CUSIP or plan code
-    // that such a row replaces.
-    const importAccounts: ImportAccountOption[] = accounts.map(({ id, name, source }) => ({ id, name, linked: source === "plaid" }));
+    // account that still syncs, and previews what they update: holdings
+    // valued by hand an import may change, and positions held under a
+    // CUSIP or plan code that such a row replaces.
+    const syncingIds = new Set(syncing.map((a) => a.id));
+    const importAccounts: ImportAccountOption[] = accounts.map(({ id, name }) => ({ id, name, linked: syncingIds.has(id) }));
     const importExisting: ImportExisting = {
         handValued: manual
-            .filter((m) => m.importable)
+            .filter((m) => m.importable && !syncingIds.has(m.portfolioId))
             .map(({ id, portfolioId, name, identifier, quantity, value, costBasis, valueAsOf, importKey }) => ({
                 id, portfolioId, name, identifier, quantity, value, costBasis, valueAsOf, importKey,
             })),

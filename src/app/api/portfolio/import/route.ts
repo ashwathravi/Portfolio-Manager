@@ -8,7 +8,8 @@
  * and counted in options.unchanged. The file's rows with no ticker Atlas
  * can price come in as holdings valued by hand (`manual`), as of
  * `valuesAsOf` (today in UTC when left out, at most tomorrow in UTC); a
- * linked account refuses them, since its bank reports its own.
+ * linked account refuses them while it syncs, since its bank reports its
+ * own.
  *
  * Body:     { portfolioId?: uuid, newPortfolioName?: string, rows: ImportRow[], options?: OptionContractRow[],
  *             manual?: { name, identifier?, quantity?, value, costBasis? }[], valuesAsOf?: 'YYYY-MM-DD' }
@@ -19,9 +20,9 @@
  *           or, for `accounts`, { data: { accounts: [that result, …] } } in the same order
  * Errors:   400 INVALID_IMPORT; 404 PORTFOLIO_NOT_FOUND; 409 DUPLICATE_ACCOUNT_NAME
  *           or ACCOUNT_LIMIT (a new account, checked as creating one), LINKED_ACCOUNT (holdings
- *           valued by hand into a linked account; nothing is written) or MANUAL_HOLDING_LIMIT;
- *           413 IMPORT_TOO_LARGE; 429 DAILY_QUOTA_REACHED (the day's CSV imports, shared with
- *           transactions)
+ *           valued by hand into a linked account that still syncs; nothing is written) or
+ *           MANUAL_HOLDING_LIMIT; 413 IMPORT_TOO_LARGE; 429 DAILY_QUOTA_REACHED (the day's CSV
+ *           imports, shared with transactions)
  */
 
 import { NextResponse } from 'next/server';

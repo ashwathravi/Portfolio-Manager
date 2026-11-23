@@ -36,7 +36,7 @@ describe("portfolio tenant query boundaries", () => {
         assertScoped(buildUserHoldingPositionsQuery(USER_A, "aapl"), USER_A);
         assertScoped(buildUserTransactionsQuery(USER_A), USER_A);
         assertScoped(buildUserPortfolioCountQuery(USER_A), USER_A);
-        assert.match(assertScoped(buildUserPortfolioOptionsQuery(USER_A), USER_A).sql, /^select "id", "name", "cash_balance", "source" from "portfolios"/);
+        assertScoped(buildUserPortfolioOptionsQuery(USER_A), USER_A);
         assertScoped(buildOwnedPortfolioQuery(USER_A, "00000000-0000-4000-8000-000000000001"), USER_A);
         assertScoped(buildOwnedPortfolioHoldingsQuery(USER_A, "00000000-0000-4000-8000-000000000001"), USER_A);
     });

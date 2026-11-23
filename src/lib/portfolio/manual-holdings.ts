@@ -32,12 +32,22 @@ export interface ManualHolding {
     source: string;
     /** Its key from a positions file (manualImportKey), so the page can preview the next import; never a linked account's key. */
     importKey: string | null;
-    /** Whether an import may update it: one added by hand or by a file, never one a linked account keys. */
+    /**
+     * Whether a positions file may update it (importManualRows): one added
+     * by hand or by a file, or one its own account's syncs brought in, which
+     * a file reaches only once that account no longer syncs (a linked
+     * account that still syncs refuses the file's rows). Never one keyed by
+     * another account's syncs: moved from a linked account, its key keeps
+     * that account's sync from adding it again.
+     */
     importable: boolean;
 }
 
 /** The prefix of a key a positions file gave a holding (manualImportKey). */
 const IMPORT_KEY_PREFIX = "csv:";
+
+/** The start of the keys a sync gives the holdings it brings into an account (institutionValuedKey in sync.ts). */
+const syncKeyPrefix = (portfolioId: string) => `${portfolioId}:`;
 
 const num = (v: string | null): number | null => {
     if (v == null) return null;
@@ -73,7 +83,7 @@ export async function loadManualHoldings(userId: string, database: Database = db
         value: num(r.value) ?? 0,
         costBasis: num(r.costBasis),
         importKey: externalId?.startsWith(IMPORT_KEY_PREFIX) ? externalId : null,
-        importable: externalId === null || externalId.startsWith(IMPORT_KEY_PREFIX),
+        importable: externalId === null || externalId.startsWith(IMPORT_KEY_PREFIX) || externalId.startsWith(syncKeyPrefix(r.portfolioId)),
     }));
 }
 
@@ -241,18 +251,21 @@ export type ManualImportResult = ManualPlanSummary;
 /**
  * Writes a positions file's rows with no ticker into one of the user's
  * accounts, inside the import's transaction (importHoldings, which holds
- * the user's account lock and the records lock for these holdings).
+ * the user's account lock and the records lock for these holdings, and
+ * refuses a linked account that still syncs).
  *
- * The rows are matched to the account's holdings an import may update
- * (added by hand or by an earlier file; never one a linked account keys)
- * as planManualImport says. A new holding is added with source "csv", its
- * import key and the file's day (`asOf`). A match is updated in place and
- * keeps its id, its name and any identifier it had; it takes the row's key
- * and source "csv", so the next file finds it. When the file isn't older
- * than the saved value, the value, units and day are the file's, and the
- * cost too when the file gives one. Every row's value is recorded for the
- * file's day, without dropping later days: an older file only adds to the
- * history.
+ * The rows are matched to the account's holdings an import may update as
+ * planManualImport says: added by hand or by an earlier file, or brought
+ * in by the account's own syncs, which a file reaches once the account no
+ * longer syncs; never one keyed by another account's syncs (moved from a
+ * linked account, which skips it by that key). A new holding is added
+ * with source "csv", its import key and the file's day (`asOf`). A match
+ * is updated in place and keeps its id, its name and any identifier it
+ * had; it takes the row's key and source "csv", so the next file finds
+ * it. When the file isn't older than the saved value, the value, units
+ * and day are the file's, and the cost too when the file gives one. Every
+ * row's value is recorded for the file's day, without dropping later
+ * days: an older file only adds to the history.
  *
  * `replace` lists the positions (held under a CUSIP or a plan's number,
  * from before they could be valued by hand) that the caller deletes, since
@@ -282,14 +295,19 @@ export async function importManualRows(
         .where(and(
             eq(manualHoldings.portfolioId, portfolioId),
             eq(manualHoldings.userId, userId),
-            or(isNull(manualHoldings.externalId), like(manualHoldings.externalId, `${IMPORT_KEY_PREFIX}%`)),
+            or(
+                isNull(manualHoldings.externalId),
+                like(manualHoldings.externalId, `${IMPORT_KEY_PREFIX}%`),
+                like(manualHoldings.externalId, `${syncKeyPrefix(portfolioId)}%`),
+            ),
         ))
         .orderBy(asc(manualHoldings.name), asc(manualHoldings.id));
     const existing = saved.map((h) => ({
         id: h.id,
         name: h.name,
         identifier: h.identifier,
-        importKey: h.externalId,
+        // A sync's key is never a file's: such a holding is found by its identifier or name.
+        importKey: h.externalId?.startsWith(IMPORT_KEY_PREFIX) ? h.externalId : null,
         quantity: num(h.quantity),
         value: num(h.value) ?? 0,
         costBasis: num(h.costBasis),

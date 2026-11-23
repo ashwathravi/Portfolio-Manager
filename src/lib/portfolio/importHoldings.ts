@@ -5,7 +5,7 @@ import { holdings, portfolios } from '@/db/schema';
 import { withinRecordLimit } from '@/lib/limits/records-server';
 import type { PortfolioImportBody } from '@/lib/validators/portfolio-import';
 import { planHoldingsImport, summarizePlan } from './csvImport';
-import { buildLockUserAccountsQuery, checkAccountName } from './manage';
+import { buildLockUserAccountsQuery, buildSyncingAccountsQuery, checkAccountName } from './manage';
 import { importManualRows, type ManualImportResult } from './manual-holdings';
 import { importOptionRows, type OptionImportResult } from './option-positions-store';
 
@@ -17,9 +17,10 @@ export class ImportAccessError extends Error {
 }
 
 /**
- * Holdings valued by hand aimed at a linked account. Its bank reports the
- * account's holdings without a ticker, and a sync replaces only its own,
- * so a file's copies would be counted twice and never removed.
+ * Holdings valued by hand aimed at a linked account that still syncs. Its
+ * bank reports the account's holdings without a ticker, and a sync
+ * replaces only its own, so a file's copies would be counted twice and
+ * never removed.
  */
 export class LinkedAccountImportError extends Error {
     constructor(readonly accountName: string) {
@@ -49,7 +50,9 @@ export interface ImportResult {
  * those positions; other positions are untouched. Option rows go to the
  * account's option positions the same way (importOptionRows), and rows with
  * no ticker to its holdings valued by hand (importManualRows), which a
- * linked account refuses (LinkedAccountImportError).
+ * linked account refuses while it syncs (LinkedAccountImportError). Once
+ * it no longer syncs (disconnected, say), those holdings are the user's,
+ * and a file updates the ones its last sync brought in.
  *
  * Every import takes the user's account-write lock first, as a Plaid sync
  * does: an import into a linked account locks the portfolio row (FOR
@@ -147,7 +150,11 @@ async function importInto(tx: Transaction, userId: string, body: ImportBody, quo
             .limit(1)
             .for('update');
         if (!owned) throw new ImportAccessError();
-        if (owned.source === 'plaid' && manualRows.length > 0) throw new LinkedAccountImportError(owned.name);
+        // Whether a linked account still syncs, as its option positions are
+        // decided: one disconnected or revoked stays 'plaid' but syncs no more.
+        if (manualRows.length > 0 && owned.source === 'plaid' && (await buildSyncingAccountsQuery(userId, tx, owned.id)).length > 0) {
+            throw new LinkedAccountImportError(owned.name);
+        }
         portfolioId = owned.id;
     } else {
         await checkAccountName(tx, userId, body.newPortfolioName!, null);

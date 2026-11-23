@@ -147,14 +147,24 @@ describe('positions files with holdings valued by hand', { skip: !DATABASE_URL &
         assert.deepEqual((await history(byName)).map((r) => r[0]), ['2026-10-01', '2026-11-02']);
     });
 
-    test('a holding a linked account keys is never matched; a linked account refuses the rows and nothing is written, positions included', async () => {
+    test('a holding a linked account keys is never matched; a linked account that still syncs refuses the rows and nothing is written, positions included', async () => {
         const ira = await seedUser('u-linked', 'IRA');
+        // The account Plaid syncs, picked: what makes the account in Atlas one that syncs.
+        const [item] = await sql<{ id: string }[]>`
+            INSERT INTO plaid_items (user_id, plaid_item_id, institution_id, institution_name, access_token_ciphertext, access_token_iv, access_token_auth_tag)
+            VALUES ('u-linked', 'item-link', 'ins_1', 'Example Brokerage', 'c', 'i', 't') RETURNING id`;
+        await sql`
+            INSERT INTO plaid_accounts (user_id, plaid_item_record_id, plaid_account_id, name, mask, type, subtype, capabilities, verification_status, sync_status)
+            VALUES ('u-linked', ${item.id}, 'acc-link', 'Individual', '1234', 'investment', 'brokerage', '["holdings"]', 'automatically_verified', 'sync_ready')`;
         const [{ id: linked }] = await sql<{ id: string }[]>`
             INSERT INTO portfolios (user_id, name, source, external_account_id) VALUES ('u-linked', 'Brokerage Link', 'plaid', 'acc-link') RETURNING id`;
         // The fund the linked account syncs, and one the user moved from it to the IRA and valued there.
+        const [synced] = await sql<{ id: string }[]>`
+            INSERT INTO manual_holdings (user_id, portfolio_id, name, value, value_as_of, source, external_id)
+            VALUES ('u-linked', ${linked}, 'Target 2055 Trust', 11000, '2026-10-30', 'plaid', ${`${linked}:sec_fund`}) RETURNING id`;
+        await sql`INSERT INTO manual_holding_values (manual_holding_id, date, value) VALUES (${synced.id}, '2026-10-30', 11000)`;
         await sql`INSERT INTO manual_holdings (user_id, portfolio_id, name, value, value_as_of, source, external_id)
-                  VALUES ('u-linked', ${linked}, 'Target 2055 Trust', 11000, '2026-10-30', 'plaid', ${`${linked}:sec_fund`}),
-                         ('u-linked', ${ira}, 'Target 2055 Trust', 9000, '2026-10-30', 'manual', ${`${linked}:sec_other`})`;
+                  VALUES ('u-linked', ${ira}, 'Target 2055 Trust', 9000, '2026-10-30', 'manual', ${`${linked}:sec_other`})`;
 
         const imported = await importFile('u-linked', ira, file(trust('12345.67')), '2026-11-02');
         assert.deepEqual(imported.manual, { insert: 1, update: 0, unchanged: 0, replacedPositions: 0 });
@@ -171,6 +181,46 @@ describe('positions files with holdings valued by hand', { skip: !DATABASE_URL &
         const tickersOnly = await importFile('u-linked', linked, file(APPLE), '2026-11-03');
         assert.deepEqual([tickersOnly.insert, tickersOnly.manual.insert], [1, 0]);
         assert.deepEqual(await positions(linked), [['AAPL', 10, 150]]);
+    });
+
+    test('regression: once a linked account no longer syncs, a file updates the holding its last sync brought in', async () => {
+        const ira = await seedUser('u-unlinked', 'IRA');
+        const [item] = await sql<{ id: string }[]>`
+            INSERT INTO plaid_items (user_id, plaid_item_id, institution_id, institution_name, access_token_ciphertext, access_token_iv, access_token_auth_tag)
+            VALUES ('u-unlinked', 'item-unlinked', 'ins_1', 'Example Brokerage', 'c', 'i', 't') RETURNING id`;
+        // Disconnected: Plaid's account isn't synced any more, as a revoked
+        // connection or an account the institution stopped returning leaves
+        // it, and the account in Atlas is still the linked one.
+        await sql`
+            INSERT INTO plaid_accounts (user_id, plaid_item_record_id, plaid_account_id, name, mask, type, subtype, capabilities, verification_status, sync_status)
+            VALUES ('u-unlinked', ${item.id}, 'acc-unlinked', 'Individual', '1234', 'investment', 'brokerage', '["holdings"]', 'automatically_verified', 'excluded')`;
+        const [{ id: linked }] = await sql<{ id: string }[]>`
+            INSERT INTO portfolios (user_id, name, source, external_account_id) VALUES ('u-unlinked', 'Brokerage Link', 'plaid', 'acc-unlinked') RETURNING id`;
+        const [synced] = await sql<{ id: string }[]>`
+            INSERT INTO manual_holdings (user_id, portfolio_id, name, value, value_as_of, source, external_id)
+            VALUES ('u-unlinked', ${linked}, 'Target 2055 Trust', 11000, '2026-10-30', 'plaid', ${`${linked}:sec_fund`}) RETURNING id`;
+        await sql`INSERT INTO manual_holding_values (manual_holding_id, date, value) VALUES (${synced.id}, '2026-10-30', 11000)`;
+        // Moved to the IRA from a linked account: still keyed by that account, so never the file's to update.
+        await sql`INSERT INTO manual_holdings (user_id, portfolio_id, name, value, value_as_of, source, external_id)
+                  VALUES ('u-unlinked', ${ira}, 'Target 2055 Trust', 9000, '2026-10-30', 'manual', ${`${linked}:sec_other`})`;
+
+        const result = await importFile('u-unlinked', linked, file(APPLE, trust('12500.00')), '2026-11-03');
+        assert.deepEqual([result.insert, result.manual], [1, { insert: 0, update: 1, unchanged: 0, replacedPositions: 0 }]);
+        assert.deepEqual(await positions(linked), [['AAPL', 10, 150]]);
+        const [fund] = (await handValued('u-unlinked')).filter((h) => h.portfolio === linked);
+        // The same holding, the file's from now on, with the sync's day and the file's.
+        assert.deepEqual(fund, {
+            id: synced.id, portfolio: linked, name: 'Target 2055 Trust', identifier: null, quantity: 120.5, value: 12500, cost: 10000,
+            asOf: '2026-11-03', source: 'csv', external: 'csv:name:target 2055 trust',
+        });
+        assert.deepEqual(await history(synced.id), [['2026-10-30', 11000, null], ['2026-11-03', 12500, 120.5]]);
+        assert.deepEqual((await handValued('u-unlinked')).filter((h) => h.portfolio === ira).map((h) => [h.value, h.source, h.external]), [
+            [9000, 'manual', `${linked}:sec_other`],
+        ]);
+        // The next file finds it by its key.
+        const again = await importFile('u-unlinked', linked, file(trust('12600.00')), '2026-11-04');
+        assert.deepEqual(again.manual, { insert: 0, update: 1, unchanged: 0, replacedPositions: 0 });
+        assert.equal((await handValued('u-unlinked')).filter((h) => h.portfolio === linked).length, 1);
     });
 
     test('a holding the file leaves out stays as it was', async () => {
