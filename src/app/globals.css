@@ -2003,9 +2003,10 @@
   outline-offset: 2px;
 }
 
+/* Darker than muted: on the group's tint, muted is about 4.2:1, and 11px text needs 4.5:1. */
 .pm-small-positions-note {
   font-size: 11px;
-  color: var(--pm-fg-subtle);
+  color: color-mix(in oklab, var(--pm-fg-muted) 85%, var(--pm-fg));
   padding-left: 20px;
 }
 

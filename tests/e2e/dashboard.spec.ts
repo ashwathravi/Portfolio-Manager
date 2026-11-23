@@ -1,6 +1,7 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Locator } from '@playwright/test';
 import { userKey } from './helpers/storage';
 import { clickUntil, collectConsoleErrors, gotoAppPage, openPolicyChecks, reloadAppPage } from './helpers/app';
+import { AA_TEXT_CONTRAST, textContrast } from './helpers/contrast';
 import { seedClosedTrades } from './helpers/trades';
 import { databaseAuthEnabled, e2eDatabase, signInAsFreshUser, signInAsNewUser } from './helpers/users';
 
@@ -246,6 +247,7 @@ test.describe('Today › holdings valued by hand', () => {
         await expect(rows.first()).toContainText('$90,000');
         await expect(rows.first()).toContainText('90.0%');
         await expect(rows.nth(1)).toContainText('Stable Value Fund');
+        expect(await textContrast(rows.first().locator('.pm-holdings-tag'))).toBeGreaterThanOrEqual(AA_TEXT_CONTRAST);
         await openPolicyChecks(page);
         const dimension = (policyId: string) => page.locator(`[data-testid="risk-policy-dimension"][data-policy-id="${policyId}"]`);
         // No single name held: nothing to concentrate in, never a breach.
@@ -836,6 +838,82 @@ test.describe('Today › net worth', () => {
         await gotoAppPage(page, '/');
         await expect(page.getByTestId('today-hero')).toHaveAttribute('data-empty', 'true');
         await expect(page.getByTestId('today-net-worth')).toHaveCount(0);
+    });
+
+    test('today\'s change is a share of the portfolio value, never of the net worth', async ({ context, page }) => {
+        await signInAsNewUser(context, { firstSignIn: true });
+        const created = await page.request.post('/api/portfolios', { data: { name: 'Brokerage', cashBalance: 1_000 } });
+        expect(created.status()).toBe(201);
+        const { data: { id: portfolioId } } = await created.json() as { data: { id: string } };
+        const imported = await page.request.post('/api/portfolio/import', {
+            data: { portfolioId, rows: [{ symbol: 'AAPL', name: 'Apple Inc.', quantity: 10, avgCost: 100 }] },
+        });
+        expect(imported.status()).toBe(200);
+        await addItem(page, HOME);
+        // Top holdings' sparkline would ask the server's market-data route.
+        await page.route('**/api/market-data/historical**', (route) => route.fulfill({ status: 200, json: { data: [] } }));
+        await page.route('**/api/market-data/quotes**', (route) => route.fulfill({ status: 200, json: {
+            data: [{ symbol: 'AAPL', price: 110, change: 10, changePercent: 10, timestamp: new Date().toISOString(), kind: 'close', isRealtime: false }],
+        } }));
+
+        await gotoAppPage(page, '/');
+        await expect(page.getByTestId('today-net-worth')).toHaveText('$302,100.00');
+        await expect(page.getByTestId('today-portfolio-value')).toHaveText('$2,100.00');
+        // $100 on the $2,000 the accounts held before today's move. Of the net worth, it would be +0.03%.
+        await expect(page.getByTestId('today-change')).toHaveText('+$100.00 (+5.00%) today');
+    });
+
+    test('a seven-figure net worth fits the hero on a phone and a wide screen: each label on one line, and clear of the prices\' freshness', async ({ context, page }) => {
+        await signInAsNewUser(context, { firstSignIn: true });
+        const imported = await page.request.post('/api/portfolio/import', {
+            data: { newPortfolioName: 'Brokerage', rows: [{ symbol: 'IBM', name: 'International Business Machines', quantity: 10, avgCost: 150 }] },
+        });
+        expect(imported.status()).toBe(200);
+        await addItem(page, { ...HOME, value: 1_234_567.89 });
+        // An earlier session's close: the freshness line at its longest, with its date.
+        const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
+        await page.route('**/api/market-data/historical**', (route) => route.fulfill({ status: 200, json: { data: [] } }));
+        await page.route('**/api/market-data/quotes**', (route) => route.fulfill({ status: 200, json: {
+            data: [{ symbol: 'IBM', price: 205, change: 5, changePercent: 2.5, timestamp: threeDaysAgo, kind: 'close', isRealtime: false }],
+        } }));
+        /** The lines a label's text takes: the distinct tops of its boxes. */
+        const lines = (text: Locator) => text.evaluate((element) => {
+            const range = document.createRange();
+            range.selectNodeContents(element);
+            return new Set([...range.getClientRects()].map((box) => Math.round(box.top))).size;
+        });
+        /** Whether any box of an element's text crosses the other element. */
+        const crosses = async (text: Locator, other: Locator) => text.evaluate((element, otherElement) => {
+            const range = document.createRange();
+            range.selectNodeContents(element);
+            const box = (otherElement as Element).getBoundingClientRect();
+            return [...range.getClientRects()].some((r) => r.width > 0 && r.left < box.right && r.right > box.left && r.top < box.bottom && r.bottom > box.top);
+        }, await other.elementHandle());
+
+        for (const viewport of [{ width: 390, height: 844 }, { width: 1280, height: 800 }]) {
+            await page.setViewportSize(viewport);
+            await gotoAppPage(page, '/');
+            const hero = page.getByRole('region', { name: 'Net worth' });
+            const freshness = hero.getByTestId('price-freshness');
+            await expect(freshness).toContainText('checked');
+            const label = hero.locator('.pm-today-label');
+            const portfolioLabel = hero.locator('.pm-today-portfolio > span:first-child');
+            const worth = hero.getByTestId('today-net-worth');
+            await expect(label).toHaveText('Net worth');
+            await expect(portfolioLabel).toHaveText('Portfolio value');
+            await expect(worth).toHaveText('$1,236,617.89');
+            const at = `at ${viewport.width}px`;
+            expect(await lines(label), at).toBe(1);
+            expect(await lines(portfolioLabel), at).toBe(1);
+            expect(await worth.evaluate((element) => element.scrollWidth - element.clientWidth), at).toBeLessThanOrEqual(0);
+            for (const text of [label, worth, hero.getByTestId('today-portfolio'), hero.getByTestId('today-change')]) {
+                expect(await crosses(text, freshness), at).toBe(false);
+            }
+            // Its small labels are muted, not subtle: 4.5:1.
+            for (const small of [label, portfolioLabel, hero.locator('.pm-today-hero-facts dt').first()]) {
+                expect(await textContrast(small), at).toBeGreaterThanOrEqual(AA_TEXT_CONTRAST);
+            }
+        }
     });
 
     test('the equity curve says it is the accounts\' alone', async ({ context, page }) => {

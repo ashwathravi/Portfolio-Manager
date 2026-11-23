@@ -1,5 +1,6 @@
 import { test, expect, type Locator, type Page } from '@playwright/test';
 import { gotoAppPage, reloadAppPage } from './helpers/app';
+import { AA_TEXT_CONTRAST, textContrast } from './helpers/contrast';
 import { databaseAuthEnabled, e2eDatabase, signInAsFreshUser, signInAsNewUser } from './helpers/users';
 
 /**
@@ -821,6 +822,8 @@ test.describe('Holdings › Small positions', () => {
         await expect(group(page).getByTestId('holding-value')).toHaveText('$70 partly at cost');
         await expect(group(page).getByRole('button', { name: '5 small positions', exact: true })).toHaveAttribute('aria-expanded', 'false');
         await expect(group(page).locator('.pm-small-positions-note')).toHaveText('Each under 0.5% of market value');
+        // 11px on the group's tint: darker than muted, to clear 4.5:1.
+        expect(await textContrast(group(page).locator('.pm-small-positions-note'))).toBeGreaterThanOrEqual(AA_TEXT_CONTRAST);
         await expect(group(page).getByTestId('holding-today')).toHaveText('—');
         // ZQD's $23 on $15; the others have no price, so no return.
         await expect(group(page).getByRole('cell').nth(3)).toHaveText('+53.33%');

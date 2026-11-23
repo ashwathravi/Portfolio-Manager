@@ -453,13 +453,19 @@
 @media (max-width: 1100px) {
   .pm-today-top { grid-template-columns: minmax(0, 1fr); }
 }
-.pm-today-hero {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  grid-template-rows: auto auto;
-  gap: 16px 24px;
-  align-content: start;
+/* The hero and the first-run card in its place share this spacing. */
+.pm-today-hero { gap: 16px 24px; align-content: start; }
+/* The headline first, and the prices' freshness beside it where both fit, else on its own row under
+   it (on a phone, or in the hero's half of a wide screen): a column beside it took the width the
+   headline and its labels need. Then the facts and the notes, each a full row. */
+.pm-today-hero:not([data-empty="true"]) {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
 }
+.pm-today-hero:not([data-empty="true"]) > .pm-today-hero-main { order: 1; flex: 1 1 auto; }
+.pm-today-hero:not([data-empty="true"]) > .pm-today-hero-live { order: 2; flex: 0 1 auto; max-width: 100%; }
+.pm-today-hero:not([data-empty="true"]) > :is(.pm-today-hero-facts, .pm-today-hero-note) { order: 3; flex: 1 1 100%; }
 .pm-today-hero[data-empty="true"] { display: flex; }
 /* First run (launch item i43): the steps to a first account with positions. */
 .pm-first-run-steps { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 14px; width: 100%; }
@@ -475,7 +481,8 @@
 .pm-first-run-body a:not(.pm-btn) { color: var(--pm-accent); }
 .pm-first-run-examples { font-size: 13px; color: var(--pm-fg-muted); }
 .pm-today-hero-main { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-.pm-today-label { font-size: 12px; font-weight: 500; color: var(--pm-fg-subtle); }
+/* Muted, not subtle, as the hero's other small labels: 12px text needs 4.5:1. */
+.pm-today-label { font-size: 12px; font-weight: 500; color: var(--pm-fg-muted); }
 .pm-today-networth {
   margin: 0;
   font-size: clamp(32px, 4.2vw, 48px);
@@ -488,13 +495,12 @@
 .pm-today-change { margin: 0; font-size: 14px; font-weight: 500; color: var(--pm-fg-muted); font-variant-numeric: tabular-nums; }
 /* With other assets and debts the headline is the net worth: the portfolio value sits under it. */
 .pm-today-portfolio { margin: 0; display: flex; align-items: baseline; gap: 6px; font-size: 15px; font-weight: 600; color: var(--pm-fg); font-variant-numeric: tabular-nums; }
-.pm-today-portfolio > span:first-child { font-size: 12px; font-weight: 500; color: var(--pm-fg-subtle); }
+/* Muted, not subtle: 12px text needs 4.5:1, and this names the figure beside it. */
+.pm-today-portfolio > span:first-child { font-size: 12px; font-weight: 500; color: var(--pm-fg-muted); }
 /* Muted, not subtle: 12px text needs 4.5:1, and the note says how old the values are or that they couldn't be loaded. */
-.pm-today-hero-note { grid-column: 1 / -1; margin: 0; font-size: 12px; color: var(--pm-fg-muted); }
+.pm-today-hero-note { margin: 0; font-size: 12px; color: var(--pm-fg-muted); }
 .pm-today-hero-note a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
-.pm-today-hero-live { grid-column: 2; grid-row: 1; justify-self: end; }
 .pm-today-hero-facts {
-  grid-column: 1 / -1;
   display: flex;
   flex-wrap: wrap;
   gap: 8px 28px;
@@ -503,7 +509,7 @@
   border-top: 1px solid var(--pm-border);
 }
 .pm-today-hero-facts > div { display: flex; flex-direction: column; gap: 2px; }
-.pm-today-hero-facts dt { font-size: 11px; color: var(--pm-fg-subtle); }
+.pm-today-hero-facts dt { font-size: 11px; color: var(--pm-fg-muted); }
 .pm-today-hero-facts dd { margin: 0; font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
 
 .pm-today-section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
@@ -558,7 +564,6 @@
 .pm-policy-strip-body { padding: 0 var(--pm-pad-card) var(--pm-pad-card); }
 .pm-policy-strip-body > .pm-card { border: 0; box-shadow: none; padding: 0; }
 .pm-today-hero-emptyhead { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; }
-.pm-today-hero[data-empty="true"] .pm-today-hero-live { grid-column: auto; grid-row: auto; }
 
 /* --- ⌘K command palette ---------------------------------------------------- */
 .pm-cmd {
