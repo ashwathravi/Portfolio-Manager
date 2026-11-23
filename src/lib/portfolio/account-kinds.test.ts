@@ -40,6 +40,16 @@ describe('account kinds', () => {
         assert.equal(accountTypeForPlaid(null), null);
     });
 
+    test('regression: a subtype named like a property every object has is no kind', () => {
+        // The maps are plain objects: "constructor" read Object itself, so
+        // Link kept it as a subtype and a sync would have tried to store
+        // that as the account's type and tax treatment.
+        for (const subtype of ['constructor', '__proto__', ' Constructor ']) {
+            assert.equal(accountTypeForPlaid(subtype), null, subtype);
+            assert.equal(taxTreatmentForPlaid(subtype), null, subtype);
+        }
+    });
+
     test('every kind has a default tax treatment entry; "other" suggests none', () => {
         for (const type of ACCOUNT_TYPES) assert.ok(type in DEFAULT_TAX_TREATMENT, type);
         assert.equal(DEFAULT_TAX_TREATMENT.other, null);

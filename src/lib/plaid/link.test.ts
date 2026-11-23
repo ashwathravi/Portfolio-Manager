@@ -112,7 +112,8 @@ describe("Plaid Link helpers", () => {
         assert.strictEqual(subtypeOf(" Roth 401k "), "roth 401k");
         assert.strictEqual(subtypeOf("checking", "depository"), "checking");
         assert.strictEqual(subtypeOf("credit card", "credit"), "credit card");
-        for (const subtype of ["gic", "cd", "", null, 7]) assert.strictEqual(subtypeOf(subtype), "other", String(subtype));
+        // Names every object has are no kind either (accountTypeForPlaid reads only its own keys).
+        for (const subtype of ["gic", "cd", "", null, 7, "constructor", "__proto__"]) assert.strictEqual(subtypeOf(subtype), "other", String(subtype));
     });
 
     test("regression: an account stored before its subtype was kept still matches itself linked again", () => {

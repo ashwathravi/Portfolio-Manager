@@ -157,14 +157,23 @@ const PLAID_TAX_TREATMENT: Readonly<Record<string, TaxTreatment>> = {
     'non-taxable brokerage account': 'tax_free',
 };
 
+/**
+ * The map's own entry for `key`, or null. Plaid's subtype comes straight
+ * from Link (normalizeSubtype in src/lib/plaid/link.ts), so a key such as
+ * "constructor" or "__proto__" must not reach Object.prototype.
+ */
+function own<T>(map: Readonly<Record<string, T>>, key: string): T | null {
+    return Object.hasOwn(map, key) ? map[key] : null;
+}
+
 export function accountTypeForPlaid(subtype: string | null | undefined): AccountType | null {
-    return PLAID_SUBTYPES[(subtype ?? '').trim().toLowerCase()] ?? null;
+    return own(PLAID_SUBTYPES, (subtype ?? '').trim().toLowerCase());
 }
 
 export function taxTreatmentForPlaid(subtype: string | null | undefined): TaxTreatment | null {
     const key = (subtype ?? '').trim().toLowerCase();
     const type = accountTypeForPlaid(key);
-    return PLAID_TAX_TREATMENT[key] ?? (type ? DEFAULT_TAX_TREATMENT[type] : null);
+    return own(PLAID_TAX_TREATMENT, key) ?? (type ? DEFAULT_TAX_TREATMENT[type] : null);
 }
 
 /** "Roth IRA · Fidelity · Individual", "Fidelity", "Joint"; null with none of them. */

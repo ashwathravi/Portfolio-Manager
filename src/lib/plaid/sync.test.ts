@@ -48,7 +48,7 @@ describe("Plaid sync", () => {
     });
 
     test("a subtype Atlas has no kind for gives no type or tax treatment, never a guess", () => {
-        for (const subtype of ["other", null]) {
+        for (const subtype of ["other", null, "constructor", "__proto__"]) {
             assert.deepEqual(linkedAccountKind(subtype, "Example Brokerage"), { accountType: null, institution: "Example Brokerage", taxTreatment: null });
         }
     });
