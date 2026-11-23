@@ -1,6 +1,7 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { getTableName, type SQL } from "drizzle-orm";
+import { format } from "node:util";
+import { DrizzleQueryError, getTableName, type SQL } from "drizzle-orm";
 import { PgDialect, type PgTable } from "drizzle-orm/pg-core";
 
 import type { db } from "@/db";
@@ -136,6 +137,22 @@ describe("reading them for a page", () => {
             assert.equal(read, "unavailable");
             assert.equal(warnings.calls.length, 1);
             assert.match(String(warnings.calls[0][0]), /^Today: other assets and debts fetch failed/);
+        } finally {
+            warnings.restore();
+        }
+    });
+
+    test("regression: a failed read is logged without its query's parameters", async () => {
+        const warnings = silenceWarnings();
+        try {
+            const read = await readNetWorthItemsForPage(USER, async (userId) => {
+                const { sql } = buildUserNetWorthItemsQuery(userId).toSQL();
+                throw new DrizzleQueryError(sql, [userId], Object.assign(new Error("terminating connection"), { code: "57P01" }));
+            }, { page: "Accounts", databaseConfigured: true });
+            assert.equal(read, "unavailable");
+            const logged = format(...warnings.calls[0]);
+            assert.ok(!logged.includes(USER), logged);
+            assert.match(logged, /Failed query: select .* \(code 57P01\)/);
         } finally {
             warnings.restore();
         }

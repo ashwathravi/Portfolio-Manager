@@ -206,6 +206,42 @@ describe("scrubSentryEvent", () => {
         assert.deepEqual(event.debug_meta?.images?.[0], { type: "sourcemap", code_file: chunk, debug_id: "abc" });
     });
 
+    test("regression: cuts a failed query's parameters from exceptions and console breadcrumbs", () => {
+        const sql = 'insert into "net_worth_items" ("id", "user_id", "name", "note") values (default, $1, $2, $3) returning "id"';
+        const message = `Failed query: ${sql}\nparams: u-1,Sample home,MARKER-note\nsecond line MARKER-more`;
+        const event = scrubSentryEvent({
+            type: undefined,
+            exception: { values: [{ type: "Error", value: message }] },
+            breadcrumbs: [
+                {
+                    category: "console",
+                    level: "error",
+                    message: `Unable to add the asset or debt. Error: ${message}\n    at queryWithCache (session.js:41:15) {\n  params: [ 'MARKER-note' ]\n}`,
+                    data: {
+                        logger: "console",
+                        arguments: ["Unable to add the asset or debt.", { message, query: sql, params: ["u-1", "MARKER-note"] }],
+                    },
+                },
+                { category: "fetch", data: { url: "/api/portfolio/net-worth-items", params: ["MARKER-array"], parameters: ["MARKER-too"] } },
+            ],
+        } as ScrubbableEvent, {});
+
+        assert.ok(!JSON.stringify(event).includes("MARKER"), JSON.stringify(event));
+        assert.equal(event.exception?.values?.[0].value, `Failed query: ${sql}`);
+        assert.equal(event.breadcrumbs?.[0].message, `Unable to add the asset or debt. Error: Failed query: ${sql}`);
+        assert.deepEqual(event.breadcrumbs?.[0].data, { logger: "console" });
+        assert.deepEqual(event.breadcrumbs?.[1].data, { url: "/api/portfolio/net-worth-items" });
+    });
+
+    test("keeps a params key that isn't a list of query parameters", () => {
+        const event = scrubSentryEvent({
+            type: undefined,
+            contexts: { route: { params: { id: "11111111-1111-4111-8111-111111111111" } } },
+        } as ScrubbableEvent, {});
+
+        assert.deepEqual(event.contexts?.route, { params: { id: "11111111-1111-4111-8111-111111111111" } });
+    });
+
     test("serverSentryOptions scrubs with the server's secrets", async () => {
         const options = serverSentryOptions({ NEXT_PUBLIC_SENTRY_DSN: DSN, CRON_SECRET: "cron-secret-value-123" });
         const event = await options.beforeSend?.({ type: undefined, message: "bad cron-secret-value-123" }, {});

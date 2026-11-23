@@ -9,6 +9,7 @@ import {
     setRateLimitStoreForTests,
     type RateLimitRule,
 } from "@/lib/api/rate-limit";
+import { withoutQueryParameters } from "@/lib/observability/loggable-error";
 import { reportError } from "@/lib/observability/report-error";
 
 export interface ApiAuthContext {
@@ -83,13 +84,19 @@ export function apiError(
     return NextResponse.json({ error, code }, { ...init, status });
 }
 
+/**
+ * Logs and reports the error, then answers a generic 500. A failed query is
+ * logged and reported without its parameters, which hold what the user saved
+ * (src/lib/observability/loggable-error.ts).
+ */
 export function internalServerError(
     error: unknown,
     userMessage = "Internal server error",
     code = "INTERNAL_SERVER_ERROR",
 ): NextResponse {
-    console.error(userMessage, error);
-    reportError(error, { tags: { code } });
+    const safe = withoutQueryParameters(error);
+    console.error(userMessage, safe);
+    reportError(safe, { tags: { code } });
     return apiError(userMessage, code, 500);
 }
 

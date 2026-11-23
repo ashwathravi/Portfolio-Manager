@@ -3,10 +3,15 @@
  * scheduled job) to Sentry. Errors nothing catches are reported by the SDK on
  * its own through `onRequestError` in src/instrumentation.ts. Without a DSN
  * (local runs, E2E) the SDK isn't started and this does nothing.
+ *
+ * A failed query is reported without its parameters, which hold what the
+ * user saved (src/lib/observability/loggable-error.ts).
  */
 
 import * as Sentry from "@sentry/nextjs";
 import { after } from "next/server";
+
+import { withoutQueryParameters } from "@/lib/observability/loggable-error";
 
 export interface ErrorReportContext {
     tags?: Record<string, string>;
@@ -32,7 +37,7 @@ const SENTRY_REPORTER: ErrorReporter = {
 let reporter: ErrorReporter = SENTRY_REPORTER;
 
 export function reportError(error: unknown, context: ErrorReportContext = {}): void {
-    reporter.capture(error, context);
+    reporter.capture(withoutQueryParameters(error), context);
     // A function can be frozen as soon as it responds; send the report first.
     reporter.afterResponse(() => Sentry.flush(2_000));
 }

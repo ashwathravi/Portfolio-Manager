@@ -1,5 +1,8 @@
 import { afterEach, describe, test, mock } from "node:test";
 import assert from "node:assert/strict";
+import { format, inspect } from "node:util";
+
+import { DrizzleQueryError } from "drizzle-orm";
 
 import { setErrorReporterForTests } from "@/lib/observability/report-error";
 
@@ -131,6 +134,38 @@ describe("internalServerError", () => {
         assert.deepEqual(await response.json(), { error: "Unable to import holdings.", code: "PORTFOLIO_IMPORT_FAILED" });
         assert.deepEqual(reports, [{ error, context: { tags: { code: "PORTFOLIO_IMPORT_FAILED" } } }]);
         assert.equal(flushes.length, 1);
+    });
+
+    test("regression: a failed query is logged and reported without its parameters, which hold what the user saved", (t) => {
+        const logged: unknown[][] = [];
+        t.mock.method(console, "error", (...args: unknown[]) => { logged.push(args); });
+        const reports: unknown[] = [];
+        setErrorReporterForTests({
+            capture: (reported) => { reports.push(reported); },
+            afterResponse: () => {},
+        });
+        const sql = 'insert into "net_worth_items" ("id", "user_id", "name", "note") values (default, $1, $2, $3) returning "id"';
+        const cause = Object.assign(new Error("canceling statement due to statement timeout"), {
+            code: "57014",
+            detail: "Failing row contains (u-1, Sample home, MARKER-note).",
+        });
+
+        const response = internalServerError(
+            new DrizzleQueryError(sql, ["u-1", "Sample home", "MARKER-note"], cause),
+            "Unable to add the asset or debt.",
+            "NET_WORTH_ITEM_CREATE_FAILED",
+        );
+
+        assert.equal(response.status, 500);
+        assert.equal(logged.length, 1);
+        const printed = format(...logged[0]);
+        assert.ok(!printed.includes("MARKER"), printed);
+        assert.ok(!printed.includes("Sample home"));
+        assert.ok(printed.includes(`Failed query: ${sql} (code 57014)`));
+        assert.equal(reports.length, 1);
+        const reported = inspect(reports[0], { showHidden: true, depth: 8 });
+        assert.ok(!reported.includes("MARKER"), reported);
+        assert.equal((reports[0] as { code?: string }).code, "57014");
     });
 });
 

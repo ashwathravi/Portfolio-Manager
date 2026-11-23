@@ -14,6 +14,7 @@ import { db } from "@/db";
 import { isDatabaseConfigured } from "@/db/connection-options";
 import { netWorthItemValues, netWorthItems } from "@/db/schema";
 import { withinRecordLimit } from "@/lib/limits/records-server";
+import { loggableError } from "@/lib/observability/loggable-error";
 import type { NetWorthItemInput } from "@/lib/validators/net-worth-item";
 import type { NetWorthCategory, NetWorthItemRow, NetWorthItemsRead, NetWorthKind } from "./net-worth";
 
@@ -65,7 +66,7 @@ export async function readNetWorthItemsForPage(
     try {
         return await query(userId);
     } catch (error) {
-        console.warn(`${page}: other assets and debts fetch failed — the page says they couldn't be loaded.`, error);
+        console.warn(`${page}: other assets and debts fetch failed — the page says they couldn't be loaded.`, loggableError(error));
         return "unavailable";
     }
 }

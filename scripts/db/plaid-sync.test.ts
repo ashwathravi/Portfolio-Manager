@@ -771,6 +771,18 @@ describe('Plaid sync into portfolios', { skip: !DATABASE_URL && 'SCRIPTS_TEST_DA
             SELECT source, value::float AS value FROM manual_holdings WHERE user_id = 'u-warrant'`).map((r) => [r.source, r.value]), [['manual', 125]]);
     });
 
+    test('regression: a sync whose write fails says why without what the account holds', async () => {
+        const { sync } = await linkedAccount('u-failwrite');
+        // Postgres can't store a NUL, so writing this fund fails at its statement.
+        const fund = { security_id: 'sec_fund_f', ticker_symbol: null, name: 'Sample Private\u0000Trust', type: 'mutual fund', cusip: '192837465' };
+        const result = await sync([AAPL_LOT, ['sec_fund_f', 10, 11, 100]], NOW, { securities: [...SECURITIES, fund] });
+
+        assert.equal(result.status, 'failed');
+        assert.match(String(result.error), /^Failed query: insert into "manual_holdings" .* \(code 22021\)$/);
+        assert.ok(!String(result.error).includes('Sample Private'), String(result.error));
+        assert.ok(!String(result.error).includes('params:'));
+    });
+
     test('the nightly job counts the option positions it brought in', async () => {
         await linkedAccount('u-optnight');
         const plaid = fakePlaid({

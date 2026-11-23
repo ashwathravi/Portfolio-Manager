@@ -51,6 +51,12 @@ const MAX_SCRUB_DEPTH = 12;
 const URL_QUERY = /((?:https?:\/\/|\/)[^\s?#"'<>]*)\?[^\s#"'<>]*/g;
 // Code locations: their URLs must stay as built for source maps to resolve.
 const CODE_LOCATION_KEYS = new Set(["stacktrace", "debug_meta"]);
+// Drizzle ends a failed query's message with "\nparams: " and every
+// parameter, which holds what the user saved; everything from there is cut.
+const QUERY_PARAMETERS = /\nparams: [\s\S]*$/;
+// Where an error object keeps those parameters: Drizzle's params and
+// postgres.js's parameters.
+const QUERY_PARAMETER_KEYS = new Set(["params", "parameters"]);
 
 /**
  * The DSN, or undefined when it is missing or not a Sentry DSN (an https URL
@@ -115,9 +121,18 @@ export function browserSentryOptions(env: SentryEnv): BrowserOptions {
  * masks secret values anywhere in the event (see {@link redactSecrets}).
  * URL queries are cut from every message too: a provider's error quotes its
  * request URL, and that can hold what the user typed into ticker search.
+ * So is a failed query's list of parameters, for an error that reaches
+ * Sentry without passing reportError (one nothing caught, or one logged
+ * with console.*, which the SDK keeps as a breadcrumb): the parameters hold
+ * the names, values and notes the user saved. A console breadcrumb keeps
+ * its text only, not the objects logged.
  */
 export function scrubSentryEvent<T extends SentryEvent>(event: T, env: Partial<Record<string, string>>): T {
     const scrubbed = redactStrings(event, env, 0, true) as T;
+
+    for (const breadcrumb of scrubbed.breadcrumbs ?? []) {
+        if (breadcrumb.category === "console" && breadcrumb.data) delete breadcrumb.data.arguments;
+    }
 
     if (scrubbed.request) {
         delete scrubbed.request.cookies;
@@ -149,15 +164,17 @@ function redactStrings(
     stripQueries: boolean,
 ): unknown {
     if (typeof value === "string") {
-        const redacted = redactSecrets(value, env);
+        const redacted = redactSecrets(value, env).replace(QUERY_PARAMETERS, "");
         return stripQueries ? stripUrlQueries(redacted) : redacted;
     }
     if (depth >= MAX_SCRUB_DEPTH || value === null || typeof value !== "object") return value;
     if (Array.isArray(value)) return value.map((item) => redactStrings(item, env, depth + 1, stripQueries));
     return Object.fromEntries(
-        Object.entries(value).map(([key, item]) => [
-            key,
-            redactStrings(item, env, depth + 1, stripQueries && !CODE_LOCATION_KEYS.has(key)),
-        ]),
+        Object.entries(value)
+            .filter(([key, item]) => !(QUERY_PARAMETER_KEYS.has(key) && Array.isArray(item)))
+            .map(([key, item]) => [
+                key,
+                redactStrings(item, env, depth + 1, stripQueries && !CODE_LOCATION_KEYS.has(key)),
+            ]),
     );
 }

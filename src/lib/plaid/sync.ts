@@ -29,6 +29,7 @@ import {
 import { transactionValues } from "@/lib/portfolio/transactionsWrite";
 import { recordManualValue } from "@/lib/portfolio/manual-holdings";
 import { lastCompletedSession } from "@/lib/markets/market-hours";
+import { safeErrorMessage } from "@/lib/observability/loggable-error";
 import { accountTypeForPlaid, INSTITUTION_MAX_LENGTH, taxTreatmentForPlaid } from "@/lib/portfolio/account-kinds";
 import { OPTION_POSITION_MULTIPLIER } from "@/lib/portfolio/option-positions";
 import { PORTFOLIO_LIMITS } from "@/lib/validators/portfolio";
@@ -865,7 +866,9 @@ export async function syncPlaidItem(userId: string, itemId: string, deps: SyncDe
             return { itemId, status: "login-required", accounts: [] };
         }
         if (error instanceof PlaidDeadlineError) return { itemId, status: "timed-out", accounts: [] };
-        return { itemId, status: "failed", accounts: [], error: error instanceof Error ? error.message : String(error) };
+        // Logged by the caller: a failed write's parameters (the holdings
+        // synced) are left out.
+        return { itemId, status: "failed", accounts: [], error: safeErrorMessage(error) };
     }
 }
 
@@ -1077,7 +1080,7 @@ export async function syncAllPlaidItems({
     for (const { userId, itemId } of items) {
         if (clock() >= deadline) break;
         const result = await syncPlaidItem(userId, itemId, { config, database, fetchImpl, getAccessToken, now: new Date(clock()), deadline, clock })
-            .catch((error: unknown): ItemSyncResult => ({ itemId, status: "failed", accounts: [], error: String(error) }));
+            .catch((error: unknown): ItemSyncResult => ({ itemId, status: "failed", accounts: [], error: safeErrorMessage(error) }));
         done++;
         if (result.status === "synced") counts.synced++;
         else if (result.status === "login-required") counts.loginRequired++;
