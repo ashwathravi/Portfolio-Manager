@@ -464,6 +464,8 @@ Set targets and caps for:
 - Cash reserve.
 - Unassigned.
 
+Under **Your holdings**, choose the bucket each holding is in. A holding starts in the one its type suggests (funds and bonds core, single stocks active ideas, crypto and warrants speculative), and one valued by hand starts in core and is listed by its name and account. Today's checks, Allocation and stress test, Trade's checks and Ask follow the bucket you choose.
+
 ### GOOG De-Risking
 
 Configure:
