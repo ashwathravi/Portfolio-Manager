@@ -54,7 +54,7 @@ describe("account queries", () => {
         for (const value of ["roth_ira", "Fidelity", "tax_free"]) assert.ok(created.params.includes(value), value);
 
         const cleared = buildUpdatePortfolioQuery(USER, ID, { accountType: null, institution: "" }, NOW).toSQL();
-        assert.match(cleared.sql, /set "account_type" = \$1, "institution" = \$2 where/i);
+        assert.match(cleared.sql, /set "account_type" = \$1, "institution" = \$2, "kind_edited_at" = case when .* end where/i);
         assert.deepEqual(cleared.params.slice(0, 2), [null, null]);
         // Not a financial change.
         assert.doesNotMatch(cleared.sql, /updated_at/);
@@ -71,6 +71,25 @@ describe("account queries", () => {
         assert.match(cleared.sql, /^update "portfolios" set "ownership" = \$1/i);
         assert.equal(cleared.params[0], null);
         assert.doesNotMatch(cleared.sql, /updated_at/);
+    });
+
+    test("regression: the user's say over the kind is marked, so a Plaid sync leaves it, a cleared field included", () => {
+        // Before kind_edited_at, a sync filled a tax treatment the user had
+        // cleared back in. Marked only when a field changes from what's stored.
+        const { sql, params } = buildUpdatePortfolioQuery(USER, ID, { taxTreatment: null, ownership: "joint" }, NOW).toSQL();
+        assert.match(sql, /set "tax_treatment" = \$1, "ownership" = \$2, "kind_edited_at" = case when \("portfolios"\."tax_treatment" is distinct from \$3 or "portfolios"\."ownership" is distinct from \$4\) then \$5::timestamp else "portfolios"\."kind_edited_at" end where/i);
+        assert.deepEqual(params.slice(0, 5), [null, "joint", null, "joint", NOW.toISOString()]);
+
+        // An empty institution is compared as none, as it's stored.
+        const institution = buildUpdatePortfolioQuery(USER, ID, { institution: "" }, NOW).toSQL();
+        assert.match(institution.sql, /"kind_edited_at" = case when \("portfolios"\."institution" is distinct from \$2\) then \$3::timestamp/i);
+        assert.deepEqual(institution.params.slice(0, 3), [null, null, NOW.toISOString()]);
+    });
+
+    test("regression: a rename, a description or a change of cash alone isn't a say over the kind", () => {
+        for (const body of [{ name: "Renamed" }, { description: "Rollover" }, { cashBalance: 10 }, { name: "Renamed", description: "", cashBalance: 10 }]) {
+            assert.doesNotMatch(buildUpdatePortfolioQuery(USER, ID, body, NOW).toSQL().sql, /kind_edited_at/, JSON.stringify(body));
+        }
     });
 
     test("regression: only a change of cash moves the account's last-change time", () => {

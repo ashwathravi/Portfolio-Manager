@@ -128,6 +128,24 @@ function kindFields(body: Pick<PortfolioUpdateBody, "accountType" | "institution
     };
 }
 
+/**
+ * `kind_edited_at` marks the user's say over the account's kind: a Plaid
+ * sync then stops filling in what the account lacks (writeAccountSync), so
+ * a field the user changed or cleared stays as they left it. It moves only
+ * when one of the fields changes, because the form sends them all with
+ * every save: a rename or a change of cash alone isn't a say over the kind.
+ * Saving a form opened before a sync filled a field in clears that field
+ * again, which is what the user saw and saved.
+ */
+function kindEdited(kind: ReturnType<typeof kindFields>, now: Date) {
+    const changes = (Object.keys(kind) as (keyof typeof kind)[])
+        .map((field) => sql`${portfolios[field]} is distinct from ${kind[field]}`);
+    if (changes.length === 0) return {};
+    return {
+        kindEditedAt: sql`case when (${sql.join(changes, sql` or `)}) then ${now.toISOString()}::timestamp else ${portfolios.kindEditedAt} end`,
+    };
+}
+
 function toManaged(row: ReturnedRow): ManagedPortfolio {
     return { ...row, cashBalance: row.cashBalance ?? 0 };
 }
@@ -161,12 +179,14 @@ export async function createPortfolio(userId: string, body: PortfolioCreateBody,
  * again, leaves it where it was.
  */
 export function buildUpdatePortfolioQuery(userId: string, id: string, body: PortfolioUpdateBody, now: Date, database: Pick<Database, "update"> = db) {
+    const kind = kindFields(body);
     return database
         .update(portfolios)
         .set({
             ...(body.name !== undefined ? { name: body.name } : {}),
             ...(body.description !== undefined ? { description: body.description || null } : {}),
-            ...kindFields(body),
+            ...kind,
+            ...kindEdited(kind, now),
             ...(body.cashBalance !== undefined
                 ? {
                     cashBalance: body.cashBalance,

@@ -278,7 +278,10 @@ export interface AccountSyncWrite {
     /**
      * What kind of account Plaid says it is, and where it's held
      * (linkedAccountKind). A new portfolio takes them; an existing one fills
-     * in only what it has none of, so the user's own choice stands.
+     * in only what it has none of, and only until the user changes any of
+     * them, so the user's own choice stands, an empty one included.
+     * Ownership isn't among them: Plaid doesn't say whose name an account is
+     * in, so only the user sets it.
      */
     kind?: LinkedAccountKind;
     /** Null when Plaid's history isn't ready yet: transactions wait for the next sync. */
@@ -364,7 +367,8 @@ export async function writeAccountSync(input: AccountSyncWrite, database: Databa
                     .where(and(eq(portfolios.id, existing.id), eq(portfolios.userId, input.userId)));
             }
             if (input.kind) {
-                // Not a financial change: updated_at stays where it was.
+                // Not a financial change: updated_at stays where it was. Only
+                // while the user hasn't changed the kind (kind_edited_at).
                 await tx
                     .update(portfolios)
                     .set({
@@ -375,6 +379,7 @@ export async function writeAccountSync(input: AccountSyncWrite, database: Databa
                     .where(and(
                         eq(portfolios.id, existing.id),
                         eq(portfolios.userId, input.userId),
+                        isNull(portfolios.kindEditedAt),
                         sql`(${portfolios.accountType} is null or ${portfolios.institution} is null or ${portfolios.taxTreatment} is null)`,
                     ));
             }

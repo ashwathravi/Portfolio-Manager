@@ -9,7 +9,7 @@ import * as schema from '../../src/db/schema';
 import { listOptionContractsToMark } from '../../src/lib/markets/option-marks';
 import type { PlaidFetch } from '../../src/lib/plaid/link';
 import { importHoldings } from '../../src/lib/portfolio/importHoldings';
-import { deletePortfolio } from '../../src/lib/portfolio/manage';
+import { deletePortfolio, updatePortfolio } from '../../src/lib/portfolio/manage';
 import { updateManualHolding } from '../../src/lib/portfolio/manual-holdings';
 import {
     addOptionPosition,
@@ -493,6 +493,46 @@ describe('Plaid sync into portfolios', { skip: !DATABASE_URL && 'SCRIPTS_TEST_DA
         // Holdings are what the institution reports now: the hand-added one is gone.
         assert.deepEqual((await held()).map((r) => [r.symbol, r.quantity, r.avg, r.price]), [['AAPL', 12, 83.333333, 110], ['VTI', 3, 250, 250]]);
         assert.deepEqual((await activity()).map((r) => [r.external_id, r.price]), [['plaid:txn_buy', 80.5], ['plaid:txn_div', null], ['plaid:txn_sell', 110], ['plaid:txn_xfer', null]]);
+    });
+
+    test('a linked account\'s type, institution and tax treatment come from Plaid until the user changes any of them, and only the user sets its ownership', async () => {
+        await linkedUser('u-kind', 'item-kind', [['acc_kind', 'Individual', 'investment']]);
+        await selectPlaidAccounts('u-kind', 'item-kind', ['acc_kind'], database);
+        // The same positions and cash every time: nothing financial changes.
+        const sync = (at: Date) => syncPlaidItem('u-kind', 'item-kind', deps(fakePlaid({
+            '/investments/holdings/get': holdingsOf('acc_kind', [['sec_aapl', 1, 100, 90]], 50),
+            '/investments/transactions/get': transactionsOf('acc_kind', []),
+        }).fetchImpl, at));
+        const account = async () => (await sql<{ id: string; type: string | null; institution: string | null; tax: string | null; ownership: string | null; edited: string | null; updated: string }[]>`
+            SELECT id, account_type AS type, institution, tax_treatment AS tax, ownership, kind_edited_at::text AS edited, updated_at::text AS updated
+            FROM portfolios WHERE user_id = 'u-kind'`)[0];
+
+        // A new linked account takes Plaid's kind and the connection's
+        // institution. Plaid doesn't say whose name it's in, so no ownership.
+        await sync(NOW);
+        const first = await account();
+        assert.deepEqual([first.type, first.institution, first.tax, first.ownership, first.edited], ['brokerage', 'Fidelity', 'taxable', null, null]);
+
+        // An account linked before institutions were kept: a rename isn't a
+        // say over the kind, so the next sync fills its institution in.
+        await sql`UPDATE portfolios SET institution = NULL WHERE id = ${first.id}`;
+        assert.equal((await updatePortfolio('u-kind', first.id, { name: 'My brokerage' }, { now: new Date('2026-10-26T12:00:00.000Z'), database }))?.name, 'My brokerage');
+        assert.equal((await account()).edited, null);
+        await sync(new Date('2026-10-26T22:30:00.000Z'));
+        assert.equal((await account()).institution, 'Fidelity');
+
+        // The user clears the tax treatment and says it's joint. From then on
+        // a sync leaves the kind as the user left it, the empty field included.
+        const saved = await updatePortfolio('u-kind', first.id, { taxTreatment: null, ownership: 'joint' }, { now: new Date('2026-10-27T12:00:00.000Z'), database });
+        assert.deepEqual([saved?.taxTreatment, saved?.ownership], [null, 'joint']);
+        assert.equal((await account()).edited, '2026-10-27 12:00:00');
+        for (const at of ['2026-10-27T22:30:00.000Z', '2026-10-28T22:30:00.000Z']) {
+            await sync(new Date(at));
+            const now = await account();
+            assert.deepEqual([now.type, now.institution, now.tax, now.ownership, now.edited], ['brokerage', 'Fidelity', null, 'joint', '2026-10-27 12:00:00'], at);
+            // None of it was a financial change: the last change is still the first sync.
+            assert.equal(now.updated, first.updated, at);
+        }
     });
 
     test('history that isn\'t ready yet: positions now, two years of transactions next time', async () => {
