@@ -10,6 +10,7 @@ _Last reviewed 2026-10-30._ Questions answered since the first version of this l
 - **Alerts.** Whether alerts need evaluating during the session (`pg_cron` calling a secured route): today the nightly job evaluates them on closes (i57) and emails them to users who ask (i58).
 - **Signed-in production checks.** The post-deploy smoke test runs signed out. Checking pages behind sign-in would need a standing production account and its session token as a CI secret (`docs/test-coverage-analysis.md`).
 - **Brokerage routing.** Atlas saves order plans and never routes orders. Whether it ever should, and with what guardrails, is open; the Schwab routes stay off until then.
+- **Whose money counts.** Ownership is descriptive: accounts held for a dependent or a business still count in Today's portfolio value, the risk policy and returns. Whether they should be left out of the user's own totals, and whether a household needs partners' accounts told apart by name, is open.
 
 ## Answered
 
