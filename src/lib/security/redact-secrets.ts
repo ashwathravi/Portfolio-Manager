@@ -42,5 +42,8 @@ export function redactSecrets(text: string, env: Partial<Record<string, string>>
     }
     return redacted
         .replace(/(\/\/)[^/\s:@]+:[^/\s@]+@/g, "$1***@")
-        .replace(/(api_?key=)[^&\s]+/gi, "$1***");
+        // A value also ends at a double quote or a backslash, so in JSON text,
+        // such as the line a route's 500 logs (src/lib/api/security.ts), the
+        // mask stays inside its string and the fields after it are kept.
+        .replace(/(api_?key=)[^&\s"\\]+/gi, "$1***");
 }

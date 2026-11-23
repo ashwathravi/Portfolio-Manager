@@ -10,6 +10,8 @@ import {
     stripUrlQueries,
     usableSentryDsn,
 } from "./sentry-options";
+import { jsonLoggableError } from "./loggable-error";
+import { PolygonApiError } from "@/lib/providers/polygon-massive-adapter";
 
 const DSN = "https://abc123publickey@o4501234.ingest.us.sentry.io/4509876";
 
@@ -254,6 +256,29 @@ describe("scrubSentryEvent", () => {
         assert.equal(entry.code, "NET_WORTH_ITEM_CREATE_FAILED");
         assert.equal(entry.error.message, `Save failed: Failed query: ${sql}`);
         assert.equal(entry.error.stack, `Error: Save failed: Failed query: ${sql}`);
+    });
+
+    test("regression: keeps the fields after a masked apiKey in the JSON line a route's 500 logs", () => {
+        // The provider's error quotes its request URL with the key already masked, as the adapter writes it.
+        const failure = new PolygonApiError(502, "Bad Gateway", "https://api.polygon.io/v3/reference/tickers/AAPL?apiKey=***");
+        const line = JSON.stringify({
+            event: "internal_server_error",
+            code: "MARKET_DATA_FUNDAMENTALS_FAILED",
+            message: "Unable to fetch fundamentals.",
+            error: jsonLoggableError(failure),
+        });
+        const event = scrubSentryEvent({
+            type: undefined,
+            breadcrumbs: [{ category: "console", level: "error", message: line, data: { logger: "console", arguments: [line] } }],
+        } as ScrubbableEvent, {});
+
+        const entry = JSON.parse(String(event.breadcrumbs?.[0].message));
+        assert.equal(entry.code, "MARKET_DATA_FUNDAMENTALS_FAILED");
+        assert.equal(entry.error.name, "PolygonApiError");
+        assert.equal(entry.error.message, "PolygonMassiveAdapter: HTTP 502 Bad Gateway — https://api.polygon.io/v3/reference/tickers/AAPL");
+        assert.equal(entry.error.status, 502);
+        assert.equal(entry.error.statusText, "Bad Gateway");
+        assert.ok(String(entry.error.stack).includes("HTTP 502 Bad Gateway — https://api.polygon.io/v3/reference/tickers/AAPL"), entry.error.stack);
     });
 
     test("keeps a params key that isn't a list of query parameters", () => {
