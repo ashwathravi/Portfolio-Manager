@@ -48,6 +48,7 @@ import {
     type OptionContractType,
     type OptionPolicyIssue,
     type SellDisciplineTask,
+    policyHandValued,
     policyHoldings,
     policyPortfolioValue,
 } from "@/lib/risk-policy";
@@ -320,6 +321,10 @@ function OrderForm({ accounts, prices, onSubmit }: OrderFormProps) {
         () => policyHoldings(policyPortfolio.holdings, riskPolicy),
         [policyPortfolio.holdings, riskPolicy],
     );
+    const policyHandValuedRows = useMemo(
+        () => policyHandValued(policyPortfolio.handValued ?? [], riskPolicy),
+        [policyPortfolio.handValued, riskPolicy],
+    );
     const policyValue = useMemo(() => policyPortfolioValue(policyPortfolio), [policyPortfolio]);
     const policyEmployerSymbols = useMemo(() => employerSymbols(riskPolicy), [riskPolicy]);
     const { theses } = useThesisStore();
@@ -581,7 +586,9 @@ function OrderForm({ accounts, prices, onSubmit }: OrderFormProps) {
     const riskPolicyImpact = useMemo(
         () =>
             evaluatePreTradeRiskPolicy({
-                holdings: policyHoldingRows,
+                // Holdings valued by hand count in their buckets and themes;
+                // the order is for a ticker, so never one of them.
+                holdings: [...policyHoldingRows, ...policyHandValuedRows],
                 portfolioValue: policyValue,
                 trade: {
                     ticker: tickerUpper,
@@ -607,6 +614,7 @@ function OrderForm({ accounts, prices, onSubmit }: OrderFormProps) {
         [
             policyUnavailable,
             policyHoldingRows,
+            policyHandValuedRows,
             policyPortfolio.options,
             policyValue,
             policyEmployerSymbols,

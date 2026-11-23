@@ -14,7 +14,7 @@ import { TodayTriage } from '@/components/today/TodayTriage';
 import { PolicyStrip } from '@/components/today/PolicyStrip';
 import { TodayTheses } from '@/components/today/TodayTheses';
 import { TodayEquityCurve } from '@/components/today/TodayEquityCurve';
-import { evaluateRiskPolicy } from '@/lib/risk-policy';
+import { chosenBucket, defaultPolicyBucket, evaluateRiskPolicy, handValuedThemeWeights } from '@/lib/risk-policy';
 import { buildPolicyPortfolio, valueHolding } from '@/lib/risk-policy/portfolio';
 import { manualSymbol } from '@/lib/portfolio/manual-symbol';
 import { loadPolicyTheses, loadUserRiskPolicy } from '@/lib/risk-policy/server';
@@ -144,19 +144,30 @@ export default async function Today() {
     .map(({ symbol, quantity, currentPrice, marketValue }) => ({ symbol, quantity, currentPrice, marketValue }));
 
   const allocationHoldings: AllocationHolding[] = [
-    ...allHoldings.map((h) => ({
-      symbol: h.symbol,
-      portfolio: h.portfolio,
-      marketValue: h.marketValue,
+    // In the bucket the user chose, else the one the security's profile
+    // suggests, as the policy checks read them.
+    ...allHoldings.map((h) => {
+      const symbol = h.symbol.toUpperCase();
+      return {
+        symbol: h.symbol,
+        portfolio: h.portfolio,
+        marketValue: h.marketValue,
+        policyBucket: chosenBucket(riskPolicy, symbol),
+        defaultBucket: defaultPolicyBucket(symbol, profiles.get(symbol)),
+      };
+    }),
+    // Valued by hand: in the bucket the user chose, core until then; its
+    // theme follows, as the policy checks read them.
+    ...allPortfolios.flatMap((p) => (p.manualHoldings ?? []).map((m) => {
+      const bucket = chosenBucket(riskPolicy, manualSymbol(m.id)) ?? 'core';
+      return {
+        symbol: manualSymbol(m.id),
+        portfolio: p.name,
+        policyBucket: bucket,
+        themeWeights: handValuedThemeWeights(bucket),
+        marketValue: Number(m.value) || 0,
+      };
     })),
-    // Valued by hand: core and broad, as the policy checks read them.
-    ...allPortfolios.flatMap((p) => (p.manualHoldings ?? []).map((m) => ({
-      symbol: manualSymbol(m.id),
-      portfolio: p.name,
-      policyBucket: 'core' as const,
-      themeWeights: [{ theme: 'broad_core_index' as const, weight: 1, source: 'fallback' as const }],
-      marketValue: Number(m.value) || 0,
-    }))),
   ];
   const cashByPortfolio = Object.fromEntries(allPortfolios.map((p) => [p.name, p.cashBalance || 0]));
   const topHoldingsRows: TopHoldingsRow[] = allHoldings.map((h) => ({

@@ -39,7 +39,13 @@ export interface AllocationHolding {
     symbol: string;
     /** Portfolio name (used for the "Account" grouping). */
     portfolio: string;
+    /** The bucket the user chose for it (Settings › Bucket policy). */
     policyBucket?: PolicyBucketId;
+    /**
+     * The bucket it starts in without a choice, from the security's profile
+     * (`defaultPolicyBucket`); when left out, only well-known tickers have one.
+     */
+    defaultBucket?: PolicyBucketId | null;
     themeWeights?: readonly ThemeWeight[];
     marketValue: number;
 }
@@ -179,6 +185,7 @@ function buildSegments(
                 symbol: h.symbol,
                 marketValue: h.marketValue,
                 policyBucket: h.policyBucket,
+                defaultBucket: h.defaultBucket,
                 themeWeights: h.themeWeights,
             })),
             ...cashInputs(cashByPortfolio),
@@ -192,6 +199,7 @@ function buildSegments(
                 symbol: h.symbol,
                 marketValue: h.marketValue,
                 policyBucket: h.policyBucket,
+                defaultBucket: h.defaultBucket,
             })),
             ...cashInputs(cashByPortfolio),
         ]);

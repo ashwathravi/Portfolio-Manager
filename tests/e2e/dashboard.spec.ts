@@ -242,6 +242,31 @@ test.describe('Today › holdings valued by hand', () => {
         await expect(dimension('single_name_concentration')).toContainText('0');
         await expect(dimension('missing_policy_metadata')).toHaveAttribute('data-status', 'inside');
     });
+
+    test('regression: the stress test names a holding valued by hand, never by its key (launch item i54)', async ({ context, page }) => {
+        await signInAsNewUser(context, { firstSignIn: true });
+        const created = await page.request.post('/api/portfolios', { data: { name: '401(k)', cashBalance: 0 } });
+        expect(created.status()).toBe(201);
+        const { data: { id } } = await created.json() as { data: { id: string } };
+        for (const [name, value] of [['Target 2055 Trust', 90_000], ['Stable Value Fund', 10_000]] as const) {
+            const added = await page.request.post('/api/portfolio/manual-holdings', {
+                data: { portfolioId: id, holding: { name, value, valueAsOf: '2026-11-19' } },
+            });
+            expect(added.status()).toBe(201);
+        }
+
+        await gotoAppPage(page, '/');
+        expect(await openPolicyChecks(page)).toBe(true);
+        const scenario = page.getByLabel('Stress-test scenario');
+        const contributors = page.getByRole('list', { name: 'Stress test top contributors' });
+        // The first scenario shocks AI names only; the broad market one shocks every holding.
+        await expect(async () => {
+            await scenario.selectOption({ label: 'Broad market -20% + tech beta' });
+            await expect(contributors.getByRole('listitem').first()).toContainText('Target 2055 Trust', { timeout: 1_000 });
+        }).toPass({ timeout: 10_000 });
+        await expect(contributors.getByRole('listitem').first()).toContainText('-$18,000');
+        await expect(page.getByTestId('risk-policy-dashboard')).not.toContainText(/manual:/i);
+    });
 });
 
 test.describe('Pattern feed (AR-112)', () => {

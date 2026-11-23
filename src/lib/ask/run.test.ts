@@ -225,6 +225,46 @@ describe('Ask Ledger answers from the user\'s data', () => {
         assert.ok(ticker.citations.some((citation) => citation.href.includes('/portfolios/holdings')));
     });
 
+    describe('holdings valued by hand, in the bucket chosen for each', () => {
+        // A retirement fund with no ticker: $50,000 beside the $87,000 above.
+        const trust: PolicyPortfolioHolding = {
+            id: 'm1', symbol: 'manual:m1', name: 'Target 2055 Trust', quantity: 1, avgCost: 40_000, currentPrice: 50_000, marketValue: 50_000, defaultBucket: 'core', account: '401(k)',
+        };
+        const withFund = (fund: PolicyPortfolioHolding, policy: Partial<RiskPolicySettings> = {}): AskContext => {
+            const base = context({}, policy);
+            return { ...base, portfolio: { ...base.portfolio, handValued: [fund] } };
+        };
+        const rowsFor = (question: string, ctx: AskContext) => runAsk(question, ctx).toolRuns[0].rows;
+
+        test('the stress test names it and shocks it as its bucket says', () => {
+            const rows = rowsFor('What happens in a market drawdown?', withFund(trust));
+            assert.strictEqual(rows[0].label, 'Broad market -20% + tech beta');
+            assert.deepStrictEqual(rows.filter((r) => r.label === 'Target 2055 Trust').map((r) => r.value), ['-$10,000']);
+            assert.ok(rows.every((r) => !/manual:/i.test(r.label)), rows.map((r) => r.label).join(', '));
+            // As cash reserve it takes no loss, so it isn't listed.
+            const cash = rowsFor('What happens in a market drawdown?', withFund(trust, { bucketAssignments: { 'manual:m1': 'cash_reserve' } }));
+            assert.ok(!cash.some((r) => r.label === 'Target 2055 Trust'));
+        });
+
+        test('its theme follows its bucket', () => {
+            const sub = (rows: ReturnType<typeof rowsFor>, label: string) => rows.find((r) => r.label === label)?.sub ?? '';
+            // VTI's $25,000 and the fund's $50,000.
+            const core = rowsFor('How much AI exposure do I have?', withFund(trust));
+            assert.match(sub(core, 'Broad core index'), /^\$75,000 /);
+            // The cash's $10,000 and the fund's $50,000.
+            const reserve = rowsFor('How much AI exposure do I have?', withFund(trust, { bucketAssignments: { 'manual:m1': 'cash_reserve' } }));
+            assert.match(sub(reserve, 'Bonds/treasuries/cash equivalent'), /^\$60,000 /);
+            assert.match(sub(reserve, 'Broad core index'), /^\$25,000 /);
+        });
+
+        test("chosen speculative, it breaches that bucket's cap", () => {
+            const breaches = (policy: Partial<RiskPolicySettings>) => rowsFor('Which risk policy guardrails are breached?', withFund({ ...trust, avgCost: 10_000, currentPrice: 10_000, marketValue: 10_000 }, policy)).map((r) => r.label);
+            // TSLA moved to core: only the fund, $10,000 of $97,000, is speculative, against a 5% cap.
+            assert.ok(!breaches({ bucketAssignments: { TSLA: 'core' } }).includes('Speculative/options'));
+            assert.ok(breaches({ bucketAssignments: { TSLA: 'core', 'manual:m1': 'speculative' } }).includes('Speculative/options'));
+        });
+    });
+
     test('trim to target: the employer stock against its plan, or the ticker asked about', () => {
         const plan = runAsk('How much should I trim to reach my target allocation?', context({}, employer(['MSFT'])));
         // MSFT $24,000 of $87,000 against the plan's 20%: sell $6,600.
