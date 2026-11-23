@@ -311,9 +311,10 @@ export const transactions = pgTable("transactions", {
 // ---------------------------------------------------------------------------
 
 /**
- * Option contracts the user holds, entered by hand or imported from a
- * broker's positions CSV, for the LEAPS ledger and the options checks of
- * the risk policy. Kept apart from holdings: they aren't in net worth,
+ * Option contracts the user holds, entered by hand, imported from a
+ * broker's positions CSV, or synced from a linked account (i44), for the
+ * LEAPS ledger and the options checks of the risk policy. Kept apart from
+ * holdings: they aren't in the portfolio value (so not in the net worth),
  * returns or the nightly valuations. One row per contract an account
  * holds; it goes with its account.
  */
@@ -341,12 +342,18 @@ export const optionPositions = pgTable("option_positions", {
     // newer close is stored.
     userMark: numeric("user_mark"),
     userMarkDate: date("user_mark_date", { mode: "string" }),
+    // The price per share the linked account last reported for the contract,
+    // and the day it's from (source "plaid", i44): a mark used while no newer
+    // close or price of the user's own is stored.
+    institutionPrice: numeric("institution_price"),
+    institutionPriceDate: date("institution_price_date", { mode: "string" }),
     // One of the user's theses (theses.id); a deleted one reads as none.
     thesisId: text("thesis_id"),
     // What must be true by expiry, and the exit, roll or expire rule.
     expiryTest: text("expiry_test").notNull().default(""),
     exitRule: text("exit_rule").notNull().default(""),
-    // "manual" or "csv".
+    // "manual", "csv" or "plaid" (synced from a linked account: while it
+    // syncs, the contract, contracts and premium are the institution's).
     source: text("source").notNull().default("manual"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
@@ -368,7 +375,11 @@ export const optionPositions = pgTable("option_positions", {
         "option_positions_user_mark_check",
         sql`(${table.userMark} is null) = (${table.userMarkDate} is null) and (${table.userMark} is null or ${table.userMark} >= 0)`,
     ),
-    sourceCheck: check("option_positions_source_check", sql`${table.source} in ('manual', 'csv')`),
+    institutionPriceCheck: check(
+        "option_positions_institution_price_check",
+        sql`(${table.institutionPrice} is null) = (${table.institutionPriceDate} is null) and (${table.institutionPrice} is null or ${table.institutionPrice} >= 0)`,
+    ),
+    sourceCheck: check("option_positions_source_check", sql`${table.source} in ('manual', 'csv', 'plaid')`),
     serverOnlyNoClientAccess: serverOnlyNoClientAccessPolicy(),
     appRuntimeAccess: appRuntimeAccessPolicy(),
 })).enableRLS();
