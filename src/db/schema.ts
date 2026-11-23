@@ -380,8 +380,9 @@ export const optionPositions = pgTable("option_positions", {
  * What an account holds that Atlas can't price from market data: a fund
  * with no ticker (a 401(k)'s collective trust, a 529 portfolio, known by
  * a CUSIP or a plan's name), a private company, a note. The user (or the
- * institution, through Plaid) gives its value as of a day, and it counts
- * at that value until the next one. No quote is ever looked up for it.
+ * institution through Plaid, or the broker's positions file through
+ * Import CSV) gives its value as of a day, and it counts at that value
+ * until the next one. No quote is ever looked up for it.
  */
 export const manualHoldings = pgTable("manual_holdings", {
     id: uuid("id").default(sql`gen_random_uuid()`).primaryKey(),
@@ -398,10 +399,13 @@ export const manualHoldings = pgTable("manual_holdings", {
     value: numeric("value").notNull(),
     costBasis: numeric("cost_basis"),
     valueAsOf: date("value_as_of", { mode: "string" }).notNull(),
-    // "manual", or "plaid": a linked account's holding with no ticker,
-    // whose value each sync replaces; externalId is the account it was
+    // "manual"; "plaid": a linked account's holding with no ticker, whose
+    // value each sync replaces, and whose externalId is the account it was
     // synced into and Plaid's security_id (institutionValuedKey), kept when
-    // the user edits or moves it.
+    // the user edits or moves it; or "csv": a positions file's row with no
+    // ticker, whose externalId is its import key in its account
+    // (manualImportKey: "csv:id:" and its identifier, or "csv:name:" and
+    // its name), so importing the file again updates it.
     source: text("source").notNull().default("manual"),
     externalId: text("external_id"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
@@ -422,7 +426,7 @@ export const manualHoldings = pgTable("manual_holdings", {
     valueCheck: check("manual_holdings_value_check", sql`${table.value} >= 0`),
     quantityCheck: check("manual_holdings_quantity_check", sql`${table.quantity} is null or ${table.quantity} > 0`),
     costBasisCheck: check("manual_holdings_cost_basis_check", sql`${table.costBasis} is null or ${table.costBasis} >= 0`),
-    sourceCheck: check("manual_holdings_source_check", sql`${table.source} in ('manual', 'plaid')`),
+    sourceCheck: check("manual_holdings_source_check", sql`${table.source} in ('manual', 'plaid', 'csv')`),
     serverOnlyNoClientAccess: serverOnlyNoClientAccessPolicy(),
     appRuntimeAccess: appRuntimeAccessPolicy(),
 })).enableRLS();

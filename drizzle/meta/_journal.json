@@ -260,6 +260,13 @@
       "when": 1795146153229,
       "tag": "0036_manual_holding_values",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1795404455016,
+      "tag": "0037_manual_holdings_csv_source",
+      "breakpoints": true
     }
   ]
 }
