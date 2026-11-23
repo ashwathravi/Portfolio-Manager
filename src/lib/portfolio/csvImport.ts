@@ -300,9 +300,15 @@ export function decodeCsvBytes(bytes: ArrayBuffer | Uint8Array): string {
         : utf16ByteOrder(data) ?? 'utf-8';
     // No UTF-16 character is one byte, so a lone last byte (a newline or NUL
     // a tool added) is dropped: decoded, it would end the last cell in U+FFFD.
-    const whole = encoding !== 'utf-8' && data.length % 2 === 1 ? data.subarray(0, data.length - 1) : data;
+    // So is a newline a tool added as two single bytes, CR LF: decoded, the
+    // pair would be one stray character at the end of the last cell.
+    let end = data.length;
+    if (encoding !== 'utf-8') {
+        if (end % 2 === 1) end -= 1;
+        else if (data[end - 2] === 0x0d && data[end - 1] === 0x0a) end -= 2;
+    }
     // The decoder drops the byte-order mark of its own encoding.
-    return new TextDecoder(encoding).decode(whole);
+    return new TextDecoder(encoding).decode(data.subarray(0, end));
 }
 
 /**

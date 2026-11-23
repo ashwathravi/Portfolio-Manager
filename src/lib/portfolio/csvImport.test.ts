@@ -264,14 +264,17 @@ describe('decodeCsvBytes', () => {
         }
     });
 
-    test('regression: a stray last byte after a UTF-16 file is dropped, not read into its last cell', () => {
+    test('regression: a newline or NUL a tool added after a UTF-16 file in single bytes is dropped, not read into its last cell', () => {
         for (const encoding of ['utf-16le', 'utf-16be'] as const) {
             for (const mark of [true, false]) {
-                // A newline or NUL some tool added as a single byte, after a last cell that's a number.
-                for (const stray of [0x0a, 0x00]) {
-                    const bytes = new Uint8Array([...fileBytes(csv, encoding, mark), stray]);
-                    const label = `${encoding}${mark ? ' with a byte-order mark' : ''}, then 0x${stray.toString(16).padStart(2, '0')}`;
-                    assert.deepStrictEqual(parseHoldingsCsv(decodeCsvBytes(bytes)), utf8, label);
+                // After a last cell that's a number, or after the file's own last line break.
+                for (const text of [csv, `${csv}\r\n`]) {
+                    const asUtf8 = parseHoldingsCsv(decodeCsvBytes(fileBytes(text, 'utf-8', false)));
+                    for (const stray of [[0x0a], [0x00], [0x0d, 0x0a]]) {
+                        const bytes = new Uint8Array([...fileBytes(text, encoding, mark), ...stray]);
+                        const label = `${encoding}${mark ? ' with a byte-order mark' : ''}${text === csv ? '' : ' and a line break'}, then ${Buffer.from(stray).toString('hex')}`;
+                        assert.deepStrictEqual(parseHoldingsCsv(decodeCsvBytes(bytes)), asUtf8, label);
+                    }
                 }
             }
         }
