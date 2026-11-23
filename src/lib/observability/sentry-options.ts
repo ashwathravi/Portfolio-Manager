@@ -54,6 +54,9 @@ const CODE_LOCATION_KEYS = new Set(["stacktrace", "debug_meta"]);
 // Drizzle ends a failed query's message with "\nparams: " and every
 // parameter, which holds what the user saved; everything from there is cut.
 const QUERY_PARAMETERS = /\nparams: [\s\S]*$/;
+// The same in a JSON log line (a route's 500, src/lib/api/security.ts), where
+// the line break is written as \n: cut to the end of that JSON string.
+const ESCAPED_QUERY_PARAMETERS = /\\nparams: (?:[^"\\]|\\.)*/g;
 // Where an error object keeps those parameters: Drizzle's params and
 // postgres.js's parameters.
 const QUERY_PARAMETER_KEYS = new Set(["params", "parameters"]);
@@ -123,9 +126,9 @@ export function browserSentryOptions(env: SentryEnv): BrowserOptions {
  * request URL, and that can hold what the user typed into ticker search.
  * So is a failed query's list of parameters, for an error that reaches
  * Sentry without passing reportError (one nothing caught, or one logged
- * with console.*, which the SDK keeps as a breadcrumb): the parameters hold
- * the names, values and notes the user saved. A console breadcrumb keeps
- * its text only, not the objects logged.
+ * with console.*, which the SDK keeps as a breadcrumb, a JSON log line
+ * included): the parameters hold the names, values and notes the user
+ * saved. A console breadcrumb keeps its text only, not the objects logged.
  */
 export function scrubSentryEvent<T extends SentryEvent>(event: T, env: Partial<Record<string, string>>): T {
     const scrubbed = redactStrings(event, env, 0, true) as T;
@@ -164,7 +167,7 @@ function redactStrings(
     stripQueries: boolean,
 ): unknown {
     if (typeof value === "string") {
-        const redacted = redactSecrets(value, env).replace(QUERY_PARAMETERS, "");
+        const redacted = redactSecrets(value, env).replace(QUERY_PARAMETERS, "").replace(ESCAPED_QUERY_PARAMETERS, "");
         return stripQueries ? stripUrlQueries(redacted) : redacted;
     }
     if (depth >= MAX_SCRUB_DEPTH || value === null || typeof value !== "object") return value;

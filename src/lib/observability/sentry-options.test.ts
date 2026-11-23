@@ -233,6 +233,29 @@ describe("scrubSentryEvent", () => {
         assert.deepEqual(event.breadcrumbs?.[1].data, { url: "/api/portfolio/net-worth-items" });
     });
 
+    test("regression: cuts them from the JSON line a route's 500 logs, which a console breadcrumb keeps", () => {
+        const sql = 'insert into "net_worth_items" ("id", "user_id", "name", "note") values (default, $1, $2, $3) returning "id"';
+        // An error whose own message quotes a failed query's, parameters and all.
+        const quoted = `Save failed: Failed query: ${sql}\nparams: u-1,Sample "home",MARKER-note`;
+        const line = JSON.stringify({
+            event: "internal_server_error",
+            code: "NET_WORTH_ITEM_CREATE_FAILED",
+            message: "Unable to add the asset or debt.",
+            error: { name: "Error", message: quoted, stack: `Error: ${quoted}\n    at save (src/lib/portfolio/net-worth-items.ts:1:1)` },
+        });
+        const event = scrubSentryEvent({
+            type: undefined,
+            breadcrumbs: [{ category: "console", level: "error", message: line, data: { logger: "console", arguments: [line] } }],
+        } as ScrubbableEvent, {});
+
+        const scrubbed = String(event.breadcrumbs?.[0].message);
+        assert.ok(!scrubbed.includes("MARKER"), scrubbed);
+        const entry = JSON.parse(scrubbed);
+        assert.equal(entry.code, "NET_WORTH_ITEM_CREATE_FAILED");
+        assert.equal(entry.error.message, `Save failed: Failed query: ${sql}`);
+        assert.equal(entry.error.stack, `Error: Save failed: Failed query: ${sql}`);
+    });
+
     test("keeps a params key that isn't a list of query parameters", () => {
         const event = scrubSentryEvent({
             type: undefined,
