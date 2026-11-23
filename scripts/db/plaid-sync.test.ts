@@ -10,6 +10,7 @@ import { lastCompletedSession, previousTradingDay } from '../../src/lib/markets/
 import { listOptionContractsToMark } from '../../src/lib/markets/option-marks';
 import { createPriceIngestStore, ingestDailyPrices, type PriceIngestAdapter, type PriceIngestStore } from '../../src/lib/markets/price-ingest';
 import type { PlaidFetch } from '../../src/lib/plaid/link';
+import { PolygonApiError } from '../../src/lib/providers/polygon-massive-adapter';
 import { importHoldings } from '../../src/lib/portfolio/importHoldings';
 import { deletePortfolio, updatePortfolio } from '../../src/lib/portfolio/manage';
 import { updateManualHolding } from '../../src/lib/portfolio/manual-holdings';
@@ -833,9 +834,9 @@ describe('Plaid sync into portfolios', { skip: !DATABASE_URL && 'SCRIPTS_TEST_DA
      * Massive's free plan as the nightly prices job finds it, at 22:31 UTC on
      * a weekday: the contract traded every session at $4.25 a share, but the
      * evening's own session isn't published until after midnight Eastern, so
-     * a range that ends on it leaves it out.
+     * a range that ends on it leaves it out, or with `refuses` is refused.
      */
-    const freePlanMassive = (now: Date): PriceIngestAdapter => {
+    const freePlanMassive = (now: Date, refuses: boolean): PriceIngestAdapter => {
         const withheld = lastCompletedSession(now);
         return {
             isConfigured: true,
@@ -843,7 +844,10 @@ describe('Plaid sync into portfolios', { skip: !DATABASE_URL && 'SCRIPTS_TEST_DA
             getDailyHistory: async () => ({ bars: [], unreadable: 0 }),
             getSplits: async () => [],
             getTickerReference: async () => null,
-            getLatestOptionClose: async (_contract, _from, to) => ({ date: to < withheld ? to : previousTradingDay(withheld), close: 4.25 }),
+            async getLatestOptionClose(_contract, _from, to) {
+                if (refuses && to >= withheld) throw new PolygonApiError(403, 'Forbidden', 'https://api.polygon.io/v2/aggs');
+                return { date: to < withheld ? to : previousTradingDay(withheld), close: 4.25 };
+            },
         };
     };
     /** The prices job with only its option marks step at work: every other step finds nothing to do. */
@@ -865,31 +869,34 @@ describe('Plaid sync into portfolios', { skip: !DATABASE_URL && 'SCRIPTS_TEST_DA
         // The cron runs the plaid job, then the prices job. On the free plan the
         // prices job stores the session before its own, so the next night's sync
         // has that close two sessions before its price.
-        const { sync } = await linkedAccount('u-freeplan');
-        const PER_CONTRACT: [string, number, number, number] = ['sec_acme_c150', 300, 420, 105_000];
-        const rows: (number | null)[][][] = [];
-        const marks: string[][] = [];
-        try {
-            for (const night of ['2026-11-02', '2026-11-03', '2026-11-04']) {
-                assert.equal((await sync([AAPL_LOT, PER_CONTRACT], new Date(`${night}T22:30:00.000Z`))).status, 'synced', night);
-                rows.push((await optionRows('u-freeplan')).map((r) => [r.quantity, r.premium, r.price]));
-                let clock = Date.parse(`${night}T22:31:00.000Z`);
-                await ingestDailyPrices({
-                    adapter: freePlanMassive(new Date(clock)),
-                    store: marksStepOnly(night),
-                    now: () => new Date(clock),
-                    sleep: async (ms) => { clock += ms; },
-                });
-                const [mark] = await sql<{ date: string; checked: string }[]>`
-                    SELECT close_date::text AS date, checked_session::text AS checked FROM option_marks WHERE contract = ${ACME_CALL}`;
-                marks.push([mark?.date, mark?.checked]);
+        for (const refuses of [false, true]) {
+            const user = refuses ? 'u-freeplan-refused' : 'u-freeplan';
+            const { sync } = await linkedAccount(user);
+            const PER_CONTRACT: [string, number, number, number] = ['sec_acme_c150', 300, 420, 105_000];
+            const rows: (number | null)[][][] = [];
+            const marks: string[][] = [];
+            try {
+                for (const night of ['2026-11-02', '2026-11-03', '2026-11-04']) {
+                    assert.equal((await sync([AAPL_LOT, PER_CONTRACT], new Date(`${night}T22:30:00.000Z`))).status, 'synced', night);
+                    rows.push((await optionRows(user)).map((r) => [r.quantity, r.premium, r.price]));
+                    let clock = Date.parse(`${night}T22:31:00.000Z`);
+                    await ingestDailyPrices({
+                        adapter: freePlanMassive(new Date(clock), refuses),
+                        store: marksStepOnly(night),
+                        now: () => new Date(clock),
+                        sleep: async (ms) => { clock += ms; },
+                    });
+                    const [mark] = await sql<{ date: string; checked: string }[]>`
+                        SELECT close_date::text AS date, checked_session::text AS checked FROM option_marks WHERE contract = ${ACME_CALL}`;
+                    marks.push([mark?.date, mark?.checked]);
+                }
+                // Each evening the session before's close, as of that evening's session.
+                assert.deepEqual(marks, [['2026-10-30', '2026-11-02'], ['2026-11-02', '2026-11-03'], ['2026-11-03', '2026-11-04']], user);
+                // Plaid's shares until a close is stored, then 300 contracts each night.
+                assert.deepEqual(rows, [[[3, 350, 420]], [[300, 3.5, 4.2]], [[300, 3.5, 4.2]]], user);
+            } finally {
+                await sql`DELETE FROM option_marks WHERE source = 'massive'`;
             }
-            // Each evening the session before's close, as of that evening's session.
-            assert.deepEqual(marks, [['2026-10-30', '2026-11-02'], ['2026-11-02', '2026-11-03'], ['2026-11-03', '2026-11-04']]);
-            // Plaid's shares until a close is stored, then 300 contracts each night.
-            assert.deepEqual(rows, [[[3, 350, 420]], [[300, 3.5, 4.2]], [[300, 3.5, 4.2]]]);
-        } finally {
-            await sql`DELETE FROM option_marks WHERE source = 'massive'`;
         }
     });
 
