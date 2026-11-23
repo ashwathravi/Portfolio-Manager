@@ -287,9 +287,10 @@ test.describe('Holdings › LEAPS ledger from your option positions', () => {
 
 test.describe('Holdings › Valued by hand', () => {
     test.skip(!databaseAuthEnabled, 'holdings valued by hand are saved in the database');
+    let userId = '';
 
     test.beforeEach(async ({ context, page }) => {
-        await signInAsFreshUser(context);
+        userId = await signInAsFreshUser(context);
         await gotoAppPage(page, '/portfolios/holdings');
     });
 
@@ -322,6 +323,52 @@ test.describe('Holdings › Valued by hand', () => {
         await page.getByRole('button', { name: 'Actions for Target 2055 Trust' }).click();
         await page.getByRole('menuitem', { name: 'Delete' }).click();
         await expect(card.getByTestId('manual-holdings-table')).toHaveCount(0);
+    });
+
+    test('regression: a new name keeps the value\'s date and adds no value; a new value is as of today', async ({ page }) => {
+        // The dialog dated every edit today, so a rename recorded a value
+        // for a day nothing was valued. A day that can't be today shows it.
+        const asOf = '2025-06-30';
+        const [account] = await e2eDatabase()<{ id: string }[]>`SELECT id FROM portfolios WHERE user_id = ${userId} AND name = 'Main Portfolio'`;
+        const added = await page.request.post('/api/portfolio/manual-holdings', {
+            data: { portfolioId: account.id, holding: { name: 'Target 2055 Trust', value: 12500, valueAsOf: asOf } },
+        });
+        expect(added.status()).toBe(201);
+        await reloadAppPage(page);
+        // The dialog's today: the browser's own date.
+        const today = await page.evaluate(() => {
+            const d = new Date();
+            return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        });
+        const values = async () => (await e2eDatabase()<{ date: string; value: string }[]>`
+            SELECT to_char(v.date, 'YYYY-MM-DD') AS date, v.value::text AS value
+            FROM manual_holding_values v JOIN manual_holdings m ON m.id = v.manual_holding_id
+            WHERE m.user_id = ${userId}
+            ORDER BY v.date`).map((v) => [v.date, Number(v.value)]);
+
+        const table = page.getByTestId('manual-holdings').getByTestId('manual-holdings-table');
+        await page.getByRole('button', { name: 'Actions for Target 2055 Trust' }).click();
+        await page.getByRole('menuitem', { name: 'Update value' }).click();
+        const dialog = page.getByRole('dialog');
+        const date = dialog.getByLabel('As of');
+        await expect(date).toHaveValue(asOf);
+        await dialog.getByLabel('Holding').fill('Target 2055 Trust (old plan)');
+        await dialog.getByRole('button', { name: 'Save' }).click();
+        await expect(dialog).toBeHidden();
+        const row = table.getByRole('row').filter({ hasText: 'Target 2055 Trust (old plan)' });
+        await expect(row).toContainText('Jun 30, 2025');
+        expect(await values()).toEqual([[asOf, 12500]]);
+
+        // A new value is as of today, and the earlier one stays by its day.
+        await page.getByRole('button', { name: 'Actions for Target 2055 Trust (old plan)' }).click();
+        await page.getByRole('menuitem', { name: 'Update value' }).click();
+        await expect(date).toHaveValue(asOf);
+        await dialog.getByLabel('Value ($)').fill('13,000');
+        await expect(date).toHaveValue(today);
+        await dialog.getByRole('button', { name: 'Save' }).click();
+        await expect(dialog).toBeHidden();
+        await expect(row).toContainText('$13,000.00');
+        expect(await values()).toEqual([[asOf, 12500], [today, 13000]]);
     });
 });
 

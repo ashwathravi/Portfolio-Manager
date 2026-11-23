@@ -210,11 +210,7 @@ export function describeNetWorthCounts({ assetCount, debtCount }: Pick<NetWorthS
 }
 
 /**
- * The day an edited item's value is as of until the user gives one: its own
- * while the value is as it was (to the cent), so a new name or note doesn't
- * date it anew or keep a value for a day nothing was valued; `today` once
- * the value changes, so the earlier value stays kept by its own day.
+ * The day an edited item's value is as of until the user gives one, by the
+ * rule holdings valued by hand share (value-dates.ts).
  */
-export function editedValueAsOf(item: Pick<NetWorthItemRow, "value" | "valueAsOf">, value: number | null, today: string): string {
-    return value !== null && Number.isFinite(value) && cents(value) === cents(item.value) ? item.valueAsOf : today;
-}
+export { editedValueAsOf } from "./value-dates";
