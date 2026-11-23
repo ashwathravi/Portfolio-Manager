@@ -827,17 +827,20 @@ describe('Plaid sync into portfolios', { skip: !DATABASE_URL && 'SCRIPTS_TEST_DA
 
     test('regression: a contract\'s close from weeks before the sync says nothing about how its lots read, so the synced row stays', async () => {
         const { sync } = await linkedAccount('u-staleclose');
-        const held = async () => (await optionRows('u-staleclose')).map((r) => [r.quantity, r.premium, r.price]);
+        const held = async () => (await optionRows('u-staleclose')).map((r) => [r.quantity, r.premium, r.price, r.priceDate]);
         await sync([AAPL_LOT, ACME_LOT], NOW);
-        assert.deepEqual(await held(), [[3, 3.5, 4.2]]);
+        assert.deepEqual(await held(), [[3, 3.5, 4.2, '2026-10-23']]);
         try {
             // An illiquid contract's last trade, about 60 days before the sync's
             // session, at $0.05 a share: within three times of $0.042, the lot's
             // price read per contract, as 300 contracts.
             await sql`INSERT INTO option_marks (contract, close, close_date, checked_session, checked_at, source)
                 VALUES (${ACME_CALL}, 0.05, '2026-08-24', '2026-10-23', now(), 'test')`;
-            await sync([AAPL_LOT, ACME_LOT], new Date('2026-10-26T22:30:00.000Z'));
-            assert.deepEqual(await held(), [[3, 3.5, 4.2]]);
+            const second = await sync([AAPL_LOT, ACME_LOT], new Date('2026-10-26T22:30:00.000Z'));
+            // Read and written again, its price as of Monday's session: neither a
+            // failed sync that wrote nothing nor a contract left out with its row.
+            assert.deepEqual([second.status, second.accounts[0]?.options, second.accounts[0]?.holdingsSkipped], ['synced', 1, 0]);
+            assert.deepEqual(await held(), [[3, 3.5, 4.2, '2026-10-26']]);
         } finally {
             await sql`DELETE FROM option_marks WHERE contract = ${ACME_CALL}`;
         }
