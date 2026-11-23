@@ -7,19 +7,21 @@ import postgres from 'postgres';
 
 import * as schema from '../../src/db/schema';
 import { RECORD_LIMITS, RecordLimitError } from '../../src/lib/limits/records';
+import { addNetWorthItem, deleteNetWorthItem, updateNetWorthItem } from '../../src/lib/portfolio/net-worth-items';
 import { addTransaction, deleteTransaction, importTransactions } from '../../src/lib/portfolio/transactionsWrite';
 import { importJournal, saveJournalEntry } from '../../src/lib/research/server/journal';
 import { importTheses, saveThesis } from '../../src/lib/research/server/theses';
 import { importWatchlist, saveWatchItem } from '../../src/lib/research/server/watchlist';
 import type { JournalEntryInput } from '../../src/lib/validators/journal';
+import { netWorthItemSchema } from '../../src/lib/validators/net-worth-item';
 import type { ThesisInput } from '../../src/lib/validators/thesis';
 import { transactionRowSchema } from '../../src/lib/validators/transaction';
 import type { WatchItemInput } from '../../src/lib/validators/watchlist';
 
-// Launch item i77: how many watchlist items, journal entries, theses and
-// transactions one user keeps, checked by the real writes against a scratch
-// database with every migration applied. Needs a local Postgres it may
-// create databases in; CI's e2e job sets this.
+// Launch item i77: how many watchlist items, journal entries, theses,
+// transactions and other assets and debts one user keeps, checked by the
+// real writes against a scratch database with every migration applied.
+// Needs a local Postgres it may create databases in; CI's e2e job sets this.
 // Locally: SCRIPTS_TEST_DATABASE_URL=postgres://atlas:atlas-local-only@127.0.0.1:54329/atlas_wealth
 const DATABASE_URL = process.env.SCRIPTS_TEST_DATABASE_URL?.trim();
 
@@ -201,6 +203,52 @@ describe('per-user record limits (launch item i77)', { skip: !DATABASE_URL && 'S
             assert.equal(await deleteTransaction('u-1', oldest.id, database), true);
             await addTransaction('u-1', b.id, deposit(), database);
             assert.equal(await count(), 50_000);
+        });
+    });
+
+    describe('net worth items', () => {
+        const home = (fields: Record<string, unknown> = {}) => netWorthItemSchema.parse({
+            kind: 'asset', category: 'property', name: 'Home', value: 300_000, valueAsOf: '2026-11-01', ...fields,
+        });
+        const count = async (user = 'u-1') => (await sql<{ n: number }[]>`SELECT count(*)::int AS n FROM net_worth_items WHERE user_id = ${user}`)[0].n;
+        /** `n` items for the user, valued as of the first. */
+        const fill = (n: number, user = 'u-1') => sql`
+            INSERT INTO net_worth_items (user_id, kind, category, name, value, value_as_of)
+            SELECT ${user}, 'asset', 'valuables', 'Item ' || n, n, '2026-11-01' FROM generate_series(1, ${n}) AS n`;
+
+        test('at 100 a new one is refused and nothing is added; an update or a delete isn\'t, and a delete makes room', async () => {
+            assert.equal(RECORD_LIMITS.netWorthItems, 100);
+            await fill(100);
+            await assert.rejects(addNetWorthItem('u-1', home({ name: 'One too many' }), { database }), RecordLimitError);
+            assert.equal(await count(), 100);
+            assert.equal((await sql`SELECT 1 FROM net_worth_items WHERE name = 'One too many'`).length, 0);
+            assert.equal((await sql`SELECT 1 FROM net_worth_item_values`).length, 0, 'and no value kept for it');
+
+            const [first, second] = await sql<{ id: string }[]>`SELECT id FROM net_worth_items WHERE user_id = 'u-1' ORDER BY value LIMIT 2`;
+            assert.equal(await updateNetWorthItem('u-1', first.id, home({ name: 'Edited at the limit' }), { database }), true);
+            assert.equal(await deleteNetWorthItem('u-1', second.id, { database }), true);
+            assert.equal(await count(), 99);
+            await addNetWorthItem('u-1', home({ name: 'In its place' }), { database });
+            assert.equal(await count(), 100);
+        });
+
+        test('two adds for the last place at once: one goes, the other is refused', async () => {
+            await fill(99);
+            const results = await Promise.allSettled([
+                addNetWorthItem('u-1', home({ name: 'Cabin' }), { database }),
+                addNetWorthItem('u-1', home({ name: 'Boat', category: 'vehicle' }), { database }),
+            ]);
+            assert.deepEqual(results.map((r) => r.status).sort(), ['fulfilled', 'rejected']);
+            const refused = results.find((r) => r.status === 'rejected') as PromiseRejectedResult;
+            assert.ok(refused.reason instanceof RecordLimitError);
+            assert.equal(await count(), 100);
+        });
+
+        test('the limit is per user: another user\'s 100 don\'t stop this one adding', async () => {
+            await fill(100, 'u-2');
+            await addNetWorthItem('u-1', home(), { database });
+            assert.equal(await count(), 1);
+            assert.equal(await count('u-2'), 100);
         });
     });
 });

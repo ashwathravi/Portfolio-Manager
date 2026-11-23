@@ -11,21 +11,23 @@ import {
 } from "./records";
 import { buildCountRecordsQuery, buildLockUserRecordsQuery } from "./records-server";
 
-// Launch item i77: how many watchlist items, journal entries, theses and
-// transactions one user keeps. The checks themselves run against a real
-// database in scripts/db/record-limits.test.ts.
+// Launch item i77: how many watchlist items, journal entries, theses,
+// transactions and other assets and debts one user keeps. The checks
+// themselves run against a real database in scripts/db/record-limits.test.ts.
 
 describe("record limits (launch item i77)", () => {
     test("each kind has its limit, its API code and a message that says what to do", () => {
-        assert.deepEqual(RECORD_LIMITS, { watchlist: 500, journal: 2_000, theses: 200, transactions: 50_000 });
+        assert.deepEqual(RECORD_LIMITS, { watchlist: 500, journal: 2_000, theses: 200, transactions: 50_000, netWorthItems: 100 });
         assert.equal(recordLimitCode("watchlist"), "WATCHLIST_LIMIT");
         assert.equal(recordLimitCode("journal"), "JOURNAL_LIMIT");
         assert.equal(recordLimitCode("theses"), "THESIS_LIMIT");
         assert.equal(recordLimitCode("transactions"), "TRANSACTION_LIMIT");
+        assert.equal(recordLimitCode("netWorthItems"), "NET_WORTH_ITEM_LIMIT");
         assert.equal(recordLimitMessage("watchlist"), "Your watchlist holds at most 500 tickers. Remove one to add another.");
         assert.equal(recordLimitMessage("journal"), "Your journal holds at most 2,000 entries. Delete one to add another.");
         assert.equal(recordLimitMessage("theses"), "You can keep at most 200 theses. Delete one to add another.");
         assert.equal(recordLimitMessage("transactions"), "Your accounts hold at most 50,000 transactions. Delete some to add more; nothing was added.");
+        assert.equal(recordLimitMessage("netWorthItems"), "You can keep at most 100 assets and debts. Delete one to add another.");
         assert.equal(new RecordLimitError("theses").message, recordLimitMessage("theses"));
     });
 
@@ -37,6 +39,8 @@ describe("record limits (launch item i77)", () => {
         assert.equal(recordLimitMessageFor("theses", refused(null)), null);
         assert.equal(recordLimitMessageFor("theses", new Error("offline")), null);
         assert.equal(recordLimitMessageFor("theses", null), null);
+        assert.equal(recordLimitMessageFor("netWorthItems", refused("NET_WORTH_ITEM_LIMIT")), recordLimitMessage("netWorthItems"));
+        assert.equal(recordLimitMessageFor("netWorthItems", refused("THESIS_LIMIT")), null);
     });
 
     test("regression: a browser's records refused by a limit on their way to the account are explained, not dropped from view in silence", () => {
@@ -72,6 +76,12 @@ describe("record limits (launch item i77)", () => {
         assert.deepEqual(params, ["u-1"]);
     });
 
+    test("every asset or debt counts: a deleted one is gone, with no dismissed row to leave out", () => {
+        const { sql, params } = buildCountRecordsQuery("netWorthItems", "u-1").toSQL();
+        assert.equal(sql, 'select count(*) from "net_worth_items" where "net_worth_items"."user_id" = $1');
+        assert.deepEqual(params, ["u-1"]);
+    });
+
     test("each user and kind has a lock of its own", () => {
         const recorded: unknown[] = [];
         const database = { execute: (query: unknown) => { recorded.push(query); return Promise.resolve(); } };
@@ -79,5 +89,7 @@ describe("record limits (launch item i77)", () => {
         const chunks = JSON.stringify(recorded[0]);
         assert.match(chunks, /pg_advisory_xact_lock\(hashtext\(/);
         assert.match(chunks, /atlas:records:theses:u-1/);
+        void buildLockUserRecordsQuery("netWorthItems", "u-1", database as never);
+        assert.match(JSON.stringify(recorded[1]), /atlas:records:netWorthItems:u-1/);
     });
 });

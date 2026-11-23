@@ -7,7 +7,7 @@
 import { count, eq, inArray, sql } from "drizzle-orm";
 
 import { db } from "@/db";
-import { journalEntries, portfolios, theses, transactions, watchlistItems } from "@/db/schema";
+import { journalEntries, netWorthItems, portfolios, theses, transactions, watchlistItems } from "@/db/schema";
 import { apiError } from "@/lib/api/security";
 
 import { RECORD_LIMITS, recordLimitCode, RecordLimitError, recordLimitMessage, type RecordKind } from "./records";
@@ -29,6 +29,7 @@ export function buildCountRecordsQuery(kind: RecordKind, userId: string, databas
         const own = database.select({ id: portfolios.id }).from(portfolios).where(eq(portfolios.userId, userId));
         return database.select({ n: count() }).from(transactions).where(inArray(transactions.portfolioId, own));
     }
+    if (kind === "netWorthItems") return database.select({ n: count() }).from(netWorthItems).where(eq(netWorthItems.userId, userId));
     const table = research[kind];
     return database.select({ n: count() }).from(table).where(sql`${table.userId} = ${userId} and not ${table.dismissed}`);
 }
