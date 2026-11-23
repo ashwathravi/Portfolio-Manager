@@ -290,8 +290,8 @@ function round(n: number, places: number): number {
 /**
  * An option or a warrant: Plaid's derivative type, a security with
  * option_contract details, or one whose ticker is a contract's symbol
- * (ACME270115C00150000), so an option Plaid gives no type never counts as
- * a holding the institution values.
+ * (ACME270115C00150000) whatever its type, so an option Plaid gives no
+ * type, or a stock's, never counts as a holding the institution values.
  */
 function isOption(security: PlaidSecurity | undefined): boolean {
     if (!security) return false;
@@ -404,6 +404,7 @@ interface OptionLots {
     costKnown: boolean;
     long: boolean;
     short: boolean;
+    /** The first lot's price per share that has one, and that lot's day for it. */
     perShare: number | null;
     priceDate: string | null;
 }
@@ -467,8 +468,11 @@ export function accountHoldings(
                 lots.costKnown &&= cost != null;
                 lots.long ||= held.contracts > 0;
                 lots.short ||= held.contracts < 0;
-                lots.perShare ??= held.perShare;
-                lots.priceDate ??= priceDate;
+                // The price and its day come from the same lot.
+                if (lots.perShare == null && held.perShare != null) {
+                    lots.perShare = held.perShare;
+                    lots.priceDate = priceDate;
+                }
             } else {
                 options.set(read.contract, {
                     details: read.details,
@@ -479,7 +483,7 @@ export function accountHoldings(
                     long: held.contracts > 0,
                     short: held.contracts < 0,
                     perShare: held.perShare,
-                    priceDate,
+                    priceDate: held.perShare == null ? null : priceDate,
                 });
             }
             continue;

@@ -156,7 +156,10 @@ test.describe('Settings page', () => {
                         data: {
                             itemId: 'item-plaid-sandbox-investments',
                             accounts: [
-                                { name: 'Plaid Sandbox Investments Plaid Growth Brokerage', positions: 7, transactionsAdded: 100, transactionsPending: false, holdingsSkipped: 0, costUnknown: 0 },
+                                {
+                                    name: 'Plaid Sandbox Investments Plaid Growth Brokerage', positions: 7, valued: 1, transactionsAdded: 100, transactionsPending: false,
+                                    holdingsSkipped: 3, skipped: { 'no-ticker': 1, 'other-currency': 1, short: 1 }, costUnknown: 0,
+                                },
                                 { name: 'Plaid Sandbox Investments Plaid Roth IRA', positions: 2, options: 2, transactionsAdded: 20, transactionsPending: false, holdingsSkipped: 1, skipped: { option: 1 }, costUnknown: 0 },
                             ],
                             overLimit: [],
@@ -190,8 +193,12 @@ test.describe('Settings page', () => {
 
         // Only the accounts picked sync: the checking account was unticked.
         // The option contracts the IRA holds come in as option positions;
-        // what wasn't brought in says why.
-        await expect(page.getByText("2 accounts: 9 positions, 2 option positions and 120 new transactions. 1 option or warrant without clear contract details wasn't brought in.")).toBeVisible();
+        // what wasn't brought in says why, one sentence for each reason.
+        await expect(page.getByText(
+            "2 accounts: 9 positions, 2 option positions, 1 holding valued by the institution and 120 new transactions. "
+            + "1 option or warrant without clear contract details wasn't brought in. 1 holding with no ticker and no value wasn't brought in. "
+            + "1 holding in another currency wasn't brought in. 1 short position wasn't brought in.",
+        )).toBeVisible();
         expect(syncRequests[0]).toEqual({ itemId: 'item-plaid-sandbox-investments', plaidAccountIds: ['plaid-growth-brokerage', 'plaid-roth-ira'] });
 
         // The connection as the server has it: what each account syncs into.

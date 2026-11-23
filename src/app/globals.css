@@ -5227,7 +5227,7 @@
   transition: border-color 120ms ease, box-shadow 120ms ease;
 }
 
-.pm-exec-input:hover {
+.pm-exec-input:hover:not(:disabled) {
   border-color: color-mix(in oklab, var(--pm-accent) 30%, var(--pm-border));
 }
 
@@ -5235,6 +5235,14 @@
   outline: none;
   border-color: color-mix(in oklab, var(--pm-accent) 55%, var(--pm-border));
   box-shadow: 0 0 0 3px color-mix(in oklab, var(--pm-accent) 18%, transparent);
+}
+
+/* Shown but not editable (a synced option contract's terms): muted and
+   flat, so it doesn't read as a field to fill in. */
+.pm-exec-input:disabled {
+  color: var(--pm-fg-muted);
+  background: transparent;
+  cursor: not-allowed;
 }
 
 .pm-exec-textarea {

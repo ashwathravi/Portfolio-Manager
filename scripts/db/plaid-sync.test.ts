@@ -15,6 +15,7 @@ import {
     addOptionPosition,
     deleteOptionPosition,
     DuplicateOptionPositionError,
+    loadOptionPositions,
     SyncedOptionPositionError,
     updateOptionPosition,
 } from '../../src/lib/portfolio/option-positions-store';
@@ -22,7 +23,7 @@ import { optionPositionSchema, type OptionPositionInput } from '../../src/lib/va
 import { createSnapshotStore, readManualHistory } from '../../src/lib/portfolio/valuation-snapshots';
 import { MAX_PLAID_CONNECTIONS_PER_USER, PlaidTokenUnavailableError, disconnectPlaidItem, handlePlaidWebhook, listPlaidConnections } from '../../src/lib/plaid/connections';
 import { createDrizzlePlaidTokenRegistryStore, resetPlaidTokenVaultForTests, setPlaidTokenRegistryStoreForTests, storePlaidConnection } from '../../src/lib/plaid/server-token-vault';
-import { PlaidItemNotFoundError, connectedAccountFingerprints, refreshPlaidItem, selectPlaidAccounts, syncAllPlaidItems, syncPlaidItem } from '../../src/lib/plaid/sync';
+import { PlaidItemNotFoundError, connectedAccountFingerprints, refreshPlaidItem, selectPlaidAccounts, syncAllPlaidItems, syncPlaidItem, writeAccountSync } from '../../src/lib/plaid/sync';
 
 // Launch item i44: Plaid's holdings and investment transactions synced into
 // portfolios, against a scratch database with every migration applied and a
@@ -468,8 +469,9 @@ describe('Plaid sync into portfolios', { skip: !DATABASE_URL && 'SCRIPTS_TEST_DA
         const [synced] = await optionRows('u-opt');
         assert.deepEqual({ ...synced, id: undefined }, {
             id: undefined, contract: ACME_CALL, underlying: 'ACME', type: 'call', strike: 150, expiry: '2027-01-15', quantity: 3, premium: 3.5, multiplier: 100,
-            // Plaid gave no day for its price: the day of the sync.
-            price: 4.2, priceDate: '2026-10-25', source: 'plaid', thesis: null, exitRule: '', userMark: null, userMarkDate: null,
+            // Plaid gave no day for its price: the last session that ended by
+            // the sync, Friday's on this Sunday.
+            price: 4.2, priceDate: '2026-10-23', source: 'plaid', thesis: null, exitRule: '', userMark: null, userMarkDate: null,
         });
         // The option trade isn't recorded: the position comes from the holdings.
         assert.equal((await sql`SELECT 1 FROM transactions t JOIN portfolios p ON p.id = t.portfolio_id WHERE p.user_id = 'u-opt'`).length, 0);
@@ -546,9 +548,50 @@ describe('Plaid sync into portfolios', { skip: !DATABASE_URL && 'SCRIPTS_TEST_DA
         await sql`UPDATE plaid_accounts SET sync_status = 'excluded' WHERE user_id = 'u-unlinked'`;
         assert.equal(await updateOptionPosition('u-unlinked', synced.id, await portfolio(), acmeCall({ quantity: 4 }), { database }), true);
         // The same contract: its last price from the institution still marks it.
-        assert.deepEqual((await optionRows('u-unlinked')).map((r) => [r.quantity, r.source, r.price, r.priceDate]), [[4, 'manual', 4.2, '2026-10-25']]);
+        assert.deepEqual((await optionRows('u-unlinked')).map((r) => [r.quantity, r.source, r.price, r.priceDate]), [[4, 'manual', 4.2, '2026-10-23']]);
         assert.equal(await deleteOptionPosition('u-unlinked', synced.id, database), true);
         assert.equal((await optionRows('u-unlinked')).length, 0);
+    });
+
+    test('regression: a price Plaid doesn\'t date is the last session\'s, so an evening sync doesn\'t outrank the user\'s price from that day', async () => {
+        const { sync, portfolio } = await linkedAccount('u-evening');
+        const marks = async () => (await loadOptionPositions('u-evening', { database })).map((p) => p.mark);
+        // "Sync now" at 8:30 pm in New York on Monday, Nov 23: already the
+        // 24th in UTC, which dated the price a day the user hadn't reached.
+        await sync([AAPL_LOT, ACME_LOT], new Date('2026-11-24T01:30:00.000Z'));
+        const [synced] = await optionRows('u-evening');
+        assert.deepEqual([synced.price, synced.priceDate], [4.2, '2026-11-23']);
+        // The price the user types that evening is dated that day, and wins the tie.
+        assert.ok(await updateOptionPosition('u-evening', synced.id, await portfolio(), acmeCall({ userMark: 5, userMarkDate: '2026-11-23' }), { database }));
+        assert.deepEqual(await marks(), [{ source: 'user', price: 5, date: '2026-11-23' }]);
+        // The next morning, before Tuesday's session ends, the price is still Monday's.
+        await sync([AAPL_LOT, ACME_LOT], new Date('2026-11-24T15:00:00.000Z'));
+        assert.deepEqual(await marks(), [{ source: 'user', price: 5, date: '2026-11-23' }]);
+        // After Tuesday's close, the institution's price is the newer one.
+        await sync([AAPL_LOT, ['sec_acme_c150', 300, 4.5, 1050]], new Date('2026-11-24T22:30:00.000Z'));
+        assert.deepEqual(await marks(), [{ source: 'institution', price: 4.5, date: '2026-11-24' }]);
+    });
+
+    test('a sync written without options leaves the account\'s option positions alone; a report of none removes the synced ones', async () => {
+        const { sync, portfolio } = await linkedAccount('u-nooptions');
+        await sync([AAPL_LOT, ACME_LOT], NOW);
+        await addOptionPosition('u-nooptions', await portfolio(), acmeCall({ contractType: 'put', quantity: 1, premium: 2 }), database);
+        const [{ recordId }] = await sql<{ recordId: string }[]>`SELECT id AS "recordId" FROM plaid_accounts WHERE user_id = 'u-nooptions'`;
+        const write = (holdings: Parameters<typeof writeAccountSync>[0]['holdings'], now: Date) => writeAccountSync({
+            userId: 'u-nooptions', plaidAccountRecordId: recordId, plaidAccountId: 'acc-u-nooptions', name: 'Individual', mask: '1234',
+            description: '', holdings, transactions: null, now,
+        }, database);
+        const positions = [{ symbol: 'AAPL', name: 'Apple Inc.', quantity: 1, avgCost: 90, price: 100 }];
+        const contracts = async () => (await optionRows('u-nooptions')).map((r) => [r.contract, r.source]);
+
+        // Holdings with no word on options aren't a report of none.
+        const without = await write({ positions, cashUsd: 0 }, new Date('2026-10-26T22:30:00.000Z'));
+        assert.equal(without?.options, 0);
+        assert.deepEqual(await contracts(), [[ACME_CALL, 'plaid'], ['O:ACME270115P00150000', 'manual']]);
+        // No contracts reported, and none kept: the synced one goes, the user's stays.
+        const none = await write({ positions, cashUsd: 0, options: [] }, new Date('2026-10-27T22:30:00.000Z'));
+        assert.equal(none?.options, 0);
+        assert.deepEqual(await contracts(), [['O:ACME270115P00150000', 'manual']]);
     });
 
     test('a warrant is counted as an option without clear details; a fund with no ticker is valued by the institution', async () => {
@@ -557,6 +600,16 @@ describe('Plaid sync into portfolios', { skip: !DATABASE_URL && 'SCRIPTS_TEST_DA
         const result = await sync([AAPL_LOT, ['sec_acme_w', 10, 1.5, 12], ['sec_fund_w', 10, 11, 100]], NOW, { securities: [...SECURITIES, fund] });
         assert.deepEqual(result.accounts.map((a) => [a.positions, a.options, a.valued, a.holdingsSkipped, a.holdingsSkippedBy]), [[1, 0, 1, 1, { option: 1 }]]);
         assert.equal((await optionRows('u-warrant')).length, 0);
+
+        // Valued by hand, the fund is the user's: the next sync neither writes
+        // it nor counts it as valued by the institution.
+        const [{ id, portfolio }] = await sql<{ id: string; portfolio: string }[]>`
+            SELECT id, portfolio_id AS portfolio FROM manual_holdings WHERE user_id = 'u-warrant'`;
+        assert.ok(await updateManualHolding('u-warrant', id, portfolio, { name: 'Target 2055 Trust', identifier: null, quantity: 10, value: 125, costBasis: 100, valueAsOf: '2026-10-26' }, { database }));
+        const later = await sync([AAPL_LOT, ['sec_fund_w', 10, 12, 100]], new Date('2026-10-26T22:30:00.000Z'), { securities: [...SECURITIES, fund] });
+        assert.deepEqual(later.accounts.map((a) => [a.positions, a.valued]), [[1, 0]]);
+        assert.deepEqual((await sql<{ source: string; value: number }[]>`
+            SELECT source, value::float AS value FROM manual_holdings WHERE user_id = 'u-warrant'`).map((r) => [r.source, r.value]), [['manual', 125]]);
     });
 
     test('the nightly job counts the option positions it brought in', async () => {

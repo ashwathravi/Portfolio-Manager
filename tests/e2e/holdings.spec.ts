@@ -446,11 +446,19 @@ test.describe('Holdings › LEAPS ledger from a linked account', () => {
             await expect(dialog).toBeVisible({ timeout: 1_000 });
         }).toPass({ timeout: 10_000 });
         await expect(dialog).toContainText('From your linked account');
-        await expect(dialog.getByRole('combobox', { name: 'Account', exact: true })).toBeDisabled();
-        for (const field of ['Strike ($)', 'Expiry', 'Contracts', 'Premium paid / share ($)']) {
+        for (const field of ['Account', 'Call or put', 'Position']) {
+            await expect(dialog.getByRole('combobox', { name: field, exact: true }), field).toBeDisabled();
+        }
+        for (const field of ['Underlying', 'Strike ($)', 'Expiry', 'Contracts', 'Premium paid / share ($)']) {
             await expect(dialog.getByRole('textbox', { name: field, exact: true }), field).toBeDisabled();
         }
-        await dialog.getByRole('textbox', { name: 'Exit, roll or expire rule (optional)', exact: true }).fill('Roll at 90 days.');
+        // They look it: muted, unlike the fields that are the user's.
+        const exitRule = dialog.getByRole('textbox', { name: 'Exit, roll or expire rule (optional)', exact: true });
+        const editableColor = await exitRule.evaluate((field) => getComputedStyle(field).color);
+        const contracts = dialog.getByRole('textbox', { name: 'Contracts', exact: true });
+        await expect(contracts).not.toHaveCSS('color', editableColor);
+        await expect(contracts).toHaveCSS('cursor', 'not-allowed');
+        await exitRule.fill('Roll at 90 days.');
         await dialog.getByRole('button', { name: 'Save' }).click();
         await expect(dialog).toBeHidden();
         await expect(row).toContainText('Roll at 90 days.');
@@ -460,7 +468,7 @@ test.describe('Holdings › LEAPS ledger from a linked account', () => {
         await expect(row).toContainText('2 long CALL contracts · Example Brokerage Individual · from your linked account');
     });
 
-    test('the API keeps its contracts and account while the account syncs; once it stops, it is yours to delete', async ({ page }) => {
+    test('the API keeps its contracts and account while the account syncs; once it stops, it is yours to change or delete', async ({ page }) => {
         const sql = e2eDatabase();
         const [{ id, portfolioId }] = await sql<{ id: string; portfolioId: string }[]>`
             SELECT id, portfolio_id AS "portfolioId" FROM option_positions WHERE user_id = ${userId}`;
@@ -484,11 +492,46 @@ test.describe('Holdings › LEAPS ledger from a linked account', () => {
         await sql`UPDATE plaid_accounts SET sync_status = 'excluded' WHERE user_id = ${userId}`;
         await reloadAppPage(page);
         await expect(row.getByTestId('option-synced')).toHaveCount(0);
+
+        // How many is the user's to change now, and saving makes the row theirs.
+        const dialog = page.getByTestId('option-position-dialog');
+        await expect(async () => {
+            await row.getByRole('button', { name: EDIT }).click();
+            await expect(dialog).toBeVisible({ timeout: 1_000 });
+        }).toPass({ timeout: 10_000 });
+        const contracts = dialog.getByRole('textbox', { name: 'Contracts', exact: true });
+        await expect(contracts).toBeEnabled();
+        await contracts.fill('3');
+        await dialog.getByRole('button', { name: 'Save' }).click();
+        await expect(dialog).toBeHidden();
+        await expect(row).toContainText('3 long CALL contracts · Example Brokerage Individual');
+        const [saved] = await sql<{ source: string; quantity: number }[]>`SELECT source, quantity::float AS quantity FROM option_positions WHERE id = ${id}`;
+        expect(saved).toEqual({ source: 'manual', quantity: 3 });
+
         page.once('dialog', (confirm) => void confirm.accept());
         await row.getByRole('button', { name: DELETE }).click();
         await expect(ledger.getByTestId('options-ledger-empty')).toBeVisible();
         await reloadAppPage(page);
         await expect(ledger.getByTestId('options-risk-row')).toHaveCount(0);
+    });
+
+    test("a Delete after the account started syncing again says why, and the row comes back as the linked account's", async ({ page }) => {
+        const sql = e2eDatabase();
+        // The page loads while the account doesn't sync, so the row has a Delete...
+        await sql`UPDATE plaid_accounts SET sync_status = 'excluded' WHERE user_id = ${userId}`;
+        await reloadAppPage(page);
+        const row = page.getByTestId('options-risk-ledger').getByTestId('options-risk-row');
+        await expect(row.getByTestId('option-synced')).toHaveCount(0);
+        await expect(row.getByRole('button', { name: DELETE })).toBeVisible();
+
+        // ...and by the time the user deletes it, the account syncs again.
+        await sql`UPDATE plaid_accounts SET sync_status = 'sync_ready' WHERE user_id = ${userId}`;
+        page.once('dialog', (confirm) => void confirm.accept());
+        await row.getByRole('button', { name: DELETE }).click();
+        await expect(page.getByText('This contract is from your linked account. It goes when the account no longer holds it.')).toBeVisible();
+        await expect(row.getByTestId('option-synced')).toBeVisible();
+        await expect(row.getByRole('button', { name: DELETE })).toHaveCount(0);
+        await expect(row.getByRole('button', { name: EDIT })).toBeVisible();
     });
 });
 

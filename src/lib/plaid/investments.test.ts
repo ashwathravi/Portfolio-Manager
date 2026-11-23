@@ -231,6 +231,18 @@ describe("accountHoldings: option contracts (launch item i63)", () => {
         assert.deepEqual(result.optionsKept, ["O:ACME270115C00150000"]);
     });
 
+    test("a contract's symbol that Plaid types as a stock is an option all the same", () => {
+        // Its symbol is no ticker, so it would have been a holding the institution values.
+        const bare = only(acmeHolding(), acmeCall({ type: "equity", option_contract: undefined }));
+        assert.deepEqual(
+            [bare.institutionValued, bare.positions, bare.options, bare.skipped, bare.optionsKept],
+            [[], [], [], [LEFT_OUT], ["O:ACME270115C00150000"]],
+        );
+        // With its details, it's an option position.
+        const detailed = only(acmeHolding(), acmeCall({ type: "equity" }));
+        assert.deepEqual([detailed.options, detailed.institutionValued, detailed.skipped], [[ACME], [], []]);
+    });
+
     test("an option in another currency is counted as one", () => {
         const result = only(acmeHolding({ iso_currency_code: "CAD" }));
         assert.deepEqual([result.options, result.skipped], [[], [{ reason: "other-currency", name: "ACME Jan 15 2027 150 Call" }]]);
@@ -242,6 +254,22 @@ describe("accountHoldings: option contracts (launch item i63)", () => {
         assert.equal(only(acmeHolding({ institution_price_as_of: "yesterday" })).options[0]?.priceDate, null);
         // A day without its price is no price.
         assert.equal(only(acmeHolding({ institution_price: null, institution_value: null, institution_price_as_of: "2026-10-23" })).options[0]?.priceDate, null);
+    });
+
+    test("regression: a contract's lots take the price and its day from the same lot", () => {
+        // The first lot has a day but no price; the second has a price as of a later day.
+        const dayWithoutPrice = accountHoldings(ACCOUNT, [
+            acmeHolding({ quantity: 100, institution_price: null, institution_value: null, cost_basis: 350, institution_price_as_of: "2026-10-20" }),
+            acmeHolding({ quantity: 200, institution_value: 840, cost_basis: 700, institution_price_as_of: "2026-10-23" }),
+        ], [acmeCall()]);
+        assert.deepEqual(dayWithoutPrice.options, [{ ...ACME, priceDate: "2026-10-23" }]);
+
+        // The first lot's price has no day: a later lot's day isn't its day.
+        const priceWithoutDay = accountHoldings(ACCOUNT, [
+            acmeHolding({ quantity: 100, institution_value: 420, cost_basis: 350 }),
+            acmeHolding({ quantity: 200, institution_price: 4.3, institution_value: 860, cost_basis: 700, institution_price_as_of: "2026-10-23" }),
+        ], [acmeCall()]);
+        assert.deepEqual(priceWithoutDay.options, [ACME]);
     });
 
     test("an option with no contracts is dropped, not counted", () => {
@@ -386,10 +414,12 @@ describe("Plaid investment transactions", () => {
 
     test("regression: an option trade isn't recorded, even when Plaid gives the contract a short ticker; a fee on one is", () => {
         // A derivative Plaid tickers "ACME" was recorded as a trade of ACME
-        // shares; one with its contract's symbol was left out as having none.
+        // shares; one with its contract's symbol was left out as having none,
+        // as was that symbol typed as a stock.
         const shortTicker = security("acme_c", { type: "derivative", ticker_symbol: "ACME" });
         const occ = security("acme_c", { type: "derivative", ticker_symbol: "ACME270115C00150000" });
-        for (const option of [shortTicker, occ]) {
+        const typedAsStock = security("acme_c", { type: "equity", ticker_symbol: "ACME270115C00150000" });
+        for (const option of [shortTicker, occ, typedAsStock]) {
             assert.deepEqual(mapPlaidTransaction(transaction({ security_id: "acme_c", quantity: 2, price: 4.2, amount: 840.65 }), option), { skipped: "option" });
             assert.deepEqual(mapPlaidTransaction(transaction({ type: "sell", subtype: "sell", security_id: "acme_c", quantity: -2 }), option), { skipped: "option" });
         }

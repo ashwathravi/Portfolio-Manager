@@ -28,6 +28,7 @@ import {
 } from "@/lib/portfolio/manage";
 import { transactionValues } from "@/lib/portfolio/transactionsWrite";
 import { recordManualValue } from "@/lib/portfolio/manual-holdings";
+import { lastCompletedSession } from "@/lib/markets/market-hours";
 import { accountTypeForPlaid, INSTITUTION_MAX_LENGTH, taxTreatmentForPlaid } from "@/lib/portfolio/account-kinds";
 import { OPTION_POSITION_MULTIPLIER } from "@/lib/portfolio/option-positions";
 import { PORTFOLIO_LIMITS } from "@/lib/validators/portfolio";
@@ -305,7 +306,7 @@ export interface AccountSyncWritten {
     positions: number;
     /** Option contracts written. */
     options: number;
-    /** Holdings with no ticker, at the institution's value. */
+    /** Holdings with no ticker written at the institution's value: not the ones the user took over. */
     valued: number;
     transactionsAdded: number;
     transactionsUpdated: number;
@@ -349,12 +350,14 @@ export async function writeAccountSync(input: AccountSyncWrite, database: Databa
             .limit(1);
         let portfolio: { id: string; name: string; created: boolean };
         let options = 0;
+        let valued = 0;
         if (existing) {
             const positionsChanged = await replaceHoldings(tx, existing.id, input.holdings.positions, input.now);
-            const valuedChanged = await replaceInstitutionValued(tx, input.userId, existing.id, input.holdings.institutionValued ?? [], input.now);
+            const institutionValued = await replaceInstitutionValued(tx, input.userId, existing.id, input.holdings.institutionValued ?? [], input.now);
+            valued = institutionValued.written;
             options = await replaceSyncedOptions(tx, input.userId, existing.id, input.holdings, input.now);
             const cashChanged = existing.cash !== input.holdings.cashUsd;
-            if (positionsChanged || valuedChanged || cashChanged) {
+            if (positionsChanged || institutionValued.changed || cashChanged) {
                 await tx
                     .update(portfolios)
                     .set({ cashBalance: input.holdings.cashUsd, updatedAt: input.now })
@@ -394,7 +397,7 @@ export async function writeAccountSync(input: AccountSyncWrite, database: Databa
                 .returning({ id: portfolios.id, name: portfolios.name });
             portfolio = { ...created, created: true };
             await replaceHoldings(tx, portfolio.id, input.holdings.positions, input.now);
-            await replaceInstitutionValued(tx, input.userId, portfolio.id, input.holdings.institutionValued ?? [], input.now);
+            valued = (await replaceInstitutionValued(tx, input.userId, portfolio.id, input.holdings.institutionValued ?? [], input.now)).written;
             options = await replaceSyncedOptions(tx, input.userId, portfolio.id, input.holdings, input.now);
         }
 
@@ -416,7 +419,7 @@ export async function writeAccountSync(input: AccountSyncWrite, database: Databa
             created: portfolio.created,
             positions: input.holdings.positions.length,
             options,
-            valued: input.holdings.institutionValued?.length ?? 0,
+            valued,
             transactionsAdded: written.added,
             transactionsUpdated: written.updated,
         };
@@ -433,7 +436,7 @@ export async function writeAccountSync(input: AccountSyncWrite, database: Databa
  * The account's holdings with no ticker, at the institution's value: the
  * ones the last sync brought in (source "plaid") are updated, added or
  * removed to match. One the user edited became theirs (source "manual")
- * and is left alone. True when anything changed.
+ * and is left alone. Says whether anything changed, and how many it wrote.
  */
 /**
  * A synced holding's key: Plaid's security ID within the account it is
@@ -449,7 +452,7 @@ async function replaceInstitutionValued(
     portfolioId: string,
     rows: AccountHoldings["institutionValued"],
     now: Date,
-): Promise<boolean> {
+): Promise<{ changed: boolean; written: number }> {
     const existing = await tx
         .select({
             id: manualHoldings.id,
@@ -475,9 +478,11 @@ async function replaceInstitutionValued(
     // ticker: it doesn't move the account's last change, which would keep
     // the nightly valuation from recording the session it closed.
     let changed = false;
+    let written = 0;
     for (const row of rows) {
         const key = institutionValuedKey(portfolioId, row.externalId);
         if (taken.has(key)) continue;
+        written++;
         const values = {
             name: row.name,
             identifier: row.identifier,
@@ -510,7 +515,7 @@ async function replaceInstitutionValued(
         await tx.delete(manualHoldings).where(inArray(manualHoldings.id, gone));
         changed = true;
     }
-    return changed;
+    return { changed, written };
 }
 
 /**
@@ -552,11 +557,14 @@ async function replaceSyncedOptions(
         .from(optionPositions)
         .where(and(eq(optionPositions.portfolioId, portfolioId), eq(optionPositions.userId, userId)));
     const byContract = new Map(existing.map((row) => [row.contract, row]));
-    // A price Plaid doesn't date is the institution's as of this sync.
-    const today = now.toISOString().slice(0, 10);
+    // A price Plaid doesn't date is dated by the last session that ended by
+    // this sync, as institutions report end-of-day prices. The UTC date is
+    // the next day's from New York's evening on, so it would outrank a price
+    // the user entered that day.
+    const undatedPriceDay = lastCompletedSession(now);
     const sameNumber = (stored: string | null, next: number | null) => (stored == null ? next == null : next != null && Number(stored) === next);
     for (const option of options) {
-        const values = syncedOptionValues(option, today);
+        const values = syncedOptionValues(option, undatedPriceDay);
         const before = byContract.get(option.contract);
         if (!before) {
             await tx
@@ -595,7 +603,7 @@ async function replaceSyncedOptions(
 }
 
 /** The columns a sync owns on an option position: the institution's. */
-function syncedOptionValues(option: SyncedOptionContract, today: string) {
+function syncedOptionValues(option: SyncedOptionContract, undatedPriceDay: string) {
     return {
         underlying: option.underlying,
         contractType: option.contractType,
@@ -605,7 +613,7 @@ function syncedOptionValues(option: SyncedOptionContract, today: string) {
         premium: String(option.premium),
         multiplier: OPTION_POSITION_MULTIPLIER,
         institutionPrice: option.price == null ? null : String(option.price),
-        institutionPriceDate: option.price == null ? null : (option.priceDate ?? today),
+        institutionPriceDate: option.price == null ? null : (option.priceDate ?? undatedPriceDay),
         source: "plaid",
     };
 }

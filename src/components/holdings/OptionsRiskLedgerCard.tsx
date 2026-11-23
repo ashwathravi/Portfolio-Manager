@@ -74,6 +74,8 @@ export function OptionsRiskLedgerCard({
                 // Say why, as when the account started syncing after the page loaded.
                 const body = (await response.json().catch(() => null)) as { error?: string } | null;
                 toast.error(body?.error ?? "Couldn't delete the option position. Try again.");
+                // The page is out of date: show the row as the linked account's, without Delete.
+                if (response.status === 409) router.refresh();
                 return;
             }
             toast.success(`Deleted ${label}.`);
