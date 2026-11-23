@@ -79,6 +79,10 @@ export interface HoldingsPageClientProps {
     optionTheses?: readonly OptionThesisOption[];
     /** Accounts offered as the CSV import target, and for option positions. */
     importAccounts?: readonly ImportAccountOption[];
+    /** What the accounts hold that a file's rows with no ticker may update or replace, for the import's preview. */
+    importExisting?: React.ComponentProps<typeof ImportHoldingsDialog>["existing"];
+    /** How many holdings valued by hand the accounts have: with any, the empty state says none has a ticker yet. */
+    handValuedCount?: number;
     /** Cash across the accounts: part of what the LEAPS ledger measures against. */
     cashTotal?: number;
     /** Holdings valued by hand, across the accounts: part of it too. */
@@ -97,6 +101,8 @@ export function HoldingsPageClient({
     optionPositions = [],
     optionTheses = [],
     importAccounts = [],
+    importExisting,
+    handValuedCount = 0,
     cashTotal = 0,
     handValuedTotal = 0,
     bankLinking,
@@ -307,7 +313,8 @@ export function HoldingsPageClient({
         return (
             <div className="pm-holdings-stack">
                 <section className="pm-card pm-empty-card" data-testid="holdings-empty">
-                    <h2>No holdings yet</h2>
+                    {/* Holdings valued by hand have their own card below. */}
+                    <h2>{handValuedCount > 0 ? "No holdings with a ticker yet" : "No holdings yet"}</h2>
                     <p>
                         {hasAccount
                             ? `Import a positions export from your broker into ${importAccounts.length === 1 ? "your account" : "one of your accounts"}, or ${bankLinking ? "connect" : "add"} another account.`
@@ -317,7 +324,11 @@ export function HoldingsPageClient({
                     </p>
                     <div className="pm-empty-actions">
                         {!hasAccount && accountAction}
-                        <ImportHoldingsDialog accounts={importAccounts} triggerClassName={`pm-btn pm-btn-${hasAccount ? "primary" : "ghost"}`} />
+                        <ImportHoldingsDialog
+                            accounts={importAccounts}
+                            existing={importExisting}
+                            triggerClassName={`pm-btn pm-btn-${hasAccount ? "primary" : "ghost"}`}
+                        />
                         {hasAccount && accountAction}
                         <Link href="/portfolios/accounts" className="pm-btn pm-btn-ghost">View accounts</Link>
                     </div>

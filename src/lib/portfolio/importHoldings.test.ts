@@ -1,48 +1,94 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 
-import type { db } from "@/db";
-import { holdings, portfolios } from "@/db/schema";
+import type { SQL } from "drizzle-orm";
+import { PgDialect } from "drizzle-orm/pg-core";
 
-import { importHoldings, importHoldingsToAccounts } from "./importHoldings";
+import type { db } from "@/db";
+import { holdings, manualHoldingValues, manualHoldings, portfolios } from "@/db/schema";
+import { RecordLimitError } from "@/lib/limits/records";
+
+import { importHoldings, importHoldingsToAccounts, LinkedAccountImportError } from "./importHoldings";
 import { AccountLimitError, DuplicateAccountNameError, MAX_ACCOUNTS_PER_USER } from "./manage";
 
 const USER = "00000000-0000-4000-8000-00000000a001";
 const PORTFOLIO = "0b9d3c1e-6a3c-4c7e-9f3a-2f4d8a1b2c3d";
 
+interface FakeDatabaseOptions {
+    /** The target account's source: "plaid" for a linked one. */
+    source?: string;
+    /** The account's holdings valued by hand that an import may update, as stored. */
+    handValued?: Array<Record<string, unknown>>;
+    /** The account's positions besides AAPL. */
+    positions?: string[];
+    /** How many holdings valued by hand the user keeps before the import. */
+    kept?: number;
+}
+
 /**
  * A database that holds AAPL already, and records what it was asked to
  * write. `accounts` are the user's accounts a new one is checked against.
+ * Each lock it's asked for is named by its key: the user's account lock,
+ * or the records lock of holdings valued by hand.
  */
-function fakeDatabase(accounts: Array<{ id: string; name: string }> = [{ id: PORTFOLIO, name: "Brokerage" }]) {
+function fakeDatabase(
+    accounts: Array<{ id: string; name: string }> = [{ id: PORTFOLIO, name: "Brokerage" }],
+    { source = "manual", handValued = [], positions = [], kept = 0 }: FakeDatabaseOptions = {},
+) {
     const inserted: Record<string, unknown>[] = [];
     const updated: Record<string, unknown>[] = [];
     const createdAccounts: Record<string, unknown>[] = [];
+    const manualInserted: Record<string, unknown>[] = [];
+    const manualUpdated: Record<string, unknown>[] = [];
+    const values: Record<string, unknown>[] = [];
+    const deleted: { sql: string; params: unknown[] }[] = [];
+    const touched: Record<string, unknown>[] = [];
     let locks = 0;
     const order: string[] = [];
+    const dialect = new PgDialect();
     const tx = {
-        execute: async () => {
-            locks++;
-            order.push("account lock");
+        execute: async (query: SQL) => {
+            const key = String(dialect.sqlToQuery(query).params[0]);
+            if (key.startsWith("atlas:records:manualHoldings:")) {
+                order.push("records lock");
+            } else {
+                assert.ok(key.startsWith("atlas:accounts:"), key);
+                locks++;
+                order.push("account lock");
+            }
         },
-        select: () => ({
+        select: (fields: Record<string, unknown>) => ({
             from: (table: unknown) => ({
                 where: () => {
+                    // The records limit's count.
+                    if ("n" in fields) return Promise.resolve([{ n: kept + manualInserted.length }]);
                     if (table === portfolios) {
-                        return { limit: () => ({ for: async () => (order.push("row lock"), [{ id: PORTFOLIO }]) }), orderBy: async () => accounts };
+                        return {
+                            limit: () => ({ for: async () => (order.push("row lock"), [{ id: PORTFOLIO, name: "Brokerage", source }]) }),
+                            orderBy: async () => accounts,
+                        };
                     }
-                    return Promise.resolve([{ id: "h-1", symbol: "AAPL", quantity: "1", avgCost: "100" }]);
+                    if (table === manualHoldings) return { orderBy: async () => handValued };
+                    return Promise.resolve([
+                        { id: "h-1", symbol: "AAPL", quantity: "1", avgCost: "100" },
+                        ...positions.map((symbol, i) => ({ id: `h-${i + 2}`, symbol, quantity: "1", avgCost: "1" })),
+                    ]);
                 },
             }),
         }),
         insert: (table: unknown) => ({
             values: (rows: Record<string, unknown> | Record<string, unknown>[]) => {
-                if (table === holdings) inserted.push(...(rows as Record<string, unknown>[]));
+                const list = Array.isArray(rows) ? rows : [rows];
+                if (table === holdings) inserted.push(...list);
+                if (table === manualHoldings) manualInserted.push(...list);
+                if (table === manualHoldingValues) values.push(...list);
                 return Object.assign(Promise.resolve(), {
                     returning: async () => {
+                        if (table === manualHoldings) return list.map((row, i) => ({ id: `m-new-${i}`, externalId: row.externalId }));
                         createdAccounts.push(rows as Record<string, unknown>);
                         return [{ id: "p-new" }];
                     },
+                    onConflictDoUpdate: async () => undefined,
                 });
             },
         }),
@@ -50,12 +96,20 @@ function fakeDatabase(accounts: Array<{ id: string; name: string }> = [{ id: POR
             set: (values: Record<string, unknown>) => ({
                 where: async () => {
                     if (table === holdings) updated.push(values);
+                    if (table === manualHoldings) manualUpdated.push(values);
+                    if (table === portfolios) touched.push(values);
                 },
             }),
         }),
+        delete: (table: unknown) => ({
+            where: async (condition: SQL) => {
+                assert.equal(table, holdings);
+                deleted.push(dialect.sqlToQuery(condition));
+            },
+        }),
     };
     const database = { transaction: async (fn: (t: typeof tx) => Promise<unknown>) => fn(tx) } as unknown as typeof db;
-    return { database, inserted, updated, createdAccounts, locks: () => locks, order };
+    return { database, inserted, updated, createdAccounts, manualInserted, manualUpdated, values, deleted, touched, locks: () => locks, order };
 }
 
 describe("importHoldings", () => {
@@ -169,5 +223,101 @@ describe("importHoldings into a new account", () => {
         await importHoldingsToAccounts(USER, [{ portfolioId: PORTFOLIO, rows }, { portfolioId: PORTFOLIO, rows }], {}, fake.database);
         assert.equal(fake.locks(), 1);
         assert.deepEqual(fake.order, ["account lock", "row lock", "row lock"]);
+    });
+});
+
+describe("importHoldings with holdings valued by hand", () => {
+    const fund = { name: "Target 2055 Trust", identifier: null, quantity: 250.5, value: 12345.67, costBasis: null };
+    const position = { symbol: "MSFT", name: "Microsoft", quantity: 4, avgCost: 300 };
+    const saved = {
+        id: "m-1", name: "Target 2055 Trust", identifier: null, externalId: "csv:name:target 2055 trust",
+        quantity: "250.5", value: "12000", costBasis: null, valueAsOf: "2026-11-01",
+    };
+
+    test("into an existing account: the account lock, then the records lock, before the account's row lock", async () => {
+        // A Plaid sync and the card take the account lock first, then the
+        // records lock; any other order with the row lock could deadlock.
+        const fake = fakeDatabase();
+        await importHoldings(USER, { portfolioId: PORTFOLIO, rows: [], manual: [fund], valuesAsOf: "2026-11-02" }, {}, fake.database);
+        assert.deepEqual(fake.order, ["account lock", "records lock", "row lock"]);
+    });
+
+    test("a body without them takes the account lock once and no records lock", async () => {
+        const fake = fakeDatabase();
+        await importHoldings(USER, { portfolioId: PORTFOLIO, rows: [position] }, {}, fake.database);
+        assert.deepEqual(fake.order, ["account lock", "row lock"]);
+        assert.deepEqual(fake.manualInserted, []);
+    });
+
+    test("a batch in which any account has them takes the account lock, then the records lock, before any row", async () => {
+        const fake = fakeDatabase([]);
+        await importHoldingsToAccounts(USER, [{ portfolioId: PORTFOLIO, rows: [position] }, { newPortfolioName: "Workplace 401k", rows: [], manual: [fund] }], {}, fake.database);
+        assert.deepEqual(fake.order.slice(0, 3), ["account lock", "records lock", "row lock"]);
+        assert.equal(fake.manualInserted.length, 1);
+    });
+
+    test("into a linked account they're refused and nothing is written; the file's positions alone still import", async () => {
+        const fake = fakeDatabase(undefined, { source: "plaid" });
+        await assert.rejects(
+            importHoldings(USER, { portfolioId: PORTFOLIO, rows: [position], manual: [fund] }, {}, fake.database),
+            (err: unknown) => err instanceof LinkedAccountImportError
+                && err.message === "Brokerage is linked to your bank, so its holdings without a ticker come from there. Import this file into another account.",
+        );
+        assert.deepEqual([fake.inserted.length, fake.manualInserted.length, fake.values.length, fake.touched.length], [0, 0, 0, 0]);
+        const positions = fakeDatabase(undefined, { source: "plaid" });
+        assert.equal((await importHoldings(USER, { portfolioId: PORTFOLIO, rows: [position] }, {}, positions.database)).insert, 1);
+    });
+
+    test("a new one marks the account changed; a new value alone doesn't, new units or a new cost do", async () => {
+        const added = fakeDatabase();
+        await importHoldings(USER, { portfolioId: PORTFOLIO, rows: [], manual: [fund] }, {}, added.database);
+        assert.equal(added.touched.length, 1);
+
+        const price = fakeDatabase(undefined, { handValued: [saved] });
+        const result = await importHoldings(USER, { portfolioId: PORTFOLIO, rows: [], manual: [fund], valuesAsOf: "2026-11-02" }, {}, price.database);
+        assert.deepEqual(result.manual, { insert: 0, update: 1, unchanged: 0, replacedPositions: 0 });
+        assert.equal(price.touched.length, 0);
+        // Updated in place: the same holding, the new value and its day.
+        assert.deepEqual(price.values, [{ manualHoldingId: "m-1", date: "2026-11-02", value: "12345.67", quantity: "250.5", recordedAt: price.values[0].recordedAt }]);
+
+        for (const change of [{ quantity: 260 }, { costBasis: 9000 }]) {
+            const fake = fakeDatabase(undefined, { handValued: [saved] });
+            await importHoldings(USER, { portfolioId: PORTFOLIO, rows: [], manual: [{ ...fund, ...change }], valuesAsOf: "2026-11-02" }, {}, fake.database);
+            assert.equal(fake.touched.length, 1, JSON.stringify(change));
+        }
+    });
+
+    test("the result counts them apart from positions, and a position held under the fund's CUSIP is deleted", async () => {
+        const fake = fakeDatabase(undefined, { positions: ["99ZZ12341"] });
+        const result = await importHoldings(USER, {
+            portfolioId: PORTFOLIO,
+            rows: [position],
+            manual: [{ name: "Stable Value Fund", identifier: "99ZZ12341", quantity: null, value: 5000, costBasis: null }],
+        }, {}, fake.database);
+        assert.deepEqual([result.insert, result.update, result.unchanged], [1, 0, 0]);
+        assert.deepEqual(result.manual, { insert: 1, update: 0, unchanged: 0, replacedPositions: 1 });
+        assert.equal(fake.deleted.length, 1);
+        assert.deepEqual(fake.deleted[0].params, [PORTFOLIO, "99ZZ12341"]);
+        assert.deepEqual(fake.manualInserted.map((m) => [m.name, m.identifier, m.source, m.externalId]), [["Stable Value Fund", "99ZZ12341", "csv", "csv:id:99ZZ12341"]]);
+        // Without hand-valued rows the result says none.
+        const plain = await importHoldings(USER, { portfolioId: PORTFOLIO, rows: [position] }, {}, fakeDatabase().database);
+        assert.deepEqual(plain.manual, { insert: 0, update: 0, unchanged: 0, replacedPositions: 0 });
+    });
+
+    test("without valuesAsOf the values are as of today's date in UTC", async () => {
+        const before = new Date().toISOString().slice(0, 10);
+        const fake = fakeDatabase();
+        await importHoldings(USER, { portfolioId: PORTFOLIO, rows: [], manual: [fund] }, {}, fake.database);
+        const after = new Date().toISOString().slice(0, 10);
+        assert.ok([before, after].includes(String(fake.manualInserted[0].valueAsOf)));
+        assert.equal(fake.values[0].date, fake.manualInserted[0].valueAsOf);
+    });
+
+    test("past the limit the import throws RecordLimitError, which rolls it back; a re-import that adds none goes through", async () => {
+        const full = fakeDatabase(undefined, { kept: 1_000 });
+        await assert.rejects(importHoldings(USER, { portfolioId: PORTFOLIO, rows: [position], manual: [fund] }, {}, full.database), RecordLimitError);
+        const again = fakeDatabase(undefined, { kept: 1_000, handValued: [saved] });
+        const result = await importHoldings(USER, { portfolioId: PORTFOLIO, rows: [], manual: [fund] }, {}, again.database);
+        assert.equal(result.manual.update, 1);
     });
 });

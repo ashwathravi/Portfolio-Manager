@@ -894,6 +894,9 @@ test.describe('Holdings › Import CSV', () => {
             { symbol: 'MSFT', name: 'Microsoft', quantity: 2, avgCost: 300 },
         ]);
         expect(Boolean(sent.portfolioId) !== Boolean(sent.newPortfolioName)).toBe(true);
+        // Nothing valued by hand in the file, so nothing of it is sent.
+        expect(sent).not.toHaveProperty('manual');
+        expect(sent).not.toHaveProperty('valuesAsOf');
     });
 
     test('a server error is shown and nothing is claimed', async ({ page }) => {
@@ -905,6 +908,142 @@ test.describe('Holdings › Import CSV', () => {
         await page.getByRole('button', { name: 'Import 2 positions' }).click();
         await expect(page.getByTestId('import-dialog').getByRole('alert')).toHaveText('Portfolio not found');
         await expect(page.getByText(/Imported \d+ position/)).toHaveCount(0);
+    });
+
+    test('a fund with no ticker previews as valued by hand, as of the day chosen, and is sent apart from the positions', async ({ page }) => {
+        let sent: Record<string, unknown> = {};
+        await page.route('**/api/portfolio/import', async (route) => {
+            sent = route.request().postDataJSON();
+            await route.fulfill({ status: 200, json: { data: {
+                portfolioId: 'p', createdPortfolio: false, insert: 1, update: 0, unchanged: 0,
+                options: { insert: 0, update: 0, unchanged: 0 }, manual: { insert: 2, update: 0, unchanged: 0, replacedPositions: 0 },
+            } } });
+        });
+        await gotoAppPage(page, '/portfolios/holdings');
+        await openImport(page, [
+            'Symbol,Description,Quantity,Average Cost,Market Value',
+            'NVDA,NVIDIA Corp,10,450.25,4600.00',
+            '--,Target 2055 Trust,120.5,,"12,345.67"',
+            '99ZZ12341,Stable Value Fund,,,"$10,000.00"',
+        ].join('\n'));
+        const dialog = page.getByTestId('import-dialog');
+        await expect(page.getByTestId('import-preview')).toContainText('positions.csv: 1 position and 2 valued by hand ready.');
+        await expect(dialog.getByRole('table', { name: 'Positions to import' }).locator('tbody tr')).toHaveCount(1);
+        const handValued = dialog.getByRole('table', { name: 'Holdings valued by hand to import' }).locator('tbody tr');
+        await expect(handValued).toHaveCount(2);
+        await expect(handValued.nth(0)).toContainText('Target 2055 Trust');
+        await expect(handValued.nth(0)).toContainText('$12,345.67');
+        await expect(handValued.nth(0)).toContainText('New');
+        // Its CUSIP under its name; no units in the file.
+        await expect(handValued.nth(1)).toContainText('Stable Value Fund99ZZ12341');
+        await expect(handValued.nth(1).locator('td').nth(1)).toHaveText('—');
+        await expect(dialog).toContainText("Atlas can't price these, so each counts at the file's value until the next import or your own update.");
+
+        // The browser's today to start with; a later day isn't allowed.
+        const today = await page.evaluate(() => {
+            const d = new Date();
+            return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        });
+        const date = dialog.getByLabel('Values as of');
+        await expect(date).toHaveValue(today);
+        await date.fill('2099-01-02');
+        await expect(dialog.getByRole('alert')).toHaveText("Choose a date that isn't in the future.");
+        await expect(dialog.getByRole('button', { name: 'Import 3 positions' })).toBeDisabled();
+        await date.fill('2026-11-02');
+        await expect(dialog.getByRole('alert')).toHaveCount(0);
+
+        await dialog.getByRole('button', { name: 'Import 3 positions' }).click();
+        await expect(page.getByText('Imported 3 positions: 1 new, 0 updated. Valued by hand: 2 new, 0 updated.')).toBeVisible();
+        expect(sent.rows).toEqual([{ symbol: 'NVDA', name: 'NVIDIA Corp', quantity: 10, avgCost: 450.25 }]);
+        expect(sent.manual).toEqual([
+            { name: 'Target 2055 Trust', identifier: null, quantity: 120.5, value: 12345.67, costBasis: null },
+            { name: 'Stable Value Fund', identifier: '99ZZ12341', quantity: null, value: 10000, costBasis: null },
+        ]);
+        expect(sent.valuesAsOf).toBe('2026-11-02');
+    });
+
+    test('without a value column, a fund with no ticker is listed with how to bring it in, and nothing can be imported', async ({ page }) => {
+        let requests = 0;
+        await page.route('**/api/portfolio/import', (route) => {
+            requests++;
+            return route.fulfill({ status: 500, json: { error: 'unexpected request' } });
+        });
+        await gotoAppPage(page, '/portfolios/holdings');
+        await openImport(page, 'Symbol,Description,Quantity,Average Cost\nMSFT,Microsoft,2,300\n,Target 2055 Trust,120.5,');
+        const preview = page.getByTestId('import-preview');
+        await expect(preview).toContainText('positions.csv: 1 position ready, 1 row needs attention.');
+        await expect(preview.getByRole('list', { name: 'Rows not imported' })).toHaveText(
+            'Line 3: Target 2055 Trust: no ticker. Add a market value column to bring it in valued by hand, or add it on Holdings.',
+        );
+        await expect(page.getByRole('table', { name: 'Holdings valued by hand to import' })).toHaveCount(0);
+        await expect(page.getByRole('button', { name: 'Import 1 position', exact: true })).toBeDisabled();
+        expect(requests).toBe(0);
+    });
+
+    test('database: a 401(k) trust with no ticker comes in valued by hand, and the next statement updates it and keeps both days', async ({ context, page }) => {
+        test.skip(!databaseAuthEnabled, 'holdings valued by hand are saved in the database');
+        const userId = await signInAsNewUser(context);
+        await gotoAppPage(page, '/portfolios/holdings');
+        const statement = (value: string) => `Symbol,Description,Quantity,Market Value\n,Target 2055 Trust,120.5,"${value}"`;
+        const dialog = page.getByTestId('import-dialog');
+        const planned = dialog.getByRole('table', { name: 'Holdings valued by hand to import' }).locator('tbody tr');
+
+        await openImport(page, statement('12,345.67'));
+        await expect(page.getByTestId('import-preview')).toContainText('positions.csv: 1 holding valued by hand ready.');
+        await expect(planned).toContainText('New');
+        await dialog.getByLabel('New account name').fill('Workplace 401k');
+        await dialog.getByLabel('Values as of').fill('2026-11-02');
+        await dialog.getByRole('button', { name: 'Import 1 position' }).click();
+        await expect(page.getByText('Imported 1 position: 0 new, 0 updated. Valued by hand: 1 new, 0 updated.')).toBeVisible();
+        // Nothing with a ticker yet; the trust is on its own card.
+        await expect(page.getByTestId('holdings-empty').getByRole('heading')).toHaveText('No holdings with a ticker yet');
+        const rows = page.getByTestId('manual-holdings-table').getByRole('row').filter({ hasText: 'Target 2055 Trust' });
+        await expect(rows).toHaveCount(1);
+        await expect(rows).toContainText('from your CSV import');
+        await expect(rows).toContainText('Workplace 401k');
+        await expect(rows).toContainText('$12,345.67');
+        await expect(rows).toContainText('Nov 2, 2026');
+
+        await openImport(page, statement('12,500.00'));
+        await expect(planned).toContainText('Updates');
+        await dialog.getByLabel('Values as of').fill('2026-11-03');
+        await dialog.getByRole('button', { name: 'Import 1 position' }).click();
+        await expect(page.getByText('Imported 1 position: 0 new, 0 updated. Valued by hand: 0 new, 1 updated.')).toBeVisible();
+        await expect(rows).toContainText('$12,500.00');
+        await expect(rows).toHaveCount(1);
+        const values = await e2eDatabase()<{ date: string; value: string }[]>`
+            SELECT to_char(v.date, 'YYYY-MM-DD') AS date, v.value::text AS value
+            FROM manual_holding_values v JOIN manual_holdings m ON m.id = v.manual_holding_id
+            WHERE m.user_id = ${userId}
+            ORDER BY v.date`;
+        expect(values.map((v) => [v.date, Number(v.value)])).toEqual([['2026-11-02', 12345.67], ['2026-11-03', 12500]]);
+    });
+
+    test('database: a holding added by hand is the one the next file updates', async ({ context, page }) => {
+        test.skip(!databaseAuthEnabled, 'holdings valued by hand are saved in the database');
+        await signInAsFreshUser(context);
+        await gotoAppPage(page, '/portfolios/holdings');
+        const card = page.getByTestId('manual-holdings');
+        await card.getByRole('button', { name: 'Add holding' }).click();
+        const add = page.getByRole('dialog');
+        await add.getByLabel('Account').selectOption({ label: 'Main Portfolio' });
+        await add.getByLabel('Holding').fill('Target 2055 Trust');
+        await add.getByLabel('Value ($)').fill('12,000');
+        await add.getByRole('button', { name: 'Add holding' }).click();
+        await expect(add).toBeHidden();
+        const rows = card.getByTestId('manual-holdings-table').getByRole('row').filter({ hasText: 'Target 2055 Trust' });
+        await expect(rows).toHaveCount(1);
+        await expect(rows).not.toContainText('from your CSV import');
+
+        await openImport(page, 'Symbol,Description,Quantity,Market Value\n,Target 2055 Trust,120.5,"12,345.67"\n');
+        const dialog = page.getByTestId('import-dialog');
+        await dialog.getByLabel('Import into').selectOption({ label: 'Main Portfolio' });
+        await expect(dialog.getByRole('table', { name: 'Holdings valued by hand to import' }).locator('tbody tr')).toContainText('Updates');
+        await dialog.getByRole('button', { name: 'Import 1 position' }).click();
+        await expect(page.getByText('Valued by hand: 0 new, 1 updated.', { exact: false })).toBeVisible();
+        await expect(rows).toContainText('$12,345.67');
+        await expect(rows).toHaveCount(1);
+        await expect(rows).toContainText('from your CSV import');
     });
 });
 
@@ -924,6 +1063,48 @@ test.describe('POST /api/portfolio/import', () => {
             data: JSON.stringify({ newPortfolioName: 'x', rows: [], pad: 'x'.repeat(400 * 1024) }),
         });
         expect(res.status()).toBe(413);
+    });
+
+    test('a holding valued by hand with a negative value, or values from a future date, is refused before the database is touched', async ({ page }) => {
+        await gotoAppPage(page, '/portfolios/holdings');
+        const fund = { name: 'Target 2055 Trust', value: 12345.67 };
+        const negative = await page.request.post('/api/portfolio/import', { data: { newPortfolioName: 'Refused import', rows: [], manual: [{ ...fund, value: -1 }] } });
+        expect(negative.status()).toBe(400);
+        expect(await negative.json()).toMatchObject({ code: 'INVALID_IMPORT', error: "Value can't be negative" });
+        const future = await page.request.post('/api/portfolio/import', { data: { newPortfolioName: 'Refused import', rows: [], manual: [fund], valuesAsOf: '2099-01-02' } });
+        expect(future.status()).toBe(400);
+        expect(await future.json()).toMatchObject({ code: 'INVALID_IMPORT', error: "The values can't be from a future date" });
+        if (dbMode) expect((await e2eDatabase()`SELECT 1 FROM portfolios WHERE name = 'Refused import'`).length).toBe(0);
+    });
+
+    test('database: holdings valued by hand into a linked account are refused, the dialog says so first, and its positions alone still import', async ({ context, page }) => {
+        test.skip(!dbMode, 'needs the seeded E2E database');
+        const userId = await signInAsFreshUser(context);
+        const [linked] = await e2eDatabase()<{ id: string }[]>`
+            INSERT INTO portfolios (user_id, name, source, external_account_id)
+            VALUES (${userId}, 'Brokerage Link', 'plaid', ${`acc-${userId}`}) RETURNING id`;
+        const refusal = 'Brokerage Link is linked to your bank, so its holdings without a ticker come from there. Import this file into another account.';
+        await gotoAppPage(page, '/portfolios/holdings');
+        await openImport(page, 'Symbol,Description,Quantity,Average Cost,Market Value\nNVDA,NVIDIA Corp,10,450.25,4600.00\n,Target 2055 Trust,120.5,,"12,345.67"\n');
+        const dialog = page.getByTestId('import-dialog');
+        await dialog.getByLabel('Import into').selectOption({ label: 'Brokerage Link' });
+        await expect(dialog.getByRole('alert')).toHaveText(refusal);
+        await expect(dialog.getByRole('button', { name: 'Import 2 positions' })).toBeDisabled();
+
+        const rows = [{ symbol: 'NVDA', name: 'NVIDIA Corp', quantity: 10, avgCost: 450.25 }];
+        const written = async () => (await e2eDatabase()<{ n: number }[]>`
+            SELECT ((SELECT count(*) FROM holdings WHERE portfolio_id = ${linked.id}) + (SELECT count(*) FROM manual_holdings WHERE portfolio_id = ${linked.id}))::int AS n`)[0].n;
+        const refused = await page.request.post('/api/portfolio/import', {
+            data: { portfolioId: linked.id, rows, manual: [{ name: 'Target 2055 Trust', quantity: 120.5, value: 12345.67 }], valuesAsOf: '2026-11-02' },
+        });
+        expect(refused.status()).toBe(409);
+        expect(await refused.json()).toMatchObject({ code: 'LINKED_ACCOUNT', error: refusal });
+        expect(await written()).toBe(0);
+
+        const positionsOnly = await page.request.post('/api/portfolio/import', { data: { portfolioId: linked.id, rows } });
+        expect(positionsOnly.status()).toBe(200);
+        expect((await positionsOnly.json()).data).toMatchObject({ insert: 1, manual: { insert: 0, update: 0, unchanged: 0, replacedPositions: 0 } });
+        expect(await written()).toBe(1);
     });
 
     test('database: another user\'s account is a 404 and nothing is written', async ({ page }) => {

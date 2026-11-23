@@ -1,4 +1,5 @@
 import { normalizeTicker } from '@/lib/research/watchlist';
+import { MANUAL_HOLDING_LIMITS } from '@/lib/validators/manual-holding';
 import { describeOptionContract, OPTION_POSITION_MULTIPLIER, optionContractTicker, parseOptionContract, type OptionContract } from './option-positions';
 
 /**
@@ -19,6 +20,13 @@ import { describeOptionContract, OPTION_POSITION_MULTIPLIER, optionContractTicke
  * contracts, negative for a written position; the premium is per share, as
  * brokers quote it: the total cost basis ÷ (100 × contracts), or else the
  * average cost, read as per share.
+ *
+ * A row with no ticker Atlas can price (a blank symbol, a CUSIP, a plan's
+ * fund number, a fund's name) is a holding valued by hand: it comes in at
+ * the file's market value when the file has a value column, and is listed
+ * as an issue, with how to bring it in, when it doesn't. Whether a row has
+ * a ticker is read from its symbol cell alone (readSymbolCell), never from
+ * the price store, so a ticker Atlas has no price for yet stays a position.
  */
 
 export const MAX_IMPORT_ROWS = 1000;
@@ -48,10 +56,29 @@ export interface OptionImportRow extends OptionContract {
     premium: number;
 }
 
+/**
+ * A holding valued by hand read from the file: a row with no ticker Atlas
+ * can price. Its value is the whole holding's, as the file gives it; units
+ * and cost are null when the file doesn't give them.
+ */
+export interface ManualImportRow {
+    /** The account the file puts it in, when the file has an account column. */
+    account?: string;
+    name: string;
+    /** A CUSIP, ISIN or the plan's own code, upper case, when the file has one. */
+    identifier: string | null;
+    quantity: number | null;
+    value: number;
+    /** The total cost, from a cost-basis column only; null when the file has none. */
+    costBasis: number | null;
+}
+
 export interface ParseResult {
     rows: ImportRow[];
     /** The file's option positions, for the LEAPS ledger. */
     options: OptionImportRow[];
+    /** The file's rows with no ticker Atlas can price, brought in valued by hand. */
+    manual: ManualImportRow[];
     issues: ParseIssue[];
     /** Cash, total, and blank rows ignored on purpose. */
     skipped: number;
@@ -63,24 +90,144 @@ export interface ParseResult {
     accounts: string[];
 }
 
-const HEADER_ALIASES: Record<'symbol' | 'quantity' | 'avgCost' | 'costBasis' | 'name' | 'assetType' | 'accountName' | 'accountNumber', readonly string[]> = {
+type Column = 'symbol' | 'quantity' | 'avgCost' | 'costBasis' | 'value' | 'name' | 'identifier' | 'assetType' | 'accountName' | 'accountNumber';
+
+const HEADER_ALIASES: Record<Column, readonly string[]> = {
     accountName: ['account', 'account name', 'account nickname', 'account name/number', 'account display name'],
     accountNumber: ['account number', 'account #', 'account no', 'account no.', 'account id'],
-    symbol: ['symbol', 'ticker', 'sym', 'security symbol'],
+    symbol: ['symbol', 'ticker', 'sym', 'security symbol', 'symbol/cusip', 'symbol / cusip'],
     quantity: ['quantity', 'qty', 'shares', 'units', 'position'],
     avgCost: ['avg cost', 'average cost', 'avg price', 'average price', 'cost/share', 'cost per share', 'unit cost', 'price paid', 'avg cost basis', 'average cost basis'],
     costBasis: ['cost basis', 'cost basis total', 'total cost', 'cost basis ($)', 'book value'],
+    // The whole holding's worth, read only for rows with no ticker: a
+    // position's value comes from its price.
+    value: [
+        'market value', 'current value', 'value', 'total value', 'market value ($)', 'current value ($)', 'value ($)', 'value $',
+        'mkt value', 'mkt val', 'position value', 'ending value', 'ending balance', 'balance',
+    ],
+    identifier: ['cusip', 'cusip number', 'cusip #', 'isin', 'cusip/isin', 'security id', 'security identifier', 'identifier'],
     assetType: ['asset type', 'asset class', 'security type', 'position type'],
-    name: ['description', 'name', 'security', 'security name', 'security description'],
+    name: [
+        'description', 'name', 'security', 'security name', 'security description',
+        'investment', 'investment name', 'fund', 'fund name', 'holding', 'holding name',
+    ],
 };
+
+type Columns = Record<Column, number>;
 
 // The ** suffix is an explicit broker core-position marker, not a ticker.
 const CORE_POSITION = /^(spaxx|fdrxx|core)\*\*$/i;
 const OPTION_ASSET_TYPE = /^(option|options|equity option|equity options|call|put|listed option)s?$/i;
 const SUMMARY_SYMBOL = /^(pending|pending activity|account total|total|--)$/i;
+/** A symbol cell that says there is no symbol. */
+const PLACEHOLDER_SYMBOL = /^(|-+|—|–|n\/?a|none|null|unknown|not available)$/i;
+/**
+ * Labels of rows that add up or head other rows, or hold cash, in a file's
+ * rows with no ticker. Exact phrases only: a fund called "Total Stock Market
+ * Trust" is a holding.
+ */
+const SUMMARY_LABEL = new RegExp(`^(?:${[
+    'total', 'totals', 'grand total', 'subtotal', 'sub-total', 'account total', 'accounts total',
+    'total value', 'total account value', 'total portfolio value', 'total market value', 'total holdings', 'total investments',
+    'net account value', 'pending', 'pending activity',
+    'cash', 'cash balance', 'cash (?:&|and) (?:cash )?(?:investments|equivalents|money market|sweep)',
+    'sweep', 'bank sweep', 'money market sweep', 'core position', 'held in money market',
+    'margin balance', 'margin debit', 'buying power',
+    'equities', 'stocks', 'etfs', 'mutual funds', 'fixed income', 'bonds', 'options',
+].join('|')})$`);
 
 export function normalizeHeader(h: string): string {
     return h.trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+/** Excel's text guard (="012345678") and a leading = taken off a cell. */
+function unwrapCell(raw: string): string {
+    const s = raw.trim();
+    const guarded = /^="(.*)"$/.exec(s);
+    return (guarded ? guarded[1] : s).replace(/^=+/, '').trim();
+}
+
+/**
+ * A CUSIP: nine characters whose last is the modulus-10 "double add double"
+ * check digit of the first eight ('*', '@' and '#' count 36, 37 and 38).
+ */
+export function isCusip(code: string): boolean {
+    const s = code.toUpperCase();
+    if (!/^[0-9A-Z*@#]{8}[0-9]$/.test(s)) return false;
+    let sum = 0;
+    for (let i = 0; i < 8; i++) {
+        const c = s[i];
+        let v = /\d/.test(c) ? Number(c) : c === '*' ? 36 : c === '@' ? 37 : c === '#' ? 38 : c.charCodeAt(0) - 55;
+        if (i % 2 === 1) v *= 2;
+        sum += Math.floor(v / 10) + (v % 10);
+    }
+    return (10 - (sum % 10)) % 10 === Number(s[8]);
+}
+
+/** A CUSIP or a plan's all-digit fund number: shaped like a ticker, but never one Atlas can price. */
+export function looksLikeSecurityCode(symbol: string): boolean {
+    return /^\d+$/.test(symbol) || isCusip(symbol);
+}
+
+/**
+ * What a row's symbol cell holds: a ticker, or, for a holding Atlas can't
+ * price, a code (a CUSIP, an ISIN, a plan's number) to keep as its
+ * identifier, words (a fund's name), or a placeholder ('--', 'n/a').
+ */
+export type SymbolCell =
+    | { ticker: string }
+    | { ticker: null; identifier: string | null; text: string | null; placeholder: boolean };
+
+export function readSymbolCell(raw: string): SymbolCell {
+    const value = unwrapCell(raw).replace(/\*+$/, '').trim();
+    if (PLACEHOLDER_SYMBOL.test(value)) return { ticker: null, identifier: null, text: null, placeholder: true };
+    const ticker = normalizeTicker(value);
+    if (ticker && !looksLikeSecurityCode(ticker)) return { ticker };
+    // A code has no spaces and fits an identifier; anything longer is words.
+    const code = !/[\s<>]/.test(value) && value.length <= MANUAL_HOLDING_LIMITS.identifier;
+    return code
+        ? { ticker: null, identifier: value.toUpperCase(), text: null, placeholder: false }
+        : { ticker: null, identifier: null, text: value, placeholder: false };
+}
+
+/** An identifier column's cell: unwrapped, upper case, at most 40 characters; null when blank or a placeholder. */
+function identifierCell(raw: string | undefined): string | null {
+    const value = unwrapCell(raw ?? '');
+    if (PLACEHOLDER_SYMBOL.test(value) || /[<>]/.test(value) || value.length > MANUAL_HOLDING_LIMITS.identifier) return null;
+    return value.toUpperCase();
+}
+
+/** A holding's name as imports compare it: case, punctuation and spacing ignored. */
+export function normalizeHoldingName(name: string): string {
+    return name.normalize('NFKC').toLocaleLowerCase('en-US').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+}
+
+const compactIdentifier = (identifier: string | null | undefined) => (identifier ?? '').replace(/\s+/g, '').toUpperCase();
+
+/**
+ * The key a holding valued by hand is found by when its file is imported
+ * again, unique within its account: "csv:id:" and its identifier (spaces
+ * and case ignored), or else "csv:name:" and its normalized name; null
+ * when it has neither.
+ */
+export function manualImportKey(row: { name: string; identifier?: string | null }): string | null {
+    const identifier = compactIdentifier(row.identifier);
+    if (identifier) return `csv:id:${identifier}`;
+    const name = normalizeHoldingName(row.name);
+    return name ? `csv:name:${name}` : null;
+}
+
+/** A total, subtotal, cash or category row's label, for rows with no ticker. */
+export function isSummaryLabel(label: string): boolean {
+    const s = normalizeHeader(label).replace(/[:*]+$/, '').trim();
+    return SUMMARY_LABEL.test(s) || /\b(?:sub-?)?totals?$/.test(s) || /\bcash$/.test(s);
+}
+
+/** Cut to `max` UTF-16 units without splitting a character. */
+function cutText(text: string, max: number): string {
+    if (text.length <= max) return text;
+    const cut = text.slice(0, max);
+    return (/[\uD800-\uDBFF]$/.test(cut) ? cut.slice(0, -1) : cut).trimEnd();
 }
 
 export interface CsvRecord {
@@ -135,7 +282,12 @@ export function readCsvRecords(text: string): CsvRecord[] {
         } else if (state === 'closed') {
             if (!/\s/.test(c)) error ??= 'Unexpected text after a closing quote.';
         } else if (c === '"') {
-            if (field.trim()) {
+            if (field.trim() === '=') {
+                // Excel's text guard written bare, ="0123": the quoted text
+                // is read, after the = that unwrapCell takes off.
+                field = '=';
+                state = 'quoted';
+            } else if (field.trim()) {
                 error ??= 'Unexpected quote in an unquoted field.';
             } else {
                 field = '';
@@ -249,18 +401,21 @@ export function parseHoldingsCsv(text: string): ParseResult {
         return {
             rows: [],
             options: [],
+            manual: [],
             issues: [{ line: 1, message: 'No header row with a Symbol and a Quantity column was found.' }],
             skipped: 0,
             accounts: [],
         };
     }
 
-    const col = {
+    const col: Columns = {
         symbol: findColumn(headers, 'symbol'),
         quantity: findColumn(headers, 'quantity'),
         avgCost: findColumn(headers, 'avgCost'),
         costBasis: findColumn(headers, 'costBasis'),
+        value: findColumn(headers, 'value'),
         name: findColumn(headers, 'name'),
+        identifier: findColumn(headers, 'identifier'),
         assetType: findColumn(headers, 'assetType'),
         accountName: findColumn(headers, 'accountName'),
         accountNumber: findColumn(headers, 'accountNumber'),
@@ -270,18 +425,19 @@ export function parseHoldingsCsv(text: string): ParseResult {
     // share a name, "Individual"), else by its name; labelled at the end.
     const accountNames = new Map<string, string>();
     const accountOrder: string[] = [];
-    if (col.avgCost < 0 && col.costBasis < 0) {
-        return {
-            rows: [],
-            options: [],
-            issues: [{ line: records[headerIndex].line, message: 'Add an Average cost or a Cost basis column so gains can be calculated.' }],
-            skipped: 0,
-            accounts: [],
-        };
+    const headerLine = records[headerIndex].line;
+    const costMessage = 'Add an Average cost or a Cost basis column so gains can be calculated.';
+    // Positions and options need a cost; holdings valued by hand need only
+    // their value, so a file with a value column is still read without one.
+    const costless = col.avgCost < 0 && col.costBasis < 0;
+    if (costless && col.value < 0) {
+        return { rows: [], options: [], manual: [], issues: [{ line: headerLine, message: costMessage }], skipped: 0, accounts: [] };
     }
+    let costIssueListed = false;
 
     const merged = new Map<string, ImportRow>();
     const options = new Map<string, OptionImportRow>();
+    const manual = new Map<string, ManualImportRow>();
     for (const record of records.slice(headerIndex + 1)) {
         const lineNo = record.line;
         if (record.error) {
@@ -289,7 +445,10 @@ export function parseHoldingsCsv(text: string): ParseResult {
             continue;
         }
         const rawSymbol = (record.cells[col.symbol] ?? '').trim();
-        if (record.cells.every((cell) => !cell) || SUMMARY_SYMBOL.test(rawSymbol) || isNoteRow(record.cells, col.symbol)) {
+        // '--' alone ends a table, unless the file can value a row with no
+        // ticker: then its label and value say what the row is.
+        const summarySymbol = SUMMARY_SYMBOL.test(rawSymbol) && !(col.value >= 0 && PLACEHOLDER_SYMBOL.test(rawSymbol));
+        if (record.cells.every((cell) => !cell) || summarySymbol || isNoteRow(record.cells, col.symbol)) {
             skipped++;
             continue;
         }
@@ -302,13 +461,30 @@ export function parseHoldingsCsv(text: string): ParseResult {
             skipped++;
             continue;
         }
+        const contract = optionContractOf(rawSymbol, cells, col);
+        const optionRow = contract !== null || OPTION_ASSET_TYPE.test(normalizeHeader(cells[col.assetType] ?? ''));
+        const cell = readSymbolCell(rawSymbol);
+        // A row with no ticker is known by its name, else its symbol cell's
+        // words or code. Totals, cash and category rows (and rows with
+        // nothing to go by) are skipped before the account is checked, so
+        // a footer without one isn't listed.
+        const nameCell = col.name >= 0 ? (cells[col.name] ?? '').trim() : '';
+        let label = '';
+        if (!optionRow && cell.ticker === null) {
+            label = (PLACEHOLDER_SYMBOL.test(nameCell) ? '' : nameCell) || cell.text || cell.identifier || '';
+            if (!label || isSummaryLabel(label)) {
+                skipped++;
+                continue;
+            }
+        }
         let accountKey = '';
         if (byAccount) {
-            const accountName = col.accountName >= 0 ? (cells[col.accountName] ?? '').trim() : '';
-            const accountNumber = col.accountNumber >= 0 ? (cells[col.accountNumber] ?? '').trim() : '';
+            // Account numbers are what a file guards as text (="0123").
+            const accountName = col.accountName >= 0 ? unwrapCell(cells[col.accountName] ?? '') : '';
+            const accountNumber = col.accountNumber >= 0 ? unwrapCell(cells[col.accountNumber] ?? '') : '';
             accountKey = accountNumber || accountName;
             if (!accountKey) {
-                issues.push({ line: lineNo, message: `${rawSymbol || 'This row'}: no account. Fill in the account column.` });
+                issues.push({ line: lineNo, message: `${label || rawSymbol || 'This row'}: no account. Fill in the account column.` });
                 continue;
             }
             if (!accountNames.has(accountKey)) {
@@ -318,7 +494,38 @@ export function parseHoldingsCsv(text: string): ParseResult {
                 accountNames.set(accountKey, accountName);
             }
         }
-        const contract = optionContractOf(rawSymbol, cells, col);
+        if (cell.ticker === null && !optionRow) {
+            const read = readManualRow(rawSymbol, cell, label, cells, col, lineNo, issues);
+            if (read === 'skip') skipped++;
+            if (!read || read === 'skip') continue;
+            const row: ManualImportRow = byAccount ? { account: accountKey, ...read } : read;
+            const key = `${accountKey}\u0000${manualImportKey(row)}`;
+            const prev = manual.get(key);
+            if (prev) {
+                // One holding on two lines of one account (two lots, or one
+                // fund in two sources): the values add, and the units and
+                // cost when both lines give them.
+                manual.set(key, {
+                    ...prev,
+                    value: prev.value + row.value,
+                    quantity: prev.quantity !== null && row.quantity !== null ? prev.quantity + row.quantity : null,
+                    costBasis: prev.costBasis !== null && row.costBasis !== null ? prev.costBasis + row.costBasis : null,
+                });
+            } else {
+                if (merged.size + manual.size >= MAX_IMPORT_ROWS) {
+                    issues.push({ line: lineNo, message: `Only the first ${MAX_IMPORT_ROWS} positions can be imported at once.` });
+                    break;
+                }
+                manual.set(key, row);
+            }
+            continue;
+        }
+        if (costless) {
+            // Listed once, on the header, rather than on every row.
+            if (!costIssueListed) issues.push({ line: headerLine, message: costMessage });
+            costIssueListed = true;
+            continue;
+        }
         if (contract) {
             const read = readOptionRow(contract, cells, col, lineNo, issues);
             if (!read) continue;
@@ -345,15 +552,11 @@ export function parseHoldingsCsv(text: string): ParseResult {
             }
             continue;
         }
-        if (OPTION_ASSET_TYPE.test(normalizeHeader(cells[col.assetType] ?? ''))) {
+        if (optionRow) {
             issues.push({ line: lineNo, message: `“${rawSymbol}” is an option Atlas can't read the contract of. Add it on Holdings instead.` });
             continue;
         }
-        const symbol = normalizeTicker(rawSymbol.replace(/\*+$/, ''));
-        if (!symbol) {
-            issues.push({ line: lineNo, message: `“${rawSymbol}” is not a ticker.` });
-            continue;
-        }
+        const symbol = cell.ticker!;
         const quantity = parseNumber(cells[col.quantity]);
         if (quantity == null || quantity <= 0) {
             issues.push({ line: lineNo, message: `${symbol}: quantity must be a positive number.` });
@@ -368,7 +571,6 @@ export function parseHoldingsCsv(text: string): ParseResult {
             issues.push({ line: lineNo, message: `${symbol}: missing or invalid cost.` });
             continue;
         }
-        const name = col.name >= 0 ? (cells[col.name] ?? '').trim() : '';
         const key = `${accountKey}\u0000${symbol}`;
         const prev = merged.get(key);
         if (prev) {
@@ -377,28 +579,80 @@ export function parseHoldingsCsv(text: string): ParseResult {
             const qty = prev.quantity + quantity;
             merged.set(key, {
                 ...prev,
-                name: prev.name || name,
+                name: prev.name || nameCell,
                 quantity: qty,
                 avgCost: (prev.avgCost * prev.quantity + avgCost * quantity) / qty,
             });
         } else {
-            if (merged.size >= MAX_IMPORT_ROWS) {
+            if (merged.size + manual.size >= MAX_IMPORT_ROWS) {
                 issues.push({ line: lineNo, message: `Only the first ${MAX_IMPORT_ROWS} positions can be imported at once.` });
                 break;
             }
-            merged.set(key, byAccount ? { account: accountKey, symbol, name, quantity, avgCost } : { symbol, name, quantity, avgCost });
+            merged.set(key, byAccount ? { account: accountKey, symbol, name: nameCell, quantity, avgCost } : { symbol, name: nameCell, quantity, avgCost });
         }
     }
 
     const labels = accountLabels(accountOrder, accountNames);
-    const label = <T extends { account?: string }>(r: T): T => (r.account === undefined ? r : { ...r, account: labels.get(r.account)! });
-    const rows = [...merged.values()].map((r) => label({
+    const withLabel = <T extends { account?: string }>(r: T): T => (r.account === undefined ? r : { ...r, account: labels.get(r.account)! });
+    const rows = [...merged.values()].map((r) => withLabel({
         ...r,
         quantity: round(r.quantity, 6),
         avgCost: round(r.avgCost, 4),
     }));
-    const optionRows = [...options.values()].map((o) => label({ ...o, quantity: round(o.quantity, 6), premium: round(o.premium, 4) }));
-    return { rows, options: optionRows, issues, skipped, accounts: accountOrder.map((k) => labels.get(k)!) };
+    const optionRows = [...options.values()].map((o) => withLabel({ ...o, quantity: round(o.quantity, 6), premium: round(o.premium, 4) }));
+    // As Plaid's are: values and costs to the cent, units to six places.
+    const manualRows = [...manual.values()].map((m) => withLabel({
+        ...m,
+        value: round(m.value, 2),
+        quantity: m.quantity !== null && round(m.quantity, 6) > 0 ? round(m.quantity, 6) : null,
+        costBasis: m.costBasis !== null ? round(m.costBasis, 2) : null,
+    }));
+    return { rows, options: optionRows, manual: manualRows, issues, skipped, accounts: accountOrder.map((k) => labels.get(k)!) };
+}
+
+/**
+ * A row with no ticker as a holding valued by hand: its value from the
+ * value column, its units, and its cost from a cost-basis column only (an
+ * average cost times units is wrong by 100 for a bond quoted per 100 of
+ * face value). Anything the API would refuse is listed instead; 'skip' is
+ * a row with no symbol, value or units, which sums up the rows above it.
+ */
+function readManualRow(
+    rawSymbol: string,
+    cell: Extract<SymbolCell, { ticker: null }>,
+    label: string,
+    cells: string[],
+    col: Columns,
+    line: number,
+    issues: ParseIssue[],
+): Omit<ManualImportRow, 'account'> | 'skip' | null {
+    const list = (message: string) => {
+        issues.push({ line, message });
+        return null;
+    };
+    if (col.value < 0) {
+        return list(cell.placeholder
+            ? `${label}: no ticker. Add a market value column to bring it in valued by hand, or add it on Holdings.`
+            : `“${rawSymbol}” isn't a ticker Atlas can price. Add a market value column to bring it in valued by hand, or add it on Holdings.`);
+    }
+    const value = parseNumber(cells[col.value]);
+    const units = parseNumber(cells[col.quantity]);
+    if (value === null) {
+        if (cell.placeholder && !units) return 'skip';
+        return list(`${label}: no ticker and no value. Fill in its market value, or add it on Holdings.`);
+    }
+    if (value < 0) return list(`${label}: value can't be negative.`);
+    if (value > MANUAL_HOLDING_LIMITS.value) return list(`${label}: value is out of range.`);
+    if (units !== null && units < 0) return list(`${label}: units can't be negative.`);
+    if (units !== null && units > MANUAL_HOLDING_LIMITS.value) return list(`${label}: units are out of range.`);
+    const cost = col.costBasis >= 0 ? parseNumber(cells[col.costBasis]) : null;
+    if (cost !== null && cost < 0) return list(`${label}: cost can't be negative.`);
+    if (cost !== null && cost > MANUAL_HOLDING_LIMITS.value) return list(`${label}: cost is out of range.`);
+    const name = cutText(label, MANUAL_HOLDING_LIMITS.name);
+    if (/[<>]/.test(name) || name.startsWith('=')) return list(`${label}: the name can't contain < or > or start with =.`);
+    const identifier = cell.identifier ?? (col.identifier >= 0 ? identifierCell(cells[col.identifier]) : null);
+    if (manualImportKey({ name, identifier }) === null) return list(`${label}: the name needs a letter or a digit.`);
+    return { name, identifier, quantity: units || null, value, costBasis: cost };
 }
 
 /**
@@ -436,6 +690,7 @@ export interface AccountImportGroup {
     account: string;
     rows: ImportRow[];
     options: OptionImportRow[];
+    manual: ManualImportRow[];
 }
 
 function withoutAccount<T extends { account?: string }>(row: T): Omit<T, 'account'> {
@@ -444,13 +699,20 @@ function withoutAccount<T extends { account?: string }>(row: T): Omit<T, 'accoun
     return copy;
 }
 
-/** A multi-account file's positions, one group per account in the file's order; [] for a one-account file. */
-export function groupImportByAccount(result: Pick<ParseResult, 'rows' | 'options' | 'accounts'>): AccountImportGroup[] {
+/**
+ * A multi-account file's positions and holdings valued by hand, one group
+ * per account in the file's order; [] for a one-account file.
+ */
+export function groupImportByAccount(
+    result: Pick<ParseResult, 'rows' | 'options' | 'accounts'> & Partial<Pick<ParseResult, 'manual'>>,
+): AccountImportGroup[] {
+    const manual = result.manual ?? [];
     return result.accounts.map((account) => ({
         account,
         rows: result.rows.filter((r) => r.account === account).map(withoutAccount),
         options: result.options.filter((o) => o.account === account).map(withoutAccount),
-    })).filter((g) => g.rows.length + g.options.length > 0);
+        manual: manual.filter((m) => m.account === account).map(withoutAccount),
+    })).filter((g) => g.rows.length + g.options.length + g.manual.length > 0);
 }
 
 /** What the import API takes in one go (OPTION_POSITION_LIMITS.importRows). */
@@ -536,4 +798,150 @@ export function summarizePlan(plan: readonly PlannedChange[]): { insert: number;
         update: plan.filter((p) => p.kind === 'update').length,
         unchanged: plan.filter((p) => p.kind === 'unchanged').length,
     };
+}
+
+// ---------------------------------------------------------------------------
+// Holdings valued by hand: what importing a file's rows will change
+// ---------------------------------------------------------------------------
+
+/** A holding valued by hand that an import may update: one added by hand, or one an earlier file brought in. */
+export interface ExistingManualHolding {
+    id: string;
+    name: string;
+    identifier: string | null;
+    /** Its key from an earlier file (manualImportKey), or null for one added by hand. */
+    importKey: string | null;
+    quantity: number | null;
+    value: number;
+    costBasis: number | null;
+    valueAsOf: string;
+}
+
+export type PlannedManualChange =
+    | { kind: 'insert'; key: string; row: ManualImportRow; replacesPosition: string | null }
+    | {
+        kind: 'update' | 'unchanged';
+        id: string;
+        key: string;
+        row: ManualImportRow;
+        savedName: string;
+        savedValueAsOf: string;
+        /** The file's day is before the saved value's: only that day's value is recorded. */
+        olderThanSaved: boolean;
+        /** Its units or cost change, which is a change to the account, not just a new price. */
+        changesHolding: boolean;
+        /** The position, held under this code, that the holding takes the place of. */
+        replacesPosition: string | null;
+    };
+
+const sameUnits = (a: number | null, b: number | null) => (a === null || b === null ? a === b : round(a, 6) === round(b, 6));
+const sameMoney = (a: number | null, b: number | null) => (a === null || b === null ? a === b : Math.round(a * 100) === Math.round(b * 100));
+
+/**
+ * What importing a file's holdings valued by hand into an account will do,
+ * given the account's holdings an import may update (`existing`: those
+ * added by hand or by an earlier file, never a linked account's) and the
+ * symbols of its positions.
+ *
+ * Each row is matched in three tiers, each over all rows in the file's
+ * order before the next starts, and a holding is claimed once: the same
+ * key; then the same identifier (spaces and case ignored), so a renamed
+ * fund is still found; then the same name, unless both have identifiers
+ * that differ. A match is updated in place and keeps its id. A file older
+ * than the saved value changes nothing but that day's history, and one
+ * whose value, units and cost are the same is unchanged. A row whose code
+ * is held as a position (a fund imported by its CUSIP before it could be
+ * valued by hand) replaces that position.
+ */
+export function planManualImport(
+    existing: readonly ExistingManualHolding[],
+    rows: readonly ManualImportRow[],
+    { asOf, positions = [] }: { asOf: string; positions?: readonly string[] },
+): PlannedManualChange[] {
+    const keyed = rows.flatMap((row) => {
+        const key = manualImportKey(row);
+        // The validator refuses a row with no key, so there is none to plan.
+        return key ? [{ row, key, name: normalizeHoldingName(row.name), identifier: compactIdentifier(row.identifier) }] : [];
+    });
+    const tiers: ((r: (typeof keyed)[number], h: ExistingManualHolding) => boolean)[] = [
+        (r, h) => h.importKey === r.key,
+        (r, h) => r.identifier !== '' && r.identifier === compactIdentifier(h.identifier),
+        (r, h) => {
+            const identifier = compactIdentifier(h.identifier);
+            return r.name !== '' && r.name === normalizeHoldingName(h.name) && !(r.identifier && identifier && r.identifier !== identifier);
+        },
+    ];
+    const matched = new Map<number, ExistingManualHolding>();
+    const claimed = new Set<string>();
+    for (const same of tiers) {
+        keyed.forEach((r, i) => {
+            if (matched.has(i)) return;
+            const holding = existing.find((h) => !claimed.has(h.id) && same(r, h));
+            if (!holding) return;
+            matched.set(i, holding);
+            claimed.add(holding.id);
+        });
+    }
+    const held = new Set(positions.map((s) => s.toUpperCase()));
+    const replaced = new Set<string>();
+    return keyed.map(({ row, key, identifier }, i) => {
+        let replacesPosition: string | null = null;
+        if (identifier && looksLikeSecurityCode(identifier) && held.has(identifier) && !replaced.has(identifier)) {
+            replacesPosition = identifier;
+            replaced.add(identifier);
+        }
+        const holding = matched.get(i);
+        if (!holding) return { kind: 'insert', key, row, replacesPosition };
+        const olderThanSaved = asOf < holding.valueAsOf;
+        const changesHolding = !olderThanSaved
+            && (!sameUnits(row.quantity, holding.quantity) || !sameMoney(row.costBasis ?? holding.costBasis, holding.costBasis));
+        const unchanged = olderThanSaved || (!changesHolding && sameMoney(row.value, holding.value));
+        return {
+            kind: unchanged ? 'unchanged' : 'update',
+            id: holding.id,
+            key,
+            row,
+            savedName: holding.name,
+            savedValueAsOf: holding.valueAsOf,
+            olderThanSaved,
+            changesHolding,
+            replacesPosition,
+        };
+    });
+}
+
+export interface ManualPlanSummary {
+    insert: number;
+    update: number;
+    unchanged: number;
+    replacedPositions: number;
+}
+
+export function summarizeManualPlan(plan: readonly PlannedManualChange[]): ManualPlanSummary {
+    return {
+        insert: plan.filter((p) => p.kind === 'insert').length,
+        update: plan.filter((p) => p.kind === 'update').length,
+        unchanged: plan.filter((p) => p.kind === 'unchanged').length,
+        replacedPositions: plan.filter((p) => p.replacesPosition !== null).length,
+    };
+}
+
+const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+
+/**
+ * The preview's count of what a file holds: "2 positions in 2 accounts,
+ * 1 valued by hand and 1 option position". A file with nothing valued by
+ * hand reads as it always has ("1 position and 1 option position").
+ */
+export function describeImportCounts({ positions, handValued, options, accounts }: { positions: number; handValued: number; options: number; accounts: number }): string {
+    const across = accounts > 1 ? ` in ${accounts} accounts` : '';
+    if (handValued === 0) {
+        return `${plural(positions, 'position')}${across}${options > 0 ? ` and ${plural(options, 'option position')}` : ''}`;
+    }
+    const parts = [
+        ...(positions > 0 ? [plural(positions, 'position'), `${handValued} valued by hand`] : [plural(handValued, 'holding') + ' valued by hand']),
+        ...(options > 0 ? [plural(options, 'option position')] : []),
+    ];
+    parts[0] += across;
+    return parts.length === 1 ? parts[0] : `${parts.slice(0, -1).join(', ')} and ${parts.at(-1)}`;
 }

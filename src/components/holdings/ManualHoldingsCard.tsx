@@ -22,7 +22,9 @@ import { MANUAL_HOLDING_LIMITS } from "@/lib/validators/manual-holding";
  * Holdings › Valued by hand: what an account holds that Atlas can't price
  * from market data (a 401(k) fund with no ticker, a 529 portfolio, a
  * private holding). Each counts at the value given, as of its date, in the
- * account's value, Today and the nightly history, until it's updated.
+ * account's value, Today and the nightly history, until it's updated. A
+ * positions file's rows with no ticker come in here too (Import CSV), and
+ * importing the file again updates them.
  */
 
 export interface ManualHoldingRow {
@@ -35,7 +37,11 @@ export interface ManualHoldingRow {
     value: number;
     costBasis: number | null;
     valueAsOf: string;
-    /** "plaid" when a linked account reports it; the next sync updates its value. */
+    /**
+     * "plaid" when a linked account reports it (the next sync updates its
+     * value); "csv" when a positions file brought it in (the next file
+     * updates it).
+     */
     source: string;
 }
 
@@ -281,9 +287,12 @@ export function ManualHoldingsCard({ rows, accounts }: { rows: readonly ManualHo
                                 <tr key={r.id}>
                                     <td>
                                         <div>{r.name}</div>
-                                        {(r.identifier || r.source === "plaid") && (
+                                        {(r.identifier || r.source !== "manual") && (
                                             <div className="pm-card-subtitle">
-                                                {[r.identifier, r.source === "plaid" ? "from your linked account" : null].filter(Boolean).join(" · ")}
+                                                {[
+                                                    r.identifier,
+                                                    r.source === "plaid" ? "from your linked account" : r.source === "csv" ? "from your CSV import" : null,
+                                                ].filter(Boolean).join(" · ")}
                                             </div>
                                         )}
                                     </td>

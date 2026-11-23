@@ -98,7 +98,7 @@ export interface ExportedManualHolding {
     value: number;
     costBasis: number | null;
     valueAsOf: string;
-    /** "manual", or "plaid" for a linked account's holding with no ticker. */
+    /** "manual"; "plaid" for a linked account's holding with no ticker; "csv" for one a positions file brought in. */
     source: string;
     updatedAt: string;
     /** Its value on each day it was valued, oldest first. */

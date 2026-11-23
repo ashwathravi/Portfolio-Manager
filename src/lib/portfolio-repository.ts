@@ -77,10 +77,13 @@ export function buildOwnedPortfolioHoldingsQuery(userId: string, portfolioId: st
         ));
 }
 
-/** The user's accounts as options for pickers (e.g. the CSV import target). */
+/**
+ * The user's accounts as options for pickers (e.g. the CSV import target),
+ * with their source, so the import can tell a linked account before sending.
+ */
 export function buildUserPortfolioOptionsQuery(userId: string) {
     return db
-        .select({ id: portfolios.id, name: portfolios.name, cashBalance: portfolios.cashBalance })
+        .select({ id: portfolios.id, name: portfolios.name, cashBalance: portfolios.cashBalance, source: portfolios.source })
         .from(portfolios)
         .where(eq(portfolios.userId, userId))
         .orderBy(portfolios.name);

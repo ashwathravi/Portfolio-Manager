@@ -410,6 +410,30 @@ describe('Plaid sync into portfolios', { skip: !DATABASE_URL && 'SCRIPTS_TEST_DA
         assert.deepEqual(await history('Stable Value Fund'), [['2026-10-22', 110], ['2026-10-26', 120]]);
     });
 
+    test('a holding a CSV brought in, then moved into a linked account, is left alone by that account\'s sync', async () => {
+        const { sync, held, history } = await fundAccount('u-csv-moved');
+        await sync(11, NOW);
+        const [{ id: linked }] = await sql<{ id: string }[]>`SELECT id FROM portfolios WHERE user_id = 'u-csv-moved' AND source = 'plaid'`;
+        const [{ id: plan }] = await sql<{ id: string }[]>`INSERT INTO portfolios (user_id, name) VALUES ('u-csv-moved', 'Old 401(k)') RETURNING id`;
+        const trust = { name: 'Target 2055 Trust', identifier: null, quantity: 20, value: 2500, costBasis: 2000 };
+        const imported = await importHoldings('u-csv-moved', { portfolioId: plan, rows: [], manual: [trust], valuesAsOf: '2026-10-23' }, {}, database);
+        assert.deepEqual(imported.manual, { insert: 1, update: 0, unchanged: 0, replacedPositions: 0 });
+        const [{ id }] = await sql<{ id: string }[]>`SELECT id FROM manual_holdings WHERE user_id = 'u-csv-moved' AND source = 'csv'`;
+        // Moved on Holdings into the linked account, where the file's rows can't be imported.
+        assert.ok(await updateManualHolding('u-csv-moved', id, linked, { ...trust, valueAsOf: '2026-10-23' }, { database }));
+
+        // The sync writes its own fund and leaves the file's as it is.
+        await sync(12, new Date('2026-10-26T22:30:00.000Z'));
+        assert.deepEqual((await held()).map((r) => [r.name, r.source, r.value, r.asOf, r.external, r.account]), [
+            ['Stable Value Fund', 'plaid', 120, '2026-10-26', `${linked}:sec_fund`, 'acc-u-csv-moved'],
+            ['Target 2055 Trust', 'csv', 2500, '2026-10-23', 'csv:name:target 2055 trust', 'acc-u-csv-moved'],
+        ]);
+        // Nor does a sync that no longer reports a fund remove it: only the institution's goes.
+        await sync(null, new Date('2026-10-27T22:30:00.000Z'));
+        assert.deepEqual((await held()).map((r) => [r.name, r.source, r.value]), [['Target 2055 Trust', 'csv', 2500]]);
+        assert.deepEqual(await history('Target 2055 Trust'), [['2026-10-23', 2500]]);
+    });
+
     test('a sync makes the portfolio, replaces its holdings and cash, and upserts its transactions', async () => {
         await linkedUser('u-sync', 'item-sync', [['acc_brokerage', 'Individual', 'investment']]);
         await selectPlaidAccounts('u-sync', 'item-sync', ['acc_brokerage'], database);

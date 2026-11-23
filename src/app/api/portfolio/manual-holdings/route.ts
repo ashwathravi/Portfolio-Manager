@@ -5,7 +5,9 @@
  * ticker, a private holding) to one of the signed-in user's accounts.
  *
  * Body:     { portfolioId, holding: { name, identifier?, quantity?, value, costBasis?, valueAsOf } }
- * Response: 201 { data: { id } }; 400 INVALID_MANUAL_HOLDING; 404 PORTFOLIO_NOT_FOUND; 413 when the body is too large
+ * Response: 201 { data: { id } }; 400 INVALID_MANUAL_HOLDING; 404 PORTFOLIO_NOT_FOUND; 409 MANUAL_HOLDING_LIMIT
+ *           when the user already keeps as many holdings valued by hand as they can (launch item i77);
+ *           413 when the body is too large
  */
 
 import { NextResponse } from 'next/server';
@@ -13,6 +15,8 @@ import { NextResponse } from 'next/server';
 import { readJsonBody } from '@/lib/api/body';
 import { apiError, internalServerError } from '@/lib/api/security';
 import { requireSessionApiUserScope } from '@/lib/api/session-security';
+import { RecordLimitError } from '@/lib/limits/records';
+import { recordLimitResponse } from '@/lib/limits/records-server';
 import { addManualHolding } from '@/lib/portfolio/manual-holdings';
 import { AccountNotFoundError } from '@/lib/portfolio/transactionsWrite';
 import { manualHoldingBodySchema, MAX_MANUAL_HOLDING_BODY_BYTES } from '@/lib/validators/manual-holding';
@@ -33,6 +37,7 @@ export async function POST(request: Request) {
         return NextResponse.json({ data: { id } }, { status: 201 });
     } catch (err) {
         if (err instanceof AccountNotFoundError) return apiError('Account not found', 'PORTFOLIO_NOT_FOUND', 404);
+        if (err instanceof RecordLimitError) return recordLimitResponse(err);
         return internalServerError(err, 'Unable to add the holding.', 'MANUAL_HOLDING_CREATE_FAILED');
     }
 }

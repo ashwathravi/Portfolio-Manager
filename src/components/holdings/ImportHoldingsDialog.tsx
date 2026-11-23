@@ -11,14 +11,44 @@ import {
     DialogHeader,
     DialogTitle,
 } from "@/components/ui/dialog";
-import { groupImportByAccount, parseHoldingsCsv, type AccountImportGroup, type ParseResult } from "@/lib/portfolio/csvImport";
+import {
+    describeImportCounts,
+    groupImportByAccount,
+    parseHoldingsCsv,
+    planManualImport,
+    type AccountImportGroup,
+    type ExistingManualHolding,
+    type ParseResult,
+    type PlannedManualChange,
+} from "@/lib/portfolio/csvImport";
 import { describeOptionContract } from "@/lib/portfolio/option-positions";
-import { formatQty, formatUsd } from "@/lib/format";
+import { localDate } from "@/lib/portfolio/value-dates";
+import { formatQty, formatShortDate, formatUsd } from "@/lib/format";
 
 export interface ImportAccountOption {
     id: string;
     name: string;
+    /** Linked to a bank through Plaid, which reports its holdings without a ticker, so a file's can't be imported into it. */
+    linked?: boolean;
 }
+
+/** One of the user's holdings valued by hand that an import into its account may update (added by hand or by an earlier file). */
+export interface ImportableManualHolding extends ExistingManualHolding {
+    portfolioId: string;
+}
+
+/**
+ * What the user's accounts already hold that a file's rows with no ticker
+ * may update or replace, for the preview: their holdings valued by hand an
+ * import may update, and their positions (only those held under a CUSIP or
+ * a plan's number matter).
+ */
+export interface ImportExisting {
+    handValued: readonly ImportableManualHolding[];
+    positions: readonly { accountId: string; symbol: string }[];
+}
+
+const NO_EXISTING: ImportExisting = { handValued: [], positions: [] };
 
 const NEW_ACCOUNT = "__new__";
 
@@ -42,17 +72,36 @@ function initialTargets(groups: readonly AccountImportGroup[], accounts: readonl
     }));
 }
 
+/** A day as the preview shows it: "Nov 20, 2026". */
+const formatDay = (day: string) => formatShortDate(`${day}T12:00:00Z`);
+
+/** What importing a row valued by hand does to what Atlas holds, as the preview's In Atlas column says it. */
+function inAtlas(change: PlannedManualChange): string {
+    let text: string;
+    if (change.kind === "insert") text = "New";
+    else if (change.olderThanSaved) text = `Keeps the newer value from ${formatDay(change.savedValueAsOf)}`;
+    else if (change.kind === "unchanged") text = "No change";
+    // The holding keeps its name: say which one when the file calls it something else.
+    else text = change.savedName.trim() === change.row.name.trim() ? "Updates" : `Updates “${change.savedName}”`;
+    return change.replacesPosition ? `${text}, replaces position ${change.replacesPosition}` : text;
+}
+
 /**
  * Holdings › Import CSV. Choose a positions export from your broker, check
  * what was read (and what was not), pick the account, then import. Nothing
  * is sent until the user confirms the preview. Option rows go to the LEAPS
- * ledger (launch item i63).
+ * ledger (launch item i63). Rows with no ticker Atlas can price come in
+ * valued by hand at the file's market value, as of the day the user gives
+ * (`existing` lets the preview say which holdings they update or which
+ * positions they replace); a linked account can't take them.
  */
 export function ImportHoldingsDialog({
     accounts,
+    existing = NO_EXISTING,
     triggerClassName = "pm-btn pm-btn-ghost",
 }: {
     accounts: readonly ImportAccountOption[];
+    existing?: ImportExisting;
     triggerClassName?: string;
 }) {
     const router = useRouter();
@@ -68,11 +117,14 @@ export function ImportHoldingsDialog({
     const [error, setError] = useState<string | null>(null);
     // A multi-account file: where each of its accounts goes.
     const [accountTargets, setAccountTargets] = useState<Record<string, AccountTarget>>({});
+    // The day the file's values are from: the browser's today once a file is read.
+    const [valuesAsOf, setValuesAsOf] = useState("");
 
     const reset = () => {
         setFileName(null);
         setParsed(null);
         setAccountTargets({});
+        setValuesAsOf("");
         setError(null);
         setSubmitting(false);
     };
@@ -89,14 +141,17 @@ export function ImportHoldingsDialog({
         const result = parseHoldingsCsv(await file.text());
         setParsed(result);
         setAccountTargets(initialTargets(groupImportByAccount(result), accounts));
+        // A corrected file chosen again keeps the day the user gave.
+        setValuesAsOf((current) => current || localDate());
     };
 
     const rows = useMemo(() => parsed?.rows ?? [], [parsed]);
     const options = useMemo(() => parsed?.options ?? [], [parsed]);
+    const manual = useMemo(() => parsed?.manual ?? [], [parsed]);
     const groups = useMemo(() => (parsed ? groupImportByAccount(parsed) : []), [parsed]);
     // One account in the file is the usual case: it goes where the user picks, as any file does.
     const multiAccount = groups.length > 1;
-    const total = rows.length + options.length;
+    const total = rows.length + options.length + manual.length;
     const chosen = groups.map((g) => accountTargets[g.account] ?? { target: NEW_ACCOUNT, newName: g.account });
     const chosenIds = chosen.flatMap((t) => (t.target === NEW_ACCOUNT ? [] : [t.target]));
     const chosenNewNames = chosen.flatMap((t) => (t.target === NEW_ACCOUNT ? [t.newName.trim()] : []));
@@ -106,7 +161,45 @@ export function ImportHoldingsDialog({
     const targetsReady = multiAccount
         ? chosenNewNames.every((n) => n.length > 0) && !targetsClash
         : target !== NEW_ACCOUNT || newName.trim().length > 0;
-    const canImport = total > 0 && parsed?.issues.length === 0 && !submitting && targetsReady;
+    // Rows valued by hand, each with the account it goes to and what it
+    // changes there. Into a new account, every one is new.
+    const today = localDate();
+    const datedOk = /^\d{4}-\d{2}-\d{2}$/.test(valuesAsOf) && valuesAsOf >= "0001-01-01" && valuesAsOf <= today;
+    const handValued = (multiAccount
+        ? groups.map((g, i) => ({ label: g.account, manual: g.manual, target: chosen[i].target }))
+        : [{ label: null, manual: groups[0]?.manual ?? manual, target }]
+    ).filter((g) => g.manual.length > 0).map((g) => {
+        const accountId = g.target === NEW_ACCOUNT ? null : g.target;
+        const plan = planManualImport(
+            accountId ? existing.handValued.filter((h) => h.portfolioId === accountId) : [],
+            g.manual,
+            {
+                asOf: datedOk ? valuesAsOf : today,
+                positions: accountId ? existing.positions.filter((p) => p.accountId === accountId).map((p) => p.symbol) : [],
+            },
+        );
+        return { ...g, accountId, plan };
+    });
+    const planned = handValued.flatMap((g) => g.plan.map((change) => ({ account: g.label, change })));
+    // Holdings an earlier file brought into a target account that this one leaves out: they stay.
+    const claimed = new Set(planned.flatMap(({ change }) => (change.kind === "insert" ? [] : [change.id])));
+    const notInFile = accounts.flatMap((account) => {
+        if (!(multiAccount ? chosen.some((t) => t.target === account.id) : target === account.id)) return [];
+        const left = existing.handValued.filter((h) => h.portfolioId === account.id && h.importKey !== null && !claimed.has(h.id)).length;
+        return left > 0 ? [{ account: account.name, left }] : [];
+    });
+    // A linked account's holdings without a ticker come from its bank (LinkedAccountImportError).
+    const linkedTargets = accounts.filter((a) => a.linked && handValued.some((g) => g.accountId === a.id));
+    const canImport = total > 0 && parsed?.issues.length === 0 && !submitting && targetsReady
+        && (manual.length === 0 || (datedOk && linkedTargets.length === 0));
+    // With rows valued by hand, the day their values are from: by the
+    // browser's calendar, no later than its today.
+    const valuesDateField = manual.length > 0 && (
+        <label className="pm-exec-field">
+            <span className="pm-exec-field-label">Values as of</span>
+            <input type="date" className="pm-exec-input" value={valuesAsOf} max={today} required onChange={(e) => setValuesAsOf(e.target.value)} />
+        </label>
+    );
     const setAccountTarget = (account: string, change: Partial<AccountTarget>) =>
         setAccountTargets((current) => ({ ...current, [account]: { ...(current[account] ?? { target: NEW_ACCOUNT, newName: account }), ...change } }));
 
@@ -116,16 +209,19 @@ export function ImportHoldingsDialog({
         setError(null);
         try {
             const destination = (t: AccountTarget) => (t.target === NEW_ACCOUNT ? { newPortfolioName: t.newName.trim() } : { portfolioId: t.target });
+            // Only with rows valued by hand, so a file without them sends what it always has.
+            const valuedByHand = (rowsByHand: typeof manual) => (rowsByHand.length > 0 ? { manual: rowsByHand, valuesAsOf } : {});
             const res = await fetch("/api/portfolio/import", {
                 method: "POST",
                 headers: { "content-type": "application/json" },
                 body: JSON.stringify(multiAccount
-                    ? { accounts: groups.map((g, i) => ({ ...destination(chosen[i]), rows: g.rows, options: g.options })) }
+                    ? { accounts: groups.map((g, i) => ({ ...destination(chosen[i]), rows: g.rows, options: g.options, ...valuedByHand(g.manual) })) }
                     : {
                         ...destination({ target, newName }),
                         // Without the account the file named.
                         rows: groups[0]?.rows ?? rows,
                         options: groups[0]?.options ?? options,
+                        ...valuedByHand(groups[0]?.manual ?? manual),
                     }),
             });
             const body = await res.json().catch(() => ({}));
@@ -134,7 +230,13 @@ export function ImportHoldingsDialog({
                 setSubmitting(false);
                 return;
             }
-            type Counts = { insert: number; update: number; unchanged: number; options?: { insert: number; update: number; unchanged: number } };
+            type Counts = {
+                insert: number;
+                update: number;
+                unchanged: number;
+                options?: { insert: number; update: number; unchanged: number };
+                manual?: { insert: number; update: number; unchanged: number; replacedPositions: number };
+            };
             const results: Counts[] = multiAccount ? body.data.accounts : [body.data];
             const sum = (pick: (c: Counts) => number) => results.reduce((n, c) => n + pick(c), 0);
             const d = {
@@ -143,12 +245,24 @@ export function ImportHoldingsDialog({
                 unchanged: sum((c) => c.unchanged),
                 options: { insert: sum((c) => c.options?.insert ?? 0), update: sum((c) => c.options?.update ?? 0), unchanged: sum((c) => c.options?.unchanged ?? 0) },
             };
+            const m = {
+                insert: sum((c) => c.manual?.insert ?? 0),
+                update: sum((c) => c.manual?.update ?? 0),
+                unchanged: sum((c) => c.manual?.unchanged ?? 0),
+                replacedPositions: sum((c) => c.manual?.replacedPositions ?? 0),
+            };
             const across = multiAccount ? ` across ${groups.length} account${groups.length === 1 ? "" : "s"}` : "";
             const optionsNote = options.length > 0
                 ? ` Option positions: ${d.options.insert} new, ${d.options.update} updated${d.options.unchanged ? `, ${d.options.unchanged} unchanged` : ""}.`
                 : "";
+            const replaced = m.replacedPositions
+                ? `; ${m.replacedPositions} ${m.replacedPositions === 1 ? "replaces a position" : "replace positions"} Atlas couldn't price`
+                : "";
+            const manualNote = manual.length > 0
+                ? ` Valued by hand: ${m.insert} new, ${m.update} updated${m.unchanged ? `, ${m.unchanged} unchanged` : ""}${replaced}.`
+                : "";
             toast.success(
-                `Imported ${total} position${total === 1 ? "" : "s"}${across}: ${d.insert} new, ${d.update} updated${d.unchanged ? `, ${d.unchanged} unchanged` : ""}.${optionsNote}`,
+                `Imported ${total} position${total === 1 ? "" : "s"}${across}: ${d.insert} new, ${d.update} updated${d.unchanged ? `, ${d.unchanged} unchanged` : ""}.${optionsNote}${manualNote}`,
             );
             setOpen(false);
             reset();
@@ -192,7 +306,9 @@ export function ImportHoldingsDialog({
                         <DialogDescription>
                             Use your broker&apos;s positions export. Atlas reads the symbol, quantity, and average cost
                             (or total cost basis), and the account when the file covers several. A symbol you already
-                            hold in the chosen account is replaced; other positions are left alone. Option rows go to the LEAPS ledger, priced per share from the total
+                            hold in the chosen account is replaced; other positions are left alone. A holding with no
+                            ticker, such as a 401(k) trust known by its name or CUSIP, comes in valued by hand at the
+                            file&apos;s market value. Option rows go to the LEAPS ledger, priced per share from the total
                             cost basis, or else the average cost; check the preview.
                         </DialogDescription>
                     </DialogHeader>
@@ -217,15 +333,18 @@ export function ImportHoldingsDialog({
                         {parsed && (
                             <div className="pm-import-preview" data-testid="import-preview">
                                 <p className="pm-import-summary">
-                                    {fileName}: {rows.length} position{rows.length === 1 ? "" : "s"}
-                                    {multiAccount && ` in ${groups.length} account${groups.length === 1 ? "" : "s"}`}
-                                    {options.length > 0 && ` and ${options.length} option position${options.length === 1 ? "" : "s"}`} ready
+                                    {fileName}: {describeImportCounts({
+                                        positions: rows.length,
+                                        handValued: manual.length,
+                                        options: options.length,
+                                        accounts: multiAccount ? groups.length : 1,
+                                    })} ready
                                     {parsed.issues.length > 0 && `, ${parsed.issues.length} ${parsed.issues.length === 1 ? "row needs" : "rows need"} attention`}
                                     {parsed.skipped > 0 && `, ${parsed.skipped} cash or total row${parsed.skipped === 1 ? "" : "s"} skipped`}.
                                 </p>
                                 {rows.length > 0 && (
                                     <div className="pm-table-scroll pm-import-table">
-                                        <table className="pm-table-full">
+                                        <table className="pm-table-full" aria-label="Positions to import">
                                             <thead>
                                                 <tr>
                                                     {multiAccount && <th scope="col">Account</th>}
@@ -275,6 +394,50 @@ export function ImportHoldingsDialog({
                                         {options.length > 50 && <p className="pm-import-more">…and {options.length - 50} more</p>}
                                     </div>
                                 )}
+                                {planned.length > 0 && (
+                                    <>
+                                        <div className="pm-table-scroll pm-import-table">
+                                            <table className="pm-table-full" aria-label="Holdings valued by hand to import">
+                                                <thead>
+                                                    <tr>
+                                                        {multiAccount && <th scope="col">Account</th>}
+                                                        <th scope="col">Holding</th>
+                                                        <th scope="col" className="num">Units</th>
+                                                        <th scope="col" className="num">Value</th>
+                                                        <th scope="col" className="num">Cost</th>
+                                                        <th scope="col">In Atlas</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {planned.slice(0, 50).map(({ account, change }) => (
+                                                        <tr key={`${account ?? ""}-${change.key}`}>
+                                                            {multiAccount && <td>{account}</td>}
+                                                            <td>
+                                                                <div>{change.row.name}</div>
+                                                                {change.row.identifier && <div className="pm-card-subtitle">{change.row.identifier}</div>}
+                                                            </td>
+                                                            <td className="num">{change.row.quantity == null ? "—" : formatQty(change.row.quantity)}</td>
+                                                            <td className="num">{formatUsd(change.row.value)}</td>
+                                                            <td className="num">{change.row.costBasis == null ? "—" : formatUsd(change.row.costBasis)}</td>
+                                                            <td>{inAtlas(change)}</td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                            {planned.length > 50 && <p className="pm-import-more">…and {planned.length - 50} more</p>}
+                                        </div>
+                                        <p className="pm-import-note">
+                                            Atlas can&apos;t price these, so each counts at the file&apos;s value until the next import or your own update.
+                                        </p>
+                                        {notInFile.map(({ account, left }) => (
+                                            <p key={account} className="pm-import-note" data-testid="import-not-in-file">
+                                                {left === 1
+                                                    ? `1 holding valued by hand that an earlier file brought into ${account} isn't in this one. It stays as it is; delete it on Holdings if it's gone.`
+                                                    : `${left} holdings valued by hand that an earlier file brought into ${account} aren't in this one. They stay as they are; delete them on Holdings if they're gone.`}
+                                            </p>
+                                        ))}
+                                    </>
+                                )}
                                 {parsed.issues.length > 0 && (
                                     <>
                                         <p role="alert">Fix the listed issues and upload the CSV again before importing.</p>
@@ -295,7 +458,7 @@ export function ImportHoldingsDialog({
                                 <p className="pm-exec-field-label">Where each account goes</p>
                                 {groups.map((g, i) => {
                                     const t = chosen[i];
-                                    const count = g.rows.length + g.options.length;
+                                    const count = g.rows.length + g.options.length + g.manual.length;
                                     return (
                                         <div key={g.account} className="pm-form-pair" data-testid="import-account-target">
                                             <label className="pm-exec-field">
@@ -330,6 +493,7 @@ export function ImportHoldingsDialog({
                                         </div>
                                     );
                                 })}
+                                {valuesDateField}
                                 {targetsClash && (
                                     <p role="alert">Each of the file&apos;s accounts needs its own Atlas account.</p>
                                 )}
@@ -367,8 +531,19 @@ export function ImportHoldingsDialog({
                                         />
                                     </label>
                                 )}
+                                {valuesDateField}
                             </div>
                         )}
+
+                        {manual.length > 0 && valuesAsOf > today && (
+                            <p className="pm-import-error" role="alert">Choose a date that isn&apos;t in the future.</p>
+                        )}
+                        {linkedTargets.map((account) => (
+                            <p key={account.id} className="pm-import-error" role="alert">
+                                {account.name} is linked to your bank, so its holdings without a ticker come from there. Import this
+                                file into another account.
+                            </p>
+                        ))}
 
                         {error && (
                             <p className="pm-import-error" role="alert">

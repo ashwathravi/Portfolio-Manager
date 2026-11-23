@@ -89,5 +89,6 @@ export const GLOSSARY: readonly GlossaryTerm[] = [
     { term: 'Sell discipline', definition: 'Rules that trigger a trim, review, or no-add block when a position crosses a threshold you set.', href: '/settings#risk-policy' },
     { term: 'Theme', definition: 'A cross-cutting exposure such as AI infrastructure or semiconductors, with its own cap.', href: '/portfolios/holdings' },
     { term: 'TWR', definition: 'Time-weighted return: performance that removes the effect of deposits and withdrawals.', href: '/performance' },
+    { term: 'Valued by hand', definition: 'A holding Atlas can’t price, such as a 401(k) fund with no ticker. It counts at the value you or your broker’s positions file give, as of its date, until the next one.', href: '/portfolios/holdings' },
     { term: '13F', definition: 'Quarterly holdings filing by large investment managers, used by Alpha Radar. Filings are delayed by up to 45 days.', href: '/research?tab=alpha-radar' },
 ];

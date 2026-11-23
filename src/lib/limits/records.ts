@@ -13,6 +13,11 @@
  * Other assets and debts (net_worth_items) have no dismissed rows: a deleted
  * one is gone, so every row counts.
  *
+ * Holdings valued by hand (manual_holdings) count across the user's
+ * accounts, those a linked account syncs included; like transactions, a
+ * sync is never refused. The card's add and an import that brings them in
+ * from a positions file are.
+ *
  * The checks run on the server (records-server.ts); this file is shared with
  * the pages, which say why a save was refused.
  */
@@ -22,6 +27,7 @@ export const RECORD_LIMITS = {
     journal: 2_000,
     theses: 200,
     transactions: 50_000,
+    manualHoldings: 1_000,
     netWorthItems: 100,
 } as const;
 
@@ -45,6 +51,10 @@ const DETAILS: Record<RecordKind, { code: string; message: (limit: string) => st
     transactions: {
         code: "TRANSACTION_LIMIT",
         message: (limit) => `Your accounts hold at most ${limit} transactions. Delete some to add more; nothing was added.`,
+    },
+    manualHoldings: {
+        code: "MANUAL_HOLDING_LIMIT",
+        message: (limit) => `You can keep at most ${limit} holdings valued by hand. Delete some to add more; nothing was added.`,
     },
     netWorthItems: {
         code: "NET_WORTH_ITEM_LIMIT",

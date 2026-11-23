@@ -988,6 +988,7 @@ a.pm-watchlist-sym:hover .pm-watchlist-ticker { text-decoration: underline; }
 .pm-import-issues { margin: 0; padding-left: 18px; font-size: 12px; color: var(--pm-warn); display: grid; gap: 2px; }
 .pm-import-target { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
 .pm-import-error { margin: 0; font-size: 13px; color: var(--pm-danger); }
+.pm-import-note { margin: 0; font-size: 12px; color: var(--pm-fg-muted); }
 
 .pm-data-unavailable {
   padding: 12px 14px;

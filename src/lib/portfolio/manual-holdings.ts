@@ -1,20 +1,24 @@
 /**
  * Holdings valued by hand (manual_holdings in schema.ts): reading them for
- * an account's value, and the user's own adds, edits and deletes. Every
- * query is scoped to the user's ID: another user's holding or account
- * reads as not found.
+ * an account's value, the user's own adds, edits and deletes, and the rows
+ * of a positions file with no ticker (importManualRows). Every query is
+ * scoped to the user's ID: another user's holding or account reads as not
+ * found.
  */
 
-import { and, asc, eq, gt, sql } from "drizzle-orm";
+import { and, asc, eq, gt, isNull, like, or, sql } from "drizzle-orm";
 
 import { db } from "@/db";
 import { manualHoldingValues, manualHoldings, portfolios } from "@/db/schema";
+import { withinRecordLimit } from "@/lib/limits/records-server";
 import type { ManualHoldingInput } from "@/lib/validators/manual-holding";
+import { planManualImport, type ManualImportRow, type ManualPlanSummary } from "./csvImport";
 import { buildLockUserAccountsQuery } from "./manage";
 import { AccountNotFoundError } from "./transactionsWrite";
 
 type Database = typeof db;
-type Executor = Database | Parameters<Parameters<Database["transaction"]>[0]>[0];
+type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
+type Executor = Database | Transaction;
 
 export interface ManualHolding {
     id: string;
@@ -26,7 +30,14 @@ export interface ManualHolding {
     costBasis: number | null;
     valueAsOf: string;
     source: string;
+    /** Its key from a positions file (manualImportKey), so the page can preview the next import; never a linked account's key. */
+    importKey: string | null;
+    /** Whether an import may update it: one added by hand or by a file, never one a linked account keys. */
+    importable: boolean;
 }
+
+/** The prefix of a key a positions file gave a holding (manualImportKey). */
+const IMPORT_KEY_PREFIX = "csv:";
 
 const num = (v: string | null): number | null => {
     if (v == null) return null;
@@ -46,6 +57,7 @@ export function buildUserManualHoldingsQuery(userId: string, database: Pick<Data
             costBasis: manualHoldings.costBasis,
             valueAsOf: manualHoldings.valueAsOf,
             source: manualHoldings.source,
+            externalId: manualHoldings.externalId,
         })
         .from(manualHoldings)
         .where(eq(manualHoldings.userId, userId))
@@ -55,11 +67,13 @@ export function buildUserManualHoldingsQuery(userId: string, database: Pick<Data
 /** The user's holdings valued by hand, across their accounts. */
 export async function loadManualHoldings(userId: string, database: Database = db): Promise<ManualHolding[]> {
     const rows = await buildUserManualHoldingsQuery(userId, database);
-    return rows.map((r) => ({
+    return rows.map(({ externalId, ...r }) => ({
         ...r,
         quantity: num(r.quantity),
         value: num(r.value) ?? 0,
         costBasis: num(r.costBasis),
+        importKey: externalId?.startsWith(IMPORT_KEY_PREFIX) ? externalId : null,
+        importable: externalId === null || externalId.startsWith(IMPORT_KEY_PREFIX),
     }));
 }
 
@@ -129,6 +143,10 @@ async function touchAccount(tx: Executor, portfolioId: string, now: Date) {
     await tx.update(portfolios).set({ updatedAt: now }).where(eq(portfolios.id, portfolioId));
 }
 
+/**
+ * Adds the user's holding, up to their limit of holdings valued by hand
+ * (RecordLimitError past it, with nothing written).
+ */
 export async function addManualHolding(
     userId: string,
     portfolioId: string,
@@ -140,10 +158,10 @@ export async function addManualHolding(
         // an edit waits for it, so neither overwrites the other.
         await buildLockUserAccountsQuery(userId, tx);
         await ownedAccount(tx, userId, portfolioId);
-        const [inserted] = await tx
+        const [inserted] = await withinRecordLimit(tx, "manualHoldings", userId, () => tx
             .insert(manualHoldings)
             .values({ userId, portfolioId, ...values(input), source: "manual", createdAt: now, updatedAt: now })
-            .returning({ id: manualHoldings.id });
+            .returning({ id: manualHoldings.id }));
         const saved = values(input);
         await recordManualValue(tx, inserted.id, { date: saved.valueAsOf, value: saved.value, quantity: saved.quantity }, { fromThenOn: true, now });
         await touchAccount(tx, portfolioId, now);
@@ -156,7 +174,10 @@ export async function addManualHolding(
  * user's accounts. False when the user has no holding with that ID. A
  * linked account's holding, edited, becomes the user's own (source
  * "manual"): it keeps Plaid's ID, so later syncs leave it, and the user's
- * value, alone rather than adding it again.
+ * value, alone rather than adding it again. One a positions file brought
+ * in stays "csv" with its key, so the next file still updates it. Moved
+ * into an account that already has a holding with its key, it goes
+ * without the key, which is unique within an account.
  */
 export async function updateManualHolding(
     userId: string,
@@ -169,14 +190,29 @@ export async function updateManualHolding(
         await buildLockUserAccountsQuery(userId, tx);
         await ownedAccount(tx, userId, portfolioId);
         const [before] = await tx
-            .select({ portfolioId: manualHoldings.portfolioId })
+            .select({ portfolioId: manualHoldings.portfolioId, source: manualHoldings.source, externalId: manualHoldings.externalId })
             .from(manualHoldings)
             .where(and(eq(manualHoldings.id, id), eq(manualHoldings.userId, userId)))
             .limit(1);
         if (!before) return false;
+        let externalId = before.externalId;
+        if (externalId !== null && before.portfolioId !== portfolioId) {
+            const [taken] = await tx
+                .select({ id: manualHoldings.id })
+                .from(manualHoldings)
+                .where(and(eq(manualHoldings.portfolioId, portfolioId), eq(manualHoldings.userId, userId), eq(manualHoldings.externalId, externalId)))
+                .limit(1);
+            if (taken) externalId = null;
+        }
         await tx
             .update(manualHoldings)
-            .set({ portfolioId, ...values(input), source: "manual", updatedAt: now })
+            .set({
+                portfolioId,
+                ...values(input),
+                source: before.source === "csv" ? "csv" : "manual",
+                ...(externalId !== before.externalId ? { externalId } : {}),
+                updatedAt: now,
+            })
             .where(and(eq(manualHoldings.id, id), eq(manualHoldings.userId, userId)));
         const saved = values(input);
         await recordManualValue(tx, id, { date: saved.valueAsOf, value: saved.value, quantity: saved.quantity }, { fromThenOn: true, now });
@@ -198,4 +234,131 @@ export async function deleteManualHolding(userId: string, id: string, { database
         await touchAccount(tx, deleted.portfolioId, now);
         return true;
     });
+}
+
+export type ManualImportResult = ManualPlanSummary;
+
+/**
+ * Writes a positions file's rows with no ticker into one of the user's
+ * accounts, inside the import's transaction (importHoldings, which holds
+ * the user's account lock and the records lock for these holdings).
+ *
+ * The rows are matched to the account's holdings an import may update
+ * (added by hand or by an earlier file; never one a linked account keys)
+ * as planManualImport says. A new holding is added with source "csv", its
+ * import key and the file's day (`asOf`). A match is updated in place and
+ * keeps its id, its name and any identifier it had; it takes the row's key
+ * and source "csv", so the next file finds it. When the file isn't older
+ * than the saved value, the value, units and day are the file's, and the
+ * cost too when the file gives one. Every row's value is recorded for the
+ * file's day, without dropping later days: an older file only adds to the
+ * history.
+ *
+ * `replace` lists the positions (held under a CUSIP or a plan's number,
+ * from before they could be valued by hand) that the caller deletes, since
+ * it writes the account's positions. `changed` says whether the account
+ * itself changed, as Plaid's rule has it: a holding added or a position
+ * replaced, or units or a cost changed. A new value alone is a price.
+ */
+export async function importManualRows(
+    tx: Executor,
+    userId: string,
+    portfolioId: string,
+    rows: readonly ManualImportRow[],
+    { asOf, positions, now }: { asOf: string; positions: readonly string[]; now: Date },
+): Promise<ManualImportResult & { replace: string[]; changed: boolean }> {
+    const saved = await tx
+        .select({
+            id: manualHoldings.id,
+            name: manualHoldings.name,
+            identifier: manualHoldings.identifier,
+            externalId: manualHoldings.externalId,
+            quantity: manualHoldings.quantity,
+            value: manualHoldings.value,
+            costBasis: manualHoldings.costBasis,
+            valueAsOf: manualHoldings.valueAsOf,
+        })
+        .from(manualHoldings)
+        .where(and(
+            eq(manualHoldings.portfolioId, portfolioId),
+            eq(manualHoldings.userId, userId),
+            or(isNull(manualHoldings.externalId), like(manualHoldings.externalId, `${IMPORT_KEY_PREFIX}%`)),
+        ))
+        .orderBy(asc(manualHoldings.name), asc(manualHoldings.id));
+    const existing = saved.map((h) => ({
+        id: h.id,
+        name: h.name,
+        identifier: h.identifier,
+        importKey: h.externalId,
+        quantity: num(h.quantity),
+        value: num(h.value) ?? 0,
+        costBasis: num(h.costBasis),
+        valueAsOf: h.valueAsOf,
+    }));
+    const byId = new Map(existing.map((h) => [h.id, h]));
+    const plan = planManualImport(existing, rows, { asOf, positions });
+    const decimal = (n: number | null) => (n === null ? null : String(n));
+
+    const ids = new Map<string, string>();
+    const inserts = plan.flatMap((p) => (p.kind === "insert" ? [p] : []));
+    if (inserts.length > 0) {
+        const created = await tx
+            .insert(manualHoldings)
+            .values(inserts.map((p) => ({
+                userId,
+                portfolioId,
+                name: p.row.name,
+                identifier: p.row.identifier,
+                quantity: decimal(p.row.quantity),
+                value: String(p.row.value),
+                costBasis: decimal(p.row.costBasis),
+                valueAsOf: asOf,
+                source: "csv",
+                externalId: p.key,
+                createdAt: now,
+                updatedAt: now,
+            })))
+            .returning({ id: manualHoldings.id, externalId: manualHoldings.externalId });
+        for (const c of created) if (c.externalId) ids.set(c.externalId, c.id);
+    }
+    for (const p of plan) {
+        if (p.kind === "insert") continue;
+        const holding = byId.get(p.id)!;
+        const kept = { externalId: p.key, source: "csv", identifier: holding.identifier ?? p.row.identifier, updatedAt: now };
+        await tx
+            .update(manualHoldings)
+            .set(p.olderThanSaved ? kept : {
+                ...kept,
+                value: String(p.row.value),
+                quantity: decimal(p.row.quantity),
+                costBasis: decimal(p.row.costBasis ?? holding.costBasis),
+                valueAsOf: asOf,
+            })
+            .where(and(eq(manualHoldings.id, p.id), eq(manualHoldings.userId, userId)));
+    }
+    if (plan.length > 0) {
+        await tx
+            .insert(manualHoldingValues)
+            .values(plan.map((p) => ({
+                manualHoldingId: p.kind === "insert" ? ids.get(p.key)! : p.id,
+                date: asOf,
+                value: String(p.row.value),
+                quantity: decimal(p.row.quantity),
+                recordedAt: now,
+            })))
+            .onConflictDoUpdate({
+                target: [manualHoldingValues.manualHoldingId, manualHoldingValues.date],
+                set: { value: sql`excluded.value`, quantity: sql`excluded.quantity`, recordedAt: sql`excluded.recorded_at` },
+            });
+    }
+    const replace = plan.flatMap((p) => (p.replacesPosition !== null ? [p.replacesPosition] : []));
+    const changed = plan.some((p) => p.kind === "insert" || p.replacesPosition !== null || p.changesHolding);
+    return {
+        insert: inserts.length,
+        update: plan.filter((p) => p.kind === "update").length,
+        unchanged: plan.filter((p) => p.kind === "unchanged").length,
+        replacedPositions: replace.length,
+        replace,
+        changed,
+    };
 }

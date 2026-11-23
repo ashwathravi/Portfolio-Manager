@@ -8,7 +8,7 @@ import { buildUserHoldingsQuery, buildUserPortfolioOptionsQuery } from "@/lib/po
 import { HoldingsPageClient, type HoldingsSeed } from "@/components/holdings/HoldingsPageClient";
 import { PageHeaderSync } from "@/components/layout/TopBar";
 import { DataUnavailableNotice } from "@/components/data-display/DataUnavailableNotice";
-import { ImportHoldingsDialog, type ImportAccountOption } from "@/components/holdings/ImportHoldingsDialog";
+import { ImportHoldingsDialog, type ImportAccountOption, type ImportExisting } from "@/components/holdings/ImportHoldingsDialog";
 import HoldingsLoading from "./loading";
 import { getSecurityProfiles } from "@/lib/markets/price-store";
 import { holdingName, loadSecurityProfiles } from "@/lib/markets/security-profile";
@@ -17,6 +17,7 @@ import type { LoadedOptionPosition } from "@/lib/portfolio/option-positions";
 import { loadOptionPositions, loadThesisChoices } from "@/lib/portfolio/option-positions-store";
 import { bankLinkingAvailable } from "@/lib/plaid/availability";
 import { parseHoldingsRowView, type HoldingsRowView } from "@/lib/holdings/combine";
+import { looksLikeSecurityCode } from "@/lib/portfolio/csvImport";
 
 /**
  * Phase 4 (AR-74) Holdings page.
@@ -42,7 +43,7 @@ async function HoldingsContent({ rowView }: { rowView: HoldingsRowView }) {
         portfolioId: string;
         portfolioName: string;
     }> = [];
-    let accounts: Array<ImportAccountOption & { cashBalance: number | null }> = [];
+    let accounts: Array<{ id: string; name: string; cashBalance: number | null; source: string }> = [];
     let optionPositions: LoadedOptionPosition[] = [];
     let optionTheses: Array<{ id: string; ticker: string; title: string }> = [];
     let manual: ManualHolding[] = [];
@@ -121,6 +122,20 @@ async function HoldingsContent({ rowView }: { rowView: HoldingsRowView }) {
         };
     });
 
+    // The import dialog warns before rows with no ticker go to a linked
+    // account, and previews what they update: holdings valued by hand an
+    // import may change, and positions held under a CUSIP or plan code
+    // that such a row replaces.
+    const importAccounts: ImportAccountOption[] = accounts.map(({ id, name, source }) => ({ id, name, linked: source === "plaid" }));
+    const importExisting: ImportExisting = {
+        handValued: manual
+            .filter((m) => m.importable)
+            .map(({ id, portfolioId, name, identifier, quantity, value, costBasis, valueAsOf, importKey }) => ({
+                id, portfolioId, name, identifier, quantity, value, costBasis, valueAsOf, importKey,
+            })),
+        positions: dbHoldings.filter((h) => looksLikeSecurityCode(h.symbol)).map((h) => ({ accountId: h.portfolioId, symbol: h.symbol })),
+    };
+
     const marketValue = seed.reduce((sum, h) => sum + h.marketValue, 0);
     const subtitle = seed.length === 0
         ? "Every position across every account"
@@ -132,12 +147,14 @@ async function HoldingsContent({ rowView }: { rowView: HoldingsRowView }) {
                 title="Portfolio"
                 subtitle={subtitle}
                 crumbs={["Portfolio", "Holdings"]}
-                actions={seed.length > 0 ? <ImportHoldingsDialog accounts={accounts.map(({ id, name }) => ({ id, name }))} /> : undefined}
+                actions={seed.length > 0 ? <ImportHoldingsDialog accounts={importAccounts} existing={importExisting} /> : undefined}
             />
             <HoldingsPageClient
                 holdings={seed}
                 initialRowView={rowView}
-                importAccounts={accounts.map(({ id, name }) => ({ id, name }))}
+                importAccounts={importAccounts}
+                importExisting={importExisting}
+                handValuedCount={manual.length}
                 // The LEAPS ledger measures against what Today and Trade do:
                 // holdings, cash and options together.
                 cashTotal={accounts.reduce((sum, account) => sum + (account.cashBalance || 0), 0)}

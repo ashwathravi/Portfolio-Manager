@@ -187,6 +187,8 @@ function isSessionBackedApiRoute(pathname: string, method: string): boolean {
     if (/^\/api\/portfolios\/(?!count$)[^/]+$/.test(pathname) && (method === "PATCH" || method === "DELETE")) return true;
     if (/^\/api\/portfolio\/[^/]+\/value$/.test(pathname) && method === "GET") return true;
     if (pathname === "/api/portfolio/import" && method === "POST") return true;
+    if (pathname === "/api/portfolio/manual-holdings" && method === "POST") return true;
+    if (/^\/api\/portfolio\/manual-holdings\/[^/]+$/.test(pathname) && (method === "PUT" || method === "DELETE")) return true;
     if (pathname === "/api/portfolio/options" && method === "POST") return true;
     if (/^\/api\/portfolio\/options\/[^/]+$/.test(pathname) && (method === "PUT" || method === "DELETE")) return true;
     if (pathname === "/api/portfolio/net-worth-items" && method === "POST") return true;

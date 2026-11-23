@@ -8,11 +8,13 @@ import postgres from 'postgres';
 import * as schema from '../../src/db/schema';
 import { AccountDeletionBlockedError, deleteAccount } from '../../src/lib/account/delete';
 import { buildAccountExport } from '../../src/lib/account/export';
+import { importHoldings } from '../../src/lib/portfolio/importHoldings';
 import { addManualHolding, updateManualHolding } from '../../src/lib/portfolio/manual-holdings';
 import { manualSymbol } from '../../src/lib/portfolio/manual-symbol';
 import { hasGoogleAccount } from '../../src/lib/auth/new-accounts';
 import { googleWorkspaceDomains } from '../../src/lib/auth/session-access';
 import type { PlaidFetch } from '../../src/lib/plaid/link';
+import { portfolioImportSchema } from '../../src/lib/validators/portfolio-import';
 
 // Launch item i65: deleting an account and exporting its data, against a
 // scratch database with every migration applied and a fake Plaid. Needs a
@@ -246,6 +248,22 @@ describe('account deletion and export', { skip: !DATABASE_URL && 'SCRIPTS_TEST_D
             ['O:SPXW261218C05000000', 'SPX', 1, 18, 'plaid', 21.5, '2026-10-25'],
             ['O:AAPL270115C00250000', 'AAPL', 3, 18.2, 'manual', null, null],
         ]);
+    });
+
+    test('a holding a positions file brought in is exported as from the CSV, with its values by day, and without its import key', async () => {
+        const portfolioId = await seedUser('u-export-csv');
+        const file = (value: number, valuesAsOf: string) => portfolioImportSchema.parse({
+            portfolioId, rows: [], manual: [{ name: 'Stable Value Fund', identifier: '99ZZ12341', quantity: 100, value, costBasis: 9000 }], valuesAsOf,
+        });
+        await importHoldings('u-export-csv', file(9800, '2026-10-22'), {}, database);
+        await importHoldings('u-export-csv', file(10000, '2026-10-23'), {}, database);
+
+        const exported = await buildAccountExport('u-export-csv', database, NOW);
+        assert.deepEqual(exported.accounts[0].manualHoldings.map((m) => [m.name, m.identifier, m.value, m.valueAsOf, m.source, m.values]), [
+            ['Stable Value Fund', '99ZZ12341', 10000, '2026-10-23', 'csv', [{ date: '2026-10-22', value: 9800, quantity: 100 }, { date: '2026-10-23', value: 10000, quantity: 100 }]],
+        ]);
+        // The key the next file finds it by stays inside Atlas.
+        assert.ok(!JSON.stringify(exported).includes('csv:id:'));
     });
 
     test('deleting ends the user\'s Plaid connections, then removes every row of theirs, and nobody else\'s', async () => {

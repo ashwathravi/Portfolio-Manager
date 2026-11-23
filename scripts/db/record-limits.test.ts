@@ -7,20 +7,25 @@ import postgres from 'postgres';
 
 import * as schema from '../../src/db/schema';
 import { RECORD_LIMITS, RecordLimitError } from '../../src/lib/limits/records';
+import { importHoldings } from '../../src/lib/portfolio/importHoldings';
+import { addManualHolding, deleteManualHolding, updateManualHolding } from '../../src/lib/portfolio/manual-holdings';
 import { addNetWorthItem, deleteNetWorthItem, updateNetWorthItem } from '../../src/lib/portfolio/net-worth-items';
 import { addTransaction, deleteTransaction, importTransactions } from '../../src/lib/portfolio/transactionsWrite';
 import { importJournal, saveJournalEntry } from '../../src/lib/research/server/journal';
 import { importTheses, saveThesis } from '../../src/lib/research/server/theses';
 import { importWatchlist, saveWatchItem } from '../../src/lib/research/server/watchlist';
 import type { JournalEntryInput } from '../../src/lib/validators/journal';
+import { manualHoldingSchema } from '../../src/lib/validators/manual-holding';
 import { netWorthItemSchema } from '../../src/lib/validators/net-worth-item';
+import { portfolioImportSchema } from '../../src/lib/validators/portfolio-import';
 import type { ThesisInput } from '../../src/lib/validators/thesis';
 import { transactionRowSchema } from '../../src/lib/validators/transaction';
 import type { WatchItemInput } from '../../src/lib/validators/watchlist';
 
 // Launch item i77: how many watchlist items, journal entries, theses,
-// transactions and other assets and debts one user keeps, checked by the
-// real writes against a scratch database with every migration applied.
+// transactions, holdings valued by hand and other assets and debts one user
+// keeps, checked by the real writes against a scratch database with every
+// migration applied.
 // Needs a local Postgres it may create databases in; CI's e2e job sets this.
 // Locally: SCRIPTS_TEST_DATABASE_URL=postgres://atlas:atlas-local-only@127.0.0.1:54329/atlas_wealth
 const DATABASE_URL = process.env.SCRIPTS_TEST_DATABASE_URL?.trim();
@@ -249,6 +254,71 @@ describe('per-user record limits (launch item i77)', { skip: !DATABASE_URL && 'S
             await addNetWorthItem('u-1', home(), { database });
             assert.equal(await count(), 1);
             assert.equal(await count('u-2'), 100);
+        });
+    });
+
+    describe('holdings valued by hand', () => {
+        const fund = (fields: Record<string, unknown> = {}) => manualHoldingSchema.parse({ name: 'Target 2055 Trust', value: 1000, valueAsOf: '2026-11-02', ...fields });
+        const count = async (user = 'u-1') => (await sql<{ n: number }[]>`SELECT count(*)::int AS n FROM manual_holdings WHERE user_id = ${user}`)[0].n;
+        const account = async (user = 'u-1', accountName = 'IRA') =>
+            (await sql<{ id: string }[]>`INSERT INTO portfolios (user_id, name) VALUES (${user}, ${accountName}) RETURNING id`)[0].id;
+        /** `n` holdings valued by hand in the account. */
+        const fill = (portfolioId: string, n: number, user = 'u-1') => sql`
+            INSERT INTO manual_holdings (user_id, portfolio_id, name, value, value_as_of)
+            SELECT ${user}, ${portfolioId}, 'Fund ' || n, n, '2026-11-01' FROM generate_series(1, ${n}) AS n`;
+        /** A positions file for the account: a share, and a fund with no ticker. */
+        const positionsFile = (portfolioId: string, symbol: string, fundName: string) => portfolioImportSchema.parse({
+            portfolioId, rows: [{ symbol, quantity: 1, avgCost: 100 }], manual: [{ name: fundName, value: 1000 }], valuesAsOf: '2026-11-02',
+        });
+
+        test('at 1,000 a new one is refused, added or imported, with nothing of the import written; an edit, a delete and a re-import that adds nothing aren\'t', async () => {
+            assert.equal(RECORD_LIMITS.manualHoldings, 1_000);
+            const ira = await account();
+            const [{ id: linked }] = await sql<{ id: string }[]>`
+                INSERT INTO portfolios (user_id, name, source, external_account_id) VALUES ('u-1', 'Brokerage Link', 'plaid', 'acc-1') RETURNING id`;
+            // What a linked account syncs counts too.
+            await sql`INSERT INTO manual_holdings (user_id, portfolio_id, name, value, value_as_of, source, external_id)
+                      SELECT 'u-1', ${linked}, 'Synced ' || n, n, '2026-11-01', 'plaid', ${linked}::text || ':sec_' || n FROM generate_series(1, 400) AS n`;
+            await fill(ira, 599);
+            const first = await importHoldings('u-1', positionsFile(ira, 'AAPL', 'Target 2055 Trust'), {}, database);
+            assert.equal(first.manual.insert, 1);
+            assert.equal(await count(), 1_000);
+
+            await assert.rejects(addManualHolding('u-1', ira, fund({ name: 'One too many' }), { database }), RecordLimitError);
+            await assert.rejects(importHoldings('u-1', positionsFile(ira, 'MSFT', 'Stable Value Fund'), {}, database), RecordLimitError);
+            assert.equal(await count(), 1_000);
+            // The whole file rolls back, its position too.
+            assert.equal((await sql`SELECT 1 FROM holdings WHERE portfolio_id = ${ira} AND symbol = 'MSFT'`).length, 0);
+
+            // The same file again adds nothing, so it goes through.
+            const again = await importHoldings('u-1', positionsFile(ira, 'AAPL', 'Target 2055 Trust'), {}, database);
+            assert.deepEqual(again.manual, { insert: 0, update: 0, unchanged: 1, replacedPositions: 0 });
+            const [one, two] = await sql<{ id: string }[]>`SELECT id FROM manual_holdings WHERE portfolio_id = ${ira} AND name LIKE 'Fund %' ORDER BY value LIMIT 2`;
+            assert.equal(await updateManualHolding('u-1', one.id, ira, fund({ name: 'Edited at the limit' }), { database }), true);
+            assert.equal(await deleteManualHolding('u-1', two.id, { database }), true);
+            assert.equal(await count(), 999);
+            await addManualHolding('u-1', ira, fund({ name: 'In its place' }), { database });
+            assert.equal(await count(), 1_000);
+        });
+
+        test('an add and an import for the last place at once: one goes, the other is refused', async () => {
+            const ira = await account();
+            await fill(ira, 999);
+            const results = await Promise.allSettled([
+                addManualHolding('u-1', ira, fund({ name: 'Cabin fund' }), { database }),
+                importHoldings('u-1', positionsFile(ira, 'AAPL', 'Target 2055 Trust'), {}, database),
+            ]);
+            assert.deepEqual(results.map((r) => r.status).sort(), ['fulfilled', 'rejected']);
+            const refused = results.find((r) => r.status === 'rejected') as PromiseRejectedResult;
+            assert.ok(refused.reason instanceof RecordLimitError);
+            assert.equal(await count(), 1_000);
+        });
+
+        test('the limit is per user: another user\'s 1,000 don\'t stop this one adding', async () => {
+            await fill(await account('u-2'), 1_000, 'u-2');
+            await addManualHolding('u-1', await account(), fund(), { database });
+            assert.equal(await count(), 1);
+            assert.equal(await count('u-2'), 1_000);
         });
     });
 });
