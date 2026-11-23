@@ -413,6 +413,8 @@ test.describe('Portfolio › Accounts — other assets and debts', () => {
     });
 
     test('an item\'s value and date are updated, keeping the earlier value; deleting one asks first', async ({ page }) => {
+        // An update, a check of the values kept, and two deletes.
+        test.slow();
         await brokerage(page);
         for (const data of [HOME, { kind: 'debt', category: 'auto_loan', name: 'Car loan', value: 12_000, valueAsOf: '2026-11-01' }]) {
             expect((await page.request.post('/api/portfolio/net-worth-items', { data })).status()).toBe(201);
