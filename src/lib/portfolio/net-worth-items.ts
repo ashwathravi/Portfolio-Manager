@@ -11,10 +11,11 @@
 import { and, asc, desc, eq, gt, sql } from "drizzle-orm";
 
 import { db } from "@/db";
+import { isDatabaseConfigured } from "@/db/connection-options";
 import { netWorthItemValues, netWorthItems } from "@/db/schema";
 import { withinRecordLimit } from "@/lib/limits/records-server";
 import type { NetWorthItemInput } from "@/lib/validators/net-worth-item";
-import type { NetWorthCategory, NetWorthItemRow, NetWorthKind } from "./net-worth";
+import type { NetWorthCategory, NetWorthItemRow, NetWorthItemsRead, NetWorthKind } from "./net-worth";
 
 type Database = typeof db;
 type Executor = Database | Parameters<Parameters<Database["transaction"]>[0]>[0];
@@ -47,6 +48,41 @@ export async function loadNetWorthItems(userId: string, database: Database = db)
         value: Number(r.value),
         updatedAt: r.updatedAt.toISOString(),
     }));
+}
+
+/**
+ * The user's items for a page (Today, Accounts), read with `query`
+ * (loadNetWorthItems). "unavailable" when the database fails to answer, so
+ * the page says they couldn't be loaded instead of leaving them out
+ * unannounced; null without a database, which has nowhere to keep them.
+ */
+export async function readNetWorthItemsForPage(
+    userId: string,
+    query: (userId: string) => Promise<NetWorthItemRow[]>,
+    { page, databaseConfigured = isDatabaseConfigured() }: { page: string; databaseConfigured?: boolean },
+): Promise<NetWorthItemsRead> {
+    if (!databaseConfigured) return null;
+    try {
+        return await query(userId);
+    } catch (error) {
+        console.warn(`${page}: other assets and debts fetch failed — the page says they couldn't be loaded.`, error);
+        return "unavailable";
+    }
+}
+
+/**
+ * An edit that would turn an asset into a debt, or a debt into an asset.
+ * The values kept by day have no kind of their own, so the item's earlier
+ * values would then read as the other kind's: a home's value as a debt.
+ * Deleting it and adding the other kind starts a history of its own.
+ */
+export class NetWorthKindChangeError extends Error {
+    constructor(readonly kind: NetWorthKind) {
+        super(kind === "asset"
+            ? "An asset can't become a debt. Delete it and add it as a debt."
+            : "A debt can't become an asset. Delete it and add it as an asset.");
+        this.name = "NetWorthKindChangeError";
+    }
 }
 
 function columns(input: NetWorthItemInput) {
@@ -101,9 +137,11 @@ export async function addNetWorthItem(
 }
 
 /**
- * Saves the item as the form now has it, its kind and category included,
- * and keeps the value as of its day. False when the user has no item with
- * that ID. Never refused by the limit: it adds nothing.
+ * Saves the item as the form now has it, its category included, and keeps
+ * the value as of its day. False when the user has no item with that ID,
+ * whatever the kind sent, so another user's item gives nothing away.
+ * Refused with NetWorthKindChangeError, and nothing saved, when it would
+ * change the item's kind. Never refused by the limit: it adds nothing.
  */
 export async function updateNetWorthItem(
     userId: string,
@@ -112,13 +150,14 @@ export async function updateNetWorthItem(
     { database = db, now = new Date() }: { database?: Database; now?: Date } = {},
 ): Promise<boolean> {
     return database.transaction(async (tx) => {
+        const mine = and(eq(netWorthItems.id, id), eq(netWorthItems.userId, userId));
+        // Locked until the save ends, so a deletion at the same time waits
+        // instead of removing the item before its value is saved (a 500).
+        const [stored] = await tx.select({ kind: netWorthItems.kind }).from(netWorthItems).where(mine).for("update");
+        if (!stored) return false;
+        if (stored.kind !== input.kind) throw new NetWorthKindChangeError(stored.kind as NetWorthKind);
         const saved = columns(input);
-        const [updated] = await tx
-            .update(netWorthItems)
-            .set({ ...saved, updatedAt: now })
-            .where(and(eq(netWorthItems.id, id), eq(netWorthItems.userId, userId)))
-            .returning({ id: netWorthItems.id });
-        if (!updated) return false;
+        await tx.update(netWorthItems).set({ ...saved, updatedAt: now }).where(mine);
         await recordValue(tx, id, saved, now);
         return true;
     });

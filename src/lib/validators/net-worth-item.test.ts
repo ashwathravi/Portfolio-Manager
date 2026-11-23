@@ -79,6 +79,16 @@ describe('netWorthItemSchema', () => {
         assert.equal(netWorthItemSchema.parse({ ...HOME, valueAsOf: '2031-01-01' }).valueAsOf, '2031-01-01');
     });
 
+    // Postgres has no year 0: a day in it would fail the save with a 500
+    // (scripts/db/net-worth-items.test.ts stores the first and last days).
+    test('refuses year 0000, which the ISO format has and Postgres doesn\'t; any day from 0001 to 9999 is fine', () => {
+        assert.equal(refused({ ...HOME, valueAsOf: '0000-01-01' }), 'Enter the date of the value (YYYY-MM-DD)');
+        assert.equal(refused({ ...HOME, valueAsOf: '0000-12-31' }), 'Enter the date of the value (YYYY-MM-DD)');
+        assert.equal(refused({ ...HOME, valueAsOf: '0000-02-29' }), 'Enter the date of the value (YYYY-MM-DD)');
+        assert.equal(netWorthItemSchema.parse({ ...HOME, valueAsOf: '0001-01-01' }).valueAsOf, '0001-01-01');
+        assert.equal(netWorthItemSchema.parse({ ...HOME, valueAsOf: '9999-12-31' }).valueAsOf, '9999-12-31');
+    });
+
     test('refuses fields the item doesn\'t have, such as another user\'s ID', () => {
         assert.match(refused({ ...HOME, userId: 'someone-else' }) ?? '', /userId/);
         assert.match(refused({ ...HOME, id: '00000000-0000-4000-8000-000000000701' }) ?? '', /\bid\b/);

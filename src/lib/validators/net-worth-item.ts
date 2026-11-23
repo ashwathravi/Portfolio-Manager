@@ -8,7 +8,8 @@ import { safeText } from './common';
  * An asset or debt outside the accounts (net_worth_items): what it is, what
  * it's called, its value as of a day and an optional note. For a debt the
  * value is the balance owed, a positive amount. The category must be one of
- * the kind's. A date after today is allowed, as for holdings valued by hand.
+ * the kind's. A date after today is allowed, as for holdings valued by hand;
+ * any day Postgres can store is, from 0001-01-01 to 9999-12-31.
  *
  * The body of POST /api/portfolio/net-worth-items and PUT
  * /api/portfolio/net-worth-items/[id] is the item itself.
@@ -26,7 +27,10 @@ export const netWorthItemSchema = z.object({
         .min(0, "Value can't be negative")
         .max(NET_WORTH_ITEM_LIMITS.value, 'Value is out of range')
         .transform((n) => Math.round(n * 100) / 100),
-    valueAsOf: z.iso.date({ message: 'Enter the date of the value (YYYY-MM-DD)' }),
+    // The ISO format has a year 0000 and Postgres doesn't: refused here, not
+    // by the database, whose error would be a 500 logging the item.
+    valueAsOf: z.iso.date({ message: 'Enter the date of the value (YYYY-MM-DD)' })
+        .refine((date) => date >= '0001-01-01', 'Enter the date of the value (YYYY-MM-DD)'),
     note: safeText.trim().max(NET_WORTH_ITEM_LIMITS.note, 'Note is too long').nullable().optional()
         .transform((v) => v || null),
 }).strict().superRefine((item, ctx) => {

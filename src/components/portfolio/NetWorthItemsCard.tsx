@@ -14,9 +14,12 @@ import {
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
-import { formatShortDate, formatUsd } from "@/lib/format";
+import { formatUsd } from "@/lib/format";
 import {
     categoriesOf,
+    describeNetWorthCounts,
+    editedValueAsOf,
+    formatAsOf,
     NET_WORTH_CATEGORY_LABELS,
     netWorthOf,
     summarizeNetWorthItems,
@@ -36,7 +39,8 @@ import { NET_WORTH_ITEM_LIMITS } from "@/lib/validators/net-worth-item";
  *
  * Changes go to /api/portfolio/net-worth-items, then the page reloads its
  * data. Each save also keeps the value as of its day; no chart reads those
- * yet.
+ * yet. Update keeps the item's date until its value changes, so fixing a
+ * name or note neither dates the value anew nor keeps another one.
  */
 
 export interface NetWorthItemsCardProps {
@@ -76,15 +80,6 @@ async function send(path: string, init: RequestInit): Promise<string | null> {
     }
 }
 
-/** "2 assets and 1 debt, at the values and dates you gave"; a zero count is left out. */
-function countsLine(assetCount: number, debtCount: number): string {
-    const counts = [
-        assetCount > 0 ? `${assetCount} ${assetCount === 1 ? "asset" : "assets"}` : null,
-        debtCount > 0 ? `${debtCount} ${debtCount === 1 ? "debt" : "debts"}` : null,
-    ].filter(Boolean).join(" and ");
-    return assetCount + debtCount === 1 ? `${counts}, at the value and date you gave` : `${counts}, at the values and dates you gave`;
-}
-
 interface NetWorthItemDialogProps {
     open: boolean;
     onOpenChange: (open: boolean) => void;
@@ -99,10 +94,15 @@ function NetWorthItemDialog({ open, onOpenChange, kind, editing }: NetWorthItemD
     const [category, setCategory] = useState<NetWorthCategory>(categories[0]);
     const [name, setName] = useState("");
     const [value, setValue] = useState("");
-    const [asOf, setAsOf] = useState(today());
+    // The date the user gave; until they give one, the default below.
+    const [typedAsOf, setTypedAsOf] = useState<string | null>(null);
     const [note, setNote] = useState("");
     const [error, setError] = useState<string | null>(null);
     const [saving, setSaving] = useState(false);
+    // A new item's value is as of today. An edit keeps the item's date until
+    // the value changes, then it's today, so the earlier value stays kept by
+    // its own day and a new name or note dates nothing anew.
+    const asOf = typedAsOf ?? (editing ? editedValueAsOf(editing, amount(value), today()) : today());
 
     useEffect(() => {
         if (!open) return;
@@ -112,9 +112,7 @@ function NetWorthItemDialog({ open, onOpenChange, kind, editing }: NetWorthItemD
         setCategory(first);
         setName(editing?.name ?? NET_WORTH_CATEGORY_LABELS[first]);
         setValue(editing ? String(editing.value) : "");
-        // An edit is usually a new value: as of today unless changed, so the
-        // value kept for the earlier day stays as it was.
-        setAsOf(today());
+        setTypedAsOf(null);
         setNote(editing?.note ?? "");
         setError(null);
     }, [open, editing, kind]);
@@ -182,7 +180,7 @@ function NetWorthItemDialog({ open, onOpenChange, kind, editing }: NetWorthItemD
                             </label>
                             <label className="pm-exec-field" htmlFor={`${ids}-asof`}>
                                 <span className="pm-exec-field-label">As of</span>
-                                <input id={`${ids}-asof`} type="date" className="pm-exec-input" value={asOf} onChange={(e) => setAsOf(e.target.value)} />
+                                <input id={`${ids}-asof`} type="date" className="pm-exec-input" value={asOf} onChange={(e) => setTypedAsOf(e.target.value)} />
                             </label>
                         </div>
                         <label className="pm-exec-field" htmlFor={`${ids}-note`}>
@@ -252,9 +250,8 @@ export function NetWorthItemsCard({ items, accountsTotal }: NetWorthItemsCardPro
                 <div>
                     <h2 id="net-worth-items-title" className="pm-card-title">Other assets and debts</h2>
                     <p className="pm-card-subtitle">
-                        {items.length === 0
-                            ? "What you own and owe outside your accounts, such as a home, a car, cash in the bank, a mortgage or a loan, at the values you give. Add one and Today shows your net worth."
-                            : countsLine(summary.assetCount, summary.debtCount)}
+                        {describeNetWorthCounts(summary)
+                            ?? "What you own and owe outside your accounts, such as a home, a car, cash in the bank, a mortgage or a loan, at the values you give. Add one and Today shows your net worth."}
                     </p>
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -296,8 +293,7 @@ export function NetWorthItemsCard({ items, accountsTotal }: NetWorthItemsCardPro
                                         </td>
                                         <td>{NET_WORTH_CATEGORY_LABELS[item.category]}</td>
                                         <td className="num">{formatUsd(item.kind === "debt" ? -item.value : item.value)}</td>
-                                        {/* Noon UTC: the same day on the server and in every browser. */}
-                                        <td>{formatShortDate(`${item.valueAsOf}T12:00:00Z`)}</td>
+                                        <td>{formatAsOf(item.valueAsOf)}</td>
                                         <td><NetWorthItemActions item={item} /></td>
                                     </tr>
                                 ))}

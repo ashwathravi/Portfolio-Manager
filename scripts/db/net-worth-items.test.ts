@@ -7,7 +7,7 @@ import postgres from 'postgres';
 
 import * as schema from '../../src/db/schema';
 import { ASSET_CATEGORIES, DEBT_CATEGORIES } from '../../src/lib/portfolio/net-worth';
-import { addNetWorthItem, deleteNetWorthItem, loadNetWorthItems, updateNetWorthItem } from '../../src/lib/portfolio/net-worth-items';
+import { addNetWorthItem, deleteNetWorthItem, loadNetWorthItems, NetWorthKindChangeError, updateNetWorthItem } from '../../src/lib/portfolio/net-worth-items';
 import { netWorthItemSchema } from '../../src/lib/validators/net-worth-item';
 
 // Other assets and debts (net_worth_items) and the value each had on each
@@ -121,9 +121,45 @@ describe('other assets and debts', { skip: !DATABASE_URL && 'SCRIPTS_TEST_DATABA
         await updateNetWorthItem('u-1', id, item({ value: 305_000, valueAsOf: '2026-11-10' }), { database, now: EDITED });
         assert.deepEqual(await valuesOf(id), [['2026-11-01', 300_000], ['2026-11-10', 305_000]]);
 
-        // The kind and category can change with it.
-        await updateNetWorthItem('u-1', id, item({ kind: 'debt', category: 'other_debt', name: 'Loan', value: 5_000, valueAsOf: '2026-11-20' }), { database, now: EDITED });
-        assert.deepEqual((await loadNetWorthItems('u-1', database)).map((i) => [i.kind, i.category, i.name, i.value]), [['debt', 'other_debt', 'Loan', 5_000]]);
+        // The category can change with it, within its kind.
+        await updateNetWorthItem('u-1', id, item({ category: 'other_asset', name: 'Land', value: 305_000, valueAsOf: '2026-11-10' }), { database, now: EDITED });
+        assert.deepEqual((await loadNetWorthItems('u-1', database)).map((i) => [i.kind, i.category, i.name, i.value]), [['asset', 'other_asset', 'Land', 305_000]]);
+        assert.deepEqual(await valuesOf(id), [['2026-11-01', 300_000], ['2026-11-10', 305_000]]);
+    });
+
+    test('an asset can\'t become a debt, nor a debt an asset: refused, with the item and its values as they were', async () => {
+        // The values kept by day have no kind: kept, a home's would read as a debt's.
+        const home = await addNetWorthItem('u-1', item(), { database, now: ADDED });
+        await assert.rejects(
+            updateNetWorthItem('u-1', home, item({ kind: 'debt', category: 'other_debt', name: 'Loan', value: 5_000, valueAsOf: '2026-11-20' }), { database, now: EDITED }),
+            (error: unknown) => error instanceof NetWorthKindChangeError && error.message === 'An asset can\'t become a debt. Delete it and add it as a debt.',
+        );
+        const [row] = await sql`SELECT kind, category, name, value::text AS value, to_char(value_as_of, 'YYYY-MM-DD') AS as_of, ${at('updated_at')} AS updated_at
+                                FROM net_worth_items WHERE id = ${home}`;
+        assert.deepEqual({ ...row }, { kind: 'asset', category: 'property', name: 'Home', value: '300000', as_of: '2026-11-01', updated_at: ADDED_AT });
+        assert.deepEqual(await valuesOf(home), [['2026-11-01', 300_000]]);
+
+        const loan = await addNetWorthItem('u-1', item({ kind: 'debt', category: 'student_loan', name: 'Loan', value: 25_000 }), { database, now: ADDED });
+        await assert.rejects(
+            updateNetWorthItem('u-1', loan, item({ category: 'owed_to_you', name: 'Loan', value: 25_000, valueAsOf: '2026-11-20' }), { database, now: EDITED }),
+            { message: 'A debt can\'t become an asset. Delete it and add it as an asset.' },
+        );
+        assert.deepEqual((await loadNetWorthItems('u-1', database)).map((i) => [i.kind, i.name, i.valueAsOf]), [['asset', 'Home', '2026-11-01'], ['debt', 'Loan', '2026-11-01']]);
+        assert.deepEqual(await valuesOf(loan), [['2026-11-01', 25_000]]);
+
+        // Another user's item is not found, whatever kind is sent: its kind isn't given away.
+        assert.equal(await updateNetWorthItem('u-2', home, item({ kind: 'debt', category: 'mortgage' }), { database, now: EDITED }), false);
+        assert.deepEqual(await valuesOf(home), [['2026-11-01', 300_000]]);
+    });
+
+    test('the first and last days the form takes are days Postgres keeps', async () => {
+        const id = await addNetWorthItem('u-1', item({ valueAsOf: '0001-01-01', value: 1 }), { database, now: ADDED });
+        assert.equal(await updateNetWorthItem('u-1', id, item({ valueAsOf: '9999-12-31', value: 2 }), { database, now: EDITED }), true);
+        assert.deepEqual(await valuesOf(id), [['0001-01-01', 1], ['9999-12-31', 2]]);
+        assert.equal((await loadNetWorthItems('u-1', database))[0].valueAsOf, '9999-12-31');
+        // The day before the first is the form's to refuse (400), not the database's (500).
+        assert.equal(netWorthItemSchema.safeParse({ kind: 'asset', category: 'property', name: 'Home', value: 1, valueAsOf: '0000-12-31' }).success, false);
+        await assert.rejects(sql`SELECT '0000-12-31'::date`, /out of range/);
     });
 
     test('another user\'s item can\'t be updated or deleted, and keeps its values', async () => {

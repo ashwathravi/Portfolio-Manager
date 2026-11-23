@@ -1,11 +1,10 @@
-import { isDatabaseConfigured } from "@/db/connection-options";
 import { requirePageUserId } from "@/lib/auth/request-user";
 import { loadQuotes } from "@/lib/services/market-data-service";
 import { loadDashboardPortfolios } from "@/lib/dashboard-portfolios";
 import { buildDashboardPortfoliosQuery } from "@/lib/portfolio-repository";
 import { buildAccountRows, summarizeAccounts } from "@/lib/portfolio/accounts";
-import { loadNetWorthItems } from "@/lib/portfolio/net-worth-items";
-import { AccountsView, type AccountsViewProps } from "@/components/portfolio/AccountsView";
+import { loadNetWorthItems, readNetWorthItemsForPage } from "@/lib/portfolio/net-worth-items";
+import { AccountsView } from "@/components/portfolio/AccountsView";
 import { PageHeaderSync } from "@/components/layout/TopBar";
 import { DataUnavailableNotice } from "@/components/data-display/DataUnavailableNotice";
 import { bankLinkingAvailable } from "@/lib/plaid/availability";
@@ -21,15 +20,9 @@ export default async function AccountsPage() {
     const userId = await requirePageUserId();
     const [{ portfolios, unavailable }, netWorth] = await Promise.all([
         loadDashboardPortfolios(userId, buildDashboardPortfoliosQuery),
-        // Without a database there's nowhere to keep them, so no card.
-        isDatabaseConfigured()
-            ? loadNetWorthItems(userId)
-                .then((items): AccountsViewProps["netWorth"] => ({ items }))
-                .catch((e): AccountsViewProps["netWorth"] => {
-                    console.warn("Accounts: other assets and debts fetch failed — the card shows the outage notice.", e);
-                    return "unavailable";
-                })
-            : null,
+        // Unreadable, the card is the outage notice; without a database
+        // there's nowhere to keep them, so no card.
+        readNetWorthItemsForPage(userId, loadNetWorthItems, { page: "Accounts" }),
     ]);
     const header = (
         <PageHeaderSync

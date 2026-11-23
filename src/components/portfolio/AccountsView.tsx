@@ -2,7 +2,7 @@ import Link from "next/link";
 import { DataUnavailableNotice } from "@/components/data-display/DataUnavailableNotice";
 import { accountKindLine } from "@/lib/portfolio/account-kinds";
 import type { AccountRow, AccountsSummary } from "@/lib/portfolio/accounts";
-import type { NetWorthItemRow } from "@/lib/portfolio/net-worth";
+import type { NetWorthItemsRead } from "@/lib/portfolio/net-worth";
 import { formatPct, formatShortDate, formatUsd } from "@/lib/format";
 import { AccountRowActions, NewAccountButton } from "./AccountControls";
 import { NetWorthItemsCard } from "./NetWorthItemsCard";
@@ -27,11 +27,11 @@ export interface AccountsViewProps {
     summary: AccountsSummary;
     bankLinking: boolean;
     /**
-     * The user's other assets and debts; "unavailable" when they couldn't be
-     * read, and null (or left out) without a database, with nowhere to keep
-     * them, so there is no card.
+     * The user's other assets and debts (readNetWorthItemsForPage);
+     * "unavailable" when they couldn't be read, and null (or left out)
+     * without a database, with nowhere to keep them, so there is no card.
      */
-    netWorth?: { items: NetWorthItemRow[] } | "unavailable" | null;
+    netWorth?: NetWorthItemsRead;
 }
 
 interface OtherAssetsAndDebtsProps {
@@ -43,7 +43,7 @@ interface OtherAssetsAndDebtsProps {
 function OtherAssetsAndDebts({ netWorth, accountsTotal }: OtherAssetsAndDebtsProps) {
     if (netWorth === "unavailable") return <DataUnavailableNotice what="your other assets and debts" />;
     if (!netWorth) return null;
-    return <NetWorthItemsCard items={netWorth.items} accountsTotal={accountsTotal} />;
+    return <NetWorthItemsCard items={netWorth} accountsTotal={accountsTotal} />;
 }
 
 export function AccountsView({ rows, summary, bankLinking, netWorth = null }: AccountsViewProps) {

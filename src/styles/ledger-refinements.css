@@ -489,7 +489,8 @@
 /* With other assets and debts the headline is the net worth: the portfolio value sits under it. */
 .pm-today-portfolio { margin: 0; display: flex; align-items: baseline; gap: 6px; font-size: 15px; font-weight: 600; color: var(--pm-fg); font-variant-numeric: tabular-nums; }
 .pm-today-portfolio > span:first-child { font-size: 12px; font-weight: 500; color: var(--pm-fg-subtle); }
-.pm-today-hero-note { grid-column: 1 / -1; margin: 0; font-size: 12px; color: var(--pm-fg-subtle); }
+/* Muted, not subtle: 12px text needs 4.5:1, and the note says how old the values are or that they couldn't be loaded. */
+.pm-today-hero-note { grid-column: 1 / -1; margin: 0; font-size: 12px; color: var(--pm-fg-muted); }
 .pm-today-hero-note a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
 .pm-today-hero-live { grid-column: 2; grid-row: 1; justify-self: end; }
 .pm-today-hero-facts {

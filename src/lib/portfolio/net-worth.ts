@@ -12,7 +12,14 @@
  *
  * The nightly valuations, returns, the equity curve and the risk policy
  * never read these items: they measure the accounts, at market prices.
+ *
+ * What the pages say about them is worked out here too: Today's headline
+ * and its note (todayHeadline), the card's count of them
+ * (describeNetWorthCounts) and the date an edit's value is as of
+ * (editedValueAsOf).
  */
+
+import { formatShortDate } from "@/lib/format";
 
 export const NET_WORTH_KINDS = ["asset", "debt"] as const;
 export type NetWorthKind = (typeof NET_WORTH_KINDS)[number];
@@ -120,4 +127,94 @@ export function summarizeNetWorthItems(
 export function netWorthOf(portfolioValue: number, summary: Pick<NetWorthSummary, "otherAssets" | "debts">): number {
     // + 0 turns a -0 into 0.
     return (cents(portfolioValue) + cents(summary.otherAssets) - cents(summary.debts)) / 100 + 0;
+}
+
+/**
+ * The other assets and debts as a page reads them
+ * (readNetWorthItemsForPage): the user's items, "unavailable" when they
+ * couldn't be read, or null without a database to keep them in.
+ */
+export type NetWorthItemsRead = readonly NetWorthItemRow[] | "unavailable" | null;
+
+/**
+ * What Today's hero is given of them (TodayHeroProps.outside): their totals
+ * once there is at least one, "unavailable" when they couldn't be read, and
+ * null with none (or no database), so the hero leads with the portfolio
+ * value.
+ */
+export function outsideForToday(read: NetWorthItemsRead): NetWorthSummary | "unavailable" | null {
+    if (read === null || read === "unavailable") return read;
+    return read.length > 0 ? summarizeNetWorthItems(read) : null;
+}
+
+/** "Nov 1, 2026" for a YYYY-MM-DD day: noon UTC, so the same day on the server and in every browser. */
+export function formatAsOf(date: string): string {
+    return formatShortDate(`${date}T12:00:00Z`);
+}
+
+/** What Today's hero leads with (todayHeadline). */
+export interface TodayHeadline {
+    /** The hero's label, and its region's name. */
+    label: "Net worth" | "Portfolio value";
+    /**
+     * Once there are other assets or debts: the net worth that leads, their
+     * totals for the facts under it, and how old their values are for the
+     * note ("as of Nov 1, 2026", or "the oldest as of Oct 15, 2026" when
+     * their dates differ). Null while the portfolio value leads.
+     */
+    netWorth: { value: number; items: NetWorthSummary; asOf: string } | null;
+    /** The line saying the portfolio value leads alone because they couldn't be read; null otherwise. */
+    unavailable: string | null;
+}
+
+/**
+ * Today's headline: the net worth once the user has other assets or debts
+ * (`outside`, from outsideForToday), else the portfolio value. When they
+ * couldn't be read it is the portfolio value, labelled as such, with a line
+ * saying so: never a net worth that silently leaves them out.
+ */
+export function todayHeadline(portfolioValue: number, outside: NetWorthSummary | "unavailable" | null): TodayHeadline {
+    if (outside === "unavailable") {
+        return {
+            label: "Portfolio value",
+            netWorth: null,
+            unavailable: "Other assets and debts couldn't be loaded, so this is your portfolio value alone.",
+        };
+    }
+    // Every item has a date, so totals without one are totals of none.
+    if (outside === null || outside.oldestAsOf === null) return { label: "Portfolio value", netWorth: null, unavailable: null };
+    const oldest = formatAsOf(outside.oldestAsOf);
+    return {
+        label: "Net worth",
+        netWorth: {
+            value: netWorthOf(portfolioValue, outside),
+            items: outside,
+            asOf: outside.newestAsOf === outside.oldestAsOf ? `as of ${oldest}` : `the oldest as of ${oldest}`,
+        },
+        unavailable: null,
+    };
+}
+
+/**
+ * The Accounts card's line under its title once there are items: "2 assets
+ * and 1 debt, at the values and dates you gave", a zero count left out.
+ * Null with none, when the card says what it's for instead.
+ */
+export function describeNetWorthCounts({ assetCount, debtCount }: Pick<NetWorthSummary, "assetCount" | "debtCount">): string | null {
+    const counts = [
+        assetCount > 0 ? `${assetCount} ${assetCount === 1 ? "asset" : "assets"}` : null,
+        debtCount > 0 ? `${debtCount} ${debtCount === 1 ? "debt" : "debts"}` : null,
+    ].filter((c) => c !== null);
+    if (counts.length === 0) return null;
+    return `${counts.join(" and ")}, ${assetCount + debtCount === 1 ? "at the value and date you gave" : "at the values and dates you gave"}`;
+}
+
+/**
+ * The day an edited item's value is as of until the user gives one: its own
+ * while the value is as it was (to the cent), so a new name or note doesn't
+ * date it anew or keep a value for a day nothing was valued; `today` once
+ * the value changes, so the earlier value stays kept by its own day.
+ */
+export function editedValueAsOf(item: Pick<NetWorthItemRow, "value" | "valueAsOf">, value: number | null, today: string): string {
+    return value !== null && Number.isFinite(value) && cents(value) === cents(item.value) ? item.valueAsOf : today;
 }

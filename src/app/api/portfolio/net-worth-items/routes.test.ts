@@ -77,6 +77,11 @@ describe("other assets and debts routes", () => {
         assert.equal(large.status, 413);
         assert.equal((await large.json()).code, "INVALID_NET_WORTH_ITEM");
 
+        // A day Postgres can't store is the form's 400, never the database's 500.
+        const yearZero = await add({ ...HOME, valueAsOf: "0000-12-31" });
+        assert.equal(yearZero.status, 400);
+        assert.deepEqual(await yearZero.json(), { error: "Enter the date of the value (YYYY-MM-DD)", code: "INVALID_NET_WORTH_ITEM" });
+
         // An edit is held to the same item.
         const edit = await save(ITEM_ID, { ...HOME, kind: "debt", category: "vehicle" });
         assert.equal(edit.status, 400);

@@ -355,6 +355,55 @@ test.describe('Portfolio › Accounts — other assets and debts', () => {
         await expect(card(page)).toContainText('Add one and Today shows your net worth.');
     });
 
+    test('a new name or note keeps the value\'s date and adds no value; a new value is as of today until another day is given', async ({ page }) => {
+        // A day that can't be today, so a value dated anew would show.
+        const asOf = '2025-06-30';
+        expect((await page.request.post('/api/portfolio/net-worth-items', { data: { ...HOME, valueAsOf: asOf } })).status()).toBe(201);
+        await gotoAppPage(page, '/portfolios/accounts');
+        // The dialog's today: the browser's own date.
+        const today = await page.evaluate(() => {
+            const d = new Date();
+            return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        });
+        const values = async () => (await e2eDatabase()<{ date: string; value: string }[]>`
+            SELECT to_char(v.date, 'YYYY-MM-DD') AS date, v.value::text AS value
+            FROM net_worth_item_values v JOIN net_worth_items i ON i.id = v.net_worth_item_id
+            WHERE i.user_id = ${userId}
+            ORDER BY v.date`).map((v) => [v.date, Number(v.value)]);
+
+        await page.getByRole('button', { name: 'Actions for Home' }).click();
+        await page.getByRole('menuitem', { name: 'Update' }).click();
+        const dialog = page.getByRole('dialog');
+        const date = dialog.getByLabel('As of');
+        await expect(date).toHaveValue(asOf);
+        // A new value is as of today; put back, it's the item's own day again.
+        await dialog.getByLabel('Value ($)').fill('320,000');
+        await expect(date).toHaveValue(today);
+        await dialog.getByLabel('Value ($)').fill('300,000');
+        await expect(date).toHaveValue(asOf);
+        await dialog.getByLabel('Name').fill('Lake house');
+        await dialog.getByLabel('Note (optional)').fill('Appraised in June');
+        await dialog.getByRole('button', { name: 'Save' }).click();
+        await expect(dialog).toBeHidden();
+        await expect(page.getByText('Lake house updated.')).toBeVisible();
+        await expect(item(page, 'Lake house')).toContainText('Appraised in June');
+        await expect(item(page, 'Lake house')).toContainText('$300,000.00');
+        await expect(item(page, 'Lake house')).toContainText('Jun 30, 2025');
+        // Still the one value, as of its own day: nothing was valued today.
+        expect(await values()).toEqual([[asOf, 300_000]]);
+
+        // A day the user gives stays theirs when the value changes after it.
+        await page.getByRole('button', { name: 'Actions for Lake house' }).click();
+        await page.getByRole('menuitem', { name: 'Update' }).click();
+        await date.fill('2025-12-31');
+        await dialog.getByLabel('Value ($)').fill('310,000');
+        await expect(date).toHaveValue('2025-12-31');
+        await dialog.getByRole('button', { name: 'Save' }).click();
+        await expect(dialog).toBeHidden();
+        await expect(item(page, 'Lake house')).toContainText('Dec 31, 2025');
+        expect(await values()).toEqual([[asOf, 300_000], ['2025-12-31', 310_000]]);
+    });
+
     test('a bad entry is explained in the form, and nothing is saved', async ({ page }) => {
         await brokerage(page);
         await gotoAppPage(page, '/portfolios/accounts');
@@ -408,9 +457,16 @@ test.describe('Portfolio › Accounts — other assets and debts', () => {
         expect(saved.status()).toBe(200);
         expect(await saved.json()).toEqual({ data: { id } });
 
+        // An asset stays an asset: the values it keeps by day are a home's, not a debt's.
+        const madeDebt = await page.request.put(`/api/portfolio/net-worth-items/${id}`, { data: { ...HOME, kind: 'debt', category: 'mortgage' } });
+        expect(madeDebt.status()).toBe(400);
+        expect(await madeDebt.json()).toEqual({ error: 'An asset can\'t become a debt. Delete it and add it as a debt.', code: 'INVALID_NET_WORTH_ITEM' });
+
         // Another user's item, or an ID that can't be one, is not found, and stays as it was.
         for (const response of [
             await page.request.put(`/api/portfolio/net-worth-items/${OTHER_USERS_ITEM}`, { data: HOME }),
+            // Whatever kind is sent, so its kind isn't given away.
+            await page.request.put(`/api/portfolio/net-worth-items/${OTHER_USERS_ITEM}`, { data: { ...HOME, kind: 'debt', category: 'mortgage' } }),
             await page.request.delete(`/api/portfolio/net-worth-items/${OTHER_USERS_ITEM}`),
             await page.request.put('/api/portfolio/net-worth-items/not-a-uuid', { data: HOME }),
             await page.request.delete('/api/portfolio/net-worth-items/not-a-uuid'),

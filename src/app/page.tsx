@@ -27,8 +27,8 @@ import { buildDashboardPortfoliosQuery, buildUserTransactionsQuery } from '@/lib
 import { toActivityRows, type TransactionRowInput } from '@/lib/portfolio/activity';
 import { toOptionRiskPosition, type LoadedOptionPosition } from '@/lib/portfolio/option-positions';
 import { loadOptionPositions } from '@/lib/portfolio/option-positions-store';
-import { summarizeNetWorthItems, type NetWorthSummary } from '@/lib/portfolio/net-worth';
-import { loadNetWorthItems } from '@/lib/portfolio/net-worth-items';
+import { outsideForToday } from '@/lib/portfolio/net-worth';
+import { loadNetWorthItems, readNetWorthItemsForPage } from '@/lib/portfolio/net-worth-items';
 import { toTodayActivity } from '@/lib/today/rows';
 import { getSecurityProfiles } from '@/lib/markets/price-store';
 import { holdingName, loadSecurityProfiles } from '@/lib/markets/security-profile';
@@ -118,15 +118,9 @@ export default async function Today() {
       })
       : [],
     // The other assets and debts the user added on Accounts: with any, the
-    // hero's headline is the net worth. Nothing else on the page reads them.
-    isDatabaseConfigured()
-      ? loadNetWorthItems(userId)
-        .then((items): NetWorthSummary | null => (items.length > 0 ? summarizeNetWorthItems(items) : null))
-        .catch((e): 'unavailable' => {
-          console.warn('Today: other assets and debts fetch failed — the hero shows the portfolio value alone.', e);
-          return 'unavailable';
-        })
-      : null,
+    // hero's headline is the net worth; unreadable, the hero says it is the
+    // portfolio value alone. Nothing else on the page reads them.
+    readNetWorthItemsForPage(userId, loadNetWorthItems, { page: 'Today' }).then(outsideForToday),
   ]);
   const closedTrades = journal && journal.entries.length > 0 ? journal.entries : undefined;
   const patternTrades = closedTrades && inPatternWindow(closedTrades, new Date());
