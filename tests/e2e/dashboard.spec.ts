@@ -235,6 +235,17 @@ test.describe('Today › holdings valued by hand', () => {
         await gotoAppPage(page, '/');
         await expect(page.getByTestId('today-portfolio-value')).toHaveText('$100,000.00');
         await expect(page.getByRole('region', { name: 'Allocation' })).toBeVisible();
+        // Top holdings lists them by value, by name: never "No holdings yet." beside the hero's count.
+        const top = page.getByRole('region', { name: 'Top holdings' });
+        await expect(top).toContainText('2 of 2 positions by market value');
+        await expect(top).not.toContainText('No holdings yet.');
+        const rows = top.locator('tbody tr');
+        await expect(rows).toHaveCount(2);
+        await expect(rows.first()).toContainText('Target 2055 Trust');
+        await expect(rows.first()).toContainText('Valued by hand');
+        await expect(rows.first()).toContainText('$90,000');
+        await expect(rows.first()).toContainText('90.0%');
+        await expect(rows.nth(1)).toContainText('Stable Value Fund');
         await openPolicyChecks(page);
         const dimension = (policyId: string) => page.locator(`[data-testid="risk-policy-dimension"][data-policy-id="${policyId}"]`);
         // No single name held: nothing to concentrate in, never a breach.

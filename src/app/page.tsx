@@ -1,6 +1,6 @@
 import { Suspense } from 'react';
 import { AllocationCard } from '@/components/dashboard/AllocationCard';
-import { TopHoldingsCard, type TopHoldingsRow } from '@/components/dashboard/TopHoldingsCard';
+import { TopHoldingsCard, type TopHoldingsHandValuedRow, type TopHoldingsRow } from '@/components/dashboard/TopHoldingsCard';
 import { RecentActivityCard } from '@/components/dashboard/RecentActivityCard';
 import { WatchlistCard } from '@/components/dashboard/WatchlistCard';
 import { PatternFeed } from '@/components/dashboard/PatternFeed';
@@ -153,6 +153,15 @@ export default async function Today() {
     currentPrice: h.currentPrice,
     marketValue: h.marketValue,
   }));
+  // Listed among them at the value given, so a book of only these (a 401(k)'s
+  // trust funds) never reads as no holdings.
+  const topHandValuedRows: TopHoldingsHandValuedRow[] = manualHoldings.map((m) => ({
+    id: m.id,
+    name: m.name,
+    quantity: m.quantity == null ? null : Number(m.quantity),
+    value: Number(m.value) || 0,
+    costBasis: m.costBasis == null ? null : Number(m.costBasis),
+  }));
 
   // The user's saved policy on their own portfolio, as every view evaluates it.
   const policyPortfolio = buildPolicyPortfolio({
@@ -200,7 +209,7 @@ export default async function Today() {
 
       {(allHoldings.length > 0 || manualHoldings.length > 0) && (
         <div className="pm-grid-2-63">
-          <TopHoldingsCard rows={topHoldingsRows} limit={6} />
+          <TopHoldingsCard rows={topHoldingsRows} handValued={topHandValuedRows} limit={6} />
           <AllocationCard holdings={allocationHoldings} cashByPortfolio={cashByPortfolio} />
         </div>
       )}

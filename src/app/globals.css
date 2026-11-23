@@ -1528,6 +1528,17 @@
   white-space: nowrap;
   max-width: 200px;
 }
+/* A holding valued by hand has no ticker: its name leads, wrapped rather than cut off. */
+.pm-holdings-ticker[data-hand-valued="true"] .pm-holdings-sym {
+  max-width: 240px;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+/* "Valued by hand" under it, at a contrast small text can be read at. */
+.pm-holdings-tag {
+  font-size: 11px;
+  color: var(--pm-fg-muted);
+}
 .pm-alloc-bar-cell {
   min-width: 120px;
 }
