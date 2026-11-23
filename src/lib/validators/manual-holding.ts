@@ -5,7 +5,8 @@ import { safeText } from './common';
 /**
  * A holding valued by hand (manual_holdings): what it is, its value as of
  * a day, and optionally how many units and what it cost. The value is the
- * whole holding's, not a price per unit.
+ * whole holding's, not a price per unit. Its day may be any Postgres can
+ * store, from 0001-01-01 to 9999-12-31.
  */
 
 export const MANUAL_HOLDING_LIMITS = { name: 120, identifier: 40, value: 1e12 } as const;
@@ -25,7 +26,10 @@ export const manualHoldingSchema = z.object({
         .max(1e12, 'Units are out of range').nullable().optional().transform((v) => v ?? null),
     value: money('Value'),
     costBasis: money('Cost').nullable().optional().transform((v) => v ?? null),
-    valueAsOf: z.iso.date({ message: 'Enter the date of the value (YYYY-MM-DD)' }),
+    // The ISO format has a year 0000 and Postgres doesn't: refused here, not
+    // by the database, whose error would be a 500 logging the holding.
+    valueAsOf: z.iso.date({ message: 'Enter the date of the value (YYYY-MM-DD)' })
+        .refine((date) => date >= '0001-01-01', 'Enter the date of the value (YYYY-MM-DD)'),
 }).strict();
 
 export type ManualHoldingInput = z.infer<typeof manualHoldingSchema>;

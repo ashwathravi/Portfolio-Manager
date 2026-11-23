@@ -240,4 +240,14 @@ describe('positions files with holdings valued by hand', { skip: !DATABASE_URL &
         assert.deepEqual(next.manual, { insert: 0, update: 1, unchanged: 0, replacedPositions: 0 });
         assert.deepEqual((await handValued('u-move')).map((h) => [h.value, h.external]), [[600, 'csv:name:target 2055 trust'], [12345.67, null]]);
     });
+
+    test('regression: a value as of 0001-01-01 or 9999-12-31, the first and last days Postgres keeps, is stored', async () => {
+        const account = await seedUser('u-dates');
+        const fund = (valueAsOf: string) => manualHoldingSchema.parse({ name: 'Target 2055 Trust', value: 100, valueAsOf });
+        const id = await addManualHolding('u-dates', account, fund('0001-01-01'), { database });
+        assert.deepEqual((await handValued('u-dates')).map((h) => h.asOf), ['0001-01-01']);
+        assert.ok(await updateManualHolding('u-dates', id, account, fund('9999-12-31'), { database }));
+        assert.deepEqual((await handValued('u-dates')).map((h) => h.asOf), ['9999-12-31']);
+        assert.deepEqual(await history(id), [['0001-01-01', 100, null], ['9999-12-31', 100, null]]);
+    });
 });
