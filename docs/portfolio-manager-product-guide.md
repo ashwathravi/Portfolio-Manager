@@ -217,6 +217,8 @@ Use it to:
 
 The sector chips above the table are the sectors you hold, largest first. A position's sector and company name come from market reference data: its industry code, fetched by the nightly price job a few symbols a night. A symbol not fetched yet uses a built-in list of well-known tickers, or "Other".
 
+Positions worth very little, such as a robo-advisor's fractional shares, are shown together as one **small positions** row at the end of the table. Each is worth under $500 and under 0.5% of your market value, and it takes at least three of them (never every position you're looking at). Select it to see them, in the table's order; it starts closed each time you open Holdings. The summary above the table, the policy buckets, Today and the holdings CSV in Settings › Data still count each one. In **By symbol**, a symbol is small only if it is across all its accounts together.
+
 Important fields:
 
 - Policy bucket: core, satellite, speculative/options, special situation, cash reserve, or unassigned.
