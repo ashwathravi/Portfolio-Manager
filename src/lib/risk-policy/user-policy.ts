@@ -16,6 +16,7 @@
  *     none until they name them.
  */
 
+import { formatUsd } from "@/lib/format";
 import { isManualSymbol, manualHoldingId, manualSymbol } from "@/lib/portfolio/manual-symbol";
 
 import { POLICY_BUCKETS, type PolicyBucketId, type PolicyBucketPolicy } from "./buckets";
@@ -207,6 +208,64 @@ export function handValuedNames(portfolio: Pick<PolicyPortfolio, "handValued">):
 export function policyHoldingLabel(symbol: string, name?: string | null): string {
     if (!isManualSymbol(symbol.trim())) return symbol;
     return name?.trim() || HAND_VALUED_LABEL;
+}
+
+/** A holding Settings › Bucket policy lists, to choose its bucket. */
+export interface BucketChoiceListing {
+    /** What the choice for it goes by (`bucketChoiceKey`). */
+    key: string;
+    /** Null for a holding valued by hand. */
+    ticker: string | null;
+    name: string;
+    /** The account a holding valued by hand is in. */
+    account?: string;
+    marketValue: number;
+}
+
+/** What a holding's row says, and what its bucket select is called. */
+export interface BucketChoiceLabels {
+    text: string;
+    select: string;
+}
+
+/**
+ * Each listed holding's labels, in the order given. A ticker's row is its
+ * company's name and its select "<TICKER> bucket". A holding valued by hand
+ * goes by its name and account; beside another of the same name in the
+ * same account, by its value too, then by its place among those of the
+ * same value ("2 of 2"), so no two rows or selects read alike.
+ */
+export function bucketChoiceLabels(holdings: readonly BucketChoiceListing[]): BucketChoiceLabels[] {
+    const alike = new Map<string, BucketChoiceListing[]>();
+    for (const holding of holdings) {
+        if (holding.ticker !== null) continue;
+        const reads = readsAs(holding);
+        alike.set(reads, [...(alike.get(reads) ?? []), holding]);
+    }
+    return holdings.map((holding) => {
+        if (holding.ticker !== null) return { text: holding.name, select: `${holding.ticker} bucket` };
+        const apart = distinction(holding, alike.get(readsAs(holding)) ?? []);
+        const where = holding.account ? ` in ${holding.account}` : "";
+        return {
+            text: [holding.name, holding.account, apart].filter(Boolean).join(" · "),
+            select: `Bucket for ${holding.name}${where}${apart ? ` (${apart})` : ""}`,
+        };
+    });
+}
+
+/** Two holdings valued by hand read alike with the same name in the same account, whatever the case or spacing. */
+function readsAs(holding: BucketChoiceListing): string {
+    return [holding.name, holding.account ?? ""]
+        .map((part) => part.trim().replace(/\s+/g, " ").toLocaleLowerCase("en-US"))
+        .join("\n");
+}
+
+/** What tells a holding apart from others that read alike: its value, then its place among those of the same value. */
+function distinction(holding: BucketChoiceListing, alike: readonly BucketChoiceListing[]): string | null {
+    if (alike.length < 2) return null;
+    const value = formatUsd(holding.marketValue, { decimals: 0 });
+    const sameValue = alike.filter((other) => formatUsd(other.marketValue, { decimals: 0 }) === value);
+    return sameValue.length < 2 ? value : `${value}, ${sameValue.indexOf(holding) + 1} of ${sameValue.length}`;
 }
 
 /** The tickers the user named as their employer's. */

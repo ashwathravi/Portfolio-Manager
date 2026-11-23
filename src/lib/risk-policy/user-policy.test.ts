@@ -17,6 +17,7 @@ import {
     MAX_BUCKET_ASSIGNMENTS,
     MAX_EMPLOYER_TICKERS,
     bucketChoiceKey,
+    bucketChoiceLabels,
     chosenBucket,
     chosenBucketForTrade,
     employerSymbols,
@@ -29,6 +30,7 @@ import {
     riskPolicyInput,
     withBucketChoice,
     type AssignablePolicyBucket,
+    type BucketChoiceListing,
     type PolicyPortfolio,
     type RiskPolicySettings,
 } from "./user-policy";
@@ -167,6 +169,40 @@ describe("holdings valued by hand", () => {
         assert.equal(policyHoldingLabel("manual:m1", "  "), "Valued by hand");
         assert.equal(handValuedNames(ONE_STOCK).get(bucketChoiceKey("MANUAL:M1")), "Target 2055 Trust");
         assert.equal(handValuedNames(EMPTY_POLICY_PORTFOLIO).size, 0);
+    });
+});
+
+describe("bucketChoiceLabels", () => {
+    const byHand = (key: string, name: string, account: string | undefined, marketValue: number): BucketChoiceListing =>
+        ({ key, ticker: null, name, ...(account ? { account } : {}), marketValue });
+
+    test("a ticker by its company's name; a holding valued by hand by its name and account", () => {
+        assert.deepEqual(bucketChoiceLabels([
+            { key: "VTI", ticker: "VTI", name: "Vanguard Total Stock Market ETF", marketValue: 50_000 },
+            byHand("manual:a", "Target 2055 Trust", "401(k)", 90_000),
+            byHand("manual:b", "Private Co shares", undefined, 10_000),
+        ]), [
+            { text: "Vanguard Total Stock Market ETF", select: "VTI bucket" },
+            { text: "Target 2055 Trust · 401(k)", select: "Bucket for Target 2055 Trust in 401(k)" },
+            { text: "Private Co shares", select: "Bucket for Private Co shares" },
+        ]);
+    });
+
+    test("regression: two of one name in one account are told apart by value, then by place among the same value", () => {
+        const labels = bucketChoiceLabels([
+            byHand("manual:a", "Rental property", "Brokerage", 250_000),
+            // Any case: a screen reader says them the same.
+            byHand("manual:b", "rental property", "Brokerage", 100_000),
+            byHand("manual:c", "Rental property", "Brokerage", 100_000.4),
+            // In another account, it is its own.
+            byHand("manual:d", "Rental property", "IRA", 100_000),
+        ]);
+        assert.deepEqual(labels, [
+            { text: "Rental property · Brokerage · $250,000", select: "Bucket for Rental property in Brokerage ($250,000)" },
+            { text: "rental property · Brokerage · $100,000, 1 of 2", select: "Bucket for rental property in Brokerage ($100,000, 1 of 2)" },
+            { text: "Rental property · Brokerage · $100,000, 2 of 2", select: "Bucket for Rental property in Brokerage ($100,000, 2 of 2)" },
+            { text: "Rental property · IRA", select: "Bucket for Rental property in IRA" },
+        ]);
     });
 });
 

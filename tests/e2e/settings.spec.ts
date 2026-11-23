@@ -1096,6 +1096,40 @@ test.describe('Settings › buckets for holdings valued by hand', () => {
         await expect(fundAgain.locator('option:checked')).toHaveText('Core (default)');
         await expect(bucketRow('core')).toContainText('from Target 2055 Trust, Private Co shares');
     });
+
+    test('two of one name in one account are told apart by their values, in full on a phone', async ({ context, page }) => {
+        await signInAsNewUser(context, { firstSignIn: true });
+        const created = await page.request.post('/api/portfolios', { data: { name: 'Brokerage', cashBalance: 0 } });
+        expect(created.status()).toBe(201);
+        const { data: { id } } = await created.json() as { data: { id: string } };
+        for (const value of [250_000, 100_000, 100_000]) {
+            const added = await page.request.post('/api/portfolio/manual-holdings', {
+                data: { portfolioId: id, holding: { name: 'Rental property', value, valueAsOf: '2026-11-19' } },
+            });
+            expect(added.status()).toBe(201);
+        }
+
+        await page.setViewportSize({ width: 390, height: 844 });
+        await gotoAppPage(page, '/settings');
+        // By value, then by place among those of the same value.
+        const names = page.getByTestId('bucket-holding').locator('.pm-bucket-holding-name');
+        await expect(names).toHaveText([
+            'Rental property · Brokerage · $250,000',
+            'Rental property · Brokerage · $100,000, 1 of 2',
+            'Rental property · Brokerage · $100,000, 2 of 2',
+        ]);
+        for (const label of [
+            'Bucket for Rental property in Brokerage ($250,000)',
+            'Bucket for Rental property in Brokerage ($100,000, 1 of 2)',
+            'Bucket for Rental property in Brokerage ($100,000, 2 of 2)',
+        ]) {
+            await expect(page.getByLabel(label, { exact: true })).toHaveCount(1);
+        }
+        // Wrapped, not cut off: what tells them apart is at the end.
+        for (const name of await names.all()) {
+            expect(await name.evaluate((element) => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(0);
+        }
+    });
 });
 
 test.describe('Settings card layout', () => {

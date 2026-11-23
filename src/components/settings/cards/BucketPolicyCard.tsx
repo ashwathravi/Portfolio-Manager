@@ -8,6 +8,7 @@ import {
     POLICY_BUCKETS,
     POLICY_BUCKET_META,
     bucketChoiceKey,
+    bucketChoiceLabels,
     computeBucketAllocation,
     normalizeTicker,
     policyHandValued,
@@ -15,6 +16,7 @@ import {
     policyHoldings,
     withBucketChoice,
     type AssignablePolicyBucket,
+    type BucketChoiceListing,
     type PolicyBucketId,
     type PolicyBucketPolicy,
     type PolicyClassifiableHolding,
@@ -28,15 +30,7 @@ type BucketPolicyField = "targetPct" | "minPct" | "maxPct";
  * One row of Your holdings: a ticker the user holds (in any account), or a
  * holding valued by hand, with the bucket it starts in.
  */
-interface HoldingRow {
-    /** What the choice for it goes by (`bucketChoiceKey`). */
-    key: string;
-    /** Null for a holding valued by hand. */
-    ticker: string | null;
-    name: string;
-    /** The account a holding valued by hand is in. */
-    account?: string;
-    marketValue: number;
+interface HoldingRow extends BucketChoiceListing {
     defaultBucket: PolicyBucketId | null;
 }
 
@@ -89,6 +83,8 @@ export function BucketPolicyCard() {
         }));
         return [...bySymbol.values(), ...handValued].sort((a, b) => b.marketValue - a.marketValue);
     }, [portfolio.holdings, portfolio.handValued]);
+    // Two holdings valued by hand with one name in one account never read alike.
+    const labels = useMemo(() => bucketChoiceLabels(rows), [rows]);
     const anyHandValued = rows.some((row) => row.ticker === null);
 
     const chooseBucket = (key: string, value: string) => {
@@ -241,7 +237,7 @@ export function BucketPolicyCard() {
                                 that&apos;s wrong.
                             </p>
                             <ul className="pm-bucket-holding-list" aria-label="Bucket for each holding">
-                                {rows.map((holding) => {
+                                {rows.map((holding, index) => {
                                     const total = allocation.totalMarketValue;
                                     const byHand = holding.ticker === null ? "true" : undefined;
                                     return (
@@ -255,9 +251,7 @@ export function BucketPolicyCard() {
                                             <span className="pm-bucket-holding-symbol" data-hand-valued={byHand}>
                                                 {holding.ticker ?? "By hand"}
                                             </span>
-                                            <span className="pm-bucket-holding-name">
-                                                {holding.account ? `${holding.name} · ${holding.account}` : holding.name}
-                                            </span>
+                                            <span className="pm-bucket-holding-name">{labels[index].text}</span>
                                             <span className="pm-bucket-holding-pct">
                                                 {formatPct(total > 0 ? (holding.marketValue / total) * 100 : 0)}
                                             </span>
@@ -265,7 +259,7 @@ export function BucketPolicyCard() {
                                                 className="pm-settings-select"
                                                 value={assignments[holding.key] ?? ""}
                                                 onChange={(event) => chooseBucket(holding.key, event.target.value)}
-                                                aria-label={bucketSelectLabel(holding)}
+                                                aria-label={labels[index].select}
                                             >
                                                 <option value="">
                                                     {holding.defaultBucket
@@ -296,12 +290,6 @@ export function BucketPolicyCard() {
             </div>
         </section>
     );
-}
-
-/** A ticker's select is "<TICKER> bucket"; a holding valued by hand's names it and its account. */
-function bucketSelectLabel(holding: HoldingRow): string {
-    if (holding.ticker !== null) return `${holding.ticker} bucket`;
-    return holding.account ? `Bucket for ${holding.name} in ${holding.account}` : `Bucket for ${holding.name}`;
 }
 
 function NumberField({

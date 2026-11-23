@@ -6418,6 +6418,12 @@
   white-space: nowrap;
 }
 
+/* With no ticker, the name, account and value are what tell the holding apart: none is cut off. */
+.pm-bucket-holding-row[data-hand-valued="true"] .pm-bucket-holding-name {
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
 .pm-bucket-holding-pct {
   color: var(--pm-fg-subtle);
   font-family: var(--pm-font-mono, monospace);
