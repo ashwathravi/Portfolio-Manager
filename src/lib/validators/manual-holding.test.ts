@@ -27,6 +27,11 @@ describe('manualHoldingSchema', () => {
         assert.equal(manualHoldingSchema.safeParse({ name: 'A', value: 1, valueAsOf: '2026-11-19', source: 'plaid' }).success, false);
     });
 
+    test('regression: refuses a NUL in the name or identifier, which Postgres can\'t store', () => {
+        assert.equal(message({ name: 'Sample\u0000Fund', value: 1, valueAsOf: '2026-11-19' }), 'Input contains an invalid character (a null character)');
+        assert.equal(message({ name: 'Sample Fund', identifier: '12345\u0000X678', value: 1, valueAsOf: '2026-11-19' }), 'Input contains an invalid character (a null character)');
+    });
+
     test("regression: refuses year 0000, which the ISO format has and Postgres doesn't; any day from 0001 to 9999 is fine", () => {
         // Accepted, the save failed in the database with a 500 whose logged
         // error carried the holding's name and value.

@@ -407,6 +407,15 @@ describe('parseHoldingsCsv › rows with no ticker, valued by hand', () => {
         assert.deepStrictEqual(r.manual, [{ name: 'Target 2055 Trust', identifier: null, quantity: 250.5, value: 12345.67, costBasis: null }]);
     });
 
+    test('regression: a stray NUL in a cell is dropped, so the file imports rather than failing to store', () => {
+        const r = parseHoldingsCsv([header, 'VTI,Sample Total Market\u0000 ETF,10,2000.00,2900.00', '--,Sample Collective Trust\u0000 R6,120.5,10000,12500'].join('\n'));
+        assert.deepStrictEqual(r.issues, []);
+        assert.deepStrictEqual(r.rows.map((row) => row.name), ['Sample Total Market ETF']);
+        assert.deepStrictEqual(r.manual.map((row) => row.name), ['Sample Collective Trust R6']);
+        // What the API takes: nothing in the rows is refused.
+        assert.strictEqual(JSON.stringify(r).includes('\\u0000'), false);
+    });
+
     test('a valid CUSIP in the symbol column is the identifier and the description the name; a wrong check digit stays a ticker', () => {
         const r = parseHoldingsCsv(['Symbol,Description,Quantity,Average Cost,Market Value', '99ZZ12341,Stable Value Fund,100,,"$5,000.00"', '99ZZ12342,Near Miss Corp,10,20,$300'].join('\n'));
         assert.deepStrictEqual(r.issues, []);

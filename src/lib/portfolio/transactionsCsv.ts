@@ -1,6 +1,6 @@
 import { normalizeTicker } from '@/lib/research/watchlist';
 
-import { fitToHeader, normalizeHeader, parseNumber, readCsvRecords, type ParseIssue } from './csvImport';
+import { csvFileText, fitToHeader, normalizeHeader, parseNumber, readCsvRecords, type ParseIssue } from './csvImport';
 import { SHARE_MOVE_TYPES, SYMBOL_TYPES, TRADE_TYPES, TRANSACTION_TYPE_LABELS, type TransactionType } from './transactions';
 
 /**
@@ -109,7 +109,7 @@ export function parseTradeDate(raw: string): string | null {
 const SUMMARY = /(\btotals?\b|^ending balance|^beginning balance)/i;
 
 export function parseTransactionsCsv(text: string): TransactionParseResult {
-    const records = readCsvRecords(text.replace(/^﻿/, ''));
+    const records = readCsvRecords(csvFileText(text));
     const issues: ParseIssue[] = [];
     let skipped = 0;
 

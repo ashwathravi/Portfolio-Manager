@@ -82,6 +82,14 @@ describe("other assets and debts routes", () => {
         assert.equal(yearZero.status, 400);
         assert.deepEqual(await yearZero.json(), { error: "Enter the date of the value (YYYY-MM-DD)", code: "INVALID_NET_WORTH_ITEM" });
 
+        // So is a NUL, which no text column can store.
+        for (const body of [{ ...HOME, name: "Sample\u0000home" }, { ...HOME, note: "Sample\u0000note" }]) {
+            const nul = await add(body);
+            assert.equal(nul.status, 400);
+            assert.deepEqual(await nul.json(), { error: "Input contains an invalid character (a null character)", code: "INVALID_NET_WORTH_ITEM" });
+            assert.equal((await save(ITEM_ID, body)).status, 400);
+        }
+
         // An edit is held to the same item.
         const edit = await save(ITEM_ID, { ...HOME, kind: "debt", category: "vehicle" });
         assert.equal(edit.status, 400);

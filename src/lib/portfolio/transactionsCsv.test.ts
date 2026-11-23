@@ -164,6 +164,12 @@ describe('parseTransactionsCsv', () => {
         assert.equal(rows.length, 1);
     });
 
+    test('regression: a stray NUL in a cell is dropped, which Postgres could not store', () => {
+        const { rows, issues } = parseTransactionsCsv('Date,Action,Symbol,Quantity,Price,Description\n2026-03-05,Buy,AAPL,1,10,Sample\u0000 purchase');
+        assert.deepEqual(issues, []);
+        assert.equal(rows[0].notes, 'Sample purchase');
+    });
+
     // The Codex findings on PR #154.
     test('regression: a price worked out from a net amount leaves the fees out', () => {
         const csv = 'Date,Action,Symbol,Quantity,Net Amount,Fees\n2026-03-05,Buy,AAPL,10,-1001,1\n2026-03-06,Sell,AAPL,10,999,1';

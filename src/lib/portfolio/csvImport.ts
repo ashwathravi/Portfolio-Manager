@@ -257,6 +257,15 @@ export interface CsvRecord {
     error?: string;
 }
 
+/**
+ * A file's text as the parsers read it: without the byte-order mark some
+ * exports start with, and without NUL characters, which some leave in a cell
+ * and Postgres can't store, so an import of them would fail.
+ */
+export function csvFileText(text: string): string {
+    return text.replace(/^\uFEFF/, '').replace(/\u0000/g, '');
+}
+
 /** Read record boundaries only outside quoted fields, preserving embedded CR/LF. */
 export function readCsvRecords(text: string): CsvRecord[] {
     const records: CsvRecord[] = [];
@@ -399,7 +408,7 @@ function findColumn(headers: string[], key: keyof typeof HEADER_ALIASES): number
 }
 
 export function parseHoldingsCsv(text: string): ParseResult {
-    const records = readCsvRecords(text.replace(/^﻿/, ''));
+    const records = readCsvRecords(csvFileText(text));
     const issues: ParseIssue[] = [];
     let skipped = 0;
 

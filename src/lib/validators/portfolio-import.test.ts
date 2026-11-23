@@ -35,6 +35,13 @@ describe('portfolioImportSchema', () => {
         assert.strictEqual(firstMessage({ portfolioId: ID, rows: [{ ...row, name: '=cmd' }] }), 'Input cannot start with =');
     });
 
+    test('regression: rejects a NUL in a name, which Postgres can\'t store, so the import never fails as a server error', () => {
+        const nul = 'Input contains an invalid character (a null character)';
+        assert.strictEqual(firstMessage({ portfolioId: ID, rows: [{ ...row, name: 'NVIDIA\u0000 Corp' }] }), nul);
+        assert.strictEqual(firstMessage({ portfolioId: ID, rows: [], manual: [{ name: 'Sample Collective Trust\u0000 R6', value: 12500 }] }), nul);
+        assert.strictEqual(firstMessage({ newPortfolioName: 'Work\u0000place 401k', rows: [row] }), nul);
+    });
+
     test('validates every row', () => {
         assert.strictEqual(firstMessage({ portfolioId: ID, rows: [] }), 'Nothing to import');
         assert.strictEqual(firstMessage({ portfolioId: ID, rows: [{ ...row, quantity: 0 }] }), 'Quantity must be positive');

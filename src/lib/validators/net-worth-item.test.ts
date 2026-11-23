@@ -72,6 +72,13 @@ describe('netWorthItemSchema', () => {
         assert.equal(refused({ ...HOME, note: 'n'.repeat(501) }), 'Note is too long');
     });
 
+    test('regression: refuses a NUL in the name or note, which Postgres can\'t store, so it never fails as a server error', () => {
+        assert.equal(refused({ ...HOME, name: 'Sample\u0000home' }), 'Input contains an invalid character (a null character)');
+        assert.equal(refused({ ...HOME, note: 'Sample\u0000note' }), 'Input contains an invalid character (a null character)');
+        // Other control characters store fine, as they always have.
+        assert.equal(refused({ ...HOME, note: 'Sample\u0001note' }), null);
+    });
+
     test('refuses a date that isn\'t YYYY-MM-DD or isn\'t a real day; a future one is fine', () => {
         assert.equal(refused({ ...HOME, valueAsOf: '11/01/2026' }), 'Enter the date of the value (YYYY-MM-DD)');
         assert.equal(refused({ ...HOME, valueAsOf: '2026-02-30' }), 'Enter the date of the value (YYYY-MM-DD)');
