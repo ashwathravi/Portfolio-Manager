@@ -1,6 +1,9 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 
+import { RECORD_LIMITS } from "@/lib/limits/records";
+import { manualSymbol } from "@/lib/portfolio/manual-symbol";
+
 import { DEFAULT_BUCKET_POLICIES } from "./buckets";
 import { DEFAULT_CASH_DEPLOYMENT_RULE } from "./cash";
 import { DEFAULT_EMPLOYER_STOCK_DERISKING_PLAN } from "./de-risking";
@@ -271,6 +274,20 @@ describe("withBucketChoice", () => {
         const choices = { ...full, "manual:m1": "speculative" as const, "manual:gone": "active" as const };
         const next = withBucketChoice(choices, "NEW", "active", ["NEW", "OLD7", "MANUAL:M1"]);
         assert.deepEqual(next, { OLD7: "core", "manual:m1": "speculative", NEW: "active" });
+    });
+
+    test("regression: every holding valued by hand a user can keep has a choice, and 500 tickers beside them", () => {
+        assert.ok(MAX_BUCKET_ASSIGNMENTS >= RECORD_LIMITS.manualHoldings + 500);
+        const handValued = Array.from(
+            { length: RECORD_LIMITS.manualHoldings },
+            (_, i) => manualSymbol(`00000000-0000-4000-8000-${String(i).padStart(12, "0")}`),
+        );
+        const held = [...handValued, ...Array.from({ length: 500 }, (_, i) => `T${i}`)];
+        const earlier = Object.fromEntries(held.slice(0, -1).map((symbol) => [bucketChoiceKey(symbol), "active" as const]));
+        const choices = withBucketChoice(earlier, held[held.length - 1], "speculative", held);
+        assert.equal(Object.keys(choices).length, held.length);
+        // None went to make room for the last: the first is still chosen.
+        assert.equal(chosenBucket({ bucketAssignments: choices }, handValued[0]), "active");
     });
 });
 

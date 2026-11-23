@@ -54,9 +54,9 @@
  *        its type suggests.
  *   v17 — launch item i54: `riskPolicy.bucketAssignments` also holds
  *        the bucket chosen for a holding valued by hand, keyed
- *        `manual:<id>`. Nothing to migrate; the bump keeps a tab from
- *        before it, which would drop those choices, from saving over
- *        them.
+ *        `manual:<id>`, and up to 1,500 choices, not 500. Nothing to
+ *        migrate; the bump keeps a tab from before it, which would
+ *        drop those choices, from saving over them.
  */
 export const SETTINGS_VERSION = 17;
 

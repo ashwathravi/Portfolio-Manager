@@ -248,7 +248,7 @@ const handValuedKey = z.string().regex(/^manual:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]
 const bucketAssignmentsSchema = z
     .partialRecord(z.union([ticker, handValuedKey]), z.enum(ASSIGNABLE_POLICY_BUCKETS))
     .refine((assignments) => Object.keys(assignments).length <= MAX_BUCKET_ASSIGNMENTS, {
-        error: `must hold at most ${MAX_BUCKET_ASSIGNMENTS} choices`,
+        error: `must hold at most ${MAX_BUCKET_ASSIGNMENTS.toLocaleString('en-US')} choices`,
     });
 
 export const riskPolicySettingsSchema = z.strictObject({

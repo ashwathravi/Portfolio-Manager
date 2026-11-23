@@ -569,7 +569,7 @@ describe('findSettingsIssue', () => {
             accepts(['riskPolicy', 'bucketAssignments'], most);
             assert.equal(
                 issueFor(['riskPolicy', 'bucketAssignments'], { ...most, EXTRA: 'core' }),
-                `settings.riskPolicy.bucketAssignments must hold at most ${MAX_BUCKET_ASSIGNMENTS} choices`,
+                'settings.riskPolicy.bucketAssignments must hold at most 1,500 choices',
             );
         });
 
@@ -593,7 +593,7 @@ describe('findSettingsIssue', () => {
             accepts(['riskPolicy', 'bucketAssignments'], full);
             assert.equal(
                 issueFor(['riskPolicy', 'bucketAssignments'], { ...full, 'manual:00000000-0000-4000-8000-000000000002': 'core' }),
-                `settings.riskPolicy.bucketAssignments must hold at most ${MAX_BUCKET_ASSIGNMENTS} choices`,
+                'settings.riskPolicy.bucketAssignments must hold at most 1,500 choices',
             );
         });
 

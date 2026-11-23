@@ -51,10 +51,13 @@ export const ASSIGNABLE_POLICY_BUCKETS = POLICY_BUCKETS.filter(
 export type AssignablePolicyBucket = (typeof ASSIGNABLE_POLICY_BUCKETS)[number];
 
 /**
- * Choices kept per user, tickers and holdings valued by hand together: far
- * more than anyone holds.
+ * Choices kept per user, tickers and holdings valued by hand together: one
+ * for each of the 1,000 holdings valued by hand a user can keep
+ * (RECORD_LIMITS.manualHoldings), and 500 tickers beside them. Raising it
+ * takes a new SETTINGS_VERSION, or a tab from before would read a longer
+ * list as no choices at all and save it that way.
  */
-export const MAX_BUCKET_ASSIGNMENTS = 500;
+export const MAX_BUCKET_ASSIGNMENTS = 1_500;
 
 /** The settings store's `riskPolicy` slice. */
 export interface RiskPolicySettings {
@@ -246,7 +249,7 @@ export function policyHoldings(
  * The user's bucket choices after choosing `bucket` for `symbol`, a ticker
  * or a holding valued by hand (null: back to its default). Past
  * MAX_BUCKET_ASSIGNMENTS, choices for holdings no longer `held` go first,
- * so a save is never refused for holding too many.
+ * then the oldest, so a save is never refused for holding too many.
  */
 export function withBucketChoice(
     assignments: RiskPolicySettings["bucketAssignments"],
