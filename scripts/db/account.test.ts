@@ -14,6 +14,8 @@ import { manualSymbol } from '../../src/lib/portfolio/manual-symbol';
 import { hasGoogleAccount } from '../../src/lib/auth/new-accounts';
 import { googleWorkspaceDomains } from '../../src/lib/auth/session-access';
 import type { PlaidFetch } from '../../src/lib/plaid/link';
+import { SETTINGS_VERSION } from '../../src/lib/settings/document';
+import { defaultPersistedSettings } from '../../src/lib/stores/settingsStore';
 import { portfolioImportSchema } from '../../src/lib/validators/portfolio-import';
 
 // Launch item i65: deleting an account and exporting its data, against a
@@ -239,6 +241,30 @@ describe('account deletion and export', { skip: !DATABASE_URL && 'SCRIPTS_TEST_D
             ['Target 2055 Trust', 1000, [{ date: '2026-10-22', value: 900, quantity: null }, { date: '2026-10-23', value: 1000, quantity: null }]],
         ]);
         assert.deepEqual(account.valuationHistory[0].positions.map((p) => [p.symbol, p.marketValue]), [['AAPL', 1000], ['Target 2055 Trust', 1000]]);
+        // No bucket chosen: in its default, core.
+        assert.deepEqual(account.manualHoldings.map((m) => m.policyBucket), [null]);
+
+        // The bucket chosen for it in Settings › Bucket policy (launch item
+        // i54), by its id; another holding valued by hand has none.
+        await addManualHolding('u-export-fund', portfolioId, {
+            name: 'Private Co shares', identifier: null, quantity: null, value: 500, costBasis: null, valueAsOf: '2026-10-23',
+        }, { database });
+        const settings = {
+            demo: { showSampleData: false },
+            riskPolicy: { ...defaultPersistedSettings().riskPolicy, bucketAssignments: { [manualSymbol(id)]: 'speculative', AAPL: 'core' } },
+        };
+        await sql`UPDATE user_settings SET version = ${SETTINGS_VERSION}, settings = ${JSON.stringify(settings)}::jsonb WHERE user_id = 'u-export-fund'`;
+        const chosen = await buildAccountExport('u-export-fund', database, NOW);
+        assert.deepEqual(chosen.accounts[0].manualHoldings.map((m) => [m.name, m.policyBucket]), [['Private Co shares', null], ['Target 2055 Trust', 'speculative']]);
+        // The settings document itself is exported as it's stored.
+        assert.equal(chosen.settings?.version, SETTINGS_VERSION);
+        assert.deepEqual(chosen.settings?.settings, JSON.parse(JSON.stringify(settings)));
+
+        // Without a settings row, every one is in its default.
+        await sql`DELETE FROM user_settings WHERE user_id = 'u-export-fund'`;
+        const none = await buildAccountExport('u-export-fund', database, NOW);
+        assert.equal(none.settings, null);
+        assert.deepEqual(none.accounts[0].manualHoldings.map((m) => [m.name, m.policyBucket]), [['Private Co shares', null], ['Target 2055 Trust', null]]);
     });
 
     test('a synced option position is exported with its contract and the institution\'s dated price; one added by hand has none (i63)', async () => {

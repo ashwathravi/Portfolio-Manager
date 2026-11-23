@@ -43,7 +43,9 @@ import {
 import { buildListFollowedFilersQuery } from "@/lib/alpha-radar/follows";
 import { orderFromRow } from "@/lib/execution/orders";
 
-import { manualHoldingId } from "@/lib/portfolio/manual-symbol";
+import { manualHoldingId, manualSymbol } from "@/lib/portfolio/manual-symbol";
+import { chosenBucket } from "@/lib/risk-policy/user-policy";
+import { storedRiskPolicy } from "@/lib/settings/risk-policy";
 import { ACCOUNT_EXPORT_FORMAT, ACCOUNT_EXPORT_VERSION, type AccountExport, type ExportedValuationPosition } from "./export-data";
 
 type Database = typeof db;
@@ -65,6 +67,11 @@ export async function buildAccountExport(userId: string, database: Database = db
     return database.transaction(async (tx) => {
         const [user] = await tx.select({ name: authUsers.name, email: authUsers.email }).from(authUsers).where(eq(authUsers.id, userId)).limit(1);
         const [settings] = await tx.select().from(userSettings).where(eq(userSettings.userId, userId)).limit(1);
+        // Read as every view reads it, for the bucket chosen for each holding valued by hand.
+        const policy = storedRiskPolicy({
+            status: "ok",
+            document: settings ? { version: settings.version, settings: settings.settings, updatedAt: settings.updatedAt.toISOString() } : null,
+        });
 
         const accounts = await tx.select().from(portfolios).where(eq(portfolios.userId, userId)).orderBy(asc(portfolios.name), asc(portfolios.id));
         const ids = accounts.map((a) => a.id);
@@ -174,6 +181,7 @@ export async function buildAccountExport(userId: string, database: Database = db
                     updatedAt: m.updatedAt.toISOString(),
                     values: handValues.filter((v) => v.manualHoldingId === m.id)
                         .map((v) => ({ date: v.date, value: Number(v.value), quantity: num(v.quantity) })),
+                    policyBucket: chosenBucket(policy, manualSymbol(m.id)) ?? null,
                 })),
                 optionPositions: options.filter((o) => o.portfolioId === account.id).map((o) => ({
                     contract: o.contract,

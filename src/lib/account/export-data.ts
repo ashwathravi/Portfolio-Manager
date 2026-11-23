@@ -4,6 +4,7 @@
  * Settings card builds the CSV files from the same export.
  */
 
+import type { AssignablePolicyBucket } from "@/lib/risk-policy/user-policy";
 import type { Order } from "@/types/execution";
 
 export const ACCOUNT_EXPORT_FORMAT = "atlas-wealth-export";
@@ -103,6 +104,8 @@ export interface ExportedManualHolding {
     updatedAt: string;
     /** Its value on each day it was valued, oldest first. */
     values: { date: string; value: number; quantity: number | null }[];
+    /** The bucket chosen for it in Settings › Bucket policy; null while it's in its default, core. */
+    policyBucket: AssignablePolicyBucket | null;
 }
 
 export interface ExportedAccount {
