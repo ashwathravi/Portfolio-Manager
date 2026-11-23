@@ -525,12 +525,15 @@ function sessionOf(day: string): string {
 
 /**
  * A contract's stored close, when it's from about the session of the price
- * it's checked against (`priceDay`): the same session, or the one before or
- * after, as the institution's price and the nightly close can be a session
- * apart. Null otherwise, or when either has no day. option_marks keeps a
- * close until a newer one arrives, so an illiquid contract's can be weeks
- * old, and in that time an option can move far enough for its close to fit
- * the wrong reading (nearClose).
+ * it's checked against (`priceDay`): from two sessions before it to one
+ * after. The institution's price and the nightly close can be a session
+ * apart either way, and the close the nightly sync has is two sessions
+ * before its price: the sync runs before the prices job, and Massive's free
+ * plan publishes a session's bars after midnight Eastern, so that job
+ * stores the session before its own. Null otherwise, or when either has no
+ * day. option_marks keeps a close until a newer one arrives, so an illiquid
+ * contract's can be weeks old, and in that time an option can move far
+ * enough for its close to fit the wrong reading (nearClose).
  */
 function closeForPriceDay(stored: StoredOptionClose | undefined, priceDay: string | null): number | null {
     const close = positivePrice(stored?.close);
@@ -538,7 +541,8 @@ function closeForPriceDay(stored: StoredOptionClose | undefined, priceDay: strin
     try {
         const closed = sessionOf(stored.date);
         const priced = sessionOf(priceDay);
-        return closed === priced || previousTradingDay(closed) === priced || previousTradingDay(priced) === closed ? close : null;
+        const before = previousTradingDay(priced);
+        return [priced, before, previousTradingDay(before)].includes(closed) || previousTradingDay(closed) === priced ? close : null;
     } catch {
         // A day before the market calendar starts, far too old to say anything.
         return null;

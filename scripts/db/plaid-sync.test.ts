@@ -6,7 +6,9 @@ import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import postgres from 'postgres';
 
 import * as schema from '../../src/db/schema';
+import { lastCompletedSession, previousTradingDay } from '../../src/lib/markets/market-hours';
 import { listOptionContractsToMark } from '../../src/lib/markets/option-marks';
+import { createPriceIngestStore, ingestDailyPrices, type PriceIngestAdapter, type PriceIngestStore } from '../../src/lib/markets/price-ingest';
 import type { PlaidFetch } from '../../src/lib/plaid/link';
 import { importHoldings } from '../../src/lib/portfolio/importHoldings';
 import { deletePortfolio, updatePortfolio } from '../../src/lib/portfolio/manage';
@@ -791,12 +793,14 @@ describe('Plaid sync into portfolios', { skip: !DATABASE_URL && 'SCRIPTS_TEST_DA
         assert.deepEqual(await held(), [[3, 350, 420]]);
 
         try {
-            // The nightly job stores the contract's close per share.
+            // The nightly job stores the contract's close per share: on Friday
+            // evening, Thursday's, as Massive's free plan publishes Friday's bars
+            // after midnight. Monday's sync has it two sessions before its price.
             await sql`INSERT INTO option_marks (contract, close, close_date, checked_session, checked_at, source)
-                VALUES (${ACME_CALL}, 4.25, '2026-10-23', '2026-10-23', now(), 'test')`;
+                VALUES (${ACME_CALL}, 4.25, '2026-10-22', '2026-10-23', now(), 'test')`;
             await sync([AAPL_LOT, PER_CONTRACT], new Date('2026-10-26T22:30:00.000Z'));
             assert.deepEqual(await held(), [[300, 3.5, 4.2]]);
-            // The next night the close is two sessions old, the prices job (which
+            // The next night the close is three sessions old, the prices job (which
             // runs after the plaid job, and checks a few contracts a run) not
             // having stored a newer one: too old to settle the contract, it keeps
             // the reading the row is in rather than going back to 3.
@@ -822,6 +826,70 @@ describe('Plaid sync into portfolios', { skip: !DATABASE_URL && 'SCRIPTS_TEST_DA
         } finally {
             await sql`DELETE FROM option_marks WHERE contract = ${ACME_CALL}`;
             await sql`DELETE FROM price_bars WHERE symbol = 'ACME' AND source = 'test'`;
+        }
+    });
+
+    /**
+     * Massive's free plan as the nightly prices job finds it, at 22:31 UTC on
+     * a weekday: the contract traded every session at $4.25 a share, but the
+     * evening's own session isn't published until after midnight Eastern, so
+     * a range that ends on it leaves it out.
+     */
+    const freePlanMassive = (now: Date): PriceIngestAdapter => {
+        const withheld = lastCompletedSession(now);
+        return {
+            isConfigured: true,
+            getDailyBars: async () => new Map(),
+            getDailyHistory: async () => ({ bars: [], unreadable: 0 }),
+            getSplits: async () => [],
+            getTickerReference: async () => null,
+            getLatestOptionClose: async (_contract, _from, to) => ({ date: to < withheld ? to : previousTradingDay(withheld), close: 4.25 }),
+        };
+    };
+    /** The prices job with only its option marks step at work: every other step finds nothing to do. */
+    const marksStepOnly = (session: string): PriceIngestStore => ({
+        ...createPriceIngestStore(database),
+        listHeldSymbols: async () => [],
+        trackSecurities: async () => [],
+        listTrackedSymbols: async () => new Set(),
+        getLatestBarDate: async () => session,
+        pruneUnpricedSecurities: async () => [],
+        listHeldSince: async () => [],
+        listSymbolsNeedingReference: async () => [],
+        countSymbolsNeedingReference: async () => 0,
+        listSymbolsNeedingHistory: async () => [],
+        countSymbolsNeedingHistory: async () => 0,
+    });
+
+    test('regression: on Massive\'s free plan the nightly sync reads a contract priced per contract by the close the prices job stored the night before', async () => {
+        // The cron runs the plaid job, then the prices job. On the free plan the
+        // prices job stores the session before its own, so the next night's sync
+        // has that close two sessions before its price.
+        const { sync } = await linkedAccount('u-freeplan');
+        const PER_CONTRACT: [string, number, number, number] = ['sec_acme_c150', 300, 420, 105_000];
+        const rows: (number | null)[][][] = [];
+        const marks: string[][] = [];
+        try {
+            for (const night of ['2026-11-02', '2026-11-03', '2026-11-04']) {
+                assert.equal((await sync([AAPL_LOT, PER_CONTRACT], new Date(`${night}T22:30:00.000Z`))).status, 'synced', night);
+                rows.push((await optionRows('u-freeplan')).map((r) => [r.quantity, r.premium, r.price]));
+                let clock = Date.parse(`${night}T22:31:00.000Z`);
+                await ingestDailyPrices({
+                    adapter: freePlanMassive(new Date(clock)),
+                    store: marksStepOnly(night),
+                    now: () => new Date(clock),
+                    sleep: async (ms) => { clock += ms; },
+                });
+                const [mark] = await sql<{ date: string; checked: string }[]>`
+                    SELECT close_date::text AS date, checked_session::text AS checked FROM option_marks WHERE contract = ${ACME_CALL}`;
+                marks.push([mark?.date, mark?.checked]);
+            }
+            // Each evening the session before's close, as of that evening's session.
+            assert.deepEqual(marks, [['2026-10-30', '2026-11-02'], ['2026-11-02', '2026-11-03'], ['2026-11-03', '2026-11-04']]);
+            // Plaid's shares until a close is stored, then 300 contracts each night.
+            assert.deepEqual(rows, [[[3, 350, 420]], [[300, 3.5, 4.2]], [[300, 3.5, 4.2]]]);
+        } finally {
+            await sql`DELETE FROM option_marks WHERE source = 'massive'`;
         }
     });
 

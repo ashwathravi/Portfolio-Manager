@@ -369,7 +369,10 @@ describe("accountHoldings: option contracts (launch item i63)", () => {
         const undated = (undatedPriceDay?: string) => accountHoldings(ACCOUNT, [perContract(300)], [acmeCall()], {
             contractCloses: new Map([[contract, { close: 4.25, date: DAY }]]), undatedPriceDay,
         }).options.map((o) => o.quantity);
-        assert.deepEqual([undated(DAY), undated("2026-10-26"), undated(), undated("2026-10-27")], [[300], [300], [3], [3]]);
+        assert.deepEqual(
+            [undated(DAY), undated("2026-10-26"), undated("2026-10-27"), undated(), undated("2026-10-28")],
+            [[300], [300], [300], [3], [3]],
+        );
 
         const stored = accountHoldings(ACCOUNT, [perContract(300)], [acmeCall()], { underlyingPrices: new Map([["ACME", 145]]) });
         assert.deepEqual(stored.options, [{ ...ACME, quantity: 300, premium: 3.5, price: 4.2 }]);
@@ -400,11 +403,11 @@ describe("accountHoldings: option contracts (launch item i63)", () => {
         const read = (date: string | null) => accountHoldings(ACCOUNT, [cheap], [acmeCall()], {
             contractCloses: new Map([[contract, { close: 0.01, date }]]), underlyingPrices: new Map([["ACME", 100]]),
         });
-        for (const date of [WEEKS_BEFORE, "2026-10-21", "2026-10-27", null]) {
+        for (const date of [WEEKS_BEFORE, "2026-10-20", "2026-10-27", null]) {
             assert.deepEqual(read(date).options, [{ ...ACME, quantity: 3, premium: 0.1, price: 0.4, priceDate: DAY }], String(date));
         }
-        // A close from the price's session, or the one before or after it, is asked.
-        for (const date of [DAY, "2026-10-22", "2026-10-26"]) {
+        // A close from the price's session, one of the two before it, or the one after it, is asked.
+        for (const date of [DAY, "2026-10-21", "2026-10-22", "2026-10-26"]) {
             assert.deepEqual(read(date).options.map((o) => [o.quantity, o.premium, o.price]), [[300, 0.001, 0.004]], date);
         }
 
@@ -424,35 +427,50 @@ describe("accountHoldings: option contracts (launch item i63)", () => {
         const read = (priceDay: string, closeDay: string) => accountHoldings(ACCOUNT, [perContract(300, { institution_price_as_of: priceDay })], [acmeCall()], {
             contractCloses: new Map([[contract, { close: 4.25, date: closeDay }]]),
         }).options.map((o) => o.quantity);
-        // Saturday's price is Friday's: Thursday's close to Monday's is asked, and none further.
-        for (const day of ["2026-10-22", "2026-10-23", "2026-10-26"]) assert.deepEqual(read("2026-10-24", day), [300], day);
-        for (const day of ["2026-10-21", "2026-10-27"]) assert.deepEqual(read("2026-10-24", day), [3], day);
-        // Thanksgiving's is Wednesday's: Tuesday's close to Friday's, the market shut between.
-        for (const day of ["2026-11-24", "2026-11-25", "2026-11-27"]) assert.deepEqual(read("2026-11-26", day), [300], day);
-        assert.deepEqual(read("2026-11-26", "2026-11-30"), [3]);
+        // Saturday's price is Friday's: Wednesday's close to Monday's is asked, and none further.
+        for (const day of ["2026-10-21", "2026-10-22", "2026-10-23", "2026-10-26"]) assert.deepEqual(read("2026-10-24", day), [300], day);
+        for (const day of ["2026-10-20", "2026-10-27"]) assert.deepEqual(read("2026-10-24", day), [3], day);
+        // Thanksgiving's is Wednesday's: Monday's close to Friday's, the market shut between.
+        for (const day of ["2026-11-23", "2026-11-24", "2026-11-25", "2026-11-27"]) assert.deepEqual(read("2026-11-26", day), [300], day);
+        for (const day of ["2026-11-20", "2026-11-30"]) assert.deepEqual(read("2026-11-26", day), [3], day);
         // A day before the market's calendar starts says nothing, and doesn't stop the sync: Plaid's shares stand.
         for (const day of ["2017-12-29", "0001-01-01"]) assert.deepEqual(read(day, DAY), [3], day);
         assert.deepEqual(read(DAY, "2017-12-29"), [3]);
     });
 
+    test("regression: the nightly sync counts the close the prices job stored the night before, two sessions before its price", () => {
+        // Massive's free plan publishes a session's bars after midnight Eastern,
+        // after the nightly jobs: Monday night's prices job stores Friday's close,
+        // and Tuesday night's sync, its price dated Tuesday, has that close two
+        // sessions before it. The first sync wrote Plaid's shares, 3 contracts.
+        const contract = "O:ACME270115C00150000";
+        const read = (undatedPriceDay: string) => accountHoldings(ACCOUNT, [perContract(300)], [acmeCall()], {
+            contractCloses: new Map([[contract, { close: 4.25, date: DAY }]]), undatedPriceDay,
+            syncedContracts: new Map([[ACCOUNT, new Map([[contract, 3]])]]),
+        }).options.map((o) => [o.quantity, o.premium, o.price]);
+        assert.deepEqual(read("2026-10-27"), [[300, 3.5, 4.2]]);
+        // Three sessions before is too old to settle it: the row's shares stand.
+        assert.deepEqual(read("2026-10-28"), [[3, 350, 420]]);
+    });
+
     test("regression: a close too old to settle a contract keeps the reading its synced row is in, and turns none into the other", () => {
         // An institution that prices per contract: its close of $4.25 a share, from
-        // Friday, read 300 at $420 as 300 contracts on Monday. On Tuesday's sync the
-        // close is two sessions old, the nightly job not having checked it since.
+        // Friday, read 300 at $420 as 300 contracts on Monday. On Wednesday's sync the
+        // close is three sessions old, the nightly job not having stored a newer one.
         const contract = "O:ACME270115C00150000";
         const synced = (contracts?: number) => (contracts == null ? undefined : new Map([[ACCOUNT, new Map([[contract, contracts]])]]));
-        const tuesday = (lots: PlaidHolding[], row?: number) => accountHoldings(ACCOUNT, lots, [acmeCall()], {
-            contractCloses: new Map([[contract, { close: 4.25, date: DAY }]]), undatedPriceDay: "2026-10-27", syncedContracts: synced(row),
+        const wednesday = (lots: PlaidHolding[], row?: number) => accountHoldings(ACCOUNT, lots, [acmeCall()], {
+            contractCloses: new Map([[contract, { close: 4.25, date: DAY }]]), undatedPriceDay: "2026-10-28", syncedContracts: synced(row),
         }).options.map((o) => [o.quantity, o.premium, o.price]);
-        assert.deepEqual(tuesday([perContract(300)], 300), [[300, 3.5, 4.2]]);
+        assert.deepEqual(wednesday([perContract(300)], 300), [[300, 3.5, 4.2]]);
         // Contracts bought since don't take the row out of its reading.
-        assert.deepEqual(tuesday([perContract(400)], 300), [[400, 3.5, 4.2]]);
+        assert.deepEqual(wednesday([perContract(400)], 300), [[400, 3.5, 4.2]]);
         // A row in Plaid's shares stays in them, and so does a contract with no row.
-        assert.deepEqual(tuesday([perContract(300)], 3), [[3, 350, 420]]);
-        assert.deepEqual(tuesday([perContract(300)]), [[3, 350, 420]]);
+        assert.deepEqual(wednesday([perContract(300)], 3), [[3, 350, 420]]);
+        assert.deepEqual(wednesday([perContract(300)]), [[3, 350, 420]]);
         // Another account's row says nothing about this one's.
         const elsewhere = accountHoldings(ACCOUNT, [perContract(300)], [acmeCall()], {
-            contractCloses: new Map([[contract, { close: 4.25, date: DAY }]]), undatedPriceDay: "2026-10-27",
+            contractCloses: new Map([[contract, { close: 4.25, date: DAY }]]), undatedPriceDay: "2026-10-28",
             syncedContracts: new Map([["acc_other", new Map([[contract, 300]])]]),
         });
         assert.deepEqual(elsewhere.options.map((o) => o.quantity), [3]);
