@@ -503,8 +503,9 @@ describe('Plaid sync into portfolios', { skip: !DATABASE_URL && 'SCRIPTS_TEST_DA
             '/investments/holdings/get': holdingsOf('acc_kind', [['sec_aapl', 1, 100, 90]], 50),
             '/investments/transactions/get': transactionsOf('acc_kind', []),
         }).fetchImpl, at));
-        const account = async () => (await sql<{ id: string; type: string | null; institution: string | null; tax: string | null; ownership: string | null; edited: string | null; updated: string }[]>`
-            SELECT id, account_type AS type, institution, tax_treatment AS tax, ownership, kind_edited_at::text AS edited, updated_at::text AS updated
+        const account = async () => (await sql<{ id: string; description: string | null; cash: number; type: string | null; institution: string | null; tax: string | null; ownership: string | null; edited: string | null; updated: string }[]>`
+            SELECT id, description, cash_balance AS cash, account_type AS type, institution, tax_treatment AS tax, ownership,
+                   kind_edited_at::text AS edited, updated_at::text AS updated
             FROM portfolios WHERE user_id = 'u-kind'`)[0];
 
         // A new linked account takes Plaid's kind and the connection's
@@ -514,16 +515,23 @@ describe('Plaid sync into portfolios', { skip: !DATABASE_URL && 'SCRIPTS_TEST_DA
         assert.deepEqual([first.type, first.institution, first.tax, first.ownership, first.edited], ['brokerage', 'Fidelity', 'taxable', null, null]);
 
         // An account linked before institutions were kept: a rename isn't a
-        // say over the kind, so the next sync fills its institution in.
+        // say over the kind, so the next sync fills its institution in. The
+        // form sends every field with each save (AccountControls), so the
+        // rename re-sends the kind as it is, the missing institution as none.
         await sql`UPDATE portfolios SET institution = NULL WHERE id = ${first.id}`;
-        assert.equal((await updatePortfolio('u-kind', first.id, { name: 'My brokerage' }, { now: new Date('2026-10-26T12:00:00.000Z'), database }))?.name, 'My brokerage');
-        assert.equal((await account()).edited, null);
+        const form = {
+            name: 'My brokerage', description: first.description ?? '', cashBalance: first.cash,
+            accountType: 'brokerage', institution: null, taxTreatment: 'taxable', ownership: null,
+        } as const;
+        assert.equal((await updatePortfolio('u-kind', first.id, form, { now: new Date('2026-10-26T12:00:00.000Z'), database }))?.name, 'My brokerage');
+        const renamed = await account();
+        assert.deepEqual([renamed.edited, renamed.updated], [null, first.updated]);
         await sync(new Date('2026-10-26T22:30:00.000Z'));
         assert.equal((await account()).institution, 'Fidelity');
 
         // The user clears the tax treatment and says it's joint. From then on
         // a sync leaves the kind as the user left it, the empty field included.
-        const saved = await updatePortfolio('u-kind', first.id, { taxTreatment: null, ownership: 'joint' }, { now: new Date('2026-10-27T12:00:00.000Z'), database });
+        const saved = await updatePortfolio('u-kind', first.id, { ...form, institution: 'Fidelity', taxTreatment: null, ownership: 'joint' }, { now: new Date('2026-10-27T12:00:00.000Z'), database });
         assert.deepEqual([saved?.taxTreatment, saved?.ownership], [null, 'joint']);
         assert.equal((await account()).edited, '2026-10-27 12:00:00');
         for (const at of ['2026-10-27T22:30:00.000Z', '2026-10-28T22:30:00.000Z']) {
