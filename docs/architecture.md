@@ -21,10 +21,10 @@ How the app, its data and its jobs fit together. The reasons behind the big choi
 | Area | Tables |
 |---|---|
 | Sign-in | `auth_users`, `auth_accounts`, `auth_sessions`, `auth_verification_tokens`, `auth_authenticators` |
-| Portfolios | `portfolios` (one per account: manual, CSV or a linked account), `holdings` (one row per symbol in each portfolio), `transactions` (with fees, currency and source) |
+| Portfolios | `portfolios` (one per account: manual, CSV or a linked account), `holdings` (one row per symbol in each portfolio), `option_positions` (each option contract an account holds: entered by hand, from a CSV or synced), `transactions` (with fees, currency and source) |
 | Linked accounts | `plaid_items` (the access token, encrypted with `PLAID_TOKEN_ENCRYPTION_KEY`), `plaid_accounts` (each account, whether it is synced, and the portfolio it syncs into) |
 | The user's own | `user_settings` (one versioned JSON row: preferences and the risk policy), `watchlist_items`, `journal_entries`, `theses` with `thesis_catalysts` and `thesis_evidence`, `order_plans`, `ask_messages`, `strategies` (each with its definition, discipline rules and last backtest) |
-| Market data | `securities` (the securities master: what is tracked, reference data, sector), `price_bars` (daily closes), `intraday_quotes` (delayed quotes, shared), `symbol_directory` (every listed US company's ticker and name, for ticker search) |
+| Market data | `securities` (the securities master: what is tracked, reference data, sector), `price_bars` (daily closes), `option_marks` (the newest close of each option contract held, shared), `intraday_quotes` (delayed quotes, shared), `symbol_directory` (every listed US company's ticker and name, for ticker search) |
 | History | `portfolio_snapshots`, `portfolio_snapshot_positions` (nightly valuations) |
 | Jobs | `job_runs` (one row per run of each scheduled job, the backup included) |
 | Alpha Radar | `alpha_radar_tracked_filers`, `alpha_radar_sec_filings`, `alpha_radar_filing_holdings`, `alpha_radar_holding_changes`, `alpha_radar_reports`, `alpha_radar_semantic_chunks` |
@@ -50,7 +50,7 @@ Database access goes through `src/db/index.ts` (`postgres` + `drizzle-orm`), whi
 
 ## Linked accounts
 
-Plaid Link runs in the browser; the server exchanges the public token and stores the access token encrypted in `plaid_items` (`src/lib/plaid`). The user picks which accounts to sync, and each one syncs into its own portfolio: holdings are replaced, transactions upserted by Plaid's id. Syncs run on demand (Settings › Sync now), nightly (the `plaid` job) and when Plaid's webhook (`/api/plaid/webhook`, ES256-signed) reports new data. A connection that needs the user to sign in again reconnects through Link's update mode. Production has no Plaid settings yet: linking real accounts waits for Plaid's approval (launch items i09, i67).
+Plaid Link runs in the browser; the server exchanges the public token and stores the access token encrypted in `plaid_items` (`src/lib/plaid`). The user picks which accounts to sync, and each one syncs into its own portfolio: holdings are replaced, transactions upserted by Plaid's id. Option contracts Plaid reports with their details become the account's option positions (`option_positions`, source `plaid`, launch item i63), replaced with the holdings in the same transaction and under the same account lock, keeping the user's thesis, rules and own price; options without clear details, and option trades, are counted, not brought in, and options aren't yet in the portfolio value or returns. Syncs run on demand (Settings › Sync now), nightly (the `plaid` job) and when Plaid's webhook (`/api/plaid/webhook`, ES256-signed) reports new data. A connection that needs the user to sign in again reconnects through Link's update mode. Production has no Plaid settings yet: linking real accounts waits for Plaid's approval (launch items i09, i67).
 
 ## Scheduled jobs and operations
 

@@ -1,6 +1,6 @@
 # Current Focus
 
-_Last updated 2026-11-14, during phase 4 of the production launch plan (private beta readiness). The launch tracker has each item's status._
+_Last updated 2026-11-23, during phase 4 of the production launch plan (private beta readiness). The launch tracker has each item's status._
 
 ## Information architecture
 
@@ -10,7 +10,7 @@ tabs, ⌘K palette, and legacy redirects all read from it):
 | Destination | Routes | Data |
 |---|---|---|
 | Today | `/` | Net worth, what needs attention under the user's risk policy, the equity curve from nightly valuations, and the weekly review and patterns from closed trades: **the user's own data**. A labelled, hideable example section until there is enough of it. |
-| Portfolio | `/portfolios/holdings`, `/portfolios/accounts`, `/portfolios/activity`, `/portfolios/detail/[symbol]` | **The user's own data**: entered by hand, imported from CSV, or synced through Plaid. Holdings by account, or one row per symbol across accounts (`?view=symbol`, i79); money moved between the user's own accounts is one transfer, not a deposit and a withdrawal (i80). LEAPS ledger: the user's option positions, entered by hand or from a positions CSV, marked at Massive's end-of-day close where its plan includes options (i63); not yet in net worth or returns. |
+| Portfolio | `/portfolios/holdings`, `/portfolios/accounts`, `/portfolios/activity`, `/portfolios/detail/[symbol]` | **The user's own data**: entered by hand, imported from CSV, or synced through Plaid. Holdings by account, or one row per symbol across accounts (`?view=symbol`, i79); money moved between the user's own accounts is one transfer, not a deposit and a withdrawal (i80). LEAPS ledger: the user's option positions, entered by hand, from a positions CSV or synced from a linked account (the contract, contracts and premium are then the institution's, the thesis and rules the user's), marked at the newest of Massive's end-of-day close where its plan includes options, the institution's price and the user's own (i63); not yet in the portfolio value or returns. |
 | Performance | `/performance` (Returns), `/performance/attribution`, `/performance/behaviour` | Returns and attribution from nightly valuation snapshots; Behaviour from closed trades. A labelled example series before any history exists. |
 | Research | `/research`, `/research/thesis/[ticker]` | Watchlist, journal and theses saved with the account (i38). Alpha Radar: 13F data from SEC EDGAR, shared by every user and managed by admins (i69), checked daily and followed per user, with Today showing the filers each user follows (i60). Each filing's information table is read from its attachment, and its holdings and report are searchable evidence, by meaning too when embeddings are on (i62). |
 | Strategies | `/strategies` (`/strategies/[id]` redirects with the strategy selected) | The user's strategies, saved with the account and backtested over stored prices (i55). Labelled, hideable examples. |
@@ -50,8 +50,9 @@ Retired routes redirect (307): `/portfolios`, `/portfolios/trade-log`,
   away during the beta, and Supabase's Data API is off. `CRON_SECRET` and
   `AUTH_ADMIN_EMAILS` were set on 2026-10-30.
 - **Product gaps:** option positions (i63) are in the LEAPS ledger and
-  the risk policy's options checks, but not yet in net worth, returns or
-  Plaid syncs.
+  the risk policy's options checks, and a linked account's contracts sync
+  when Plaid reports their details, but they aren't yet in the portfolio
+  value or returns, and option trades aren't recorded.
 - **Public launch (phase 5):** invite the first users (i75), upgrade plans
   (i76), then open sign-up: `AUTH_OPEN_SIGNUP`, with the per-user daily
   quotas, the caps on what each user keeps (watchlist, journal, theses,
