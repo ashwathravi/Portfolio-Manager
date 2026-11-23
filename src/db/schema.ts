@@ -502,6 +502,74 @@ export const optionMarks = pgTable("option_marks", {
 })).enableRLS();
 
 // ---------------------------------------------------------------------------
+// Net worth: what the user owns and owes outside their accounts
+// ---------------------------------------------------------------------------
+
+/**
+ * Assets and debts the user enters by hand, outside their investment
+ * accounts: a home, a car, cash in the bank, money owed to them; a
+ * mortgage, a car loan, a card balance (src/lib/portfolio/net-worth.ts).
+ * Each has a value as of a day: for a debt, the balance owed, never
+ * negative, which is taken off. Today adds them to the portfolio value for
+ * the net worth. They aren't in any account, the nightly valuations,
+ * returns or the risk policy. An update replaces the value and its date;
+ * each value saved is also kept, by day, in net_worth_item_values. They go
+ * with the user.
+ */
+export const netWorthItems = pgTable("net_worth_items", {
+    id: uuid("id").default(sql`gen_random_uuid()`).primaryKey(),
+    userId: text("user_id")
+        .notNull()
+        .references(() => authUsers.id, { onDelete: "cascade" }),
+    // "asset" or "debt".
+    kind: text("kind").notNull(),
+    // One of the kind's categories (NET_WORTH_CATEGORIES in src/lib/portfolio/net-worth.ts).
+    category: text("category").notNull(),
+    name: text("name").notNull(),
+    // What it's worth or, for a debt, what is owed; never negative.
+    value: numeric("value").notNull(),
+    valueAsOf: date("value_as_of", { mode: "string" }).notNull(),
+    note: text("note"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => ({
+    userIdIdx: index("net_worth_items_user_id_idx").on(table.userId),
+    kindCheck: check("net_worth_items_kind_check", sql`${table.kind} in ('asset', 'debt')`),
+    categoryCheck: check(
+        "net_worth_items_category_check",
+        sql`(${table.kind} = 'asset' and ${table.category} in ('property', 'vehicle', 'bank_cash', 'valuables', 'owed_to_you', 'other_asset')) or (${table.kind} = 'debt' and ${table.category} in ('mortgage', 'auto_loan', 'credit_card', 'student_loan', 'other_debt'))`,
+    ),
+    nameCheck: check("net_worth_items_name_check", sql`char_length(${table.name}) between 1 and 120`),
+    valueCheck: check("net_worth_items_value_check", sql`${table.value} >= 0`),
+    noteCheck: check("net_worth_items_note_check", sql`${table.note} is null or char_length(${table.note}) between 1 and 500`),
+    serverOnlyNoClientAccess: serverOnlyNoClientAccessPolicy(),
+    appRuntimeAccess: appRuntimeAccessPolicy(),
+})).enableRLS();
+
+/**
+ * An asset or debt outside the accounts as it stood on each day it was
+ * valued: one row per item per as-of date, written with every value the
+ * user saves, the way manual_holding_values keeps a hand-valued holding's.
+ * Today reads only the item's current value; this keeps the history, so a
+ * net worth over time can be drawn from it later, and the export lists it.
+ * A saved value stands from its as-of date on: saving it removes later
+ * rows (src/lib/portfolio/net-worth.ts). It goes with its item.
+ */
+export const netWorthItemValues = pgTable("net_worth_item_values", {
+    netWorthItemId: uuid("net_worth_item_id")
+        .notNull()
+        .references(() => netWorthItems.id, { onDelete: "cascade" }),
+    date: date("date", { mode: "string" }).notNull(),
+    value: numeric("value").notNull(),
+    recordedAt: timestamp("recorded_at").defaultNow().notNull(),
+}, (table) => ({
+    pk: primaryKey({ columns: [table.netWorthItemId, table.date] }),
+    valueCheck: check("net_worth_item_values_value_check", sql`${table.value} >= 0`),
+    serverOnlyNoClientAccess: serverOnlyNoClientAccessPolicy(),
+    appRuntimeAccess: appRuntimeAccessPolicy(),
+})).enableRLS();
+
+// ---------------------------------------------------------------------------
 // Alpha Radar — 13F research domain
 // ---------------------------------------------------------------------------
 export const alphaRadarTrackedFilers = pgTable("alpha_radar_tracked_filers", {

@@ -281,6 +281,13 @@
       "when": 1795404498116,
       "tag": "0039_account_ownership",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1795404529073,
+      "tag": "0040_net_worth_items",
+      "breakpoints": true
     }
   ]
 }
