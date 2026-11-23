@@ -185,9 +185,9 @@ When the first positions are in, the steps give way to your portfolio value. A n
 
 What to review:
 
-- Net worth (once you add other assets and debts on Accounts), portfolio value and daily movement.
+- Net worth (once you add other assets and debts on Accounts), portfolio value and daily movement, which is a share of the portfolio value, not of the net worth.
 - Allocation.
-- Top holdings.
+- Top holdings, by value: positions and holdings valued by hand together, each marked Valued by hand where it is.
 - Recent activity.
 - Alpha Radar signal card.
 - Risk Policy Dashboard card.
@@ -225,7 +225,7 @@ Important fields:
 - Theme/factor tags: AI infrastructure, semiconductors, mega-cap growth, cloud/platform, crypto/risk-on, employer-linked, broad core, bonds/cash.
 - Options risk: premium at risk, notional equivalent, expiry, thesis and max-loss policy.
 
-**Valued by hand** keeps the holdings Atlas can't price (a 401(k) fund with no ticker, a 529 portfolio, a private company): each counts at the value given, as of its date. Add one with **Add holding**, or import your broker's positions file: a row with no ticker but a market value comes in valued by hand, listed on its own in the preview, as of the day you choose in **Values as of**. Importing the file again updates the same holding (found by its CUSIP or other code, else its name) and keeps each day's value in its history; a file older than the value saved only adds its day. A holding the file no longer lists stays until you delete it. While a linked account syncs, its holdings without a ticker come from your bank, so a file's can't be imported into it; once it stops syncing (disconnected, say), a file updates the ones its last sync brought in. In **Update value** a new value is dated today unless you give another day, and changing anything but the value (its name, units, cost, code or account) leaves the date as it was. You can keep up to 1,000, a linked account's included.
+**Valued by hand** keeps the holdings Atlas can't price (a 401(k) fund with no ticker, a 529 portfolio, a private company): each counts at the value given, as of its date. Add one with **Add holding**, or import your broker's positions file: a row with no ticker but a market value comes in valued by hand, listed on its own in the preview, as of the day you choose in **Values as of**. Importing the file again updates the same holding (found by its CUSIP or other code, else its name) and keeps each day's value in its history; a file older than the value saved only adds its day. A holding the file no longer lists stays until you delete it. While a linked account syncs, its holdings without a ticker come in with each sync, so a file's can't be imported into it; once it stops syncing (disconnected, say), a file updates the ones its last sync brought in. In **Update value** a new value is dated today unless you give another day, and changing anything but the value (its name, units, cost, code or account) leaves the date as it was. You can keep up to 1,000, a linked account's included.
 
 ## Portfolios
 
@@ -242,7 +242,7 @@ On **Portfolio › Accounts**, **New account** adds an account with its cash and
 
 Account names are unique, ignoring case and surrounding spaces: creating an account, renaming one, or importing a CSV into a new account with a name you already use is refused, so the import's account picker and the Returns account switcher can tell your accounts apart. You can have up to 50 accounts.
 
-Below your accounts, **Other assets and debts** keeps what you own and owe outside them: a home, a vehicle, cash in the bank, valuables or money owed to you, and a mortgage, auto loan, credit card, student loan or other debt. Give each a value (for a debt, the balance owed) and the date of it; **Update** changes both, and each value you give is kept by its date. In **Update** a new value is dated today unless you give another day, and a new name or note leaves the date as it was. Once you have any, Today's headline is your net worth (your accounts plus other assets, minus debts), with your portfolio value beside it. Returns, the equity curve and the risk policy still measure your accounts only. Investment and retirement accounts belong in Accounts, so don't add them here too. You can keep up to 100.
+Below your accounts, **Other assets and debts** keeps what you own and owe outside them: a home, a vehicle, cash in the bank, valuables or money owed to you, and a mortgage, auto loan, credit card, student loan or other debt. Give each a value (for a debt, the balance owed) and the date of it; **Update** changes both, and each value you give is kept by its date. In **Update** a new value is dated today unless you give another day, and a new name or note leaves the date as it was. Once you have any, this card shows your net worth, and so does Today's headline once your accounts hold positions (your portfolio value plus other assets, minus debts), with your portfolio value beside it; before then Today shows the first-run steps. The card's first figure is your portfolio value, as Today and the strip at the top of Accounts call it. Two items of the same name, such as two cards left named Credit card, are told apart by their value in the row's **⋯** menu and when you delete one. Returns, the equity curve and the risk policy still measure your accounts only. Investment and retirement accounts belong in Accounts, so don't add them here too. You can keep up to 100.
 
 ## Trade Log
 
