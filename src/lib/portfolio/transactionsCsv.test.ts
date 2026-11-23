@@ -1,6 +1,7 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 
+import { decodeCsvBytes } from './csvImport';
 import { parseTradeDate, parseTransactionsCsv, transactionTypeFor } from './transactionsCsv';
 
 describe('transactionTypeFor', () => {
@@ -168,6 +169,21 @@ describe('parseTransactionsCsv', () => {
         const { rows, issues } = parseTransactionsCsv('Date,Action,Symbol,Quantity,Price,Description\n2026-03-05,Buy,AAPL,1,10,Sample\u0000 purchase');
         assert.deepEqual(issues, []);
         assert.equal(rows[0].notes, 'Sample purchase');
+    });
+
+    test('regression: a UTF-16 file in either byte order, with a byte-order mark or without, reads as the same file in UTF-8', async () => {
+        const csv = 'Run Date,Action,Symbol,Description,Quantity,Price,Amount\r\n2026-03-05,YOU BOUGHT,ACME,Sample Café purchase,2,10.00,-20.00';
+        const utf8 = parseTransactionsCsv(decodeCsvBytes(new Uint8Array(Buffer.from(csv, 'utf8'))));
+        assert.deepEqual(utf8.issues, []);
+        assert.deepEqual(utf8.rows.map((r) => [r.type, r.symbol, r.quantity, r.price, r.notes]), [['BUY', 'ACME', 2, 10, 'Sample Café purchase']]);
+        for (const encoding of ['utf-16le', 'utf-16be'] as const) {
+            for (const mark of [true, false]) {
+                const le = Buffer.from(mark ? `﻿${csv}` : csv, 'utf16le');
+                // As the import dialog reads the file chosen.
+                const bytes = await new Blob([new Uint8Array(encoding === 'utf-16be' ? le.swap16() : le)]).arrayBuffer();
+                assert.deepEqual(parseTransactionsCsv(decodeCsvBytes(bytes)), utf8, `${encoding}${mark ? ' with a byte-order mark' : ''}`);
+            }
+        }
     });
 
     // The Codex findings on PR #154.

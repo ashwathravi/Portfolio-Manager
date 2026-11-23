@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/dialog";
 import {
     countNotInFile,
+    decodeCsvBytes,
     describeImportCounts,
     describeImportResult,
     describeImportTotal,
@@ -135,7 +136,7 @@ export function ImportHoldingsDialog({
             return;
         }
         setFileName(file.name);
-        const result = parseHoldingsCsv(await file.text());
+        const result = parseHoldingsCsv(decodeCsvBytes(await file.arrayBuffer()));
         setParsed(result);
         setAccountTargets(initialTargets(groupImportByAccount(result), accounts));
         // A corrected file chosen again keeps the day the user gave.

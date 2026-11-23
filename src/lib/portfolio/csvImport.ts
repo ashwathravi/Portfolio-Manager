@@ -257,10 +257,54 @@ export interface CsvRecord {
     error?: string;
 }
 
+/** How much of a file without a byte-order mark is checked for UTF-16. */
+const UTF16_SAMPLE_BYTES = 4096;
+
+/**
+ * The byte order of a UTF-16 file without a byte-order mark, or null when it
+ * isn't one. A CSV is mostly ASCII (its commas, digits and headings), and in
+ * UTF-16 an ASCII character's high byte is 0: the second byte of each pair
+ * in little-endian order, the first in big-endian. So in a UTF-16 file at
+ * least half of one of those bytes are 0 and almost none of the other,
+ * which a stray NUL in UTF-8 text never comes near.
+ */
+function utf16ByteOrder(data: Uint8Array): 'utf-16le' | 'utf-16be' | null {
+    const pairs = Math.floor(Math.min(data.length, UTF16_SAMPLE_BYTES) / 2);
+    if (pairs === 0) return null;
+    let firstZero = 0;
+    let secondZero = 0;
+    for (let i = 0; i < pairs; i++) {
+        if (data[2 * i] === 0) firstZero++;
+        if (data[2 * i + 1] === 0) secondZero++;
+    }
+    if (secondZero >= pairs / 2 && firstZero <= pairs / 10) return 'utf-16le';
+    if (firstZero >= pairs / 2 && secondZero <= pairs / 10) return 'utf-16be';
+    return null;
+}
+
+/**
+ * A chosen file's bytes as text, for the parsers. A file saved as UTF-16
+ * (Excel's Unicode formats, some exports) is read as UTF-16, by its
+ * byte-order mark or, without one, by its zero bytes (utf16ByteOrder): read
+ * as UTF-8, as File.text() reads every file, each character would come with
+ * a NUL, and every letter past ASCII garbled. Anything else is read as
+ * UTF-8, a byte that isn't valid in it becoming U+FFFD as before.
+ */
+export function decodeCsvBytes(bytes: ArrayBuffer | Uint8Array): string {
+    const data = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+    const encoding = data[0] === 0xff && data[1] === 0xfe ? 'utf-16le'
+        : data[0] === 0xfe && data[1] === 0xff ? 'utf-16be'
+        : utf16ByteOrder(data) ?? 'utf-8';
+    // The decoder drops the byte-order mark of its own encoding.
+    return new TextDecoder(encoding).decode(data);
+}
+
 /**
  * A file's text as the parsers read it: without the byte-order mark some
  * exports start with, and without NUL characters, which some leave in a cell
- * and Postgres can't store, so an import of them would fail.
+ * and Postgres can't store, so an import of them would fail. A UTF-16 file
+ * is decoded as UTF-16 first (decodeCsvBytes), so the NULs dropped here are
+ * stray ones.
  */
 export function csvFileText(text: string): string {
     return text.replace(/^\uFEFF/, '').replace(/\u0000/g, '');

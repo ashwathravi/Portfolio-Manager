@@ -1055,13 +1055,15 @@ const SAMPLE_CSV = [
     'Account Total,,,',
 ].join('\n');
 
-async function openImport(page: Page, csv = SAMPLE_CSV) {
+/** Opens Import CSV and chooses a file of `csv`: text, saved as UTF-8, or the file's bytes. */
+async function openImport(page: Page, csv: string | Buffer = SAMPLE_CSV) {
     const trigger = page.getByRole('button', { name: 'Import CSV' }).first();
     await expect(async () => {
         await trigger.click();
         await expect(page.getByTestId('import-dialog')).toBeVisible({ timeout: 1_000 });
     }).toPass({ timeout: 10_000 });
-    await page.getByLabel('CSV file').setInputFiles({ name: 'positions.csv', mimeType: 'text/csv', buffer: Buffer.from(csv) });
+    const buffer = typeof csv === 'string' ? Buffer.from(csv) : csv;
+    await page.getByLabel('CSV file').setInputFiles({ name: 'positions.csv', mimeType: 'text/csv', buffer });
 }
 
 test.describe('Holdings › Import CSV', () => {
@@ -1246,6 +1248,35 @@ test.describe('Holdings › Import CSV', () => {
             { name: 'Stable Value Fund', identifier: '99ZZ12341', quantity: null, value: 10000, costBasis: null },
         ]);
         expect(sent.valuesAsOf).toBe('2026-11-02');
+    });
+
+    test('regression: a file saved as UTF-16 previews and sends its names as written', async ({ page }) => {
+        // Read as UTF-8, its letters past ASCII came in garbled (é as U+FFFD),
+        // and 本 (U+672C) put a comma in its row.
+        let sent: Record<string, unknown> = {};
+        await page.route('**/api/portfolio/import', async (route) => {
+            sent = route.request().postDataJSON();
+            await route.fulfill({ status: 200, json: { data: {
+                portfolioId: 'p', createdPortfolio: false, insert: 1, update: 0, unchanged: 0,
+                options: { insert: 0, update: 0, unchanged: 0 }, manual: { insert: 1, update: 0, unchanged: 0, replacedPositions: 0 },
+            } } });
+        });
+        await gotoAppPage(page, '/portfolios/holdings');
+        // As Excel saves a Unicode CSV: little-endian, after a byte-order mark.
+        await openImport(page, Buffer.from(`﻿${[
+            'Symbol,Description,Quantity,Average Cost,Market Value',
+            'ACME,Sample 日本 Fund,10,200.00,2900.00',
+            ',Sample Fonds Équilibré,120.5,,12500.00',
+        ].join('\r\n')}`, 'utf16le'));
+        const dialog = page.getByTestId('import-dialog');
+        await expect(page.getByTestId('import-preview')).toContainText('positions.csv: 1 position and 1 valued by hand ready.');
+        await expect(dialog.getByRole('table', { name: 'Positions to import' }).locator('tbody tr')).toContainText('Sample 日本 Fund');
+        await expect(dialog.getByRole('table', { name: 'Holdings valued by hand to import' }).locator('tbody tr')).toContainText('Sample Fonds Équilibré');
+        await expect(page.getByTestId('import-preview').getByRole('list', { name: 'Rows not imported' })).toHaveCount(0);
+        await dialog.getByRole('button', { name: 'Import 2 holdings' }).click();
+        await expect(page.getByText('Imported 1 position: 1 new, 0 updated. Valued by hand: 1 new, 0 updated.')).toBeVisible();
+        expect(sent.rows).toEqual([{ symbol: 'ACME', name: 'Sample 日本 Fund', quantity: 10, avgCost: 200 }]);
+        expect(sent.manual).toEqual([{ name: 'Sample Fonds Équilibré', identifier: null, quantity: 120.5, value: 12500, costBasis: null }]);
     });
 
     test('without a value column, a fund with no ticker is listed with how to bring it in, and nothing can be imported', async ({ page }) => {

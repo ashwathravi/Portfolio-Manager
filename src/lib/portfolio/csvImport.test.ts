@@ -2,6 +2,7 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert';
 import {
     countNotInFile,
+    decodeCsvBytes,
     describeImportCounts,
     describeImportResult,
     describeImportTotal,
@@ -223,6 +224,51 @@ describe('parseHoldingsCsv', () => {
         const r = parseHoldingsCsv(`Symbol,Quantity,Average Cost\n${body}`);
         assert.strictEqual(r.rows.length, MAX_IMPORT_ROWS);
         assert.match(r.issues.at(-1)?.message ?? '', /first 1000 positions/);
+    });
+});
+
+/** A file's bytes as an export saves them: UTF-8, or UTF-16 in either byte order, with a byte-order mark or without. */
+function fileBytes(text: string, encoding: 'utf-8' | 'utf-16le' | 'utf-16be', mark: boolean): Uint8Array<ArrayBuffer> {
+    const marked = mark ? `﻿${text}` : text;
+    if (encoding === 'utf-8') return new Uint8Array(Buffer.from(marked, 'utf8'));
+    const bytes = Buffer.from(marked, 'utf16le');
+    return new Uint8Array(encoding === 'utf-16be' ? bytes.swap16() : bytes);
+}
+
+describe('decodeCsvBytes', () => {
+    const csv = [
+        'Symbol,Description,Quantity,Cost Basis Total,Current Value',
+        'ACME,Sample 日本 Fund,10,2000.00,2900.00',
+        ',Sample Fonds Équilibré,120.5,10000.00,12500.00',
+    ].join('\r\n');
+    const utf8 = parseHoldingsCsv(decodeCsvBytes(fileBytes(csv, 'utf-8', false)));
+
+    test('a UTF-8 file reads as File.text() reads it, with or without a byte-order mark', () => {
+        assert.deepStrictEqual(utf8.issues, []);
+        assert.deepStrictEqual(utf8.rows, [{ symbol: 'ACME', name: 'Sample 日本 Fund', quantity: 10, avgCost: 200 }]);
+        assert.deepStrictEqual(utf8.manual, [{ name: 'Sample Fonds Équilibré', identifier: null, quantity: 120.5, value: 12500, costBasis: 10000 }]);
+        assert.deepStrictEqual(parseHoldingsCsv(decodeCsvBytes(fileBytes(csv, 'utf-8', true))), utf8);
+    });
+
+    test('regression: a UTF-16 file in either byte order, with a byte-order mark or without, reads as the same file in UTF-8', async () => {
+        for (const encoding of ['utf-16le', 'utf-16be'] as const) {
+            for (const mark of [true, false]) {
+                const label = `${encoding}${mark ? ' with a byte-order mark' : ''}`;
+                // As the import dialog reads the file chosen.
+                const r = parseHoldingsCsv(decodeCsvBytes(await new Blob([fileBytes(csv, encoding, mark)]).arrayBuffer()));
+                // Its letters past ASCII intact, and no comma made out of one (本 is U+672C).
+                assert.deepStrictEqual(r, utf8, label);
+                // So importing it again from either file finds the same holding.
+                assert.strictEqual(manualImportKey(r.manual[0]), 'csv:name:sample fonds équilibré', label);
+            }
+        }
+    });
+
+    test('a UTF-8 file with a stray NUL stays UTF-8, and the parser drops the NUL', () => {
+        const text = 'Symbol,Description,Quantity,Average Cost\nVTI,Sample Total Market\u0000 ETF,10,200';
+        assert.strictEqual(decodeCsvBytes(fileBytes(text, 'utf-8', false)), text);
+        assert.deepStrictEqual(parseHoldingsCsv(decodeCsvBytes(fileBytes(text, 'utf-8', false))).rows.map((row) => row.name), ['Sample Total Market ETF']);
+        assert.strictEqual(decodeCsvBytes(new Uint8Array()), '');
     });
 });
 
