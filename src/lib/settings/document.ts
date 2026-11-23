@@ -52,8 +52,13 @@
  *        bucket the user chose for each ticker. Existing users
  *        migrate to none chosen, so every holding keeps the bucket
  *        its type suggests.
+ *   v17 — launch item i54: `riskPolicy.bucketAssignments` also holds
+ *        the bucket chosen for a holding valued by hand, keyed
+ *        `manual:<id>`. Nothing to migrate; the bump keeps a tab from
+ *        before it, which would drop those choices, from saving over
+ *        them.
  */
-export const SETTINGS_VERSION = 16;
+export const SETTINGS_VERSION = 17;
 
 /**
  * The version settings were first saved to the server at. A browser migrates

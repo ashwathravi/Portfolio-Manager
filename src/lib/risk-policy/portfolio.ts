@@ -36,6 +36,8 @@ export interface StoredHandValuedHolding {
 }
 
 export interface StoredPolicyAccount {
+    /** The account's name: a holding valued by hand is listed with it. */
+    name?: string;
     cashBalance?: number | null;
     holdings: readonly StoredPolicyHolding[];
     manualHoldings?: readonly StoredHandValuedHolding[];
@@ -43,8 +45,9 @@ export interface StoredPolicyAccount {
 
 /**
  * Holdings valued by hand, as the policy reads them: part of the
- * portfolio's value, in the core bucket (most are a retirement plan's or
- * a college plan's diversified fund), never a single name.
+ * portfolio's value, never a single name, and in the core bucket (most are
+ * a retirement plan's or a college plan's diversified fund) until the user
+ * chooses another (`chosenBucket`).
  */
 export function handValuedPolicyHoldings(accounts: readonly StoredPolicyAccount[]): PolicyPortfolioHolding[] {
     return accounts.flatMap((account) => (account.manualHoldings ?? []).map((holding) => {
@@ -59,6 +62,7 @@ export function handValuedPolicyHoldings(accounts: readonly StoredPolicyAccount[
             currentPrice: marketValue,
             marketValue,
             defaultBucket: "core" as const,
+            ...(account.name ? { account: account.name } : {}),
         };
     }));
 }

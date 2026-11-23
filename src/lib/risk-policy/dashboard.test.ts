@@ -123,6 +123,49 @@ describe("computeRiskPolicyDashboard", () => {
         assert.strictEqual(missing.currentValueUsd, 10_000);
     });
 
+    test("regression: a holding valued by hand with an unknown theme isn't missing metadata; a ticker with none still is", () => {
+        const summary = computeRiskPolicyDashboard({
+            holdings: [{ id: "zzzz", symbol: "ZZZZ", marketValue: 1_000, defaultBucket: "active" }],
+            otherHoldings: [{
+                id: "m1",
+                symbol: "manual:m1",
+                name: "Private Co shares",
+                marketValue: 5_000,
+                policyBucket: "speculative",
+                themeWeights: [{ theme: "unknown", weight: 1, source: "unknown" }],
+            }],
+        });
+        const missing = summary.dimensions.find((dimension) => dimension.id === "missing_policy_metadata")!;
+        assert.strictEqual(missing.status, "missing_data");
+        assert.strictEqual(missing.currentLabel, "1 holding");
+        assert.strictEqual(missing.currentValueUsd, 1_000);
+    });
+
+    test("a holding valued by hand chosen speculative is in that bucket's check, never a single name", () => {
+        const summary = computeRiskPolicyDashboard({
+            holdings: [
+                { id: "vti", symbol: "VTI", marketValue: 60_000 },
+                { id: "bnd", symbol: "BND", marketValue: 20_000 },
+            ],
+            otherHoldings: [{
+                id: "m1",
+                symbol: "manual:m1",
+                name: "Private Co shares",
+                marketValue: 100_000,
+                policyBucket: "speculative",
+                themeWeights: [{ theme: "unknown", weight: 1, source: "unknown" }],
+            }],
+        });
+        const dimension = (id: string) => summary.dimensions.find((candidate) => candidate.id === id)!;
+        assert.strictEqual(dimension("speculative_options_exposure").status, "breached");
+        assert.deepStrictEqual(dimension("speculative_options_exposure").impactedSymbols, ["MANUAL:M1"]);
+        for (const id of ["single_name_concentration", "top_3_concentration", "top_5_concentration"]) {
+            assert.ok(!dimension(id).impactedSymbols.includes("MANUAL:M1"), id);
+        }
+        assert.deepStrictEqual(dimension("single_name_concentration").impactedSymbols, ["VTI"]);
+        assert.ok(Math.abs((dimension("single_name_concentration").currentPct ?? Number.NaN) - 100 / 3) < 1e-9);
+    });
+
     test("uses configured cash jobs to clear cash purpose missing data", () => {
         const summary = computeRiskPolicyDashboard({
             holdings: [

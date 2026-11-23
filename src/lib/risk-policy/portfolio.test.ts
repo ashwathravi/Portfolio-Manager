@@ -64,6 +64,20 @@ describe("buildPolicyPortfolio", () => {
         ]);
     });
 
+    test("holdings valued by hand carry their account's name; tickers never do", () => {
+        const portfolio = buildPolicyPortfolio({
+            accounts: [
+                { name: "Retirement", holdings: [{ id: "h1", symbol: "VTI", quantity: 1, avgCost: 1 }], manualHoldings: [{ id: "m1", name: "Stable Value Fund", value: 100 }] },
+                { holdings: [], manualHoldings: [{ id: "m2", name: "Private Co", value: 300 }] },
+            ],
+        });
+        const [named, unnamed] = portfolio.handValued ?? [];
+        assert.equal(named.account, "Retirement");
+        // Without an account name there is no account key at all.
+        assert.equal(Object.hasOwn(unnamed, "account"), false);
+        assert.equal(Object.hasOwn(portfolio.holdings[0], "account"), false);
+    });
+
     test("without reference data only the well-known tickers have a bucket", () => {
         const portfolio = buildPolicyPortfolio({
             accounts: [{ holdings: [

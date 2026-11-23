@@ -32,6 +32,24 @@ describe("storedRiskPolicy", () => {
         assert.deepEqual(stored, riskPolicy);
     });
 
+    test("keeps the bucket chosen for a holding valued by hand; a key the app couldn't have written goes", () => {
+        const fund = "manual:00000000-0000-4000-8000-000000000001";
+        const stored = storedRiskPolicy({
+            status: "ok",
+            document: {
+                version: 17,
+                settings: {
+                    riskPolicy: {
+                        ...defaults,
+                        bucketAssignments: { [fund]: "speculative", "MANUAL:00000000-0000-4000-8000-000000000002": "core", TSLA: "active" },
+                    },
+                },
+                updatedAt: "2026-11-23T12:00:00.000Z",
+            },
+        });
+        assert.deepEqual(stored.bucketAssignments, { [fund]: "speculative", TSLA: "active" });
+    });
+
     test("an older document is migrated, and what the app couldn't have written is repaired", () => {
         const v15: Partial<typeof defaults> = { ...defaults };
         delete v15.bucketAssignments;

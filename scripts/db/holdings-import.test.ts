@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { after, before, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
+import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import postgres from 'postgres';
@@ -9,7 +10,13 @@ import * as schema from '../../src/db/schema';
 import { parseHoldingsCsv } from '../../src/lib/portfolio/csvImport';
 import { ImportAccessError, importHoldings, LinkedAccountImportError } from '../../src/lib/portfolio/importHoldings';
 import { addManualHolding, loadManualHoldings, updateManualHolding } from '../../src/lib/portfolio/manual-holdings';
+import { manualSymbol } from '../../src/lib/portfolio/manual-symbol';
 import { createSnapshotStore } from '../../src/lib/portfolio/valuation-snapshots';
+import { buildPolicyPortfolio } from '../../src/lib/risk-policy/portfolio';
+import { riskPolicyInput } from '../../src/lib/risk-policy/user-policy';
+import { SETTINGS_VERSION } from '../../src/lib/settings/document';
+import { storedRiskPolicy } from '../../src/lib/settings/risk-policy';
+import { defaultPersistedSettings } from '../../src/lib/stores/settingsStore';
 import { manualHoldingSchema } from '../../src/lib/validators/manual-holding';
 import { portfolioImportSchema } from '../../src/lib/validators/portfolio-import';
 
@@ -299,5 +306,30 @@ describe('positions files with holdings valued by hand', { skip: !DATABASE_URL &
         assert.ok(await updateManualHolding('u-dates', id, account, fund('9999-12-31'), { database }));
         assert.deepEqual((await handValued('u-dates')).map((h) => h.asOf), ['9999-12-31']);
         assert.deepEqual(await history(id), [['0001-01-01', 100, null], ['9999-12-31', 100, null]]);
+    });
+
+    test('a bucket chosen for an imported holding still applies after the same file is imported again (launch item i54)', async () => {
+        const account = await seedUser('u-bucket');
+        await importFile('u-bucket', account, file(APPLE, trust('12345.67')), '2026-11-02');
+        const [{ id }] = await handValued('u-bucket');
+        // Chosen in Settings › Bucket policy: the settings document keeps it by the holding's id.
+        const riskPolicy = { ...defaultPersistedSettings().riskPolicy, bucketAssignments: { [manualSymbol(id)]: 'speculative' } };
+        await sql`INSERT INTO user_settings (user_id, version, settings) VALUES ('u-bucket', ${SETTINGS_VERSION}, ${JSON.stringify({ riskPolicy })}::jsonb)`;
+
+        await importFile('u-bucket', account, file(APPLE, trust('12500.00')), '2026-11-03');
+        assert.deepEqual((await handValued('u-bucket')).map((h) => [h.id, h.value]), [[id, 12500]]);
+
+        // Read as Today reads the portfolio and the saved policy.
+        const accounts = await database.query.portfolios.findMany({
+            where: eq(schema.portfolios.userId, 'u-bucket'),
+            with: { holdings: true, manualHoldings: { columns: { id: true, name: true, value: true, costBasis: true, valueAsOf: true } } },
+        });
+        const [stored] = await database.select().from(schema.userSettings).where(eq(schema.userSettings.userId, 'u-bucket'));
+        const policy = storedRiskPolicy({ status: 'ok', document: { version: stored.version, settings: stored.settings, updatedAt: stored.updatedAt.toISOString() } });
+        const portfolio = buildPolicyPortfolio({ accounts });
+        assert.deepEqual(portfolio.handValued?.map((h) => [h.name, h.account, h.marketValue]), [['Target 2055 Trust', 'Workplace 401k', 12500]]);
+        const input = riskPolicyInput(portfolio, policy);
+        assert.deepEqual(input.holdings.map((h) => h.symbol), ['AAPL']);
+        assert.deepEqual(input.otherHoldings?.map((h) => [h.symbol, h.policyBucket]), [[manualSymbol(id), 'speculative']]);
     });
 });

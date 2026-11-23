@@ -8,12 +8,15 @@
  * settings as the user edits them. Nothing here reads example data.
  *
  * The user's own choices are part of the policy:
- *   - which bucket each holding is in (`bucketAssignments`, by ticker), the
- *     bucket its security type suggests until they choose
- *     (`defaultPolicyBucket`);
+ *   - which bucket each holding is in (`bucketAssignments`: by ticker, or
+ *     by `manual:<id>` for a holding valued by hand), the bucket its
+ *     security type suggests until they choose (`defaultPolicyBucket`), and
+ *     core for a holding valued by hand, whose theme follows its bucket;
  *   - which tickers are their employer's (the employer plan's `symbols`),
  *     none until they name them.
  */
+
+import { isManualSymbol, manualHoldingId, manualSymbol } from "@/lib/portfolio/manual-symbol";
 
 import { POLICY_BUCKETS, type PolicyBucketId, type PolicyBucketPolicy } from "./buckets";
 import type { CashDeploymentRule, CashJob } from "./cash";
@@ -27,7 +30,7 @@ import {
 import type { EmployerStockDeRiskingPlan } from "./de-risking";
 import { optionNetValue, type OptionRiskPosition, type OptionsRiskPolicy } from "./options";
 import type { SellDisciplineRule, SellDisciplineThesis } from "./sell-discipline";
-import type { ThemeId } from "./themes";
+import type { ThemeId, ThemeWeight } from "./themes";
 
 export interface ChurnPolicySettings {
     windowDays: number;
@@ -47,7 +50,10 @@ export const ASSIGNABLE_POLICY_BUCKETS = POLICY_BUCKETS.filter(
 );
 export type AssignablePolicyBucket = (typeof ASSIGNABLE_POLICY_BUCKETS)[number];
 
-/** Choices kept per user: far more tickers than anyone holds. */
+/**
+ * Choices kept per user, tickers and holdings valued by hand together: far
+ * more than anyone holds.
+ */
 export const MAX_BUCKET_ASSIGNMENTS = 500;
 
 /** The settings store's `riskPolicy` slice. */
@@ -60,7 +66,11 @@ export interface RiskPolicySettings {
     optionsRiskPolicy: OptionsRiskPolicy;
     sellDisciplineRules: SellDisciplineRule[];
     churnPolicy: ChurnPolicySettings;
-    /** The bucket the user chose for a ticker (upper case); a ticker without one keeps its default. */
+    /**
+     * The bucket the user chose for a holding: by ticker (upper case), or by
+     * `manual:<id>` (lower case) for a holding valued by hand
+     * (`bucketChoiceKey`). A holding without one keeps its default.
+     */
     bucketAssignments: Partial<Record<string, AssignablePolicyBucket>>;
 }
 
@@ -75,6 +85,8 @@ export interface PolicyPortfolioHolding {
     marketValue: number;
     /** From the securities master (`defaultPolicyBucket`); null when nothing says. */
     defaultBucket: PolicyBucketId | null;
+    /** The account it's in; set for holdings valued by hand. */
+    account?: string;
 }
 
 /** The user's portfolio, as every risk-policy view reads it. */
@@ -107,6 +119,86 @@ export function normalizeTicker(symbol: string | null | undefined): string {
     return symbol?.trim().toUpperCase() ?? "";
 }
 
+/**
+ * The key a holding's bucket choice goes by in `bucketAssignments`: a
+ * ticker in upper case, and a holding valued by hand as `manual:<id>` with
+ * the id in lower case, as Postgres writes it. Any case comes in (the
+ * dashboard upper-cases every symbol), and no ticker has a colon, so the
+ * two never meet.
+ */
+export function bucketChoiceKey(symbol: string): string {
+    const id = manualHoldingId(symbol.trim());
+    return id === null ? normalizeTicker(symbol) : manualSymbol(id.toLowerCase());
+}
+
+/** The bucket the user chose for a holding, by ticker or by its id when valued by hand; none while it keeps its default. */
+export function chosenBucket(
+    policy: Pick<RiskPolicySettings, "bucketAssignments">,
+    symbol: string,
+): AssignablePolicyBucket | undefined {
+    return policy.bucketAssignments?.[bucketChoiceKey(symbol)];
+}
+
+const HAND_VALUED_THEMES: Record<AssignablePolicyBucket, ThemeId> = {
+    core: "broad_core_index",
+    active: "unknown",
+    speculative: "unknown",
+    special_situation: "special_situation_regulatory",
+    cash_reserve: "bonds_treasuries_cash_equivalent",
+};
+
+/**
+ * The theme a holding valued by hand counts under: it has no ticker to
+ * classify, so its bucket stands for it. Core is a diversified fund, cash
+ * reserve is cash or bonds, a special situation is one; an active or
+ * speculative holding could be anything, so its theme is unknown.
+ */
+export function handValuedThemeWeights(bucket: AssignablePolicyBucket): ThemeWeight[] {
+    const theme = HAND_VALUED_THEMES[bucket];
+    return [{ theme, weight: 1, source: theme === "unknown" ? "unknown" : "fallback" }];
+}
+
+/**
+ * Holdings valued by hand with the user's choices applied: in the bucket
+ * chosen for each, core until then, with the theme that bucket implies.
+ * Never employer stock: the employer plan acts on tickers.
+ */
+export function policyHandValued(
+    handValued: readonly PolicyPortfolioHolding[],
+    policy: Pick<RiskPolicySettings, "bucketAssignments">,
+): RiskPolicyDashboardHolding[] {
+    return handValued.map((holding) => {
+        const bucket = chosenBucket(policy, holding.symbol) ?? assignableOrCore(holding.defaultBucket);
+        return {
+            ...holding,
+            policyBucket: bucket,
+            isEmployerStock: false,
+            themeWeights: handValuedThemeWeights(bucket),
+        };
+    });
+}
+
+function assignableOrCore(bucket: PolicyBucketId | null): AssignablePolicyBucket {
+    return bucket && bucket !== "unassigned" ? bucket : "core";
+}
+
+/** What the policy calls a holding valued by hand when its name isn't at hand. */
+export const HAND_VALUED_LABEL = "Valued by hand";
+
+/** The names of the holdings valued by hand, by their `bucketChoiceKey`. */
+export function handValuedNames(portfolio: Pick<PolicyPortfolio, "handValued">): Map<string, string> {
+    return new Map((portfolio.handValued ?? []).map((holding) => [bucketChoiceKey(holding.symbol), holding.name]));
+}
+
+/**
+ * How the policy lists a holding: a ticker as itself, a holding valued by
+ * hand by its name, never by its internal key.
+ */
+export function policyHoldingLabel(symbol: string, name?: string | null): string {
+    if (!isManualSymbol(symbol.trim())) return symbol;
+    return name?.trim() || HAND_VALUED_LABEL;
+}
+
 /** The tickers the user named as their employer's. */
 export function employerSymbols(policy: Pick<RiskPolicySettings, "employerStockPlan">): string[] {
     return [...new Set((policy.employerStockPlan?.symbols ?? []).map(normalizeTicker).filter(Boolean))];
@@ -136,21 +228,18 @@ export function policyHoldings(
     policy: Pick<RiskPolicySettings, "bucketAssignments" | "employerStockPlan">,
 ): RiskPolicyDashboardHolding[] {
     const employer = new Set(employerSymbols(policy));
-    const assignments = policy.bucketAssignments ?? {};
-    return holdings.map((holding) => {
-        const symbol = normalizeTicker(holding.symbol);
-        return {
-            ...holding,
-            policyBucket: assignments[symbol] ?? null,
-            isEmployerStock: employer.has(symbol),
-        };
-    });
+    return holdings.map((holding) => ({
+        ...holding,
+        policyBucket: chosenBucket(policy, holding.symbol) ?? null,
+        isEmployerStock: employer.has(normalizeTicker(holding.symbol)),
+    }));
 }
 
 /**
- * The user's bucket choices after choosing `bucket` for `symbol` (null: back
- * to its default). Past MAX_BUCKET_ASSIGNMENTS, choices for tickers no
- * longer `held` go first, so a save is never refused for holding too many.
+ * The user's bucket choices after choosing `bucket` for `symbol`, a ticker
+ * or a holding valued by hand (null: back to its default). Past
+ * MAX_BUCKET_ASSIGNMENTS, choices for holdings no longer `held` go first,
+ * so a save is never refused for holding too many.
  */
 export function withBucketChoice(
     assignments: RiskPolicySettings["bucketAssignments"],
@@ -158,13 +247,13 @@ export function withBucketChoice(
     bucket: AssignablePolicyBucket | null,
     held: readonly string[],
 ): RiskPolicySettings["bucketAssignments"] {
-    const ticker = normalizeTicker(symbol);
+    const chosen = bucketChoiceKey(symbol);
     const next = { ...assignments };
-    if (bucket) next[ticker] = bucket;
-    else delete next[ticker];
+    if (bucket) next[chosen] = bucket;
+    else delete next[chosen];
     const keys = Object.keys(next);
     if (keys.length <= MAX_BUCKET_ASSIGNMENTS) return next;
-    const keep = new Set([ticker, ...held.map(normalizeTicker)]);
+    const keep = new Set([chosen, ...held.map(bucketChoiceKey)]);
     return Object.fromEntries(
         Object.entries(next).filter(([key]) => keep.has(key)).slice(-MAX_BUCKET_ASSIGNMENTS),
     );
@@ -173,15 +262,15 @@ export function withBucketChoice(
 /**
  * The bucket the user chose for a ticker they're about to trade, held now
  * or not (a choice outlives selling out). An option keeps its own
- * classification, so none.
+ * classification, so none; nor is a holding valued by hand ever traded.
  */
 export function chosenBucketForTrade(
     policy: Pick<RiskPolicySettings, "bucketAssignments">,
     ticker: string,
     instrumentType: "equity" | "option",
 ): AssignablePolicyBucket | undefined {
-    if (instrumentType !== "equity") return undefined;
-    return policy.bucketAssignments?.[normalizeTicker(ticker)];
+    if (instrumentType !== "equity" || isManualSymbol(ticker.trim())) return undefined;
+    return chosenBucket(policy, ticker);
 }
 
 /** The evaluation's input from the user's portfolio and policy. */
@@ -193,13 +282,7 @@ export function riskPolicyInput(
     const churn = policy.churnPolicy ?? DEFAULT_CHURN_POLICY;
     return {
         holdings: policyHoldings(portfolio.holdings, policy),
-        otherHoldings: (portfolio.handValued ?? []).map((holding) => ({
-            ...holding,
-            policyBucket: holding.defaultBucket,
-            isEmployerStock: false,
-            // Diversified, as its bucket assumes: not an unknown theme to classify.
-            themeWeights: [{ theme: "broad_core_index" as const, weight: 1, source: "fallback" as const }],
-        })),
+        otherHoldings: policyHandValued(portfolio.handValued ?? [], policy),
         cashTotal: portfolio.cashTotal,
         trades: portfolio.trades,
         theses: portfolio.theses,

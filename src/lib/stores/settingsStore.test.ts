@@ -905,6 +905,15 @@ describe('settingsStore', () => {
 
             assert.deepStrictEqual(migrateSettings({ demo }, SETTINGS_VERSION), { demo });
         });
+
+        test('brings a v16 document to v17 unchanged: the bump adds no field', async () => {
+            const { migrateSettings, defaultPersistedSettings, SETTINGS_VERSION } = await import('./settingsStore');
+            const riskPolicy = { ...defaultPersistedSettings().riskPolicy, bucketAssignments: { TSLA: 'speculative' as const } };
+            const migrated = migrateSettings({ riskPolicy: structuredClone(riskPolicy) }, 16);
+
+            assert.strictEqual(SETTINGS_VERSION, 17);
+            assert.deepStrictEqual(migrated, { riskPolicy });
+        });
     });
 
     describe('normalizeSettings', () => {
@@ -946,6 +955,16 @@ describe('settingsStore', () => {
             } as never);
 
             assert.deepStrictEqual(normalized.riskPolicy, defaults.riskPolicy);
+        });
+
+        test('keeps a choice for a holding valued by hand beside the ticker choices', async () => {
+            const { normalizeSettings, defaultPersistedSettings } = await import('./settingsStore');
+            const defaults = defaultPersistedSettings();
+            const bucketAssignments = { TSLA: 'speculative', 'manual:00000000-0000-4000-8000-000000000001': 'cash_reserve' } as const;
+
+            const normalized = normalizeSettings({ riskPolicy: { ...defaults.riskPolicy, bucketAssignments } });
+
+            assert.deepStrictEqual(normalized.riskPolicy?.bucketAssignments, bucketAssignments);
         });
 
         test('regression: saved settings load back unchanged', async () => {
