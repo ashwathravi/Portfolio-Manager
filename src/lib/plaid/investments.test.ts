@@ -8,7 +8,7 @@ import {
     fetchPlaidHoldings,
     fetchPlaidInvestmentTransactions,
     mapPlaidTransaction,
-    optionContractsHeld,
+    optionLotReadings,
     skippedByReason,
     transactionTypeForPlaid,
     PlaidDeadlineError,
@@ -291,13 +291,109 @@ describe("accountHoldings: option contracts (launch item i63)", () => {
         assert.deepEqual([result.options, result.skipped, result.optionsKept], [[], [], []]);
     });
 
-    test("optionContractsHeld: within rounding of the value it reads, further off it doesn't, and never a fraction of a contract", () => {
-        assert.deepEqual(optionContractsHeld(300, 4.2, 1260 * 1.01), { contracts: 3, perShare: 4.2 });
-        assert.equal(optionContractsHeld(300, 4.2, 1260 * 1.1), null);
-        assert.equal(optionContractsHeld(2.5, 4.2, 1050), null);
-        assert.equal(optionContractsHeld(250, null, null), null);
+    // An institution that reports contracts at a price per contract: 300
+    // contracts at $420 each are worth what 300 shares (3 contracts) at $420
+    // a share are, so the value alone can't tell them apart.
+    const PUT_DETAILS = { ...CALL_DETAILS, contract_type: "put" };
+    const acmePut = (fields: Partial<PlaidSecurity> = {}) => security("acme_p", {
+        type: "derivative", ticker_symbol: "ACME270115P00150000", name: "ACME Jan 15 2027 150 Put", option_contract: PUT_DETAILS, ...fields,
+    });
+    const ACME_PUT = { ...ACME, contract: "O:ACME270115P00150000", contractType: "put" };
+    const perContract = (contracts: number, fields: Partial<PlaidHolding> = {}) => holding("acme_c", {
+        quantity: contracts, institution_price: 420, institution_value: contracts * 420, cost_basis: contracts * 350, ...fields,
+    });
+    const acmeStock = (price: number) => holding("acme", { quantity: 10, institution_price: price, institution_value: price * 10, cost_basis: 1000 });
+
+    test("regression: a written put of 300 contracts priced per contract is 300 contracts at $4.20 a share, not 3 at $420", () => {
+        // $420 a share on a $150 put is a price no put can have.
+        const result = only(holding("acme_p", { quantity: -300, institution_price: 420, institution_value: -126_000, cost_basis: -105_000 }), acmePut());
+        assert.deepEqual(result.options, [{ ...ACME_PUT, quantity: -300, premium: 3.5, price: 4.2 }]);
+        assert.deepEqual([result.skipped, result.optionsKept], [[], []]);
+    });
+
+    test("regression: a contract's lots are read the same way, in either order", () => {
+        // 100 contracts read as 1 at $420 a share too, but 50 can't, so both are contracts at a price per contract.
+        for (const lots of [[perContract(100), perContract(50)], [perContract(50), perContract(100)]]) {
+            const result = accountHoldings(ACCOUNT, lots, [acmeCall()]);
+            assert.deepEqual(result.options, [{ ...ACME, quantity: 150, premium: 3.5, price: 4.2 }], JSON.stringify(lots.map((l) => l.quantity)));
+        }
+    });
+
+    test("regression: lots of a contract that read in no one way are left out, and its synced row kept", () => {
+        // 300 shares at $4.20 a share, and 3 contracts at $4.20 a share.
+        const result = accountHoldings(ACCOUNT, [acmeHolding(), acmeHolding({ quantity: 3 })], [acmeCall()]);
+        assert.deepEqual([result.options, result.skipped, result.optionsKept], [[], [LEFT_OUT, LEFT_OUT], ["O:ACME270115C00150000"]]);
+    });
+
+    test("lots in whole hundreds stay shares at a price per share unless something says otherwise", () => {
+        // Nothing does: 300 at $420 is 3 contracts at $420 a share, as Plaid documents it.
+        assert.deepEqual(only(perContract(300)).options, [{ ...ACME, quantity: 3, premium: 350, price: 420 }]);
+        // A call is never worth more than its underlying: at $145 a share, $420 can't be a share's price.
+        const belowPrice = accountHoldings(ACCOUNT, [perContract(300), acmeStock(145)], [acmeCall(), security("acme")]);
+        assert.deepEqual(belowPrice.options, [{ ...ACME, quantity: 300, premium: 3.5, price: 4.2 }]);
+        // Nor is either worth much under what it's worth exercised: with ACME at $160, $0.105 can't be
+        // this call's price a share, even where the institution prices its other contracts per contract.
+        const put = holding("acme_p", { quantity: 50, institution_price: 420, institution_value: 21_000, cost_basis: 17_500 });
+        const exercised = accountHoldings(ACCOUNT, [acmeHolding({ institution_price: 10.5, institution_value: 3150 }), put, acmeStock(160)], [acmeCall(), acmePut(), security("acme")]);
+        assert.deepEqual(exercised.options[0], { ...ACME, price: 10.5 });
+    });
+
+    test("the stored close and the underlying's stored price settle a contract that reads two ways", () => {
+        const contract = "O:ACME270115C00150000";
+        const closed = (close: number) => accountHoldings(ACCOUNT, [perContract(300)], [acmeCall()], { contractCloses: new Map([[contract, close]]) }).options;
+        assert.deepEqual(closed(4.25), [{ ...ACME, quantity: 300, premium: 3.5, price: 4.2 }]);
+        assert.deepEqual(closed(410), [{ ...ACME, quantity: 3, premium: 350, price: 420 }]);
+        // A close that far from both says nothing: Plaid's shares stand.
+        assert.deepEqual(closed(30), [{ ...ACME, quantity: 3, premium: 350, price: 420 }]);
+
+        const stored = accountHoldings(ACCOUNT, [perContract(300)], [acmeCall()], { underlyingPrices: new Map([["ACME", 145]]) });
+        assert.deepEqual(stored.options, [{ ...ACME, quantity: 300, premium: 3.5, price: 4.2 }]);
+        // The institution's price for the underlying comes before a stored one.
+        const both = accountHoldings(ACCOUNT, [acmeHolding({ institution_price: 10.5, institution_value: 3150 }), acmeStock(160)], [acmeCall(), security("acme")], {
+            underlyingPrices: new Map([["ACME", 1]]),
+        });
+        assert.deepEqual(both.options, [{ ...ACME, price: 10.5 }]);
+    });
+
+    test("regression: when the price's bounds and the stored close disagree, the contract is left out and its row kept", () => {
+        const put = holding("acme_p", { quantity: -300, institution_price: 420, institution_value: -126_000, cost_basis: -105_000 });
+        const result = accountHoldings(ACCOUNT, [put], [acmePut()], { contractCloses: new Map([["O:ACME270115P00150000", 400]]) });
+        assert.deepEqual(
+            [result.options, result.skipped, result.optionsKept],
+            [[], [{ reason: "option", name: "ACME Jan 15 2027 150 Put" }], ["O:ACME270115P00150000"]],
+        );
+    });
+
+    test("an institution that prices its other contracts per contract settles one that reads two ways", () => {
+        // 50 puts at $420 each read only as contracts at a price per contract.
+        const put = holding("acme_p", { quantity: 50, institution_price: 420, institution_value: 21_000, cost_basis: 17_500 });
+        const result = accountHoldings(ACCOUNT, [perContract(300), put], [acmeCall(), acmePut()]);
+        assert.deepEqual(result.options, [
+            { ...ACME, quantity: 300, premium: 3.5, price: 4.2 },
+            { ...ACME_PUT, quantity: 50, premium: 3.5, price: 4.2 },
+        ]);
+        // Without a symbol to confirm it, the put may be an adjusted contract: it settles nothing.
+        const unconfirmed = accountHoldings(ACCOUNT, [perContract(300), put], [acmeCall(), acmePut({ ticker_symbol: null })]);
+        assert.deepEqual(unconfirmed.options.map((o) => [o.contract, o.quantity]), [["O:ACME270115C00150000", 3], ["O:ACME270115P00150000", 50]]);
+        // Nor does it in an institution that also reports contracts at a price per share.
+        const mixed = accountHoldings(ACCOUNT, [perContract(300), put, holding("acme_c2", { quantity: 3, institution_price: 4.2, institution_value: 1260 })], [
+            acmeCall(),
+            acmePut(),
+            acmeCall({ security_id: "acme_c2", ticker_symbol: "ACME270115C00160000", option_contract: { ...CALL_DETAILS, strike_price: 160 } }),
+        ]);
+        assert.equal(mixed.options.find((o) => o.contract === "O:ACME270115C00150000")?.quantity, 3);
+    });
+
+    test("optionLotReadings: within rounding of the value it reads, further off it doesn't, and never a fraction of a contract", () => {
+        // Shares at a price per share and contracts at a price per contract come to the same worth.
+        assert.deepEqual(optionLotReadings(300, 4.2, 1260 * 1.01), ["shares", "per-contract"]);
+        assert.deepEqual(optionLotReadings(150, 420, 63_000), ["per-contract"]);
+        assert.deepEqual(optionLotReadings(3, 4.2, 1260), ["contracts"]);
+        assert.deepEqual(optionLotReadings(300, 4.2, 1260 * 1.1), []);
+        assert.deepEqual(optionLotReadings(2.5, 4.2, 1050), []);
+        assert.deepEqual(optionLotReadings(250, null, null), []);
         // A price of 0 is no price to check against.
-        assert.deepEqual(optionContractsHeld(-500, 0, 0), { contracts: -5, perShare: null });
+        assert.deepEqual(optionLotReadings(-500, 0, 0), ["shares"]);
     });
 
     test("skippedByReason counts each reason", () => {

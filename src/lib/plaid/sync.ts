@@ -18,7 +18,7 @@
 import { and, asc, eq, inArray, isNotNull, isNull, ne, notInArray, sql } from "drizzle-orm";
 
 import { db } from "@/db";
-import { holdings, manualHoldings, optionPositions, plaidAccounts, plaidItems, portfolios, transactions } from "@/db/schema";
+import { holdings, manualHoldings, optionMarks, optionPositions, plaidAccounts, plaidItems, portfolios, transactions } from "@/db/schema";
 import {
     AccountLimitError,
     MAX_ACCOUNTS_PER_USER,
@@ -29,6 +29,7 @@ import {
 import { transactionValues } from "@/lib/portfolio/transactionsWrite";
 import { recordManualValue } from "@/lib/portfolio/manual-holdings";
 import { lastCompletedSession } from "@/lib/markets/market-hours";
+import { getLatestCloses } from "@/lib/markets/price-store";
 import { safeErrorMessage } from "@/lib/observability/loggable-error";
 import { accountTypeForPlaid, INSTITUTION_MAX_LENGTH, taxTreatmentForPlaid } from "@/lib/portfolio/account-kinds";
 import { OPTION_POSITION_MULTIPLIER } from "@/lib/portfolio/option-positions";
@@ -41,10 +42,13 @@ import {
     accountTransactions,
     fetchPlaidHoldings,
     fetchPlaidInvestmentTransactions,
+    optionContractsIn,
     PlaidDeadlineError,
     skippedByReason,
     type AccountHoldings,
     type HoldingSkipReason,
+    type OptionPriceEvidence,
+    type PlaidSecurity,
     type SyncedOptionContract,
     type TransactionSkipReason,
 } from "./investments";
@@ -781,6 +785,26 @@ export interface SyncDeps {
     clock?: () => number;
 }
 
+/**
+ * The stored prices that settle how an option holding reads when its
+ * quantity, price and value fit two ways (launch item i63): each contract's
+ * close in option_marks and each underlying's latest close. Both tables are
+ * shared and say nothing about who holds what.
+ */
+export async function loadOptionPriceEvidence(securities: readonly PlaidSecurity[], database: Database = db): Promise<OptionPriceEvidence> {
+    const { contracts, underlyings } = optionContractsIn(securities);
+    if (contracts.length === 0) return {};
+    const marks = await database
+        .select({ contract: optionMarks.contract, close: optionMarks.close })
+        .from(optionMarks)
+        .where(and(inArray(optionMarks.contract, contracts), isNotNull(optionMarks.close)));
+    const closes = await getLatestCloses(underlyings, undefined, database);
+    return {
+        contractCloses: new Map(marks.flatMap(({ contract, close }) => (close == null ? [] : [[contract, close] as const]))),
+        underlyingPrices: new Map([...closes].map(([symbol, { close }]) => [symbol, close] as const)),
+    };
+}
+
 /** Syncs the item's picked investment accounts; the user's own item only. */
 export async function syncPlaidItem(userId: string, itemId: string, deps: SyncDeps): Promise<ItemSyncResult> {
     const { config, database = db, fetchImpl = fetch, getAccessToken = getPlaidAccessTokenForUser, now = new Date(), deadline, clock } = deps;
@@ -811,10 +835,11 @@ export async function syncPlaidItem(userId: string, itemId: string, deps: SyncDe
             if (!(error instanceof PlaidApiError && error.errorCode === "PRODUCT_NOT_READY")) throw error;
         }
 
+        const evidence = await loadOptionPriceEvidence(holdingsPayload.securities, database);
         const results: AccountSyncResult[] = [];
         const overLimit: string[] = [];
         for (const account of accounts) {
-            const held = accountHoldings(account.plaidAccountId, holdingsPayload.holdings, holdingsPayload.securities);
+            const held = accountHoldings(account.plaidAccountId, holdingsPayload.holdings, holdingsPayload.securities, evidence);
             const activity = history ? accountTransactions(account.plaidAccountId, history.transactions, history.securities) : null;
             let written: AccountSyncWritten | null;
             try {

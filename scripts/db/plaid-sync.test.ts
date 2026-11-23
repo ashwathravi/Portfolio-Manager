@@ -771,6 +771,38 @@ describe('Plaid sync into portfolios', { skip: !DATABASE_URL && 'SCRIPTS_TEST_DA
             SELECT source, value::float AS value FROM manual_holdings WHERE user_id = 'u-warrant'`).map((r) => [r.source, r.value]), [['manual', 125]]);
     });
 
+    test('regression: a contract the institution prices per contract is read by the stored prices, the next sync putting it right', async () => {
+        const { sync } = await linkedAccount('u-percontract');
+        // 300 contracts at $420 each, $350 paid for each: worth what 300
+        // shares at $420 a share are, so the value alone can't tell.
+        const PER_CONTRACT: [string, number, number, number] = ['sec_acme_c150', 300, 420, 105_000];
+        const held = async () => (await optionRows('u-percontract')).map((r) => [r.quantity, r.premium, r.price]);
+        await sync([AAPL_LOT, PER_CONTRACT], NOW);
+        // Nothing says otherwise yet: Plaid's documented reading, 3 contracts at $420 a share.
+        assert.deepEqual(await held(), [[3, 350, 420]]);
+
+        try {
+            // The nightly job stores the contract's close per share.
+            await sql`INSERT INTO option_marks (contract, close, close_date, checked_session, checked_at, source)
+                VALUES (${ACME_CALL}, 4.25, '2026-10-23', '2026-10-23', now(), 'test')`;
+            await sync([AAPL_LOT, PER_CONTRACT], new Date('2026-10-26T22:30:00.000Z'));
+            assert.deepEqual(await held(), [[300, 3.5, 4.2]]);
+            // Lots as Plaid usually reports them still read as shares.
+            await sync([AAPL_LOT, ACME_LOT], new Date('2026-10-27T22:30:00.000Z'));
+            assert.deepEqual(await held(), [[3, 3.5, 4.2]]);
+
+            // Without a close, the underlying's: a call is never worth more than ACME's $145 a share.
+            await sql`DELETE FROM option_marks WHERE contract = ${ACME_CALL}`;
+            await sql`INSERT INTO securities (symbol) VALUES ('ACME') ON CONFLICT DO NOTHING`;
+            await sql`INSERT INTO price_bars (symbol, date, open, high, low, close, volume, source) VALUES ('ACME', '2026-10-23', 145, 145, 145, 145, 1000, 'test')`;
+            await sync([AAPL_LOT, PER_CONTRACT], new Date('2026-10-28T22:30:00.000Z'));
+            assert.deepEqual(await held(), [[300, 3.5, 4.2]]);
+        } finally {
+            await sql`DELETE FROM option_marks WHERE contract = ${ACME_CALL}`;
+            await sql`DELETE FROM price_bars WHERE symbol = 'ACME' AND source = 'test'`;
+        }
+    });
+
     test('regression: a sync whose write fails says why without what the account holds', async () => {
         const { sync } = await linkedAccount('u-failwrite');
         // Postgres can't store a NUL, so writing this fund fails at its statement.
