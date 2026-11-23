@@ -18,6 +18,8 @@
  * of them answers.
  */
 
+import { inspect, stripVTControlCharacters } from "node:util";
+
 // How deep causes and an AggregateError's errors are followed.
 const MAX_DEPTH = 8;
 // An import's insert of many rows repeats its placeholders for each row.
@@ -121,9 +123,9 @@ export function loggableError(error: unknown): unknown {
  * parameters: its name, message and stack, the fields of its own a console
  * line shows that are text, numbers or true and false (a code, a
  * constraint), and its cause and an AggregateError's errors the same way.
- * Anything thrown that isn't an Error is given as text. JSON escapes line
- * breaks, so a message that quotes what a request sent can't start a log
- * line of its own.
+ * Anything thrown that isn't an Error is given as text. JSON escapes
+ * carriage returns and line feeds, so a message that quotes what a request
+ * sent can't start a log line of its own.
  */
 export function jsonLoggableError(error: unknown): unknown {
     return errorData(withoutQueryParameters(error), 0);
@@ -137,7 +139,7 @@ function errorData(error: unknown, depth: number): unknown {
         if (Object.hasOwn(data, key)) continue;
         if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") data[key] = value;
     }
-    if (typeof error.stack === "string") data.stack = error.stack;
+    if (typeof error.stack === "string") data.stack = printedStack(error);
     if (depth < MAX_DEPTH) {
         if (error.cause !== undefined) data.cause = errorData(error.cause, depth + 1);
         if (error instanceof AggregateError && Array.isArray(error.errors)) {
@@ -145,6 +147,21 @@ function errorData(error: unknown, depth: number): unknown {
         }
     }
     return data;
+}
+
+/**
+ * The stack as console.* prints it. Next.js maps a stack's frames to the
+ * source only when it prints the error (util.inspect), where it also writes
+ * the first line from the error's name and message; `error.stack` names the
+ * bundled chunks. The error printed carries only that name, message and
+ * stack, so none of the original's other fields are printed, and the colour
+ * codes Next adds when the output is a terminal are taken out.
+ */
+function printedStack(error: Error): string {
+    const bare = new Error(asText(error.message));
+    Object.defineProperty(bare, "name", { value: asText(error.name), configurable: true, writable: true });
+    bare.stack = error.stack;
+    return stripVTControlCharacters(inspect(bare));
 }
 
 function asText(value: unknown): string {

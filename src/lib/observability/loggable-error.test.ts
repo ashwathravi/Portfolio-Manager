@@ -238,6 +238,40 @@ describe("jsonLoggableError", () => {
         assert.equal(data.note, "a\r\nb");
     });
 
+    test("its stack is printed as console.* prints it, so Next.js maps the frames, without the error's other fields or colour codes", () => {
+        const previous = Object.getOwnPropertyDescriptor(Error.prototype, inspect.custom);
+        // Stands in for Next.js's hook (next/dist/server/patch-error-inspect.js): printing an error maps its frames to the
+        // source, writes the first line from its name and message, prints its own fields, and colours the frames it hides
+        // when the output is a terminal.
+        Object.defineProperty(Error.prototype, inspect.custom, {
+            configurable: true,
+            writable: true,
+            value(this: Error) {
+                const frames = String(this.stack).slice(String(this.stack).indexOf("\n"))
+                    .replace(".next/server/chunks/route.js:1:534", "src/lib/portfolio/manage.ts:4:25");
+                const fields = Object.keys(this).length > 0 ? ` ${JSON.stringify({ ...this })}` : "";
+                return `${this.name}: ${this.message}${frames}\n    at \u001b[3mignore-listed frames\u001b[23m${fields}`;
+            },
+        });
+        try {
+            const error = Object.assign(new Error("Could not create the account"), { code: "CREATE_FAILED", row: { note: MARKER } });
+            error.name = "AccountCreateError";
+            error.stack = "AccountCreateError: Could not create the account\n    at createPortfolio (/app/.next/server/chunks/route.js:1:534)";
+
+            const data = jsonLoggableError(error) as Record<string, unknown>;
+
+            assert.equal(
+                data.stack,
+                "AccountCreateError: Could not create the account\n    at createPortfolio (/app/src/lib/portfolio/manage.ts:4:25)\n    at ignore-listed frames",
+            );
+            assert.equal(data.code, "CREATE_FAILED");
+            assert.ok(!JSON.stringify(data).includes(MARKER));
+        } finally {
+            if (previous) Object.defineProperty(Error.prototype, inspect.custom, previous);
+            else delete (Error.prototype as unknown as Record<symbol, unknown>)[inspect.custom];
+        }
+    });
+
     test("anything thrown that isn't an Error is text, and a cause that leads back to its error ends", () => {
         assert.equal(jsonLoggableError("timeout"), "timeout");
         assert.equal(jsonLoggableError(42), "42");
