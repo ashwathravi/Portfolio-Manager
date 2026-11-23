@@ -272,6 +272,28 @@ describe("jsonLoggableError", () => {
         }
     });
 
+    test("a stack that can't be printed is given as it is", () => {
+        const previous = Object.getOwnPropertyDescriptor(Error.prototype, inspect.custom);
+        Object.defineProperty(Error.prototype, inspect.custom, {
+            configurable: true,
+            writable: true,
+            value() {
+                throw new Error("source map unreadable");
+            },
+        });
+        try {
+            const error = new Error("boom");
+
+            const data = jsonLoggableError(error) as Record<string, unknown>;
+
+            assert.equal(data.stack, error.stack);
+            assert.equal(data.message, "boom");
+        } finally {
+            if (previous) Object.defineProperty(Error.prototype, inspect.custom, previous);
+            else delete (Error.prototype as unknown as Record<symbol, unknown>)[inspect.custom];
+        }
+    });
+
     test("anything thrown that isn't an Error is text, and a cause that leads back to its error ends", () => {
         assert.equal(jsonLoggableError("timeout"), "timeout");
         assert.equal(jsonLoggableError(42), "42");

@@ -161,7 +161,12 @@ function printedStack(error: Error): string {
     const bare = new Error(asText(error.message));
     Object.defineProperty(bare, "name", { value: asText(error.name), configurable: true, writable: true });
     bare.stack = error.stack;
-    return stripVTControlCharacters(inspect(bare));
+    try {
+        return stripVTControlCharacters(inspect(bare));
+    } catch {
+        // Printing must never cost a route its answer: the stack as it is.
+        return String(error.stack);
+    }
 }
 
 function asText(value: unknown): string {
