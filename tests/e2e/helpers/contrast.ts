@@ -1,6 +1,9 @@
 import type { Locator } from '@playwright/test';
 
-/** WCAG AA's contrast for text under 18px (14px bold): the pages' small labels are 11–13px. */
+/**
+ * WCAG AA's contrast for text below large scale, which is under 18pt (24px),
+ * or under 14pt (about 18.7px) when bold: the pages' small labels are 11–13px.
+ */
 export const AA_TEXT_CONTRAST = 4.5;
 
 /**
