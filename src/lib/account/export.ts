@@ -151,6 +151,7 @@ export async function buildAccountExport(userId: string, database: Database = db
                 accountType: account.accountType,
                 institution: account.institution,
                 taxTreatment: account.taxTreatment,
+                ownership: account.ownership,
                 cashBalance: account.cashBalance ?? 0,
                 createdAt: account.createdAt.toISOString(),
                 updatedAt: account.updatedAt.toISOString(),

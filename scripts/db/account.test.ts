@@ -142,6 +142,10 @@ describe('account deletion and export', { skip: !DATABASE_URL && 'SCRIPTS_TEST_D
     test('the export holds everything the user has, as they\'d recognize it, and nothing internal or secret', async () => {
         const portfolioId = await seedUser('u-export');
         await seedUser('u-other');
+        // The account's kind and whose name it's in, as the user set them.
+        await sql`
+            UPDATE portfolios SET account_type = 'brokerage', institution = 'Example Brokerage', tax_treatment = 'taxable', ownership = 'joint', kind_edited_at = now()
+            WHERE id = ${portfolioId}`;
         const data = await buildAccountExport('u-export', database, NOW);
 
         assert.equal(data.format, 'atlas-wealth-export');
@@ -151,6 +155,7 @@ describe('account deletion and export', { skip: !DATABASE_URL && 'SCRIPTS_TEST_D
         assert.equal(data.accounts.length, 1);
         const [account] = data.accounts;
         assert.deepEqual([account.id, account.name, account.source, account.cashBalance], [portfolioId, 'Brokerage', 'manual', 250]);
+        assert.deepEqual([account.accountType, account.institution, account.taxTreatment, account.ownership], ['brokerage', 'Example Brokerage', 'taxable', 'joint']);
         assert.deepEqual(account.holdings.map((h) => [h.symbol, h.quantity, h.avgCost, h.lastPrice]), [['AAPL', 10, 80, 100]]);
         assert.deepEqual(account.transactions.map((t) => [t.date, t.type, t.symbol, t.quantity, t.price, t.amount, t.notes]), [
             ['2026-03-05T12:00:00.000Z', 'BUY', 'AAPL', 10, 80, 800, 'starter'],
@@ -213,7 +218,7 @@ describe('account deletion and export', { skip: !DATABASE_URL && 'SCRIPTS_TEST_D
         // Nor the IDs of the user's other assets and debts.
         const itemIds = (await sql<{ id: string }[]>`SELECT id FROM net_worth_items WHERE user_id = 'u-export'`).map((r) => r.id);
         assert.equal(itemIds.length, 2);
-        for (const leak of ['userId', 'writeSession', 'writeSeq', 'dismissed', 'cleared', 'occurrence', 'An earlier question', 'secret-cipher', 'item-u-export', 'acc-u-export', 'u-other', 'unsubscribe-secret', 'alertsSince', 'emailClaimedAt', 'emailBatch', 'alerts/batch-', 'netWorthItemId', ...itemIds]) {
+        for (const leak of ['userId', 'writeSession', 'writeSeq', 'dismissed', 'cleared', 'occurrence', 'An earlier question', 'secret-cipher', 'item-u-export', 'acc-u-export', 'u-other', 'unsubscribe-secret', 'alertsSince', 'emailClaimedAt', 'emailBatch', 'alerts/batch-', 'netWorthItemId', 'kindEditedAt', 'kind_edited_at', ...itemIds]) {
             assert.ok(!text.includes(leak), leak);
         }
     });

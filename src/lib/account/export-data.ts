@@ -114,6 +114,8 @@ export interface ExportedAccount {
     accountType: string | null;
     institution: string | null;
     taxTreatment: string | null;
+    /** Whose name it's in: "individual", "joint", "dependent" or "business"; null when not said. */
+    ownership: string | null;
     cashBalance: number;
     createdAt: string;
     updatedAt: string;

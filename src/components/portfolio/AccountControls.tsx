@@ -19,8 +19,11 @@ import { PORTFOLIO_LIMITS } from "@/lib/validators/portfolio";
 import {
     ACCOUNT_TYPE_LABELS,
     ACCOUNT_TYPES,
+    DEFAULT_OWNERSHIP,
     DEFAULT_TAX_TREATMENT,
     INSTITUTION_MAX_LENGTH,
+    OWNERSHIP_LABELS,
+    OWNERSHIPS,
     TAX_TREATMENT_LABELS,
     TAX_TREATMENTS,
     type AccountType,
@@ -40,6 +43,7 @@ export interface EditableAccount {
     accountType?: string | null;
     institution?: string | null;
     taxTreatment?: string | null;
+    ownership?: string | null;
 }
 
 async function send(path: string, init: RequestInit): Promise<{ ok: true } | { ok: false; message: string }> {
@@ -84,6 +88,7 @@ function AccountDialog({
     const [accountType, setAccountType] = useState("");
     const [institution, setInstitution] = useState("");
     const [taxTreatment, setTaxTreatment] = useState("");
+    const [ownership, setOwnership] = useState("");
     const [error, setError] = useState<string | null>(null);
     const [saving, setSaving] = useState(false);
 
@@ -97,6 +102,7 @@ function AccountDialog({
         setAccountType(editing?.accountType ?? "");
         setInstitution(editing?.institution ?? "");
         setTaxTreatment(editing?.taxTreatment ?? "");
+        setOwnership(editing?.ownership ?? "");
         setError(null);
     }, [open, editing]);
 
@@ -108,7 +114,12 @@ function AccountDialog({
         if (!Number.isFinite(cashBalance)) return setError("Cash must be a number, such as 2500 or 2,500.00.");
 
         // Empty is "not said": null clears what an edit had.
-        const kind = { accountType: accountType || null, institution: institution.trim() || null, taxTreatment: taxTreatment || null };
+        const kind = {
+            accountType: accountType || null,
+            institution: institution.trim() || null,
+            taxTreatment: taxTreatment || null,
+            ownership: ownership || null,
+        };
         setSaving(true);
         const result = editing
             ? await send(`/api/portfolios/${editing.id}`, {
@@ -155,8 +166,9 @@ function AccountDialog({
                                     onChange={(e) => {
                                         const next = e.target.value;
                                         setAccountType(next);
-                                        // Suggest how it's usually taxed; the user's own pick stands.
+                                        // Suggest how it's usually taxed and held; the user's own pick stands.
                                         if (next && !taxTreatment) setTaxTreatment(DEFAULT_TAX_TREATMENT[next as AccountType] ?? "");
+                                        if (next && !ownership) setOwnership(DEFAULT_OWNERSHIP[next as AccountType] ?? "");
                                     }}
                                 >
                                     <option value="">Not set</option>
@@ -171,16 +183,25 @@ function AccountDialog({
                                 </select>
                             </label>
                         </div>
-                        <label className="pm-exec-field" htmlFor={`${ids}-institution`}>
-                            <span className="pm-exec-field-label">Institution (optional)</span>
-                            <Input
-                                id={`${ids}-institution`}
-                                value={institution}
-                                maxLength={INSTITUTION_MAX_LENGTH}
-                                placeholder="e.g. Fidelity, Schwab"
-                                onChange={(e) => setInstitution(e.target.value)}
-                            />
-                        </label>
+                        <div className="pm-form-pair">
+                            <label className="pm-exec-field" htmlFor={`${ids}-ownership`}>
+                                <span className="pm-exec-field-label">Ownership (optional)</span>
+                                <select id={`${ids}-ownership`} className="pm-exec-input" value={ownership} onChange={(e) => setOwnership(e.target.value)}>
+                                    <option value="">Not set</option>
+                                    {OWNERSHIPS.map((o) => <option key={o} value={o}>{OWNERSHIP_LABELS[o]}</option>)}
+                                </select>
+                            </label>
+                            <label className="pm-exec-field" htmlFor={`${ids}-institution`}>
+                                <span className="pm-exec-field-label">Institution (optional)</span>
+                                <Input
+                                    id={`${ids}-institution`}
+                                    value={institution}
+                                    maxLength={INSTITUTION_MAX_LENGTH}
+                                    placeholder="e.g. Fidelity, Schwab"
+                                    onChange={(e) => setInstitution(e.target.value)}
+                                />
+                            </label>
+                        </div>
                         <label className="pm-exec-field" htmlFor={`${ids}-description`}>
                             <span className="pm-exec-field-label">Description (optional)</span>
                             <Input

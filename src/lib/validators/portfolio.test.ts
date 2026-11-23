@@ -48,7 +48,7 @@ describe('portfolioUpdateSchema', () => {
     });
 
     test('at least one change, and the same rules as creating', () => {
-        assert.equal(message(portfolioUpdateSchema, {}), 'Change at least one of name, description, cash, type, institution or tax treatment');
+        assert.equal(message(portfolioUpdateSchema, {}), 'Change at least one of name, description, cash, type, institution, tax treatment or ownership');
         assert.equal(message(portfolioUpdateSchema, { name: '' }), 'Name the account');
         assert.equal(portfolioUpdateSchema.safeParse({ id: '00000000-0000-4000-8000-000000000001' }).success, false);
     });
@@ -68,5 +68,27 @@ describe('account kind fields', () => {
         assert.equal(message(portfolioCreateSchema, { name: 'A', accountType: 'checking' }), 'Choose an account type');
         assert.equal(message(portfolioUpdateSchema, { taxTreatment: 'exempt' }), 'Choose how the account is taxed');
         assert.equal(message(portfolioUpdateSchema, { institution: 'x'.repeat(81) }), 'Institution name is too long');
+    });
+});
+
+describe('account ownership', () => {
+    test('an ownership from the list, on create or update, and null clears it', () => {
+        assert.deepEqual(portfolioCreateSchema.parse({ name: 'Joint brokerage', ownership: 'joint' }), { name: 'Joint brokerage', ownership: 'joint' });
+        for (const ownership of ['individual', 'joint', 'dependent', 'business']) {
+            assert.deepEqual(portfolioUpdateSchema.parse({ ownership }), { ownership });
+        }
+        assert.deepEqual(portfolioUpdateSchema.parse({ ownership: null }), { ownership: null });
+        // The form sends every kind field with each save.
+        assert.deepEqual(
+            portfolioUpdateSchema.parse({ accountType: '529', institution: null, taxTreatment: 'tax_free', ownership: 'dependent' }),
+            { accountType: '529', institution: null, taxTreatment: 'tax_free', ownership: 'dependent' },
+        );
+    });
+
+    test('anything else is refused: another word, another spelling, or empty (the form sends null)', () => {
+        for (const ownership of ['partner', '', 'Joint', 'trust', 1]) {
+            assert.equal(message(portfolioCreateSchema, { name: 'A', ownership }), 'Choose whose account it is', String(ownership));
+            assert.equal(message(portfolioUpdateSchema, { ownership }), 'Choose whose account it is', String(ownership));
+        }
     });
 });

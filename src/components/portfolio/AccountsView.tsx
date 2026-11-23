@@ -129,6 +129,7 @@ export function AccountsView({ rows, summary, bankLinking, netWorth = null }: Ac
                                             account={{
                                                 id: r.id, name: r.name, description: r.description, cashUsd: r.cashUsd, positions: r.positions,
                                                 accountType: r.accountType, institution: r.institution, taxTreatment: r.taxTreatment,
+                                                ownership: r.ownership,
                                             }}
                                         />
                                     </td>

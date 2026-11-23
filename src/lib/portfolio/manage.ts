@@ -102,6 +102,7 @@ export interface ManagedPortfolio {
     accountType: string | null;
     institution: string | null;
     taxTreatment: string | null;
+    ownership: string | null;
 }
 
 const returned = {
@@ -112,16 +113,18 @@ const returned = {
     accountType: portfolios.accountType,
     institution: portfolios.institution,
     taxTreatment: portfolios.taxTreatment,
+    ownership: portfolios.ownership,
 };
 
 type ReturnedRow = Omit<ManagedPortfolio, "cashBalance"> & { cashBalance: number | null };
 
 /** The kind fields a body sets: each given one, an empty institution as none. */
-function kindFields(body: Pick<PortfolioUpdateBody, "accountType" | "institution" | "taxTreatment">) {
+function kindFields(body: Pick<PortfolioUpdateBody, "accountType" | "institution" | "taxTreatment" | "ownership">) {
     return {
         ...(body.accountType !== undefined ? { accountType: body.accountType } : {}),
         ...(body.institution !== undefined ? { institution: body.institution || null } : {}),
         ...(body.taxTreatment !== undefined ? { taxTreatment: body.taxTreatment } : {}),
+        ...(body.ownership !== undefined ? { ownership: body.ownership } : {}),
     };
 }
 

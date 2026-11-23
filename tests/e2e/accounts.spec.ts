@@ -1,4 +1,4 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Locator, type Page } from '@playwright/test';
 import { gotoAppPage, reloadAppPage } from './helpers/app';
 import { e2eDatabase, signInAsFreshUser, signInAsNewUser } from './helpers/users';
 
@@ -74,6 +74,17 @@ async function fillAccount(page: Page, { name, description, cash }: { name?: str
     return dialog;
 }
 
+/** Opens the account's Edit dialog, makes `change` in it, and saves. */
+async function editAccount(page: Page, name: string, change: (dialog: Locator) => Promise<void>) {
+    await page.getByRole('button', { name: `Actions for ${name}` }).click();
+    await page.getByRole('menuitem', { name: 'Edit' }).click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByLabel('Name')).toHaveValue(name);
+    await change(dialog);
+    await dialog.getByRole('button', { name: 'Save changes' }).click();
+    await expect(dialog).toBeHidden();
+}
+
 // Launch item i41: add, edit and delete accounts.
 test.describe('Portfolio › Accounts — managing accounts', () => {
     test.skip(!databaseAuthEnabled, 'requires the database-auth E2E mode');
@@ -96,26 +107,27 @@ test.describe('Portfolio › Accounts — managing accounts', () => {
         await expect(row(page, 'Roth IRA')).toContainText('$2,500');
     });
 
-    test("an account's type, institution and tax treatment are kept, shown under its name, and can be cleared", async ({ page }) => {
+    test("an account's type, institution, tax treatment and ownership are kept, shown under its name, and can be cleared", async ({ page }) => {
         await page.getByRole('button', { name: 'New account' }).click();
         const dialog = await fillAccount(page, { name: 'Old 401k' });
+        await expect(dialog.getByLabel('Ownership (optional)')).toHaveValue('');
         await dialog.getByLabel('Type (optional)').selectOption({ label: '401(k)' });
-        // Picking a kind suggests how it's usually taxed.
+        // Picking a kind suggests how it's usually taxed and held, before anything is saved.
         await expect(dialog.getByLabel('Tax treatment (optional)')).toHaveValue('tax_deferred');
+        await expect(dialog.getByLabel('Ownership (optional)')).toHaveValue('individual');
         await dialog.getByLabel('Institution (optional)').fill('Vanguard');
         await dialog.getByRole('button', { name: 'Add account' }).click();
         await expect(dialog).toBeHidden();
-        await expect(row(page, 'Old 401k').getByTestId('account-kind')).toHaveText('401(k) · Vanguard');
+        await expect(row(page, 'Old 401k').getByTestId('account-kind')).toHaveText('401(k) · Vanguard · Individual');
 
         await reloadAppPage(page);
-        await page.getByRole('button', { name: 'Actions for Old 401k' }).click();
-        await page.getByRole('menuitem', { name: 'Edit' }).click();
-        const edit = page.getByRole('dialog');
-        await expect(edit.getByLabel('Tax treatment (optional)')).toHaveValue('tax_deferred');
-        await edit.getByLabel('Type (optional)').selectOption('');
-        await edit.getByLabel('Institution (optional)').fill('');
-        await edit.getByRole('button', { name: 'Save changes' }).click();
-        await expect(edit).toBeHidden();
+        await editAccount(page, 'Old 401k', async (edit) => {
+            await expect(edit.getByLabel('Tax treatment (optional)')).toHaveValue('tax_deferred');
+            await expect(edit.getByLabel('Ownership (optional)')).toHaveValue('individual');
+            await edit.getByLabel('Type (optional)').selectOption('');
+            await edit.getByLabel('Institution (optional)').fill('');
+            await edit.getByLabel('Ownership (optional)').selectOption('');
+        });
         await expect(row(page, 'Old 401k').getByTestId('account-kind')).toHaveCount(0);
     });
 
@@ -194,6 +206,18 @@ test.describe('Portfolio › Accounts — managing accounts', () => {
         expect((await page.request.post('/api/portfolios', { data: { name: '' } })).status()).toBe(400);
         expect((await page.request.post('/api/portfolios', { data: { name: 'A', userId: 'someone-else' } })).status()).toBe(400);
         expect((await page.request.patch(`/api/portfolios/${data.id}`, { data: {} })).status()).toBe(400);
+
+        // Whose name an account is in: one from the list, or none.
+        const joint = await page.request.post('/api/portfolios', { data: { name: 'Joint brokerage', ownership: 'joint' } });
+        expect(joint.status()).toBe(201);
+        const jointAccount = (await joint.json()).data;
+        expect(jointAccount.ownership).toBe('joint');
+        const unset = await page.request.patch(`/api/portfolios/${jointAccount.id}`, { data: { ownership: null } });
+        expect(unset.status()).toBe(200);
+        expect((await unset.json()).data.ownership).toBeNull();
+        const partner = await page.request.patch(`/api/portfolios/${jointAccount.id}`, { data: { ownership: 'partner' } });
+        expect(partner.status()).toBe(400);
+        expect(await partner.json()).toMatchObject({ code: 'INVALID_PORTFOLIO', error: 'Choose whose account it is' });
 
         // Another user's account is not found, and stays as it was.
         for (const response of [
