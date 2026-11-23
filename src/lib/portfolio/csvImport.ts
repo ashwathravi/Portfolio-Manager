@@ -295,8 +295,11 @@ export function decodeCsvBytes(bytes: ArrayBuffer | Uint8Array): string {
     const encoding = data[0] === 0xff && data[1] === 0xfe ? 'utf-16le'
         : data[0] === 0xfe && data[1] === 0xff ? 'utf-16be'
         : utf16ByteOrder(data) ?? 'utf-8';
+    // No UTF-16 character is one byte, so a lone last byte (a newline or NUL
+    // a tool added) is dropped: decoded, it would end the last cell in U+FFFD.
+    const whole = encoding !== 'utf-8' && data.length % 2 === 1 ? data.subarray(0, data.length - 1) : data;
     // The decoder drops the byte-order mark of its own encoding.
-    return new TextDecoder(encoding).decode(data);
+    return new TextDecoder(encoding).decode(whole);
 }
 
 /**

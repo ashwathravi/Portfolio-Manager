@@ -264,6 +264,21 @@ describe('decodeCsvBytes', () => {
         }
     });
 
+    test('regression: a stray last byte after a UTF-16 file is dropped, not read into its last cell', () => {
+        for (const encoding of ['utf-16le', 'utf-16be'] as const) {
+            for (const mark of [true, false]) {
+                // A newline or NUL some tool added as a single byte, after a last cell that's a number.
+                for (const stray of [0x0a, 0x00]) {
+                    const bytes = new Uint8Array([...fileBytes(csv, encoding, mark), stray]);
+                    const label = `${encoding}${mark ? ' with a byte-order mark' : ''}, then 0x${stray.toString(16).padStart(2, '0')}`;
+                    assert.deepStrictEqual(parseHoldingsCsv(decodeCsvBytes(bytes)), utf8, label);
+                }
+            }
+        }
+        // A UTF-8 file keeps its last byte.
+        assert.strictEqual(decodeCsvBytes(fileBytes('Symbol,Quantity\nVTI,7', 'utf-8', false)), 'Symbol,Quantity\nVTI,7');
+    });
+
     test('a UTF-8 file with a stray NUL stays UTF-8, and the parser drops the NUL', () => {
         const text = 'Symbol,Description,Quantity,Average Cost\nVTI,Sample Total Market\u0000 ETF,10,200';
         assert.strictEqual(decodeCsvBytes(fileBytes(text, 'utf-8', false)), text);
