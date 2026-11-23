@@ -9,7 +9,7 @@ import {
     setRateLimitStoreForTests,
     type RateLimitRule,
 } from "@/lib/api/rate-limit";
-import { withoutQueryParameters } from "@/lib/observability/loggable-error";
+import { jsonLoggableError, withoutQueryParameters } from "@/lib/observability/loggable-error";
 import { reportError } from "@/lib/observability/report-error";
 
 export interface ApiAuthContext {
@@ -87,7 +87,9 @@ export function apiError(
 /**
  * Logs and reports the error, then answers a generic 500. A failed query is
  * logged and reported without its parameters, which hold what the user saved
- * (src/lib/observability/loggable-error.ts).
+ * (src/lib/observability/loggable-error.ts). The log entry is one line of
+ * JSON, as logApiEvent's are: an error's message can quote what a request
+ * sent, and a line break in it must not start a log line of its own.
  */
 export function internalServerError(
     error: unknown,
@@ -95,7 +97,13 @@ export function internalServerError(
     code = "INTERNAL_SERVER_ERROR",
 ): NextResponse {
     const safe = withoutQueryParameters(error);
-    console.error(userMessage, safe);
+    console.error(JSON.stringify({
+        event: "internal_server_error",
+        code,
+        message: userMessage,
+        error: jsonLoggableError(safe),
+        timestamp: new Date().toISOString(),
+    }));
     reportError(safe, { tags: { code } });
     return apiError(userMessage, code, 500);
 }

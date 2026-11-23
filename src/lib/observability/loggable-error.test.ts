@@ -4,7 +4,7 @@ import { inspect } from "node:util";
 
 import { DrizzleQueryError } from "drizzle-orm";
 
-import { DatabaseQueryError, loggableError, safeErrorMessage, withoutQueryParameters } from "./loggable-error";
+import { DatabaseQueryError, jsonLoggableError, loggableError, safeErrorMessage, withoutQueryParameters } from "./loggable-error";
 
 /** What postgres.js rejects with when neither of localhost's addresses answers. */
 function refusedOnBothAddresses() {
@@ -190,5 +190,64 @@ describe("safeErrorMessage", () => {
         assert.equal(safeErrorMessage(failedInsert()), `Failed query: ${INSERT} (code 57014)`);
         assert.equal(safeErrorMessage(new Error("Plaid timed out")), "Plaid timed out");
         assert.equal(safeErrorMessage("plain text"), "plain text");
+    });
+});
+
+describe("jsonLoggableError", () => {
+    test("a failed query is its SQL, code and stack, never its parameters", () => {
+        const data = jsonLoggableError(failedInsert()) as Record<string, unknown>;
+
+        assert.ok(!JSON.stringify(data).includes(MARKER));
+        assert.equal(data.name, "DatabaseQueryError");
+        assert.equal(data.message, `Failed query: ${INSERT} (code 57014)`);
+        assert.equal(data.code, "57014");
+        assert.ok(framesOf(data.stack as string).length > 0);
+        assert.ok(!("cause" in data));
+    });
+
+    test("keeps its fields that are text, numbers or true and false, its cause and an AggregateError's errors", () => {
+        const error = Object.assign(new Error("Import failed", { cause: refusedOnBothAddresses() }), {
+            code: "IMPORT_FAILED",
+            rows: 3,
+            retried: false,
+            row: { note: MARKER },
+        });
+
+        const data = jsonLoggableError(error) as Record<string, unknown>;
+
+        assert.deepEqual(
+            { name: data.name, message: data.message, code: data.code, rows: data.rows, retried: data.retried },
+            { name: "Error", message: "Import failed", code: "IMPORT_FAILED", rows: 3, retried: false },
+        );
+        assert.ok(!("row" in data));
+        const cause = data.cause as Record<string, unknown>;
+        assert.equal(cause.name, "AggregateError");
+        assert.equal(cause.code, "ECONNREFUSED");
+        assert.deepEqual(
+            (cause.errors as Array<Record<string, unknown>>).map((inner) => [inner.message, inner.address, inner.port]),
+            [["connect ECONNREFUSED ::1:5432", "::1", 5432], ["connect ECONNREFUSED 127.0.0.1:5432", "127.0.0.1", 5432]],
+        );
+    });
+
+    test("in a JSON line, a line break in a message or a field stays inside it", () => {
+        const line = JSON.stringify(jsonLoggableError(Object.assign(new Error("first\nsecond"), { note: "a\r\nb" })));
+
+        assert.ok(!/[\r\n]/.test(line), line);
+        const data = JSON.parse(line);
+        assert.equal(data.message, "first\nsecond");
+        assert.equal(data.note, "a\r\nb");
+    });
+
+    test("anything thrown that isn't an Error is text, and a cause that leads back to its error ends", () => {
+        assert.equal(jsonLoggableError("timeout"), "timeout");
+        assert.equal(jsonLoggableError(42), "42");
+        assert.equal(jsonLoggableError(undefined), "undefined");
+        assert.equal(jsonLoggableError(Object.create(null)), "[object Object]");
+
+        const looped = new Error("loop");
+        looped.cause = looped;
+        const data = JSON.parse(JSON.stringify(jsonLoggableError(looped)));
+        assert.equal(data.message, "loop");
+        assert.equal(data.cause.cause.message, "loop");
     });
 });

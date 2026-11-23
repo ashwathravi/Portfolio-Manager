@@ -116,6 +116,47 @@ export function loggableError(error: unknown): unknown {
     return plain;
 }
 
+/**
+ * An error as plain data for a JSON log line, without any query's
+ * parameters: its name, message and stack, the fields of its own a console
+ * line shows that are text, numbers or true and false (a code, a
+ * constraint), and its cause and an AggregateError's errors the same way.
+ * Anything thrown that isn't an Error is given as text. JSON escapes line
+ * breaks, so a message that quotes what a request sent can't start a log
+ * line of its own.
+ */
+export function jsonLoggableError(error: unknown): unknown {
+    return errorData(withoutQueryParameters(error), 0);
+}
+
+function errorData(error: unknown, depth: number): unknown {
+    if (!(error instanceof Error)) return asText(error);
+
+    const data: Record<string, unknown> = { name: asText(error.name), message: asText(error.message) };
+    for (const [key, value] of Object.entries(error)) {
+        if (Object.hasOwn(data, key)) continue;
+        if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") data[key] = value;
+    }
+    if (typeof error.stack === "string") data.stack = error.stack;
+    if (depth < MAX_DEPTH) {
+        if (error.cause !== undefined) data.cause = errorData(error.cause, depth + 1);
+        if (error instanceof AggregateError && Array.isArray(error.errors)) {
+            data.errors = (error.errors as unknown[]).map((inner) => errorData(inner, depth + 1));
+        }
+    }
+    return data;
+}
+
+function asText(value: unknown): string {
+    if (typeof value === "string") return value;
+    try {
+        return String(value);
+    } catch {
+        // An object without a prototype has no toString.
+        return Object.prototype.toString.call(value);
+    }
+}
+
 interface DrizzleQueryErrorLike extends Error {
     query: string;
     params: unknown;

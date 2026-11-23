@@ -161,11 +161,42 @@ describe("internalServerError", () => {
         const printed = format(...logged[0]);
         assert.ok(!printed.includes("MARKER"), printed);
         assert.ok(!printed.includes("Sample home"));
-        assert.ok(printed.includes(`Failed query: ${sql} (code 57014)`));
+        const entry = JSON.parse(printed);
+        assert.equal(entry.error.message, `Failed query: ${sql} (code 57014)`);
+        assert.equal(entry.error.code, "57014");
         assert.equal(reports.length, 1);
         const reported = inspect(reports[0], { showHidden: true, depth: 8 });
         assert.ok(!reported.includes("MARKER"), reported);
         assert.equal((reports[0] as { code?: string }).code, "57014");
+    });
+
+    test("regression: the failure is logged as one line of JSON, so a line break in its message can't start a log line of its own", (t) => {
+        const logged: unknown[][] = [];
+        t.mock.method(console, "error", (...args: unknown[]) => { logged.push(args); });
+        setErrorReporterForTests({ capture: () => {}, afterResponse: () => {} });
+        // A message that quotes what a request sent, such as a symbol.
+        const forged = 'No closing price for "ZZZZ\n{"event":"sign_in","user":"someone-else"}"';
+        const cause = Object.assign(new Error("upstream\r\nanswered 502"), { status: 502 });
+        const error = Object.assign(new Error(forged, { cause }), { code: "PROVIDER_FAILED" });
+
+        const response = internalServerError(error, "Unable to fetch quote.", "MARKET_DATA_QUOTE_FAILED");
+
+        assert.equal(response.status, 500);
+        assert.equal(logged.length, 1);
+        assert.equal(logged[0].length, 1);
+        const line = String(logged[0][0]);
+        assert.ok(!/[\r\n]/.test(line), line);
+        const entry = JSON.parse(line);
+        assert.equal(entry.event, "internal_server_error");
+        assert.equal(entry.code, "MARKET_DATA_QUOTE_FAILED");
+        assert.equal(entry.message, "Unable to fetch quote.");
+        assert.ok(!Number.isNaN(Date.parse(entry.timestamp)));
+        assert.equal(entry.error.name, "Error");
+        assert.equal(entry.error.message, forged);
+        assert.equal(entry.error.code, "PROVIDER_FAILED");
+        assert.ok(entry.error.stack.startsWith(`Error: ${forged}\n    at `), entry.error.stack);
+        assert.equal(entry.error.cause.message, "upstream\r\nanswered 502");
+        assert.equal(entry.error.cause.status, 502);
     });
 });
 
