@@ -16,7 +16,7 @@ export interface GettingStartedStep {
 /** Step one where bank linking is set up: connect a brokerage in Settings. */
 const CONNECT_STEP: GettingStartedStep = {
     title: 'Connect an account',
-    body: 'Link a brokerage so holdings, cash, and transactions come from your own data. Until then, example data is labelled “Sample”.',
+    body: 'Link a brokerage so holdings, option positions, cash, and transactions come from your own data. Until then, example data is labelled “Sample”.',
     href: CONNECT_ACCOUNT_LINK.href,
     cta: CONNECT_ACCOUNT_LINK.label,
 };

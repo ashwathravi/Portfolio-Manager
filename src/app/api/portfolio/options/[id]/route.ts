@@ -6,9 +6,15 @@
  *
  * Any other ID is a 404, as if it didn't exist.
  *
+ * A contract a linked account syncs (launch item i44) keeps the
+ * institution's contract, contracts, premium and account while the account
+ * syncs: PUT saves only the opened date, the user's own price, the thesis
+ * and the rules, and moving or deleting it is 409 OPTION_POSITION_SYNCED.
+ * Once the account no longer syncs, it is the user's to change or delete.
+ *
  * PUT body: { portfolioId, position } as for POST /api/portfolio/options.
  * Responses: PUT 200 { data: { id } }, DELETE 204; 400 INVALID_OPTION_POSITION; 404 OPTION_POSITION_NOT_FOUND
- *            or PORTFOLIO_NOT_FOUND; 409 OPTION_POSITION_EXISTS
+ *            or PORTFOLIO_NOT_FOUND; 409 OPTION_POSITION_EXISTS or OPTION_POSITION_SYNCED
  */
 
 import { NextResponse } from 'next/server';
@@ -17,7 +23,12 @@ import { z } from 'zod';
 import { readJsonBody } from '@/lib/api/body';
 import { apiError, internalServerError } from '@/lib/api/security';
 import { requireSessionApiUserScope } from '@/lib/api/session-security';
-import { deleteOptionPosition, DuplicateOptionPositionError, updateOptionPosition } from '@/lib/portfolio/option-positions-store';
+import {
+    deleteOptionPosition,
+    DuplicateOptionPositionError,
+    SyncedOptionPositionError,
+    updateOptionPosition,
+} from '@/lib/portfolio/option-positions-store';
 import { AccountNotFoundError } from '@/lib/portfolio/transactionsWrite';
 import { MAX_OPTION_POSITION_BODY_BYTES, optionPositionUpdateSchema } from '@/lib/validators/option-position';
 
@@ -50,6 +61,9 @@ export async function PUT(request: Request, { params }: Params) {
         if (err instanceof DuplicateOptionPositionError) {
             return apiError('That account already holds this contract.', 'OPTION_POSITION_EXISTS', 409);
         }
+        if (err instanceof SyncedOptionPositionError) {
+            return apiError('A contract from your linked account stays in that account.', 'OPTION_POSITION_SYNCED', 409);
+        }
         return internalServerError(err, 'Unable to save the option position.', 'OPTION_POSITION_UPDATE_FAILED');
     }
 }
@@ -63,6 +77,9 @@ export async function DELETE(request: Request, { params }: Params) {
     try {
         return (await deleteOptionPosition(auth.context.userId, id)) ? new NextResponse(null, { status: 204 }) : notFound();
     } catch (err) {
+        if (err instanceof SyncedOptionPositionError) {
+            return apiError('This contract is from your linked account. It goes when the account no longer holds it.', 'OPTION_POSITION_SYNCED', 409);
+        }
         return internalServerError(err, 'Unable to delete the option position.', 'OPTION_POSITION_DELETE_FAILED');
     }
 }

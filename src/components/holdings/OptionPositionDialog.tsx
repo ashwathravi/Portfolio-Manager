@@ -32,7 +32,9 @@ const text = (n: number | null | undefined) => (n == null ? "" : String(n));
  * i63). The contract, how many and what was paid per share; optionally a
  * price of the user's own (used while no newer close is stored), the thesis
  * it rests on, what must be true by expiry and the exit rule, which the
- * ledger checks for.
+ * ledger checks for. For a contract a linked account syncs, the contract,
+ * how many, the premium and the account are the institution's: shown, not
+ * editable, and sent as they are (the server keeps the synced ones).
  */
 export function OptionPositionDialog({
     open,
@@ -50,6 +52,7 @@ export function OptionPositionDialog({
 }) {
     const router = useRouter();
     const ids = useId();
+    const synced = editing?.synced === true;
     const [account, setAccount] = useState("");
     const [underlying, setUnderlying] = useState("");
     const [contractType, setContractType] = useState<"call" | "put">("call");
@@ -166,15 +169,16 @@ export function OptionPositionDialog({
                     <DialogHeader>
                         <DialogTitle>{editing ? "Edit option position" : "Add an option position"}</DialogTitle>
                         <DialogDescription>
-                            What you hold and paid, per share as your broker quotes it. Atlas marks it at the latest
-                            closing price where its data allows, otherwise at your own price or what you paid.
+                            {synced
+                                ? "From your linked account: each sync sets the contract, how many you hold and the premium. Your price, opened date, thesis and rules are yours to change."
+                                : "What you hold and paid, per share as your broker quotes it. Atlas marks it at the latest closing price where its data allows, otherwise at your own price or what you paid."}
                         </DialogDescription>
                     </DialogHeader>
                     <div className="pm-card-stack" style={{ padding: "16px 0" }}>
                         <div className="pm-form-pair">
                             <label className="pm-exec-field" htmlFor={`${ids}-account`}>
                                 <span className="pm-exec-field-label">Account</span>
-                                <select id={`${ids}-account`} className="pm-exec-input" value={account} onChange={(e) => setAccount(e.target.value)}>
+                                <select id={`${ids}-account`} className="pm-exec-input" value={account} disabled={synced} onChange={(e) => setAccount(e.target.value)}>
                                     {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
                                 </select>
                             </label>
@@ -186,6 +190,7 @@ export function OptionPositionDialog({
                                     value={underlying}
                                     placeholder="AAPL"
                                     autoCapitalize="characters"
+                                    disabled={synced}
                                     onChange={(e) => setUnderlying(e.target.value.toUpperCase())}
                                 />
                             </label>
@@ -193,24 +198,24 @@ export function OptionPositionDialog({
                         <div className="pm-form-pair">
                             <label className="pm-exec-field" htmlFor={`${ids}-type`}>
                                 <span className="pm-exec-field-label">Call or put</span>
-                                <select id={`${ids}-type`} className="pm-exec-input" value={contractType} onChange={(e) => setContractType(e.target.value as "call" | "put")}>
+                                <select id={`${ids}-type`} className="pm-exec-input" value={contractType} disabled={synced} onChange={(e) => setContractType(e.target.value as "call" | "put")}>
                                     <option value="call">Call</option>
                                     <option value="put">Put</option>
                                 </select>
                             </label>
                             <label className="pm-exec-field" htmlFor={`${ids}-strike`}>
                                 <span className="pm-exec-field-label">Strike ($)</span>
-                                <input id={`${ids}-strike`} className="pm-exec-input" inputMode="decimal" value={strike} onChange={(e) => setStrike(e.target.value)} />
+                                <input id={`${ids}-strike`} className="pm-exec-input" inputMode="decimal" value={strike} disabled={synced} onChange={(e) => setStrike(e.target.value)} />
                             </label>
                         </div>
                         <div className="pm-form-pair">
                             <label className="pm-exec-field" htmlFor={`${ids}-expiry`}>
                                 <span className="pm-exec-field-label">Expiry</span>
-                                <input id={`${ids}-expiry`} type="date" className="pm-exec-input" value={expiry} onChange={(e) => setExpiry(e.target.value)} />
+                                <input id={`${ids}-expiry`} type="date" className="pm-exec-input" value={expiry} disabled={synced} onChange={(e) => setExpiry(e.target.value)} />
                             </label>
                             <label className="pm-exec-field" htmlFor={`${ids}-direction`}>
                                 <span className="pm-exec-field-label">Position</span>
-                                <select id={`${ids}-direction`} className="pm-exec-input" value={direction} onChange={(e) => setDirection(e.target.value as "long" | "short")}>
+                                <select id={`${ids}-direction`} className="pm-exec-input" value={direction} disabled={synced} onChange={(e) => setDirection(e.target.value as "long" | "short")}>
                                     <option value="long">Bought (long)</option>
                                     <option value="short">Written (short)</option>
                                 </select>
@@ -219,11 +224,11 @@ export function OptionPositionDialog({
                         <div className="pm-form-pair">
                             <label className="pm-exec-field" htmlFor={`${ids}-contracts`}>
                                 <span className="pm-exec-field-label">Contracts</span>
-                                <input id={`${ids}-contracts`} className="pm-exec-input" inputMode="numeric" value={contracts} onChange={(e) => setContracts(e.target.value)} />
+                                <input id={`${ids}-contracts`} className="pm-exec-input" inputMode="numeric" value={contracts} disabled={synced} onChange={(e) => setContracts(e.target.value)} />
                             </label>
                             <label className="pm-exec-field" htmlFor={`${ids}-premium`}>
                                 <span className="pm-exec-field-label">{direction === "short" ? "Premium received / share ($)" : "Premium paid / share ($)"}</span>
-                                <input id={`${ids}-premium`} className="pm-exec-input" inputMode="decimal" value={premium} onChange={(e) => setPremium(e.target.value)} />
+                                <input id={`${ids}-premium`} className="pm-exec-input" inputMode="decimal" value={premium} disabled={synced} onChange={(e) => setPremium(e.target.value)} />
                             </label>
                         </div>
                         <div className="pm-form-pair">
@@ -244,7 +249,9 @@ export function OptionPositionDialog({
                             </label>
                         </div>
                         <p id={`${ids}-mark-hint`} className="pm-metric-note">
-                            Used until a newer closing price is stored. Leave it empty to use the close, or what you paid.
+                            {synced
+                                ? "Used until a newer close, or a newer price from your linked account, is stored. Leave it empty to use those."
+                                : "Used until a newer closing price is stored. Leave it empty to use the close, or what you paid."}
                         </p>
                         <label className="pm-exec-field" htmlFor={`${ids}-thesis`}>
                             <span className="pm-exec-field-label">Thesis (optional)</span>

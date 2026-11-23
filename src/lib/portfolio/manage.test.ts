@@ -8,6 +8,7 @@ import {
     buildCreatePortfolioQuery,
     buildDeletePortfolioQuery,
     buildExcludeLinkedAccountQuery,
+    buildSyncingAccountsQuery,
     deletePortfolio,
     buildLockUserAccountsQuery,
     buildUpdatePortfolioQuery,
@@ -81,6 +82,19 @@ describe("account queries", () => {
         const { sql, params } = buildExcludeLinkedAccountQuery(USER, "plaid-acct-1", NOW).toSQL();
         assert.match(sql, /^update "plaid_accounts" set "sync_status" = \$1, "updated_at" = \$2 where \("plaid_accounts"\."user_id" = \$3 and "plaid_accounts"\."plaid_account_id" = \$4\)$/i);
         assert.deepEqual(params, ["excluded", NOW.toISOString(), USER, "plaid-acct-1"]);
+    });
+
+    test("the accounts that still sync are the user's linked accounts picked for syncing", () => {
+        // What a sync brings in is the institution's only while its account
+        // syncs; an 'excluded' one (disconnected, deleted, unpicked) is the
+        // user's again.
+        const all = buildSyncingAccountsQuery(USER).toSQL();
+        assert.match(all.sql, /^select "portfolios"\."id" from "portfolios" inner join "plaid_accounts" on \("plaid_accounts"\."user_id" = "portfolios"\."user_id" and "plaid_accounts"\."plaid_account_id" = "portfolios"\."external_account_id"\) where \("portfolios"\."user_id" = \$1 and "portfolios"\."source" = \$2 and "plaid_accounts"\."sync_status" = \$3\)$/i);
+        assert.deepEqual(all.params, [USER, "plaid", "sync_ready"]);
+
+        const one = buildSyncingAccountsQuery(USER, undefined, ID).toSQL();
+        assert.match(one.sql, / and "portfolios"\."id" = \$4\)$/i);
+        assert.deepEqual(one.params, [USER, "plaid", "sync_ready", ID]);
     });
 
     test("delete excludes the Plaid account only for a linked account", async () => {

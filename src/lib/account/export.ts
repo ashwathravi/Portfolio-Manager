@@ -168,6 +168,7 @@ export async function buildAccountExport(userId: string, database: Database = db
                         .map((v) => ({ date: v.date, value: Number(v.value), quantity: num(v.quantity) })),
                 })),
                 optionPositions: options.filter((o) => o.portfolioId === account.id).map((o) => ({
+                    contract: o.contract,
                     underlying: o.underlying,
                     contractType: o.contractType,
                     strike: Number(o.strike),
@@ -178,6 +179,8 @@ export async function buildAccountExport(userId: string, database: Database = db
                     openedAt: o.openedAt,
                     userMark: num(o.userMark),
                     userMarkDate: o.userMarkDate,
+                    institutionPrice: num(o.institutionPrice),
+                    institutionPriceDate: o.institutionPriceDate,
                     thesisId: o.thesisId,
                     expiryTest: o.expiryTest,
                     exitRule: o.exitRule,

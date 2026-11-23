@@ -208,6 +208,20 @@ describe('account deletion and export', { skip: !DATABASE_URL && 'SCRIPTS_TEST_D
         assert.deepEqual(account.valuationHistory[0].positions.map((p) => [p.symbol, p.marketValue]), [['AAPL', 1000], ['Target 2055 Trust', 1000]]);
     });
 
+    test('a synced option position is exported with its contract and the institution\'s dated price; one added by hand has none (i63)', async () => {
+        const portfolioId = await seedUser('u-export-synced');
+        await sql`UPDATE portfolios SET source = 'plaid', external_account_id = 'acc-u-export-synced' WHERE id = ${portfolioId}`;
+        // A weekly, named for its own root: the underlying alone wouldn't say which contract.
+        await sql`
+            INSERT INTO option_positions (user_id, portfolio_id, contract, underlying, contract_type, strike, expiry, quantity, premium, institution_price, institution_price_date, source)
+            VALUES ('u-export-synced', ${portfolioId}, 'O:SPXW261218C05000000', 'SPX', 'call', 5000, '2026-12-18', 1, 18, 21.5, '2026-10-25', 'plaid')`;
+        const [account] = (await buildAccountExport('u-export-synced', database, NOW)).accounts;
+        assert.deepEqual(account.optionPositions.map((o) => [o.contract, o.underlying, o.quantity, o.premium, o.source, o.institutionPrice, o.institutionPriceDate]), [
+            ['O:SPXW261218C05000000', 'SPX', 1, 18, 'plaid', 21.5, '2026-10-25'],
+            ['O:AAPL270115C00250000', 'AAPL', 3, 18.2, 'manual', null, null],
+        ]);
+    });
+
     test('deleting ends the user\'s Plaid connections, then removes every row of theirs, and nobody else\'s', async () => {
         await seedUser('u-delete');
         await sql`INSERT INTO alpha_radar_tracked_filers (name, slug, cik) VALUES ('Shared filer', 'shared-filer', '0000000001')`;

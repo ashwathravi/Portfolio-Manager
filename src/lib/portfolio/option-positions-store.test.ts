@@ -1,5 +1,7 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
+import type { SQL } from "drizzle-orm";
+import { PgDialect } from "drizzle-orm/pg-core";
 
 import type { db } from "@/db";
 import { optionPositionSchema } from "@/lib/validators/option-position";
@@ -8,10 +10,12 @@ import {
     addOptionPosition,
     buildDeleteOptionPositionQuery,
     buildUserOptionPositionsQuery,
+    deleteOptionPosition,
     DuplicateOptionPositionError,
     importOptionRows,
     loadOptionPositions,
     loadThesisChoices,
+    SyncedOptionPositionError,
     updateOptionPosition,
 } from "./option-positions-store";
 import { AccountNotFoundError } from "./transactionsWrite";
@@ -37,25 +41,51 @@ function chain(result: unknown): unknown {
     return proxy;
 }
 
-/** A database answering its selects in order, recording what's inserted and set. */
-function fakeDatabase({ selects = [] as unknown[], insert = [{ id: "p-new" }] as unknown, updated = [{ id: "p-1" }] as unknown } = {}) {
+/**
+ * A database answering its selects in order, recording what's inserted,
+ * set and deleted, and the account locks taken (by their key).
+ */
+function fakeDatabase({
+    selects = [] as unknown[],
+    insert = [{ id: "p-new" }] as unknown,
+    updated = [{ id: "p-1" }] as unknown,
+    deleted = [{ id: "p-1" }] as unknown,
+} = {}) {
     const queue = [...selects];
     const inserted: unknown[] = [];
     const set: Record<string, unknown>[] = [];
+    const locks: unknown[] = [];
+    let deletes = 0;
     let selected = 0;
     const tx = {
+        execute: async (query: SQL) => {
+            locks.push(new PgDialect().sqlToQuery(query).params[0]);
+        },
         select: () => {
             selected++;
             return chain(queue.shift() ?? []);
         },
         insert: () => ({ values: (values: unknown) => { inserted.push(values); return chain(insert); } }),
         update: () => ({ set: (values: Record<string, unknown>) => { set.push(values); return chain(updated); } }),
+        delete: () => {
+            deletes++;
+            return chain(deleted);
+        },
     };
     const database = { ...tx, transaction: async (fn: (t: typeof tx) => Promise<unknown>) => fn(tx) } as unknown as typeof db;
-    return { database, tx: tx as unknown as typeof db, inserted, set, selects: () => selected };
+    return { database, tx: tx as unknown as typeof db, inserted, set, locks, deletes: () => deletes, selects: () => selected };
 }
 
 const OWNS = [{ id: ACCOUNT }];
+const LOCK = `atlas:accounts:${USER}`;
+/** The linked account still syncs (buildSyncingAccountsQuery's answer), or doesn't. */
+const SYNCING = [{ id: ACCOUNT }];
+const NOT_SYNCING: unknown[] = [];
+const OTHER_ACCOUNT = "6d1f5a4e-0c1b-4f7a-9d2e-3b4c5d6e7f80";
+/** The stored row updateOptionPosition reads first. */
+const current = (fields: Record<string, unknown> = {}) => [{
+    portfolioId: ACCOUNT, source: "manual", contract: AAPL_CALL, underlying: "AAPL", contractType: "call", strike: "250", expiry: "2027-01-15", ...fields,
+}];
 
 describe("the user's option positions query", () => {
     test("reads only the user's positions, with their own account's name and the contract's stored close", () => {
@@ -78,8 +108,8 @@ describe("loadOptionPositions", () => {
         position: {
             id: "p-1", userId: USER, portfolioId: ACCOUNT, contract: AAPL_CALL, underlying: "AAPL", contractType: "call",
             strike: "250", expiry: "2027-01-15", quantity: "3", premium: "18.2", multiplier: 100, openedAt: null,
-            userMark: null, userMarkDate: null, thesisId: null, expiryTest: "", exitRule: "", source: "manual",
-            createdAt: NOW, updatedAt: NOW, ...overrides,
+            userMark: null, userMarkDate: null, institutionPrice: null, institutionPriceDate: null, thesisId: null,
+            expiryTest: "", exitRule: "", source: "manual", createdAt: NOW, updatedAt: NOW, ...overrides,
         },
         account: "Brokerage",
         ...mark,
@@ -111,6 +141,32 @@ describe("loadOptionPositions", () => {
         ]);
     });
 
+    test("a synced position from an account that still syncs says so, and is marked at the institution's price when that's newest", async () => {
+        const { database, selects } = fakeDatabase({
+            selects: [
+                [
+                    row({ source: "plaid", institutionPrice: "33.1", institutionPriceDate: "2026-10-05" }, { close: 31.25, closeDate: "2026-10-01" }),
+                    // The same contract in an account that no longer syncs: the user's.
+                    row({ id: "p-2", portfolioId: OTHER_ACCOUNT, source: "plaid", institutionPrice: "30", institutionPriceDate: "2026-09-30" }, { close: 31.25, closeDate: "2026-10-01" }),
+                ],
+                SYNCING,
+            ],
+        });
+        const loaded = await loadOptionPositions(USER, { database });
+        assert.equal(selects(), 2);
+        assert.deepEqual(loaded.map((p) => [p.id, p.source, p.synced, p.institutionPrice, p.institutionPriceDate, p.mark]), [
+            ["p-1", "plaid", true, 33.1, "2026-10-05", { source: "institution", price: 33.1, date: "2026-10-05" }],
+            ["p-2", "plaid", false, 30, "2026-09-30", { source: "close", price: 31.25, date: "2026-10-01" }],
+        ]);
+    });
+
+    test("without a synced position, the linked accounts aren't read", async () => {
+        const { database, selects } = fakeDatabase({ selects: [[row()]] });
+        const [loaded] = await loadOptionPositions(USER, { database });
+        assert.equal(selects(), 1);
+        assert.deepEqual([loaded.source, loaded.synced, loaded.institutionPrice, loaded.mark.source], ["manual", false, null, "cost"]);
+    });
+
     test("no positions: nothing else is read", async () => {
         const { database, selects } = fakeDatabase({ selects: [[]] });
         let quoted = false;
@@ -129,8 +185,10 @@ describe("loadThesisChoices", () => {
 
 describe("addOptionPosition", () => {
     test("adds the position to the user's account, under Massive's name for the contract", async () => {
-        const { database, inserted } = fakeDatabase({ selects: [OWNS] });
+        const { database, inserted, locks } = fakeDatabase({ selects: [OWNS] });
         assert.equal(await addOptionPosition(USER, ACCOUNT, POSITION, database), "p-new");
+        // Under the user's account lock, as a sync writes: one waits for the other.
+        assert.deepEqual(locks, [LOCK]);
         assert.deepEqual(inserted, [{
             userId: USER, portfolioId: ACCOUNT, contract: AAPL_CALL, underlying: "AAPL", contractType: "call",
             strike: "250", expiry: "2027-01-15", quantity: "3", premium: "18.2", multiplier: 100, openedAt: null,
@@ -158,17 +216,87 @@ describe("addOptionPosition", () => {
 
 describe("updateOptionPosition", () => {
     test("saves the position as the form has it, into the account chosen", async () => {
-        const { database, set } = fakeDatabase({ selects: [OWNS] });
+        const { database, set, locks } = fakeDatabase({ selects: [OWNS, current()] });
         const marked = { ...POSITION, quantity: -2, userMark: 20, userMarkDate: "2026-11-04" };
         assert.equal(await updateOptionPosition(USER, "p-1", ACCOUNT, marked, { database, now: NOW }), true);
         assert.deepEqual([set[0].portfolioId, set[0].contract, set[0].quantity, set[0].userMark, set[0].userMarkDate, set[0].updatedAt], [ACCOUNT, AAPL_CALL, "-2", "20", "2026-11-04", NOW]);
+        assert.equal("source" in set[0], false);
+        assert.deepEqual(locks, [LOCK]);
     });
 
     test("a position the user doesn't have is false; an account that isn't theirs is refused", async () => {
-        assert.equal(await updateOptionPosition(USER, "p-x", ACCOUNT, POSITION, { database: fakeDatabase({ selects: [OWNS], updated: [] }).database }), false);
+        const missing = fakeDatabase({ selects: [OWNS, []] });
+        assert.equal(await updateOptionPosition(USER, "p-x", ACCOUNT, POSITION, { database: missing.database }), false);
+        assert.deepEqual(missing.set, []);
         const notTheirs = fakeDatabase({ selects: [[]] });
         await assert.rejects(updateOptionPosition(USER, "p-1", ACCOUNT, POSITION, { database: notTheirs.database }), AccountNotFoundError);
         assert.deepEqual(notTheirs.set, []);
+    });
+
+    test("regression: a contract a syncing account holds keeps the institution's contract, contracts and premium; only the user's fields are saved", async () => {
+        const { database, set } = fakeDatabase({ selects: [OWNS, current({ source: "plaid" }), SYNCING] });
+        const edited = {
+            ...POSITION, quantity: 9, premium: 1, openedAt: "2026-01-02", userMark: 5, userMarkDate: "2026-10-26",
+            thesisId: "t-1", expiryTest: "Margins hold.", exitRule: "Roll at 90 days.",
+        };
+        assert.equal(await updateOptionPosition(USER, "p-1", ACCOUNT, edited, { database, now: NOW }), true);
+        assert.deepEqual(set, [{
+            openedAt: "2026-01-02", userMark: "5", userMarkDate: "2026-10-26", thesisId: "t-1", expiryTest: "Margins hold.", exitRule: "Roll at 90 days.", updatedAt: NOW,
+        }]);
+    });
+
+    test("a contract a syncing account holds can't be moved to another account", async () => {
+        const { database, set } = fakeDatabase({ selects: [[{ id: OTHER_ACCOUNT }], current({ source: "plaid" }), SYNCING] });
+        await assert.rejects(
+            updateOptionPosition(USER, "p-1", OTHER_ACCOUNT, POSITION, { database, now: NOW }),
+            (error: unknown) => error instanceof SyncedOptionPositionError && error.action === "move",
+        );
+        assert.deepEqual(set, []);
+    });
+
+    test("once its account no longer syncs, a synced contract is saved whole and becomes the user's", async () => {
+        const { database, set } = fakeDatabase({ selects: [OWNS, current({ source: "plaid" }), NOT_SYNCING] });
+        assert.equal(await updateOptionPosition(USER, "p-1", ACCOUNT, { ...POSITION, quantity: 4 }, { database, now: NOW }), true);
+        assert.deepEqual([set[0].quantity, set[0].contract, set[0].source], ["4", AAPL_CALL, "manual"]);
+    });
+
+    test("regression: a weekly keeps its own root when its contract is unchanged; another contract drops the institution's price", async () => {
+        // Synced as SPXW's weekly; the form's underlying, SPX, would name it O:SPX….
+        const weekly = current({ source: "plaid", contract: "O:SPXW261218C05000000", underlying: "SPX", strike: "5000", expiry: "2026-12-18" });
+        const spx = { ...POSITION, underlying: "SPX", strike: 5000, expiry: "2026-12-18" };
+        const kept = fakeDatabase({ selects: [OWNS, weekly, NOT_SYNCING] });
+        await updateOptionPosition(USER, "p-1", ACCOUNT, spx, { database: kept.database, now: NOW });
+        assert.equal(kept.set[0].contract, "O:SPXW261218C05000000");
+        assert.equal("institutionPrice" in kept.set[0], false);
+
+        const changed = fakeDatabase({ selects: [OWNS, weekly, NOT_SYNCING] });
+        await updateOptionPosition(USER, "p-1", ACCOUNT, { ...spx, strike: 5100 }, { database: changed.database, now: NOW });
+        assert.deepEqual([changed.set[0].contract, changed.set[0].institutionPrice, changed.set[0].institutionPriceDate], ["O:SPX261218C05100000", null, null]);
+    });
+});
+
+describe("deleteOptionPosition", () => {
+    test("deletes one of the user's positions under the account lock; one they don't have is false", async () => {
+        const fake = fakeDatabase({ selects: [current()] });
+        assert.equal(await deleteOptionPosition(USER, "p-1", fake.database), true);
+        assert.deepEqual([fake.locks, fake.deletes()], [[LOCK], 1]);
+
+        const missing = fakeDatabase({ selects: [[]] });
+        assert.equal(await deleteOptionPosition(USER, "p-x", missing.database), false);
+        assert.equal(missing.deletes(), 0);
+    });
+
+    test("a contract a syncing account holds isn't deleted; once it no longer syncs, it is", async () => {
+        const syncing = fakeDatabase({ selects: [current({ source: "plaid" }), SYNCING] });
+        await assert.rejects(
+            deleteOptionPosition(USER, "p-1", syncing.database),
+            (error: unknown) => error instanceof SyncedOptionPositionError && error.action === "delete",
+        );
+        assert.equal(syncing.deletes(), 0);
+
+        const unlinked = fakeDatabase({ selects: [current({ source: "plaid" }), NOT_SYNCING] });
+        assert.equal(await deleteOptionPosition(USER, "p-1", unlinked.database), true);
+        assert.equal(unlinked.deletes(), 1);
     });
 });
 
@@ -190,6 +318,19 @@ describe("importOptionRows", () => {
             userId: USER, portfolioId: ACCOUNT, contract: "O:AAPL270115C00350000", underlying: "AAPL", contractType: "call",
             strike: "350", expiry: "2027-01-15", quantity: "-1", premium: "4", multiplier: 100, source: "csv",
         }]]);
+    });
+
+    test("a contract the account's sync brought in stays as the sync has it while the account syncs", async () => {
+        const { tx, inserted, set, selects } = fakeDatabase({
+            selects: [[{ id: "p-synced", contract: "O:AAPL270115C00250000", quantity: "3", premium: "18.2", source: "plaid" }], SYNCING],
+        });
+        assert.deepEqual(await importOptionRows(tx, USER, ACCOUNT, [row(250, 7, 20)], NOW), { insert: 0, update: 0, unchanged: 1 });
+        assert.deepEqual([set, inserted, selects()], [[], [], 2]);
+
+        // Without a synced row, the linked accounts aren't read.
+        const csvOnly = fakeDatabase({ selects: [[{ id: "p-csv", contract: "O:AAPL270115C00250000", quantity: "3", premium: "18.2", source: "csv" }]] });
+        assert.deepEqual(await importOptionRows(csvOnly.tx, USER, ACCOUNT, [row(250, 7, 20)], NOW), { insert: 0, update: 1, unchanged: 0 });
+        assert.equal(csvOnly.selects(), 1);
     });
 
     test("a file without option rows reads nothing", async () => {

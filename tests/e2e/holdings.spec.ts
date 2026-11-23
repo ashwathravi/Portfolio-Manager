@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { gotoAppPage, reloadAppPage } from './helpers/app';
-import { databaseAuthEnabled, signInAsFreshUser, signInAsNewUser } from './helpers/users';
+import { databaseAuthEnabled, e2eDatabase, signInAsFreshUser, signInAsNewUser } from './helpers/users';
 
 /**
  * Portfolio › Holdings (/portfolios/holdings).
@@ -391,6 +391,104 @@ test.describe('Holdings › LEAPS ledger with holdings valued by hand', () => {
         // option itself: 5.0%, as Today and Trade measure it (not 9.1%).
         await expect(row).toContainText('5.0%');
         await expect(ledger.getByLabel('Options exposure summary')).toContainText('5.0%');
+    });
+});
+
+test.describe('Holdings › LEAPS ledger from a linked account', () => {
+    test.skip(!databaseAuthEnabled, 'a linked account and its synced contracts are set up in the database');
+
+    const EDIT = 'Edit NVDA Jan 15 2027 150 call';
+    const DELETE = 'Delete NVDA Jan 15 2027 150 call';
+    let userId = '';
+
+    // A linked account that still syncs (launch item i44), holding a contract
+    // as a sync leaves it: the institution's contracts, premium and dated
+    // price. Set up in the database, without Plaid.
+    test.beforeEach(async ({ context, page }) => {
+        userId = await signInAsFreshUser(context);
+        const sql = e2eDatabase();
+        await sql.begin(async (transaction) => {
+            // postgres.js types a transaction without its tagged-template call.
+            const tx = transaction as unknown as typeof sql;
+            const [item] = await tx<{ id: string }[]>`
+                INSERT INTO plaid_items (user_id, plaid_item_id, institution_name, access_token_ciphertext, access_token_iv, access_token_auth_tag)
+                VALUES (${userId}, ${`item-${userId}`}, 'Example Brokerage', 'x', 'x', 'x') RETURNING id`;
+            await tx`
+                INSERT INTO plaid_accounts (user_id, plaid_item_record_id, plaid_account_id, name, type, subtype, capabilities, verification_status, sync_status)
+                VALUES (${userId}, ${item.id}, ${`acc-${userId}`}, 'Individual', 'investment', 'brokerage', '[]', 'automatically_verified', 'sync_ready')`;
+            const [account] = await tx<{ id: string }[]>`
+                INSERT INTO portfolios (user_id, name, source, external_account_id)
+                VALUES (${userId}, 'Example Brokerage Individual', 'plaid', ${`acc-${userId}`}) RETURNING id`;
+            await tx`
+                INSERT INTO option_positions (user_id, portfolio_id, contract, underlying, contract_type, strike, expiry, quantity, premium, source, institution_price, institution_price_date)
+                VALUES (${userId}, ${account.id}, 'O:NVDA270115C00150000', 'NVDA', 'call', 150, '2027-01-15', 2, 25, 'plaid', 33.10, '2026-10-05')`;
+        });
+        await gotoAppPage(page, '/portfolios/holdings');
+    });
+
+    test("a synced contract says where it's from, is marked at the institution's newer price, and only its plan is yours to edit", async ({ page }) => {
+        const ledger = page.getByTestId('options-risk-ledger');
+        const row = ledger.getByTestId('options-risk-row');
+        await expect(row).toHaveCount(1);
+        await expect(row).toContainText('2 long CALL contracts · Example Brokerage Individual · from your linked account');
+        // Newer than the fixture close for the contract ($31.25 on Oct 1).
+        await expect(row.getByTestId('option-mark-source')).toHaveText("Institution's price Oct 5");
+        await expect(row).toContainText('$33.10');
+        // 2 contracts × 100 × $33.10.
+        await expect(row).toContainText('$6,620');
+        // It goes when the account no longer holds it, not from here.
+        await expect(row.getByRole('button', { name: EDIT })).toBeVisible();
+        await expect(row.getByRole('button', { name: DELETE })).toHaveCount(0);
+
+        const dialog = page.getByTestId('option-position-dialog');
+        await expect(async () => {
+            await row.getByRole('button', { name: EDIT }).click();
+            await expect(dialog).toBeVisible({ timeout: 1_000 });
+        }).toPass({ timeout: 10_000 });
+        await expect(dialog).toContainText('From your linked account');
+        await expect(dialog.getByRole('combobox', { name: 'Account', exact: true })).toBeDisabled();
+        for (const field of ['Strike ($)', 'Expiry', 'Contracts', 'Premium paid / share ($)']) {
+            await expect(dialog.getByRole('textbox', { name: field, exact: true }), field).toBeDisabled();
+        }
+        await dialog.getByRole('textbox', { name: 'Exit, roll or expire rule (optional)', exact: true }).fill('Roll at 90 days.');
+        await dialog.getByRole('button', { name: 'Save' }).click();
+        await expect(dialog).toBeHidden();
+        await expect(row).toContainText('Roll at 90 days.');
+
+        await reloadAppPage(page);
+        await expect(row).toContainText('Roll at 90 days.');
+        await expect(row).toContainText('2 long CALL contracts · Example Brokerage Individual · from your linked account');
+    });
+
+    test('the API keeps its contracts and account while the account syncs; once it stops, it is yours to delete', async ({ page }) => {
+        const sql = e2eDatabase();
+        const [{ id, portfolioId }] = await sql<{ id: string; portfolioId: string }[]>`
+            SELECT id, portfolio_id AS "portfolioId" FROM option_positions WHERE user_id = ${userId}`;
+        const [{ id: mainPortfolio }] = await sql<{ id: string }[]>`SELECT id FROM portfolios WHERE user_id = ${userId} AND name = 'Main Portfolio'`;
+        const position = { underlying: 'NVDA', contractType: 'call', strike: 150, expiry: '2027-01-15', quantity: 5, premium: 25 };
+
+        // Saved, but how many is still the institution's.
+        expect((await page.request.put(`/api/portfolio/options/${id}`, { data: { portfolioId, position } })).status()).toBe(200);
+        const moved = await page.request.put(`/api/portfolio/options/${id}`, { data: { portfolioId: mainPortfolio, position } });
+        expect([moved.status(), (await moved.json()).code]).toEqual([409, 'OPTION_POSITION_SYNCED']);
+        const deleted = await page.request.delete(`/api/portfolio/options/${id}`);
+        expect([deleted.status(), (await deleted.json()).code]).toEqual([409, 'OPTION_POSITION_SYNCED']);
+        const twice = await page.request.post('/api/portfolio/options', { data: { portfolioId, position } });
+        expect([twice.status(), (await twice.json()).code]).toEqual([409, 'OPTION_POSITION_EXISTS']);
+        await reloadAppPage(page);
+        const ledger = page.getByTestId('options-risk-ledger');
+        const row = ledger.getByTestId('options-risk-row');
+        await expect(row).toContainText('2 long CALL contracts · Example Brokerage Individual');
+
+        // Disconnected, or its pick undone: the account no longer syncs.
+        await sql`UPDATE plaid_accounts SET sync_status = 'excluded' WHERE user_id = ${userId}`;
+        await reloadAppPage(page);
+        await expect(row.getByTestId('option-synced')).toHaveCount(0);
+        page.once('dialog', (confirm) => void confirm.accept());
+        await row.getByRole('button', { name: DELETE }).click();
+        await expect(ledger.getByTestId('options-ledger-empty')).toBeVisible();
+        await reloadAppPage(page);
+        await expect(ledger.getByTestId('options-risk-row')).toHaveCount(0);
     });
 });
 

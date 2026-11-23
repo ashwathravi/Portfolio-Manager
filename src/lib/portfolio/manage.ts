@@ -209,6 +209,25 @@ export function buildExcludeLinkedAccountQuery(userId: string, plaidAccountId: s
 }
 
 /**
+ * The user's linked accounts that still sync (or the one `portfolioId`
+ * names, when it does): their Plaid account is picked for syncing. One
+ * that was disconnected, deleted or unpicked is 'excluded' and no longer
+ * syncs, so what a sync brought into it is the user's to change.
+ */
+export function buildSyncingAccountsQuery(userId: string, database: Executor = db, portfolioId?: string) {
+    return database
+        .select({ id: portfolios.id })
+        .from(portfolios)
+        .innerJoin(plaidAccounts, and(eq(plaidAccounts.userId, portfolios.userId), eq(plaidAccounts.plaidAccountId, portfolios.externalAccountId)))
+        .where(and(
+            eq(portfolios.userId, userId),
+            eq(portfolios.source, "plaid"),
+            eq(plaidAccounts.syncStatus, "sync_ready"),
+            portfolioId ? eq(portfolios.id, portfolioId) : undefined,
+        ));
+}
+
+/**
  * Deletes the account with its holdings, transactions and valuation
  * history (all cascade). False when the user has no account with that ID.
  * A linked account's Plaid account stops syncing, or the next sync would

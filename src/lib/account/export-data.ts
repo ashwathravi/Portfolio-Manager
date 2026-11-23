@@ -55,8 +55,14 @@ export interface ExportedValuationPosition {
     marketValue: number | null;
 }
 
-/** An option position (launch item i63), as entered or imported. */
+/** An option position (launch item i63), as entered, imported or synced. */
 export interface ExportedOptionPosition {
+    /**
+     * Massive's name for the contract (O:AAPL270115C00250000): a weekly a
+     * sync brought in is named for its own root (SPXW), which the
+     * underlying alone doesn't give.
+     */
+    contract: string;
     underlying: string;
     contractType: string;
     strike: number;
@@ -70,10 +76,13 @@ export interface ExportedOptionPosition {
     /** The user's own price per share, and its date. */
     userMark: number | null;
     userMarkDate: string | null;
+    /** The price per share the linked account last reported, and its date. */
+    institutionPrice: number | null;
+    institutionPriceDate: string | null;
     thesisId: string | null;
     expiryTest: string;
     exitRule: string;
-    /** "manual" or "csv". */
+    /** "manual", "csv" or "plaid". */
     source: string;
     updatedAt: string;
 }

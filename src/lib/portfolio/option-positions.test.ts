@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
     chooseOptionMark,
     describeOptionContract,
+    describeOptionMark,
     isCalendarDate,
     isOptionStrike,
     optionContractTicker,
@@ -101,6 +102,44 @@ describe('chooseOptionMark', () => {
     test('a close of $0 (a worthless contract) is a price, not a missing one', () => {
         assert.deepEqual(chooseOptionMark({ premium: 4.4, close: 0, closeDate: '2026-10-16' }), { source: 'close', price: 0, date: '2026-10-16' });
     });
+
+    test("a linked account's price is used when it's the newest", () => {
+        const all = { premium: 18.2, close: 21.4, closeDate: '2026-10-01', userMark: 20, userMarkDate: '2026-10-03' };
+        assert.deepEqual(chooseOptionMark({ ...all, institutionPrice: 22.5, institutionPriceDate: '2026-10-05' }), { source: 'institution', price: 22.5, date: '2026-10-05' });
+        // An older one loses to the close and to the user's own price.
+        assert.deepEqual(chooseOptionMark({ ...all, institutionPrice: 22.5, institutionPriceDate: '2026-10-02' }), { source: 'user', price: 20, date: '2026-10-03' });
+        assert.deepEqual(
+            chooseOptionMark({ premium: 18.2, close: 21.4, closeDate: '2026-10-01', institutionPrice: 22.5, institutionPriceDate: '2026-09-30' }),
+            { source: 'close', price: 21.4, date: '2026-10-01' },
+        );
+    });
+
+    test('on the same day: the close, then the user’s price, then the institution’s', () => {
+        const day = '2026-10-05';
+        assert.deepEqual(
+            chooseOptionMark({ premium: 18.2, close: 21.4, closeDate: day, userMark: 20, userMarkDate: day, institutionPrice: 22.5, institutionPriceDate: day }),
+            { source: 'close', price: 21.4, date: day },
+        );
+        assert.deepEqual(
+            chooseOptionMark({ premium: 18.2, userMark: 20, userMarkDate: day, institutionPrice: 22.5, institutionPriceDate: day }),
+            { source: 'user', price: 20, date: day },
+        );
+    });
+
+    test("the institution's price alone is used; without its day, or at $0, it isn't", () => {
+        assert.deepEqual(chooseOptionMark({ premium: 18.2, institutionPrice: 22.5, institutionPriceDate: '2026-10-05' }), { source: 'institution', price: 22.5, date: '2026-10-05' });
+        assert.deepEqual(chooseOptionMark({ premium: 18.2, institutionPrice: 22.5, institutionPriceDate: null }), { source: 'cost', price: 18.2 });
+        assert.deepEqual(chooseOptionMark({ premium: 18.2, institutionPrice: 0, institutionPriceDate: '2026-10-05' }), { source: 'cost', price: 18.2 });
+    });
+});
+
+describe('describeOptionMark', () => {
+    test('where the price comes from, and its day', () => {
+        assert.equal(describeOptionMark({ source: 'cost', price: 18.2 }), 'At cost: no price yet');
+        assert.equal(describeOptionMark({ source: 'close', price: 21.4, date: '2026-10-01' }), 'Close Oct 1');
+        assert.equal(describeOptionMark({ source: 'user', price: 20, date: '2026-10-03' }), 'Your price Oct 3');
+        assert.equal(describeOptionMark({ source: 'institution', price: 22.5, date: '2026-10-05' }), "Institution's price Oct 5");
+    });
 });
 
 describe('toOptionRiskPosition', () => {
@@ -110,12 +149,16 @@ describe('toOptionRiskPosition', () => {
         portfolioId: 'acct-1',
         account: 'Brokerage',
         contract: 'O:AAPL270115C00250000',
+        source: 'manual',
+        synced: false,
         quantity: 3,
         premium: 18.2,
         multiplier: 100,
         openedAt: '2026-02-01',
         userMark: null,
         userMarkDate: null,
+        institutionPrice: null,
+        institutionPriceDate: null,
         thesisId: 'thesis-1',
         thesisTitle: 'Services margin expansion',
         expiryTest: 'Services re-rate earnings by 2027.',

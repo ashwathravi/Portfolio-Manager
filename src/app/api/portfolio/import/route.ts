@@ -3,7 +3,9 @@
  *
  * Imports parsed holdings rows (from the Holdings "Import CSV" dialog) into
  * an account the signed-in user owns, or a new account for them, with the
- * file's option positions (launch item i63).
+ * file's option positions (launch item i63). Option rows for a contract a
+ * linked account that still syncs brought in are left as the sync has them,
+ * and counted in options.unchanged.
  *
  * Body:     { portfolioId?: uuid, newPortfolioName?: string, rows: ImportRow[], options?: OptionContractRow[] }
  *           or, for a file covering several accounts, { accounts: [that body, …] }, written

@@ -29,6 +29,8 @@ describe('help content', () => {
         const [first] = gettingStarted(true);
         assert.strictEqual(first.href, '/settings#accounts');
         assert.strictEqual(first.cta, 'Connect an account');
+        // A linked account's option contracts sync with it (launch item i63).
+        assert.match(first.body, /holdings, option positions, cash, and transactions/);
     });
 
     test('glossary terms are unique, alphabetical (numbers last), and link to live pages', () => {
