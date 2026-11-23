@@ -158,6 +158,13 @@ export function handValuedThemeWeights(bucket: AssignablePolicyBucket): ThemeWei
     return [{ theme, weight: 1, source: theme === "unknown" ? "unknown" : "fallback" }];
 }
 
+/** A holding valued by hand with the user's choice applied (`policyHandValued`). */
+export interface PolicyHandValuedHolding extends PolicyPortfolioHolding {
+    policyBucket: AssignablePolicyBucket;
+    isEmployerStock: false;
+    themeWeights: ThemeWeight[];
+}
+
 /**
  * Holdings valued by hand with the user's choices applied: in the bucket
  * chosen for each, core until then, with the theme that bucket implies.
@@ -166,7 +173,7 @@ export function handValuedThemeWeights(bucket: AssignablePolicyBucket): ThemeWei
 export function policyHandValued(
     handValued: readonly PolicyPortfolioHolding[],
     policy: Pick<RiskPolicySettings, "bucketAssignments">,
-): RiskPolicyDashboardHolding[] {
+): PolicyHandValuedHolding[] {
     return handValued.map((holding) => {
         const bucket = chosenBucket(policy, holding.symbol) ?? assignableOrCore(holding.defaultBucket);
         return {

@@ -1,5 +1,5 @@
 import { Suspense } from 'react';
-import { AllocationCard, type AllocationHolding } from '@/components/dashboard/AllocationCard';
+import { AllocationCard } from '@/components/dashboard/AllocationCard';
 import { TopHoldingsCard, type TopHoldingsRow } from '@/components/dashboard/TopHoldingsCard';
 import { RecentActivityCard } from '@/components/dashboard/RecentActivityCard';
 import { WatchlistCard } from '@/components/dashboard/WatchlistCard';
@@ -14,9 +14,8 @@ import { TodayTriage } from '@/components/today/TodayTriage';
 import { PolicyStrip } from '@/components/today/PolicyStrip';
 import { TodayTheses } from '@/components/today/TodayTheses';
 import { TodayEquityCurve } from '@/components/today/TodayEquityCurve';
-import { chosenBucket, defaultPolicyBucket, evaluateRiskPolicy, handValuedThemeWeights } from '@/lib/risk-policy';
-import { buildPolicyPortfolio, valueHolding } from '@/lib/risk-policy/portfolio';
-import { manualSymbol } from '@/lib/portfolio/manual-symbol';
+import { evaluateRiskPolicy } from '@/lib/risk-policy';
+import { buildPolicyPortfolio, policyAllocationHoldings, valueHolding } from '@/lib/risk-policy/portfolio';
 import { loadPolicyTheses, loadUserRiskPolicy } from '@/lib/risk-policy/server';
 import type { SellDisciplineThesis } from '@/lib/risk-policy/sell-discipline';
 import { loadDashboardPortfolios } from '@/lib/dashboard-portfolios';
@@ -132,7 +131,6 @@ export default async function Today() {
   const allHoldings = allPortfolios.flatMap((p) =>
     p.holdings.map((h) => ({
       id: h.id,
-      portfolio: p.name,
       symbol: h.symbol,
       name: holdingName(h.symbol, h.name, profiles.get(h.symbol.toUpperCase())),
       ...valueHolding(h, liveQuotes[h.symbol.toUpperCase()]?.price),
@@ -143,32 +141,8 @@ export default async function Today() {
     .filter((h) => h.symbol)
     .map(({ symbol, quantity, currentPrice, marketValue }) => ({ symbol, quantity, currentPrice, marketValue }));
 
-  const allocationHoldings: AllocationHolding[] = [
-    // In the bucket the user chose, else the one the security's profile
-    // suggests, as the policy checks read them.
-    ...allHoldings.map((h) => {
-      const symbol = h.symbol.toUpperCase();
-      return {
-        symbol: h.symbol,
-        portfolio: h.portfolio,
-        marketValue: h.marketValue,
-        policyBucket: chosenBucket(riskPolicy, symbol),
-        defaultBucket: defaultPolicyBucket(symbol, profiles.get(symbol)),
-      };
-    }),
-    // Valued by hand: in the bucket the user chose, core until then; its
-    // theme follows, as the policy checks read them.
-    ...allPortfolios.flatMap((p) => (p.manualHoldings ?? []).map((m) => {
-      const bucket = chosenBucket(riskPolicy, manualSymbol(m.id)) ?? 'core';
-      return {
-        symbol: manualSymbol(m.id),
-        portfolio: p.name,
-        policyBucket: bucket,
-        themeWeights: handValuedThemeWeights(bucket),
-        marketValue: Number(m.value) || 0,
-      };
-    })),
-  ];
+  // Each holding, valued by hand or not, in the bucket the policy checks put it in.
+  const allocationHoldings = policyAllocationHoldings({ accounts: allPortfolios, quotes: liveQuotes, profiles }, riskPolicy);
   const cashByPortfolio = Object.fromEntries(allPortfolios.map((p) => [p.name, p.cashBalance || 0]));
   const topHoldingsRows: TopHoldingsRow[] = allHoldings.map((h) => ({
     id: h.id,

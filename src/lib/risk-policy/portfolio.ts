@@ -2,7 +2,8 @@
  * The user's portfolio as the risk policy reads it (./user-policy.ts), from
  * what the server loaded: every account's holdings valued as Today values
  * them, their cash, their buys and sells, the theses they wrote and the
- * option positions they hold.
+ * option positions they hold. Today's Allocation card groups the same
+ * holdings, in the buckets the policy puts them in.
  */
 
 import type { ActivityRow } from "@/lib/portfolio/activity";
@@ -11,10 +12,18 @@ import { holdingName } from "@/lib/markets/security-profile";
 import { manualSymbol } from "@/lib/portfolio/manual-symbol";
 import type { Quote } from "@/types/market-data";
 
-import { defaultPolicyBucket } from "./buckets";
+import { defaultPolicyBucket, type PolicyBucketId } from "./buckets";
 import type { OptionRiskPosition } from "./options";
 import type { SellDisciplineThesis } from "./sell-discipline";
-import type { PolicyPortfolio, PolicyPortfolioHolding } from "./user-policy";
+import type { ThemeWeight } from "./themes";
+import {
+    chosenBucket,
+    policyHandValued,
+    type AssignablePolicyBucket,
+    type PolicyPortfolio,
+    type PolicyPortfolioHolding,
+    type RiskPolicySettings,
+} from "./user-policy";
 
 /** A stored holding, as the portfolio queries return it. */
 export interface StoredPolicyHolding {
@@ -142,4 +151,59 @@ export function buildPolicyPortfolio({
         theses: [...theses],
         options: [...options],
     };
+}
+
+/** A holding as Today's Allocation card groups it: by theme, by policy bucket or by account. */
+export interface PolicyAllocationHolding {
+    symbol: string;
+    /** The account's name, for the Account grouping. */
+    portfolio: string;
+    marketValue: number;
+    /** The bucket the user chose for it; a holding valued by hand always has one, core until they choose. */
+    policyBucket?: AssignablePolicyBucket;
+    /** The bucket a ticker starts in until the user chooses one (`defaultPolicyBucket`). */
+    defaultBucket?: PolicyBucketId | null;
+    /** A holding valued by hand's theme, which follows its bucket. */
+    themeWeights?: readonly ThemeWeight[];
+}
+
+/**
+ * Every account's holdings as Today's Allocation card groups them, valued
+ * and bucketed as the policy checks read them: a ticker in the bucket the
+ * user chose for it, else the one it starts in (`defaultPolicyBucket`); a
+ * holding valued by hand in the one chosen for it, core until then, with
+ * the theme that bucket implies (`policyHandValued`).
+ */
+export function policyAllocationHoldings(
+    {
+        accounts,
+        quotes,
+        profiles,
+    }: {
+        accounts: readonly StoredPolicyAccount[];
+        quotes?: Readonly<Record<string, Pick<Quote, "price">>>;
+        profiles?: ReadonlyMap<string, SecurityProfile>;
+    },
+    policy: Pick<RiskPolicySettings, "bucketAssignments">,
+): PolicyAllocationHolding[] {
+    return accounts.flatMap((account) => {
+        const portfolio = account.name ?? "";
+        const { holdings, handValued = [] } = buildPolicyPortfolio({ accounts: [account], quotes, profiles });
+        return [
+            ...holdings.map((holding) => ({
+                symbol: holding.symbol,
+                portfolio,
+                marketValue: holding.marketValue,
+                policyBucket: chosenBucket(policy, holding.symbol),
+                defaultBucket: holding.defaultBucket,
+            })),
+            ...policyHandValued(handValued, policy).map((holding) => ({
+                symbol: holding.symbol,
+                portfolio,
+                marketValue: holding.marketValue,
+                policyBucket: holding.policyBucket,
+                themeWeights: holding.themeWeights,
+            })),
+        ];
+    });
 }

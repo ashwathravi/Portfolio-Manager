@@ -17,6 +17,21 @@ async function hasPolicyHoldings(page: Page): Promise<boolean> {
     return !(await page.getByTestId('bucket-holdings-empty').isVisible());
 }
 
+/** Groups Today's Allocation card by policy bucket. */
+async function groupAllocationByBucket(page: Page) {
+    const byPolicy = page.getByRole('region', { name: 'Allocation' }).getByRole('radio', { name: 'Policy' });
+    await clickUntil(byPolicy, async () => {
+        await expect(byPolicy).toHaveAttribute('aria-checked', 'true', { timeout: 1000 });
+    });
+}
+
+/** A group's share of Today's Allocation card, found by its label. */
+function allocationShare(page: Page, label: string) {
+    return page.getByRole('region', { name: 'Allocation' }).locator('.pm-alloc-row')
+        .filter({ has: page.getByText(label, { exact: true }) })
+        .locator('.pm-alloc-pct');
+}
+
 /**
  * Phase 9 (AR-94) Settings tests, refreshed for JournalPlus (AR-109).
  *
@@ -752,6 +767,11 @@ test.describe('Settings page', () => {
         // TSLA is the only speculative holding: 12% of the portfolio, over the 5% cap.
         await gotoAppPage(page, '/');
         await expect(page.getByTestId('today-triage-item').filter({ hasText: 'Speculative/options' })).toHaveCount(1);
+        // Allocation files it there too, and has nothing in core.
+        await groupAllocationByBucket(page);
+        const speculativeShare = await allocationShare(page, 'Speculative/options').textContent() ?? '';
+        expect(speculativeShare).toMatch(/^\d+\.\d%$/);
+        await expect(allocationShare(page, 'Core')).toHaveCount(0);
 
         await gotoAppPage(page, '/settings');
         const tsla = page.getByLabel('TSLA bucket');
@@ -775,6 +795,10 @@ test.describe('Settings page', () => {
         await expect(
             page.locator('[data-testid="risk-policy-dimension"][data-policy-id="speculative_options_exposure"]'),
         ).toHaveAttribute('data-status', 'inside');
+        // So does Allocation: TSLA's share moves from speculative to core.
+        await groupAllocationByBucket(page);
+        await expect(allocationShare(page, 'Core')).toHaveText(speculativeShare);
+        await expect(allocationShare(page, 'Speculative/options')).toHaveCount(0);
 
         // Holdings files it under the bucket chosen.
         await gotoAppPage(page, '/portfolios/holdings');
@@ -1057,12 +1081,10 @@ test.describe('Settings › buckets for holdings valued by hand', () => {
         await expect(dimension('missing_policy_metadata')).toHaveAttribute('data-status', 'inside');
         await expect(dimension('single_name_concentration')).not.toHaveAttribute('data-status', 'breached');
         await expect(page.getByTestId('risk-policy-dashboard')).not.toContainText(/manual:/i);
-        const allocation = page.getByRole('region', { name: 'Allocation' });
-        const byPolicy = allocation.getByRole('radio', { name: 'Policy' });
-        await clickUntil(byPolicy, async () => {
-            await expect(byPolicy).toHaveAttribute('aria-checked', 'true', { timeout: 1000 });
-        });
-        await expect(allocation.getByText('Speculative/options', { exact: true })).toBeVisible();
+        // Allocation files the shares under speculative too, and the fund stays in core.
+        await groupAllocationByBucket(page);
+        await expect(allocationShare(page, 'Speculative/options')).toHaveText('10.0%');
+        await expect(allocationShare(page, 'Core')).toHaveText('90.0%');
 
         await gotoAppPage(page, '/settings');
         const back = savedRiskPolicy(page, (riskPolicy) => handValuedChoices(riskPolicy).length === 0);
