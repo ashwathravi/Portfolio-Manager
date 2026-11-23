@@ -2002,6 +2002,13 @@
   padding-left: 30px;
 }
 
+/* The group's "N accounts" pill holds their names for a screen reader;
+   positioned, so that hidden text sits inside the card it scrolls with
+   and never widens the page. */
+.pm-small-positions-group .pm-account-pill {
+  position: relative;
+}
+
 .pm-policy-chip,
 .pm-theme-chip {
   display: inline-flex;

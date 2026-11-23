@@ -8,7 +8,8 @@
  * opens or closes, is always among the rows drawn, so its button stays
  * mounted and keeps focus: virtual-rows.test.ts checks every row of every
  * count from 81 to 1,200, including the scroll the browser clamps at the
- * end (count × 58 − 640).
+ * end (count × 58 − 640). The table only scrolls to that row when it
+ * wouldn't be drawn where the card already is (scrollTopKeepingRow).
  */
 
 export const VIRTUALIZE_AFTER_ROWS = 80;
@@ -51,4 +52,17 @@ export function rowWindow(count: number, scrollTop: number): RowWindow {
 /** The card's scroll position at row `index`, counting each row 58px: never below 0. */
 export function scrollTopForRow(index: number): number {
     return Math.max(0, index) * VIRTUAL_ROW_HEIGHT;
+}
+
+/**
+ * Where the card goes when the table changes to `count` rows and row
+ * `index` must stay drawn, as the small positions' row must while it opens
+ * or closes. It stays at `current` when that row is drawn there, so the
+ * column headings and rows in view stay put, and moves to the row
+ * otherwise. Null when the table draws every row: the card doesn't scroll.
+ */
+export function scrollTopKeepingRow(index: number, count: number, current: number): number | null {
+    const drawn = rowWindow(count, current);
+    if (!drawn.virtualized) return null;
+    return index >= drawn.start && index < drawn.end ? current : scrollTopForRow(index);
 }

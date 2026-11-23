@@ -5,7 +5,8 @@ import { ChevronDown, ChevronRight } from "lucide-react";
 import { useLayoutEffect, useMemo, useRef, useState, type Ref } from "react";
 import { PriceSparkline } from "@/components/charts";
 import type { Sector } from "@/lib/holdings/sector";
-import { rowWindow, scrollTopForRow, VIRTUAL_VIEWPORT_HEIGHT } from "@/lib/holdings/virtual-rows";
+import { formatAllocationPct, formatSmallPositionValue } from "@/lib/holdings/small-positions";
+import { rowWindow, scrollTopKeepingRow, VIRTUAL_VIEWPORT_HEIGHT } from "@/lib/holdings/virtual-rows";
 import {
     policyBucketLabel,
     themeLabel,
@@ -119,12 +120,16 @@ export function HoldingsFullTable({ rows, smallPositions = null, className }: Ho
         if (!smallPositions) return;
         const open = !smallOpen;
         const count = rows.length + 1 + (open ? smallPositions.rows.length : 0);
-        // A table long enough to draw only part of itself draws from the
-        // group's row, in the same render as the toggle, so its button stays
-        // mounted and keeps focus. From the top, opening a long group drew
-        // rows the button wasn't among.
-        if (rowWindow(count, 0).virtualized) {
-            setScrollTop(scrollTopForRow(rows.length));
+        // A table long enough to draw only part of itself keeps the group's
+        // row among the rows drawn, in the same render as the toggle, so its
+        // button stays mounted and keeps focus. The card stays where it is
+        // when the row is drawn there, keeping the column headings and the
+        // positions above in view, and moves to the row only when it isn't.
+        // While the table draws every row its card doesn't scroll: it is at
+        // the top, whatever position was last remembered.
+        const next = scrollTopKeepingRow(rows.length, count, drawn.virtualized ? scrollTop : 0);
+        if (next !== null) {
+            setScrollTop(next);
             scrollRequested.current = true;
         }
         keepToggleInView.current = true;
@@ -279,12 +284,16 @@ function SmallPositionsRow({ group, open, onToggle, toggleRef, ariaRowIndex }: S
             </td>
             <AllocationCell allocationPct={group.allocationPct} />
             <td>
-                {/* Not a link: a group has no page of its own. */}
+                {/* Not a link: a group has no page of its own. The names are in
+                    the tooltip, and in hidden text a screen reader reads out
+                    as it does By symbol's link (a title often isn't read).
+                    Opened, each position names its account on screen. */}
                 {group.accounts.length === 1 ? (
                     <span className="pm-account-pill">{group.accounts[0]}</span>
                 ) : (
                     <span className="pm-account-pill" title={group.accounts.join(", ")}>
                         {group.accounts.length} accounts
+                        <span className="sr-only">: {group.accounts.join(", ")}</span>
                     </span>
                 )}
             </td>
@@ -295,7 +304,7 @@ function SmallPositionsRow({ group, open, onToggle, toggleRef, ariaRowIndex }: S
 
 interface HoldingRowProps {
     row: HoldingsTableRow;
-    /** One of the small positions, drawn under their row while it's open. */
+    /** One of the small positions, drawn under their row while it's open, its value to the cent. */
     small?: boolean;
     ariaRowIndex?: number;
 }
@@ -327,7 +336,7 @@ function HoldingRow({ row, small = false, ariaRowIndex }: HoldingRowProps) {
             <td className="num">{fmtCurrency2(row.avgCost)}</td>
             <td className="num">{row.last === null ? "—" : fmtCurrency2(row.last)}</td>
             <td className="num" data-testid="holding-value">
-                {fmtCurrency0(row.marketValue)}
+                {small ? formatSmallPositionValue(row.marketValue) : fmtCurrency0(row.marketValue)}
                 {row.last === null && <span className="pm-card-subtitle" title="No price yet, so it is valued at what you paid"> at cost</span>}
                 {row.partlyAtCost && <span className="pm-card-subtitle" title="Some of these shares have no price yet, so they are valued at what you paid"> partly at cost</span>}
             </td>
@@ -377,7 +386,7 @@ function AllocationCell({ allocationPct }: AllocationCellProps) {
                     />
                 </div>
                 <span className="num" style={{ minWidth: 40, textAlign: "right" }}>
-                    {allocationPct.toFixed(1)}%
+                    {formatAllocationPct(allocationPct)}
                 </span>
             </div>
         </td>

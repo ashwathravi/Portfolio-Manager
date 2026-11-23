@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 
 import { combineBySymbol, type AccountPosition } from "./combine";
 import {
+    formatAllocationPct,
+    formatSmallPositionValue,
     SMALL_POSITIONS_RULE,
     smallPositionsLimitLabel,
     smallPositionsLimits,
@@ -92,6 +94,53 @@ describe("holdings / splitSmallPositions", () => {
         assert.deepEqual(symbolsOf(large.shown), ["BIGX", "EDGE"]);
         const tiny = splitSmallPositions([row("BIGX", 4_925), row("EDGE", 25), row("SMLA", 24), row("SMLB", 20), row("SMLC", 6)], 5_000);
         assert.deepEqual(symbolsOf(tiny.shown), ["BIGX", "EDGE"]);
+    });
+
+    it("regression: no grouped position reads as the limit its group says it is under", () => {
+        // A $1,000,000 book, limited by value. The open group writes values
+        // to the cent: $499.996 would read $500.00 under "Each under $500",
+        // so it stays a row, and $499.99 is small.
+        const large = splitSmallPositions([row("BIGX", 998_500), row("EDGE", 499.996), row("SMLA", 499.99), row("SMLB", 300), row("SMLC", 200)], 1_000_000);
+        assert.deepEqual(symbolsOf(large.shown), ["BIGX", "EDGE"]);
+        assert.deepEqual(symbolsOf(large.small?.rows ?? []), ["SMLA", "SMLB", "SMLC"]);
+        assert.equal(large.small?.limitedBy, "value");
+        assert.equal(formatSmallPositionValue(499.996), "$500.00");
+        assert.equal(formatSmallPositionValue(499.99), "$499.99");
+
+        // A $40,000 book, limited by share ($200). $199 is 0.4975%, which
+        // reads 0.50% under "Each under 0.5% of market value", so it stays a
+        // row; $197.90 reads 0.49%.
+        const book = 40_000;
+        const held = (symbol: string, value: number) => row(symbol, value, { allocationPct: (value / book) * 100 });
+        const small = splitSmallPositions([held("BIGX", 39_313.1), held("EDGE", 199), held("NEAR", 197.9), held("SMLA", 190), held("SMLB", 100)], book);
+        assert.deepEqual(symbolsOf(small.shown), ["BIGX", "EDGE"]);
+        assert.deepEqual(symbolsOf(small.small?.rows ?? []), ["NEAR", "SMLA", "SMLB"]);
+        assert.equal(small.small?.limitedBy, "share");
+        assert.deepEqual(small.small?.rows.map((r) => formatAllocationPct(r.allocationPct)), ["0.49%", "0.47%", "0.25%"]);
+        assert.equal(formatAllocationPct((199 / book) * 100), "0.50%");
+    });
+
+    it("keeps out only positions that read as a limit: every grouped one reads under both", () => {
+        const readsUnder = (r: Row) =>
+            Number(formatSmallPositionValue(r.marketValue).replace(/[$,]/g, "")) < SMALL_POSITIONS_RULE.maxValue
+            && parseFloat(formatAllocationPct(r.allocationPct)) < SMALL_POSITIONS_RULE.maxShare * 100;
+        for (const book of [5_000, 40_000, 99_999, 100_000, 250_000, 2_000_000]) {
+            const limit = Math.min(SMALL_POSITIONS_RULE.maxValue, SMALL_POSITIONS_RULE.maxShare * book);
+            const held = (symbol: string, value: number) => row(symbol, value, { allocationPct: (value / book) * 100 });
+            // From $3 under the limit to $1 over it, a tenth of a cent apart,
+            // beside a large position and three that are plainly small.
+            const rows = [
+                held("BIGX", book / 2),
+                ...[1, 2, 3].map((value) => held(`TINY${value}`, value)),
+                ...Array.from({ length: 4_000 }, (_, i) => held(`NEAR${i}`, limit - 3 + i / 1_000)),
+            ];
+            const { shown, small } = splitSmallPositions(rows, book);
+            assert.ok(small, `a group in a $${book} book`);
+            for (const r of small.rows) assert.ok(readsUnder(r), `${r.marketValue} in a $${book} book is grouped but reads as a limit`);
+            for (const r of shown) {
+                if (r.marketValue < limit) assert.ok(!readsUnder(r), `${r.marketValue} in a $${book} book reads under both limits but isn't grouped`);
+            }
+        }
     });
 
     it("two small positions stay rows; a third makes the group", () => {
@@ -285,5 +334,26 @@ describe("holdings / smallPositionsLimitLabel", () => {
         assert.deepEqual(smallPositionsLimits(rule), { value: "$1,000", share: "0.25%", minCount: "four" });
         assert.deepEqual(smallPositionsLimits(), { value: "$500", share: "0.5%", minCount: "three" });
         assert.equal(smallPositionsLimitLabel("share", rule), "Each under 0.25% of market value");
+    });
+});
+
+describe("holdings / formatSmallPositionValue", () => {
+    it("writes a small position's value to the cent", () => {
+        assert.equal(formatSmallPositionValue(1.5), "$1.50");
+        assert.equal(formatSmallPositionValue(23), "$23.00");
+        assert.equal(formatSmallPositionValue(0), "$0.00");
+        assert.equal(formatSmallPositionValue(1_234.567), "$1,234.57");
+    });
+});
+
+describe("holdings / formatAllocationPct", () => {
+    it("writes a tenth of a percent, or a hundredth under 1%", () => {
+        assert.equal(formatAllocationPct(53.09), "53.1%");
+        assert.equal(formatAllocationPct(100), "100.0%");
+        assert.equal(formatAllocationPct(1), "1.0%");
+        // Under 1%: a small position reads 0.47%, not the 0.5% it is under.
+        assert.equal(formatAllocationPct(0.475), "0.47%");
+        assert.equal(formatAllocationPct(0.0056), "0.01%");
+        assert.equal(formatAllocationPct(0), "0.00%");
     });
 });

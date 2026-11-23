@@ -7,10 +7,13 @@
  *
  * A position is small when it is worth under $500 and under 0.5% of the
  * table's market value, the total its Allocation column divides by, so a
- * filter never changes which positions are small. They are grouped only
- * when at least three are, and never every position in view. Holdings
- * valued by hand (their own card) and option positions (the LEAPS ledger)
- * are never in the table, so never in the group.
+ * filter never changes which positions are small. It must also read under
+ * both as the table writes them (its value to the cent in the open group,
+ * its share to a hundredth of a percent), so no grouped position reads as
+ * the limit its group says it is under. They are grouped only when at
+ * least three are, and never every position in view. Holdings valued by
+ * hand (their own card) and option positions (the LEAPS ledger) are never
+ * in the table, so never in the group.
  */
 
 import { formatUsd } from "@/lib/format";
@@ -29,6 +32,9 @@ export const SMALL_POSITIONS_RULE: Readonly<SmallPositionsRule> = Object.freeze(
     maxShare: 0.005,
     minCount: 3,
 });
+
+/** The open group writes its positions' values to the cent, which count when one is worth a few dollars. */
+const SMALL_POSITION_VALUE_DECIMALS = 2;
 
 /** A row of the Holdings table as the rule reads it: one account's position, or one symbol's (By symbol). */
 export interface SmallPositionCandidate {
@@ -98,7 +104,15 @@ export function splitSmallPositions<T extends SmallPositionCandidate>(
     if (!(limit > 0)) return { shown: [...rows], small: null };
     // Strictly under the limit. A position worth $0 can be small; a short,
     // worth less than nothing, never is, and nor is a value that isn't a number.
-    const isSmall = (row: T) => row.marketValue >= 0 && row.marketValue < limit;
+    // It must also read under both limits as the table writes them, its
+    // value to the cent in the open group and its share to a hundredth of a
+    // percent: $499.996 reads $500.00 and 0.497% reads 0.50%, which would
+    // sit under a line saying each is under $500, or under 0.5%.
+    const isSmall = (row: T) =>
+        row.marketValue >= 0
+        && row.marketValue < limit
+        && asWritten(row.marketValue, SMALL_POSITION_VALUE_DECIMALS) < rule.maxValue
+        && asWritten(row.allocationPct, allocationDecimals(row.allocationPct)) < rule.maxShare * 100;
     const small = rows.filter(isSmall);
     if (small.length < rule.minCount || small.length === rows.length) return { shown: [...rows], small: null };
     return {
@@ -182,6 +196,29 @@ export function smallPositionsLimitLabel(
 ): string {
     const limits = smallPositionsLimits(rule);
     return limitedBy === "value" ? `Each under ${limits.value}` : `Each under ${limits.share} of market value`;
+}
+
+/** A small position's value as the open group writes it, e.g. "$1.50" where other rows round to whole dollars. */
+export function formatSmallPositionValue(value: number): string {
+    return formatUsd(value, { decimals: SMALL_POSITION_VALUE_DECIMALS });
+}
+
+/**
+ * A share of the table's market value (0..100) as its Allocation column
+ * writes it: to a tenth of a percent, or a hundredth under 1%, so a small
+ * position reads 0.47% rather than the 0.5% it is under.
+ */
+export function formatAllocationPct(pct: number): string {
+    return `${pct.toFixed(allocationDecimals(pct))}%`;
+}
+
+function allocationDecimals(pct: number): number {
+    return Math.abs(pct) < 1 ? 2 : 1;
+}
+
+/** What a figure reads to `decimals` places, rounded as the table rounds it. */
+function asWritten(value: number, decimals: number): number {
+    return Number(value.toFixed(decimals));
 }
 
 function sum<T>(rows: readonly T[], value: (row: T) => number): number {
