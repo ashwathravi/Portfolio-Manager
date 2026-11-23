@@ -241,28 +241,30 @@ describe("jsonLoggableError", () => {
     test("its stack is printed as console.* prints it, so Next.js maps the frames, without the error's other fields or colour codes", () => {
         const previous = Object.getOwnPropertyDescriptor(Error.prototype, inspect.custom);
         // Stands in for Next.js's hook (next/dist/server/patch-error-inspect.js): printing an error maps its frames to the
-        // source, writes the first line from its name and message, prints its own fields, and colours the frames it hides
-        // when the output is a terminal.
+        // source, writes the first line from its name and message, and prints its own fields after the stack. It leaves
+        // out the frames it ignore-lists, such as Next.js's own, or with __NEXT_SHOW_IGNORE_LISTED=true prints them
+        // dimmed, with colour codes when the output is a terminal. This prints them that way.
         Object.defineProperty(Error.prototype, inspect.custom, {
             configurable: true,
             writable: true,
             value(this: Error) {
-                const frames = String(this.stack).slice(String(this.stack).indexOf("\n"))
-                    .replace(".next/server/chunks/route.js:1:534", "src/lib/portfolio/manage.ts:4:25");
+                const [, app, framework] = String(this.stack).split("\n");
+                const mapped = app.replace(".next/server/chunks/route.js:1:534", "src/lib/portfolio/manage.ts:4:25");
                 const fields = Object.keys(this).length > 0 ? ` ${JSON.stringify({ ...this })}` : "";
-                return `${this.name}: ${this.message}${frames}\n    at \u001b[3mignore-listed frames\u001b[23m${fields}`;
+                return `${this.name}: ${this.message}\n${mapped}\n\u001b[2m${framework}\u001b[22m${fields}`;
             },
         });
         try {
+            const framework = "    at AppRouteRouteModule.handle (/app/node_modules/next/dist/compiled/next-server/app-route-turbo.runtime.dev.js:5:25953)";
             const error = Object.assign(new Error("Could not create the account"), { code: "CREATE_FAILED", row: { note: MARKER } });
             error.name = "AccountCreateError";
-            error.stack = "AccountCreateError: Could not create the account\n    at createPortfolio (/app/.next/server/chunks/route.js:1:534)";
+            error.stack = `AccountCreateError: Could not create the account\n    at createPortfolio (/app/.next/server/chunks/route.js:1:534)\n${framework}`;
 
             const data = jsonLoggableError(error) as Record<string, unknown>;
 
             assert.equal(
                 data.stack,
-                "AccountCreateError: Could not create the account\n    at createPortfolio (/app/src/lib/portfolio/manage.ts:4:25)\n    at ignore-listed frames",
+                `AccountCreateError: Could not create the account\n    at createPortfolio (/app/src/lib/portfolio/manage.ts:4:25)\n${framework}`,
             );
             assert.equal(data.code, "CREATE_FAILED");
             assert.ok(!JSON.stringify(data).includes(MARKER));
