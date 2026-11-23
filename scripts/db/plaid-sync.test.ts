@@ -331,29 +331,83 @@ describe('Plaid sync into portfolios', { skip: !DATABASE_URL && 'SCRIPTS_TEST_DA
         assert.deepEqual((await fund()).map((r) => [r.account, r.source, r.value]), [['acc_fx', 'manual', 150], ['acc_fy', 'plaid', 130]]);
 
         // Each value is kept as of its day, so a missed night's valuation
-        // reads that night's value (Codex on PR #216).
+        // reads that night's value (Codex on PR #216). Plaid gave no day for
+        // these: the first sync's, on a Sunday, is Friday's session's.
         const history = await sql<{ account: string; date: string; value: number }[]>`
             SELECT p.external_account_id AS account, v.date::text AS date, v.value::float AS value
             FROM manual_holding_values v JOIN manual_holdings m ON m.id = v.manual_holding_id JOIN portfolios p ON p.id = m.portfolio_id
             WHERE m.user_id = 'u-fund' ORDER BY 1, 2`;
         assert.deepEqual(history.map((r) => [r.account, r.date, r.value]), [
-            ['acc_fx', '2026-10-25', 110], ['acc_fx', '2026-10-26', 120], ['acc_fx', '2026-10-27', 150],
-            ['acc_fy', '2026-10-25', 110], ['acc_fy', '2026-10-26', 120], ['acc_fy', '2026-10-27', 130],
+            ['acc_fx', '2026-10-23', 110], ['acc_fx', '2026-10-26', 120], ['acc_fx', '2026-10-27', 150],
+            ['acc_fy', '2026-10-23', 110], ['acc_fy', '2026-10-26', 120], ['acc_fy', '2026-10-27', 130],
         ]);
         // The nightly valuation reads them back: from a day on, with the one standing on it.
         const values = await readManualHistory([id], '2026-10-26', database);
-        assert.deepEqual(values.get(id)?.map((r) => [r.date, r.value, r.quantity]), [['2026-10-25', 110, 10], ['2026-10-26', 120, 10], ['2026-10-27', 150, 10]]);
+        assert.deepEqual(values.get(id)?.map((r) => [r.date, r.value, r.quantity]), [['2026-10-23', 110, 10], ['2026-10-26', 120, 10], ['2026-10-27', 150, 10]]);
         const later = await readManualHistory([id], '2026-10-27', database);
         assert.deepEqual(later.get(id)?.map((r) => r.date), ['2026-10-26', '2026-10-27']);
         // ... in the same transaction as the portfolios' state (Codex on PR #217).
         const states = await createSnapshotStore(database, { now: () => new Date('2026-10-28T12:00:00Z') }).portfolios();
         const held = states.flatMap((state) => state.manual ?? []).find((m) => m.id === id);
-        assert.deepEqual(held?.history?.map((r) => [r.date, r.value]), [['2026-10-25', 110], ['2026-10-26', 120], ['2026-10-27', 150]]);
+        assert.deepEqual(held?.history?.map((r) => [r.date, r.value]), [['2026-10-23', 110], ['2026-10-26', 120], ['2026-10-27', 150]]);
 
         // The user's value stands from its day on: one dated earlier drops the later ones.
         assert.ok(await updateManualHolding('u-fund', id, portfolio, { name: 'Stable Value Fund', identifier: null, quantity: 10, value: 140, costBasis: 100, valueAsOf: '2026-10-26' }, { database }));
         const edited = await sql<{ date: string; value: number }[]>`SELECT date::text AS date, value::float AS value FROM manual_holding_values WHERE manual_holding_id = ${id} ORDER BY date`;
-        assert.deepEqual(edited.map((r) => [r.date, r.value]), [['2026-10-25', 110], ['2026-10-26', 140]]);
+        assert.deepEqual(edited.map((r) => [r.date, r.value]), [['2026-10-23', 110], ['2026-10-26', 140]]);
+    });
+
+    /** A user with one linked account picked to sync, and a sync of it as of `at` that reports a share and, unless `fundPrice` is null, a fund with no ticker. */
+    async function fundAccount(user: string) {
+        await linkedUser(user, `item-${user}`, [[`acc-${user}`, 'Brokerage', 'investment']]);
+        await selectPlaidAccounts(user, `item-${user}`, [`acc-${user}`], database);
+        const FUND = { security_id: 'sec_fund', ticker_symbol: null, name: 'Stable Value Fund', type: 'mutual fund', cusip: '123456789' };
+        const sync = (fundPrice: number | null, at: Date, reported: Record<string, unknown> = {}) => syncPlaidItem(user, `item-${user}`, deps(fakePlaid({
+            '/investments/holdings/get': () => ({
+                json: {
+                    holdings: [
+                        { account_id: `acc-${user}`, security_id: 'sec_aapl', quantity: 1, institution_price: 100, institution_value: 100, cost_basis: 90, iso_currency_code: 'USD' },
+                        ...(fundPrice == null ? [] : [{
+                            account_id: `acc-${user}`, security_id: 'sec_fund', quantity: 10, institution_price: fundPrice, institution_value: 10 * fundPrice,
+                            cost_basis: 100, iso_currency_code: 'USD', ...reported,
+                        }]),
+                    ],
+                    securities: [...SECURITIES, FUND],
+                },
+            }),
+            '/investments/transactions/get': transactionsOf(`acc-${user}`, []),
+        }).fetchImpl, at));
+        const held = () => sql<{ name: string; source: string; value: number; asOf: string; external: string | null; account: string | null }[]>`
+            SELECT m.name, m.source, m.value::float AS value, m.value_as_of::text AS "asOf", m.external_id AS external, p.external_account_id AS account
+            FROM manual_holdings m JOIN portfolios p ON p.id = m.portfolio_id WHERE m.user_id = ${user} ORDER BY m.name`;
+        const history = async (name: string) => (await sql<{ date: string; value: number }[]>`
+            SELECT v.date::text AS date, v.value::float AS value FROM manual_holding_values v JOIN manual_holdings m ON m.id = v.manual_holding_id
+            WHERE m.user_id = ${user} AND m.name = ${name} ORDER BY v.date`).map((r) => [r.date, r.value]);
+        return { sync, held, history };
+    }
+
+    test('regression: a fund\'s value Plaid doesn\'t date is the last session\'s, so an evening sync doesn\'t date it the next day', async () => {
+        const { sync, held, history } = await fundAccount('u-fund-evening');
+        // "Sync now" at 8:30 pm in New York on Monday, Nov 23: already the
+        // 24th in UTC, a day the nightly valuation hadn't reached.
+        await sync(11, new Date('2026-11-24T01:30:00.000Z'));
+        assert.deepEqual((await held()).map((r) => [r.name, r.value, r.asOf]), [['Stable Value Fund', 110, '2026-11-23']]);
+        assert.deepEqual(await history('Stable Value Fund'), [['2026-11-23', 110]]);
+        // The next morning, before Tuesday's session ends, a new value is still Monday's.
+        await sync(12, new Date('2026-11-24T15:00:00.000Z'));
+        assert.deepEqual((await held()).map((r) => [r.value, r.asOf]), [[120, '2026-11-23']]);
+        assert.deepEqual(await history('Stable Value Fund'), [['2026-11-23', 120]]);
+    });
+
+    test('a fund\'s value Plaid dates is kept as of the institution\'s day', async () => {
+        const { sync, held, history } = await fundAccount('u-fund-dated');
+        // Synced on a Sunday; the plan priced the fund on Thursday.
+        await sync(11, NOW, { institution_price_as_of: '2026-10-22' });
+        assert.deepEqual((await held()).map((r) => [r.name, r.value, r.asOf]), [['Stable Value Fund', 110, '2026-10-22']]);
+        assert.deepEqual(await history('Stable Value Fund'), [['2026-10-22', 110]]);
+        // A day Atlas can't read is no day: the last session's stands in.
+        await sync(12, new Date('2026-10-26T22:30:00.000Z'), { institution_price_as_of: 'not a date' });
+        assert.deepEqual(await history('Stable Value Fund'), [['2026-10-22', 110], ['2026-10-26', 120]]);
     });
 
     test('a sync makes the portfolio, replaces its holdings and cash, and upserts its transactions', async () => {

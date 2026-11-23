@@ -254,6 +254,8 @@ export interface InstitutionValuedHolding {
     quantity: number | null;
     value: number;
     costBasis: number | null;
+    /** The day of the institution's value, when Plaid dates it; of lots, the earliest. */
+    priceDate: string | null;
 }
 
 export interface AccountHoldings {
@@ -497,10 +499,14 @@ export function accountHoldings(
             }
             const existing = valued.get(holding.security_id);
             const cost = holding.cost_basis != null && holding.cost_basis > 0 ? holding.cost_basis : null;
+            const priceDate = priceDay(holding.institution_price_as_of);
             if (existing) {
                 existing.value += value;
                 existing.quantity = existing.quantity != null && holding.quantity > 0 ? existing.quantity + holding.quantity : existing.quantity;
                 existing.costBasis = existing.costBasis != null && cost != null ? existing.costBasis + cost : null;
+                // Lots valued on different days add up to a value no newer
+                // than the oldest of them.
+                if (priceDate != null && (existing.priceDate == null || priceDate < existing.priceDate)) existing.priceDate = priceDate;
             } else {
                 valued.set(holding.security_id, {
                     externalId: holding.security_id,
@@ -509,6 +515,7 @@ export function accountHoldings(
                     quantity: holding.quantity > 0 ? holding.quantity : null,
                     value,
                     costBasis: cost,
+                    priceDate,
                 });
             }
             continue;

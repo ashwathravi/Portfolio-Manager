@@ -90,9 +90,23 @@ describe("accountHoldings", () => {
         ]);
         assert.deepEqual(result.positions, []);
         assert.deepEqual(result.institutionValued, [{
-            externalId: "cit", name: "Target 2055 Trust", identifier: "12345X678", quantity: 130.5, value: 11092.5, costBasis: null,
+            externalId: "cit", name: "Target 2055 Trust", identifier: "12345X678", quantity: 130.5, value: 11092.5, costBasis: null, priceDate: null,
         }]);
         assert.deepEqual(result.skipped, [{ reason: "no-ticker", name: "Acme Holdings" }]);
+    });
+
+    test("a holding valued by the institution keeps the day Plaid gives its value; lots valued on different days, the earliest", () => {
+        const trust = security("cit", { ticker_symbol: null, name: "Target 2055 Trust", cusip: "12345X678" });
+        const dated = (asOf: unknown) => accountHoldings(ACCOUNT, [holding("cit", { quantity: 10, institution_value: 850, institution_price_as_of: asOf as string })], [trust]).institutionValued[0]?.priceDate;
+        assert.equal(dated("2026-11-20"), "2026-11-20");
+        assert.equal(dated("2026-11-20T21:00:00Z"), "2026-11-20");
+        for (const undated of [null, "yesterday", "2026-02-30", 20261120]) assert.equal(dated(undated), null, String(undated));
+        const lots = accountHoldings(ACCOUNT, [
+            holding("cit", { quantity: 10, institution_value: 850, institution_price_as_of: "2026-11-20" }),
+            holding("cit", { quantity: 5, institution_value: 425, institution_price_as_of: null }),
+            holding("cit", { quantity: 1, institution_value: 85, institution_price_as_of: "2026-11-18" }),
+        ], [trust]);
+        assert.deepEqual(lots.institutionValued.map((v) => [v.value, v.priceDate]), [[1360, "2026-11-18"]]);
     });
 
     test("without a cost basis, a position is held at its price: no gain Plaid didn't report", () => {

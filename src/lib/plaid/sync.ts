@@ -471,7 +471,12 @@ async function replaceInstitutionValued(
         .from(manualHoldings)
         .where(and(eq(manualHoldings.userId, userId), eq(manualHoldings.source, "manual"), isNotNull(manualHoldings.externalId))))
         .map((row) => row.externalId));
-    const asOf = now.toISOString().slice(0, 10);
+    // The institution's day for its value, or, when Plaid doesn't date it,
+    // the last session that ended by this sync, as an undated option price
+    // is dated: the UTC date is the next day's from New York's evening on,
+    // which would put the value ahead of the nightly valuation of the day
+    // it belongs to.
+    const undatedDay = lastCompletedSession(now);
     const sameNumber = (stored: string | null, next: number | null) => (stored == null ? next == null : next != null && Number(stored) === next);
     // A holding added, gone, or with another quantity or cost is a change
     // to the account. A new value alone is a price, as a quote is for a
@@ -483,6 +488,7 @@ async function replaceInstitutionValued(
         const key = institutionValuedKey(portfolioId, row.externalId);
         if (taken.has(key)) continue;
         written++;
+        const asOf = row.priceDate ?? undatedDay;
         const values = {
             name: row.name,
             identifier: row.identifier,
