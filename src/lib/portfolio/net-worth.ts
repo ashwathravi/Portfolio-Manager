@@ -15,11 +15,12 @@
  *
  * What the pages say about them is worked out here too: Today's headline
  * and its note (todayHeadline), the card's count of them
- * (describeNetWorthCounts) and the date an edit's value is as of
+ * (describeNetWorthCounts), what tells items of one name apart
+ * (netWorthItemDistinctions) and the date an edit's value is as of
  * (editedValueAsOf).
  */
 
-import { formatShortDate } from "@/lib/format";
+import { formatShortDate, formatUsd } from "@/lib/format";
 
 export const NET_WORTH_KINDS = ["asset", "debt"] as const;
 export type NetWorthKind = (typeof NET_WORTH_KINDS)[number];
@@ -207,6 +208,36 @@ export function describeNetWorthCounts({ assetCount, debtCount }: Pick<NetWorthS
     ].filter((c) => c !== null);
     if (counts.length === 0) return null;
     return `${counts.join(" and ")}, ${assetCount + debtCount === 1 ? "at the value and date you gave" : "at the values and dates you gave"}`;
+}
+
+/** An item's value as its row shows it: a debt with a minus sign. */
+export function signedNetWorthValue(item: Pick<NetWorthItemRow, "kind" | "value">): number {
+    return item.kind === "debt" ? -item.value : item.value;
+}
+
+/** Two items read alike with the same name, whatever the case or spacing. */
+function readsAs(name: string): string {
+    return name.trim().replace(/\s+/g, " ").toLocaleLowerCase("en-US");
+}
+
+/**
+ * What tells each item apart from others of the same name, by ID: its value
+ * as its row shows it, and its place among those of the same value when
+ * that matches too ("$0.00, 2 of 2"); null for a name no other item has.
+ * A new item's name starts as its type ("Credit card"), so two cards left
+ * as named would otherwise have the same actions button and the same
+ * prompt to delete.
+ */
+export function netWorthItemDistinctions(items: readonly Pick<NetWorthItemRow, "id" | "kind" | "name" | "value">[]): Map<string, string | null> {
+    const alike = new Map<string, Pick<NetWorthItemRow, "id" | "kind" | "name" | "value">[]>();
+    for (const item of items) alike.set(readsAs(item.name), [...(alike.get(readsAs(item.name)) ?? []), item]);
+    return new Map(items.map((item) => {
+        const named = alike.get(readsAs(item.name)) ?? [];
+        if (named.length < 2) return [item.id, null];
+        const value = formatUsd(signedNetWorthValue(item));
+        const sameValue = named.filter((other) => formatUsd(signedNetWorthValue(other)) === value);
+        return [item.id, sameValue.length < 2 ? value : `${value}, ${sameValue.indexOf(item) + 1} of ${sameValue.length}`];
+    }));
 }
 
 /**

@@ -15,8 +15,10 @@ import {
     NET_WORTH_CATEGORIES,
     NET_WORTH_CATEGORY_LABELS,
     NET_WORTH_KINDS,
+    netWorthItemDistinctions,
     netWorthOf,
     outsideForToday,
+    signedNetWorthValue,
     summarizeNetWorthItems,
     todayHeadline,
     type NetWorthItemRow,
@@ -167,6 +169,39 @@ describe("describeNetWorthCounts", () => {
 
     test("none is null: the card says what it's for instead", () => {
         assert.equal(describeNetWorthCounts({ assetCount: 0, debtCount: 0 }), null);
+    });
+});
+
+describe("netWorthItemDistinctions", () => {
+    const card = (id: string, value: number, name = "Credit card"): NetWorthItemRow => ({
+        ...MORTGAGE, id, category: "credit_card", name, value,
+    });
+
+    test("regression: items of one name are told apart by their value as the row shows it", () => {
+        // A new item's name starts as its type: two cards left as named read alike.
+        const apart = netWorthItemDistinctions([card("a", 2_500.12), card("b", 1_000), HOME]);
+        assert.deepEqual([...apart], [["a", "−$2,500.12"], ["b", "−$1,000.00"], [HOME.id, null]]);
+    });
+
+    test("whatever the case or spacing; with the same value too, by their place among those", () => {
+        const apart = netWorthItemDistinctions([card("a", 0), card("b", 0, "  credit   CARD "), card("c", 50), { ...HOME, id: "h2", name: "Home" }, HOME]);
+        assert.deepEqual([...apart], [
+            ["a", "$0.00, 1 of 2"],
+            ["b", "$0.00, 2 of 2"],
+            ["c", "−$50.00"],
+            ["h2", "$300,000.00, 1 of 2"],
+            [HOME.id, "$300,000.00, 2 of 2"],
+        ]);
+    });
+
+    test("names no other item has need nothing more", () => {
+        assert.deepEqual([...netWorthItemDistinctions([HOME, MORTGAGE])], [[HOME.id, null], [MORTGAGE.id, null]]);
+        assert.deepEqual([...netWorthItemDistinctions([])], []);
+    });
+
+    test("signedNetWorthValue: a debt is taken off", () => {
+        assert.equal(signedNetWorthValue(HOME), 300_000);
+        assert.equal(signedNetWorthValue(MORTGAGE), -200_000);
     });
 });
 

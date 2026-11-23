@@ -460,6 +460,71 @@ test.describe('Portfolio › Accounts — other assets and debts', () => {
         await expect(card(page)).toContainText('Add one to see your net worth here, and on Today once your accounts hold positions.');
     });
 
+    test('items of one name are told apart by their value, in their actions button and the prompt to delete', async ({ page }) => {
+        await brokerage(page);
+        await gotoAppPage(page, '/portfolios/accounts');
+        // Two cards, each left named as its type.
+        for (const value of ['2,500.12', '1000']) {
+            await expect(await add(page, 'debt', { type: 'Credit card', value })).toBeHidden();
+        }
+        await expect(item(page, 'Credit card')).toHaveCount(2);
+        const larger = card(page).getByRole('button', { name: 'Actions for Credit card (−$2,500.12)', exact: true });
+        const smaller = card(page).getByRole('button', { name: 'Actions for Credit card (−$1,000.00)', exact: true });
+        await expect(larger).toHaveCount(1);
+        await expect(smaller).toHaveCount(1);
+
+        const asked: string[] = [];
+        page.on('dialog', (confirm) => {
+            asked.push(confirm.message());
+            void confirm.accept();
+        });
+        await smaller.click();
+        await page.getByRole('menuitem', { name: 'Delete' }).click();
+        await expect(page.getByText('Credit card (−$1,000.00) deleted.')).toBeVisible();
+        expect(asked).toEqual(['Delete Credit card (−$1,000.00)? It stops counting in your net worth.']);
+        await expect(item(page, 'Credit card')).toHaveCount(1);
+        await expect(item(page, 'Credit card')).toContainText('−$2,500.12');
+        // The only one of its name again: named as any other.
+        await expect(card(page).getByRole('button', { name: 'Actions for Credit card', exact: true })).toHaveCount(1);
+    });
+
+    test('closing the add dialog, by Escape, Cancel or a save, gives the focus back to the button that opened it', async ({ page }) => {
+        await brokerage(page);
+        await gotoAppPage(page, '/portfolios/accounts');
+        const dialog = page.getByRole('dialog');
+        const addAsset = card(page).getByRole('button', { name: 'Add asset' });
+        const addDebt = card(page).getByRole('button', { name: 'Add debt' });
+
+        await addAsset.focus();
+        await page.keyboard.press('Enter');
+        await expect(dialog.getByLabel('Value ($)')).toBeFocused();
+        await page.keyboard.press('Escape');
+        await expect(dialog).toBeHidden();
+        await expect(addAsset).toBeFocused();
+
+        await addDebt.click();
+        await dialog.getByRole('button', { name: 'Cancel' }).click();
+        await expect(dialog).toBeHidden();
+        await expect(addDebt).toBeFocused();
+
+        await addAsset.focus();
+        await page.keyboard.press('Enter');
+        await dialog.getByLabel('Value ($)').fill('5000');
+        await page.keyboard.press('Enter');
+        await expect(dialog).toBeHidden();
+        await expect(page.getByText('Home or property added.')).toBeVisible();
+        await expect(addAsset).toBeFocused();
+
+        // The same for the page's other dialogs opened from a button, not a trigger.
+        const newAccount = page.getByRole('button', { name: 'New account' });
+        await newAccount.focus();
+        await page.keyboard.press('Enter');
+        await expect(dialog).toBeVisible();
+        await page.keyboard.press('Escape');
+        await expect(dialog).toBeHidden();
+        await expect(newAccount).toBeFocused();
+    });
+
     test('a new name or note keeps the value\'s date and adds no value; a new value is as of today until another day is given', async ({ page }) => {
         // A day that can't be today, so a value dated anew would show.
         const asOf = '2025-06-30';

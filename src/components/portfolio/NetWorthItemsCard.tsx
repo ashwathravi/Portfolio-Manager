@@ -21,12 +21,15 @@ import {
     editedValueAsOf,
     formatAsOf,
     NET_WORTH_CATEGORY_LABELS,
+    netWorthItemDistinctions,
     netWorthOf,
+    signedNetWorthValue,
     summarizeNetWorthItems,
     type NetWorthCategory,
     type NetWorthItemRow,
     type NetWorthKind,
 } from "@/lib/portfolio/net-worth";
+import { localDate } from "@/lib/portfolio/value-dates";
 import { NET_WORTH_ITEM_LIMITS } from "@/lib/validators/net-worth-item";
 
 /**
@@ -54,11 +57,6 @@ const HINTS: Record<NetWorthKind, string> = {
     asset: "Investment and retirement accounts belong in Accounts above, where they're priced and in your returns. Cash in a brokerage account is already counted there.",
     debt: "Enter what you owe now, not the original amount. It's taken off your net worth.",
 };
-
-function today(): string {
-    const d = new Date();
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
 
 /** "12,500.00" or "$12,500" → 12500; "" → null; anything else → NaN. */
 function amount(text: string): number | null {
@@ -103,7 +101,7 @@ function NetWorthItemDialog({ open, onOpenChange, kind, editing }: NetWorthItemD
     // A new item's value is as of today. An edit keeps the item's date until
     // the value changes, then it's today, so the earlier value stays kept by
     // its own day and a new name or note dates nothing anew.
-    const asOf = typedAsOf ?? (editing ? editedValueAsOf(editing, amount(value), today()) : today());
+    const asOf = typedAsOf ?? (editing ? editedValueAsOf(editing, amount(value), localDate()) : localDate());
 
     useEffect(() => {
         if (!open) return;
@@ -202,22 +200,30 @@ function NetWorthItemDialog({ open, onOpenChange, kind, editing }: NetWorthItemD
 
 interface NetWorthItemActionsProps {
     item: NetWorthItemRow;
+    /**
+     * What tells it apart from items of the same name (netWorthItemDistinctions):
+     * its value, "−$1,000.00"; null when no other item has its name.
+     */
+    apart: string | null;
 }
 
-function NetWorthItemActions({ item }: NetWorthItemActionsProps) {
+function NetWorthItemActions({ item, apart }: NetWorthItemActionsProps) {
     const router = useRouter();
     const [editOpen, setEditOpen] = useState(false);
+    // Two cards left named "Credit card" get a button each that says which,
+    // and the prompt says which balance goes.
+    const label = apart ? `${item.name} (${apart})` : item.name;
     const remove = async () => {
-        if (!window.confirm(`Delete ${item.name}? It stops counting in your net worth.`)) return;
+        if (!window.confirm(`Delete ${label}? It stops counting in your net worth.`)) return;
         const message = await send(`/api/portfolio/net-worth-items/${item.id}`, { method: "DELETE" });
         if (message) return void toast.error(message);
-        toast.success(`${item.name} deleted.`);
+        toast.success(`${label} deleted.`);
         router.refresh();
     };
     return (
         <>
             <DropdownMenu>
-                <DropdownMenuTrigger className="pm-icon-btn" aria-label={`Actions for ${item.name}`}>
+                <DropdownMenuTrigger className="pm-icon-btn" aria-label={`Actions for ${label}`}>
                     <MoreHorizontal size={16} aria-hidden="true" />
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
@@ -245,6 +251,7 @@ export function NetWorthItemsCard({ items, accountsTotal }: NetWorthItemsCardPro
         setAddOpen(true);
     };
     const summary = summarizeNetWorthItems(items);
+    const apart = netWorthItemDistinctions(items);
     return (
         <section className="pm-card pm-card-stack" id="other-assets" data-testid="net-worth-items" aria-labelledby="net-worth-items-title">
             <div className="pm-card-header flex-wrap">
@@ -293,9 +300,9 @@ export function NetWorthItemsCard({ items, accountsTotal }: NetWorthItemsCardPro
                                             {item.note && <div className="pm-card-subtitle">{item.note}</div>}
                                         </td>
                                         <td>{NET_WORTH_CATEGORY_LABELS[item.category]}</td>
-                                        <td className="num">{formatUsd(item.kind === "debt" ? -item.value : item.value)}</td>
+                                        <td className="num">{formatUsd(signedNetWorthValue(item))}</td>
                                         <td>{formatAsOf(item.valueAsOf)}</td>
-                                        <td><NetWorthItemActions item={item} /></td>
+                                        <td><NetWorthItemActions item={item} apart={apart.get(item.id) ?? null} /></td>
                                     </tr>
                                 ))}
                             </tbody>

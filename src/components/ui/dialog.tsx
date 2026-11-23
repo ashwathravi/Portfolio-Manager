@@ -36,32 +36,78 @@ function keepsDialogOpen(target: EventTarget | null): boolean {
         && target.matches('[role="combobox"][aria-expanded="true"]')
 }
 
-const DialogContent = React.forwardRef<
-    React.ElementRef<typeof DialogPrimitive.Content>,
-    React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content>
->(({ className, children, onEscapeKeyDown, ...props }, ref) => (
+/**
+ * What had the focus as the dialog opened: the control that opened it, or
+ * null without a document (the server's render).
+ */
+function focusedElement(): Element | null {
+    return typeof document === "undefined" ? null : document.activeElement
+}
+
+/**
+ * The control to give the focus back to as the dialog closes: the one that
+ * opened it, while it is still on the page. Null leaves it to Radix, which
+ * returns it only to a DialogTrigger.
+ */
+function focusReturnTarget(opener: Element | null): HTMLElement | null {
+    if (typeof HTMLElement === "undefined" || !(opener instanceof HTMLElement)) return null
+    if (opener === opener.ownerDocument.body || !opener.isConnected) return null
+    return opener
+}
+
+type DialogContentProps = React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content>
+
+/**
+ * The content itself. It mounts as the dialog opens, under the portal, and
+ * notes what has the focus while it first renders: before a field with
+ * autoFocus takes it, which happens before any effect or Radix's own
+ * open-focus event. Noted later, it would be that field.
+ */
+const DialogContentBody = React.forwardRef<React.ElementRef<typeof DialogPrimitive.Content>, DialogContentProps>(
+    ({ className, children, onEscapeKeyDown, onCloseAutoFocus, ...props }, ref) => {
+        const [opener] = React.useState(focusedElement)
+        return (
+            <DialogPrimitive.Content
+                ref={ref}
+                className={cn(
+                    "fixed left-[50%] top-[50%] z-50 grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 border bg-background p-6 shadow-lg duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%] sm:rounded-lg",
+                    className
+                )}
+                onEscapeKeyDown={(event) => {
+                    // Escape in a field with its suggestions open (a ticker
+                    // search) closes the suggestions; the next one, the dialog.
+                    if (keepsDialogOpen(event.target)) event.preventDefault();
+                    onEscapeKeyDown?.(event);
+                }}
+                onCloseAutoFocus={(event) => {
+                    onCloseAutoFocus?.(event);
+                    if (event.defaultPrevented) return;
+                    // A dialog opened from state (Add asset, New account, Add
+                    // holding) has no DialogTrigger, so Radix would leave the
+                    // focus on the page's body, and the next Tab would start
+                    // at the top of the page. Back to the control that opened it.
+                    const target = focusReturnTarget(opener);
+                    if (!target) return;
+                    event.preventDefault();
+                    target.focus();
+                }}
+                {...props}
+            >
+                {children}
+                <DialogPrimitive.Close className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground">
+                    <X className="h-4 w-4" />
+                    <span className="sr-only">Close</span>
+                </DialogPrimitive.Close>
+            </DialogPrimitive.Content>
+        )
+    }
+)
+DialogContentBody.displayName = "DialogContentBody"
+
+const DialogContent = React.forwardRef<React.ElementRef<typeof DialogPrimitive.Content>, DialogContentProps>((props, ref) => (
     <DialogPortal>
         <DialogOverlay />
-        <DialogPrimitive.Content
-            ref={ref}
-            className={cn(
-                "fixed left-[50%] top-[50%] z-50 grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 border bg-background p-6 shadow-lg duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%] sm:rounded-lg",
-                className
-            )}
-            onEscapeKeyDown={(event) => {
-                // Escape in a field with its suggestions open (a ticker
-                // search) closes the suggestions; the next one, the dialog.
-                if (keepsDialogOpen(event.target)) event.preventDefault();
-                onEscapeKeyDown?.(event);
-            }}
-            {...props}
-        >
-            {children}
-            <DialogPrimitive.Close className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground">
-                <X className="h-4 w-4" />
-                <span className="sr-only">Close</span>
-            </DialogPrimitive.Close>
-        </DialogPrimitive.Content>
+        <DialogContentBody ref={ref} {...props} />
     </DialogPortal>
 ))
 DialogContent.displayName = DialogPrimitive.Content.displayName
