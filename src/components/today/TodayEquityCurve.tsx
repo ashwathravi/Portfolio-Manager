@@ -4,14 +4,25 @@ import { loggableError } from "@/lib/observability/loggable-error";
 import { loadReturnHistory, type ReturnHistory } from "@/lib/performance/return-history";
 import { DAILY } from "@/lib/performance/periodSummary";
 
+export interface TodayEquityCurveProps {
+    userId: string;
+    /**
+     * The headline above is the net worth: say the curve is the accounts'
+     * alone, not the other assets and debts.
+     */
+    accountsOnly?: boolean;
+}
+
 /**
  * Today's equity curve (launch item i52): the user's time-weighted return
  * from their nightly valuations, all accounts together, beside the
- * benchmark ETFs: the series Performance › Returns shows. Nothing until
- * there are two valuations; streamed in, so it never holds up the money
- * above it.
+ * benchmark ETFs: the series Performance › Returns shows. It is always the
+ * accounts' return, never the net worth's: the other assets and debts are
+ * values the user gives, not prices, and no valuation reads them. Nothing
+ * until there are two valuations; streamed in, so it never holds up the
+ * money above it.
  */
-export async function TodayEquityCurve({ userId }: { userId: string }) {
+export async function TodayEquityCurve({ userId, accountsOnly = false }: TodayEquityCurveProps) {
     // Without a database there is no history to read.
     if (!isDatabaseConfigured()) return null;
     let history: ReturnHistory;
@@ -29,7 +40,12 @@ export async function TodayEquityCurve({ userId }: { userId: string }) {
     const benchmarks: Benchmark[] = history.benchmarks.map((b) => ({ key: b.key, label: b.label, series: b.values }));
     return (
         <div data-testid="today-equity-curve">
-            <EquityCurveCard portfolio={portfolio} benchmarks={benchmarks} periodsPerYear={DAILY} />
+            <EquityCurveCard
+                portfolio={portfolio}
+                benchmarks={benchmarks}
+                periodsPerYear={DAILY}
+                note={accountsOnly ? "Your accounts only, not your other assets and debts." : undefined}
+            />
         </div>
     );
 }

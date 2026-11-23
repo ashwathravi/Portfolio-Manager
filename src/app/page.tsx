@@ -27,6 +27,8 @@ import { buildDashboardPortfoliosQuery, buildUserTransactionsQuery } from '@/lib
 import { toActivityRows, type TransactionRowInput } from '@/lib/portfolio/activity';
 import { toOptionRiskPosition, type LoadedOptionPosition } from '@/lib/portfolio/option-positions';
 import { loadOptionPositions } from '@/lib/portfolio/option-positions-store';
+import { summarizeNetWorthItems, type NetWorthSummary } from '@/lib/portfolio/net-worth';
+import { loadNetWorthItems } from '@/lib/portfolio/net-worth-items';
 import { toTodayActivity } from '@/lib/today/rows';
 import { getSecurityProfiles } from '@/lib/markets/price-store';
 import { holdingName, loadSecurityProfiles } from '@/lib/markets/security-profile';
@@ -40,7 +42,9 @@ import { bankLinkingAvailable } from '@/lib/plaid/availability';
  * Today (/).
  *
  * Ordered by what the user needs first:
- *   1. Money — net worth and today's change from their own holdings.
+ *   1. Money — the portfolio value and today's change from their own
+ *      holdings, and the net worth once they add other assets and debts on
+ *      Accounts.
  *   2. Needs your attention — policy breaches, theses due for review, the
  *      weekly review. Each row links to where it gets resolved.
  *   3. A one-line risk-policy strip (full checks behind a disclosure).
@@ -52,7 +56,8 @@ import { bankLinkingAvailable } from '@/lib/plaid/availability';
  *      Atlas tracks any; until then it's one of the examples.
  *   7. Review & research — example-data cards, labelled and hideable.
  *
- * Every figure in 1–4 comes from the user's portfolios and transactions;
+ * Every figure in 1–4 comes from the user's portfolios and transactions
+ * (the net worth also from the other assets and debts they entered);
  * the risk policy is the user's saved one, evaluated on their holdings,
  * cash, trades and the theses they wrote (launch item i52), as Trade and
  * the Settings previews evaluate it (no example data mixed in).
@@ -83,7 +88,7 @@ export default async function Today() {
   // Warm quotes for the first paint; the hero keeps polling client-side.
   // Without market data the stored prices stand.
   const heldSymbols = allPortfolios.flatMap((p) => p.holdings.map((h) => h.symbol));
-  const [liveQuotes, profiles, theses, riskPolicy, { journal }, alphaRadarLive, optionPositions] = await Promise.all([
+  const [liveQuotes, profiles, theses, riskPolicy, { journal }, alphaRadarLive, optionPositions, outside] = await Promise.all([
     loadQuotes(heldSymbols),
     // Company names from the securities master (launch item i34).
     loadSecurityProfiles(heldSymbols, getSecurityProfiles),
@@ -112,6 +117,16 @@ export default async function Today() {
         return [];
       })
       : [],
+    // The other assets and debts the user added on Accounts: with any, the
+    // hero's headline is the net worth. Nothing else on the page reads them.
+    isDatabaseConfigured()
+      ? loadNetWorthItems(userId)
+        .then((items): NetWorthSummary | null => (items.length > 0 ? summarizeNetWorthItems(items) : null))
+        .catch((e): 'unavailable' => {
+          console.warn('Today: other assets and debts fetch failed — the hero shows the portfolio value alone.', e);
+          return 'unavailable';
+        })
+      : null,
   ]);
   const closedTrades = journal && journal.entries.length > 0 ? journal.entries : undefined;
   const patternTrades = closedTrades && inPatternWindow(closedTrades, new Date());
@@ -189,6 +204,7 @@ export default async function Today() {
           // Decided here, on the server: the first-run steps offer to connect
           // a bank only where Settings can (x30).
           bankLinking={bankLinkingAvailable()}
+          outside={outside}
         />
         {/* Policy checks only mean something once there are positions to check. */}
         <TodayTriage
@@ -200,7 +216,7 @@ export default async function Today() {
       {hasPolicyPositions && <PolicyStrip summary={riskPolicySummary} portfolio={policyPortfolio} />}
 
       <Suspense fallback={null}>
-        <TodayEquityCurve userId={userId} />
+        <TodayEquityCurve userId={userId} accountsOnly={outside !== null && outside !== 'unavailable'} />
       </Suspense>
 
       {(allHoldings.length > 0 || manualHoldings.length > 0) && (

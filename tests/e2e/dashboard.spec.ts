@@ -2,17 +2,19 @@ import { test, expect } from '@playwright/test';
 import { userKey } from './helpers/storage';
 import { clickUntil, collectConsoleErrors, gotoAppPage, openPolicyChecks, reloadAppPage } from './helpers/app';
 import { seedClosedTrades } from './helpers/trades';
-import { databaseAuthEnabled, signInAsFreshUser, signInAsNewUser } from './helpers/users';
+import { databaseAuthEnabled, e2eDatabase, signInAsFreshUser, signInAsNewUser } from './helpers/users';
 
 /**
  * Today (/) — formerly the Dashboard.
  *
  *   Top bar ............... title "Today", greeting · date · market state,
  *                           "New order" → /execution
- *   Hero .................. net worth + today's change from real holdings
- *                           (first-run steps when none: add an account by
- *                           hand, and "Connect an account" only where bank
- *                           linking is set up)
+ *   Hero .................. portfolio value + today's change from real
+ *                           holdings, headed by the net worth once there
+ *                           are other assets and debts (first-run steps
+ *                           when none: add an account by hand, and
+ *                           "Connect an account" only where bank linking
+ *                           is set up)
  *   Needs your attention .. ranked triage list (policy, theses, review)
  *   Risk policy strip ..... one line; full checks behind a disclosure
  *                           (only when there are holdings)
@@ -90,9 +92,12 @@ test.describe('Today page', () => {
         await expect(page.getByText('$10,050')).toHaveCount(0);
     });
 
-    test('with holdings: net worth, policy strip, and the full checks behind a disclosure', async ({ page }) => {
+    test('with holdings: the portfolio value, policy strip, and the full checks behind a disclosure', async ({ page }) => {
         test.skip(!(await hasHoldings(page)), 'no holdings in this database');
-        await expect(page.getByTestId('today-networth')).toHaveText(/^\$[\d,]+\.\d{2}$/);
+        // Fixture user A has no other assets or debts: no net worth.
+        await expect(page.getByRole('region', { name: 'Portfolio value' })).toBeVisible();
+        await expect(page.getByTestId('today-portfolio-value')).toHaveText(/^\$[\d,]+\.\d{2}$/);
+        await expect(page.getByTestId('today-net-worth')).toHaveCount(0);
         const strip = page.getByTestId('policy-strip');
         await expect(strip).toBeVisible();
         await expect(page.getByTestId('risk-policy-dashboard')).toBeHidden();
@@ -117,6 +122,8 @@ test.describe('Today page', () => {
         await expect(curve).toBeVisible();
         await expect(curve.locator('.pm-card-title')).toHaveText('Equity curve');
         await expect(curve.getByTestId('performance-hero')).toContainText('time-weighted');
+        // The headline is the portfolio value, so the curve needs no note.
+        await expect(curve.getByTestId('equity-curve-note')).toHaveCount(0);
         await expect(page.getByTestId('today-examples').getByTestId('today-equity-curve')).toHaveCount(0);
         await expect(page.getByTestId('today-examples').getByLabel('Equity curve')).toHaveCount(0);
     });
@@ -222,7 +229,7 @@ test.describe('Today › holdings valued by hand', () => {
         }
 
         await gotoAppPage(page, '/');
-        await expect(page.getByTestId('today-networth')).toHaveText('$100,000.00');
+        await expect(page.getByTestId('today-portfolio-value')).toHaveText('$100,000.00');
         await expect(page.getByRole('region', { name: 'Allocation' })).toBeVisible();
         await openPolicyChecks(page);
         const dimension = (policyId: string) => page.locator(`[data-testid="risk-policy-dimension"][data-policy-id="${policyId}"]`);
@@ -612,7 +619,7 @@ test.describe('Today › Top holdings', () => {
     });
 });
 
-test.describe('Today › Net worth hero', () => {
+test.describe('Today › Portfolio value hero', () => {
     const HELD = ['AAPL', 'MSFT', 'NVDA', 'GOOGL', 'TSLA', 'AMZN'];
     const quote = (symbol: string) => ({ symbol, price: 100, change: 1, changePercent: 1, timestamp: new Date().toISOString(), kind: 'close', isRealtime: false });
 
@@ -663,31 +670,31 @@ test.describe('Today › Net worth hero', () => {
         await expect(page.getByTestId('today-change')).toHaveText(/^\+\$[\d,]+\.\d{2} \(\+\d+\.\d{2}%\) today$/);
     });
 
-    test('regression: a position with no price yet counts at cost in net worth, not $0', async ({ context, page }) => {
+    test('regression: a position with no price yet counts at cost in the portfolio value, not $0', async ({ context, page }) => {
         // Launch item i41 (the Codex finding on PR #153): Today valued an
         // imported position without a quote or stored price at $0.
         test.skip(!(process.env.CI || process.env.E2E_DATABASE_AUTH === '1'), 'needs the seeded E2E database');
         await signInAsFreshUser(context);
         // The same quotes on both loads, so only the new position changes the total.
         await page.route('**/api/market-data/quotes**', (route) => route.fulfill({ status: 200, json: { data: HELD.map(quote) } }));
-        const netWorth = async () => {
+        const portfolioValue = async () => {
             await gotoAppPage(page, '/');
             // The page arrives valued at the prices stored with the holdings
             // (E2E has no market data), and the hero swaps in the quotes above
             // when they land. Read the total once the line under it describes
             // them: a load read before they landed was off by the difference.
             await expect(page.getByTestId('price-freshness')).toContainText('Closing prices');
-            const text = await page.getByTestId('today-networth').textContent();
+            const text = await page.getByTestId('today-portfolio-value').textContent();
             return Number((text ?? '').replace(/[$,]/g, ''));
         };
-        const before = await netWorth();
+        const before = await portfolioValue();
 
         const imported = await page.request.post('/api/portfolio/import', {
             data: { newPortfolioName: 'Unpriced', rows: [{ symbol: 'ZZZQ', name: 'No Price Co', quantity: 10, avgCost: 12.5 }] },
         });
         expect(imported.status()).toBe(200);
 
-        expect(Math.round(((await netWorth()) - before) * 100) / 100).toBe(125);
+        expect(Math.round(((await portfolioValue()) - before) * 100) / 100).toBe(125);
     });
 
     test('regression: a move for some positions only is labelled partial, with no portfolio percentage', async ({ page }) => {
@@ -698,6 +705,113 @@ test.describe('Today › Net worth hero', () => {
         const change = page.getByTestId('today-change');
         await expect(change).toHaveText(/^\+\$[\d,]+\.\d{2} today on 1 of \d+ positions$/);
         await expect(change).not.toContainText('%');
+    });
+});
+
+// Other assets and debts, entered on Accounts: once there are any, Today's
+// headline is the net worth, with the portfolio value under it.
+test.describe('Today › net worth', () => {
+    test.skip(!databaseAuthEnabled, 'other assets and debts are saved in the database');
+
+    const HOME = { kind: 'asset', category: 'property', name: 'Home', value: 300_000, valueAsOf: '2026-11-01' };
+    const MORTGAGE = { kind: 'debt', category: 'mortgage', name: 'Mortgage', value: 200_000, valueAsOf: '2026-10-15' };
+
+    async function addItem(page: import('@playwright/test').Page, item: Record<string, unknown>): Promise<string> {
+        const added = await page.request.post('/api/portfolio/net-worth-items', { data: item });
+        expect(added.status()).toBe(201);
+        return ((await added.json()) as { data: { id: string } }).data.id;
+    }
+
+    /** An account with $1,000 of cash and a fund valued by hand at $9,000: a $10,000 portfolio. */
+    async function tenThousandPortfolio(page: import('@playwright/test').Page) {
+        const created = await page.request.post('/api/portfolios', { data: { name: 'Brokerage', cashBalance: 1_000 } });
+        expect(created.status()).toBe(201);
+        const { data: { id } } = await created.json() as { data: { id: string } };
+        const fund = await page.request.post('/api/portfolio/manual-holdings', {
+            data: { portfolioId: id, holding: { name: 'Target 2055 Trust', value: 9_000, valueAsOf: '2026-11-19' } },
+        });
+        expect(fund.status()).toBe(201);
+    }
+
+    test('the headline is the portfolio value plus the other assets, less the debts, with the portfolio value under it', async ({ context, page }) => {
+        await signInAsNewUser(context, { firstSignIn: true });
+        await tenThousandPortfolio(page);
+        await addItem(page, HOME);
+        await addItem(page, MORTGAGE);
+
+        await gotoAppPage(page, '/');
+        const hero = page.getByRole('region', { name: 'Net worth' });
+        await expect(hero.getByTestId('today-net-worth')).toHaveText('$110,000.00');
+        await expect(hero.getByTestId('today-portfolio')).toHaveText('Portfolio value $10,000.00');
+        await expect(hero.getByTestId('today-portfolio-value')).toHaveText('$10,000.00');
+        await expect(hero.getByTestId('today-other-assets')).toContainText('$300,000');
+        await expect(hero.getByTestId('today-debts')).toContainText('−$200,000');
+        // A debt is owed, not lost: never in red.
+        await expect(hero.locator('[data-testid="today-debts"] .pm-neg')).toHaveCount(0);
+        const note = hero.getByTestId('today-net-worth-note');
+        await expect(note).toHaveText('Other assets and debts are at the values you gave on Accounts, the oldest as of Oct 15, 2026.');
+        await expect(note.getByRole('link', { name: 'Accounts' })).toHaveAttribute('href', '/portfolios/accounts#other-assets');
+        await expect(page.getByTestId('today-net-worth-unavailable')).toHaveCount(0);
+    });
+
+    test('debts larger than everything else make it negative, never clamped to zero', async ({ context, page }) => {
+        await signInAsNewUser(context, { firstSignIn: true });
+        await tenThousandPortfolio(page);
+        await addItem(page, { kind: 'debt', category: 'student_loan', name: 'Student loan', value: 25_000, valueAsOf: '2026-11-01' });
+
+        await gotoAppPage(page, '/');
+        await expect(page.getByTestId('today-net-worth')).toHaveText('−$15,000.00');
+        await expect(page.getByTestId('today-portfolio-value')).toHaveText('$10,000.00');
+        await expect(page.getByTestId('today-other-assets')).toContainText('$0');
+        await expect(page.getByTestId('today-net-worth-note')).toHaveText('Other assets and debts are at the values you gave on Accounts, as of Nov 1, 2026.');
+    });
+
+    test('with them deleted, the headline is the portfolio value again', async ({ context, page }) => {
+        await signInAsNewUser(context, { firstSignIn: true });
+        await tenThousandPortfolio(page);
+        const id = await addItem(page, HOME);
+        await gotoAppPage(page, '/');
+        await expect(page.getByTestId('today-net-worth')).toHaveText('$310,000.00');
+
+        expect((await page.request.delete(`/api/portfolio/net-worth-items/${id}`)).status()).toBe(204);
+        await reloadAppPage(page);
+        await expect(page.getByRole('region', { name: 'Portfolio value' })).toBeVisible();
+        await expect(page.getByTestId('today-portfolio-value')).toHaveText('$10,000.00');
+        for (const testId of ['today-net-worth', 'today-portfolio', 'today-other-assets', 'today-debts', 'today-net-worth-note']) {
+            await expect(page.getByTestId(testId)).toHaveCount(0);
+        }
+    });
+
+    test('an account of cash and an asset, with no positions, still gets the first-run steps', async ({ context, page }) => {
+        await signInAsNewUser(context, { firstSignIn: true });
+        expect((await page.request.post('/api/portfolios', { data: { name: 'Brokerage', cashBalance: 1_000 } })).status()).toBe(201);
+        await addItem(page, HOME);
+        await gotoAppPage(page, '/');
+        await expect(page.getByTestId('today-hero')).toHaveAttribute('data-empty', 'true');
+        await expect(page.getByTestId('today-net-worth')).toHaveCount(0);
+    });
+
+    test('the equity curve says it is the accounts\' alone', async ({ context, page }) => {
+        // A copy of user A, with A's valuation history: an equity curve.
+        const userId = await signInAsFreshUser(context);
+        const sql = e2eDatabase();
+        await sql`
+            INSERT INTO portfolio_snapshots (portfolio_id, date, holdings_value, cash, total_value, cost_basis, positions, unpriced)
+            SELECT md5(${userId} || s.portfolio_id::text)::uuid, s.date, s.holdings_value, s.cash, s.total_value, s.cost_basis, s.positions, s.unpriced
+            FROM portfolio_snapshots s JOIN portfolios p ON p.id = s.portfolio_id
+            WHERE p.user_id = '00000000-0000-4000-8000-00000000a001'`;
+        await sql`
+            INSERT INTO portfolio_snapshot_positions (portfolio_id, date, symbol, quantity, cost_basis, close, close_date, market_value)
+            SELECT md5(${userId} || s.portfolio_id::text)::uuid, s.date, s.symbol, s.quantity, s.cost_basis, s.close, s.close_date, s.market_value
+            FROM portfolio_snapshot_positions s JOIN portfolios p ON p.id = s.portfolio_id
+            WHERE p.user_id = '00000000-0000-4000-8000-00000000a001'`;
+        await addItem(page, HOME);
+
+        await gotoAppPage(page, '/');
+        await expect(page.getByTestId('today-net-worth')).toBeVisible();
+        const curve = page.getByTestId('today-equity-curve');
+        await expect(curve).toBeVisible();
+        await expect(curve.getByTestId('equity-curve-note')).toHaveText('Your accounts only, not your other assets and debts.');
     });
 });
 
@@ -737,7 +851,7 @@ test.describe('Today › First run', () => {
     const firstRun = (page: import('@playwright/test').Page) => page.getByTestId('first-run');
     const steps = (page: import('@playwright/test').Page) => page.getByTestId('first-run-step');
 
-    test('from no accounts, to an account, to positions and a net worth', async ({ context, page }) => {
+    test('from no accounts, to an account, to positions and a portfolio value', async ({ context, page }) => {
         await signInAsNewUser(context);
         await gotoAppPage(page, '/');
         await expect(page.getByTestId('today-hero')).toHaveAttribute('data-empty', 'true');
@@ -774,11 +888,11 @@ test.describe('Today › First run', () => {
         await page.getByRole('button', { name: 'Import 1 position' }).click();
         await expect(page.getByText('Imported 1 position: 1 new, 0 updated.')).toBeVisible();
 
-        // Done: the net worth (cash plus the position at cost) replaces the steps.
+        // Done: the portfolio value (cash plus the position at cost) replaces the steps.
         await expect(firstRun(page)).toHaveCount(0);
         expect((await (await page.request.get('/api/portfolios/count')).json()).count).toBe(1);
         await expect(page.getByTestId('today-hero')).not.toHaveAttribute('data-empty', 'true');
-        await expect(page.getByTestId('today-networth')).toHaveText('$1,100.00');
+        await expect(page.getByTestId('today-portfolio-value')).toHaveText('$1,100.00');
     });
 
     test('a new user starts with example data off, and can turn it on from the card', async ({ context, page }) => {
