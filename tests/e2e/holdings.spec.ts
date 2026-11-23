@@ -1262,7 +1262,7 @@ test.describe('Holdings › Import CSV', () => {
             } } });
         });
         await gotoAppPage(page, '/portfolios/holdings');
-        // As Excel saves a Unicode CSV: little-endian, after a byte-order mark.
+        // As PowerShell's Export-Csv -Encoding Unicode saves a CSV: little-endian, after a byte-order mark.
         await openImport(page, Buffer.from(`﻿${[
             'Symbol,Description,Quantity,Average Cost,Market Value',
             'ACME,Sample 日本 Fund,10,200.00,2900.00',
