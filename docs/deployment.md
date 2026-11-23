@@ -80,7 +80,7 @@ Sentry (Vercel Marketplace, Developer plan) receives errors from production and 
 - **IP addresses**: the SDK never adds one to a report, but browsers send reports to Sentry directly, and Sentry can record the connection's address unless the project's **Prevent Storing of IP Addresses** setting (Project Settings → Security & Privacy) is on. Turn it on; the privacy policy only says Sentry *sees* the address.
 - **CSP**: `connect-src` allows the DSN's ingest host only.
 - **Request IDs**: API log events (`logApiEvent`) carry `requestId`, the same `x-vercel-id` that Vercel's runtime logs and Sentry show, so a report and its log lines can be matched.
-- **A route's 500 in the logs**: `internalServerError` logs one line of JSON, `"event": "internal_server_error"` with the route's error code and message, and the error's name, message, stack, its own fields that are text, numbers or true and false, and its causes, without a failed query's parameters. JSON escapes line breaks, so an error message that quotes what a request sent can't start a log line of its own.
+- **A route's 500 in the logs**: `internalServerError` logs one line of JSON, `"event": "internal_server_error"` with the route's error code and message, and the error's name, message, stack (as `console` prints it, so `next dev` maps it to the source), its own fields that are text, numbers or true and false, and its causes, without a failed query's parameters. JSON escapes carriage returns and line feeds, so an error message that quotes what a request sent can't start a log line of its own. Sentry keeps the line as a console breadcrumb, and cuts a failed query's parameters from it as from any other (`src/lib/observability/sentry-options.ts`).
 
 ## One-time setup
 
