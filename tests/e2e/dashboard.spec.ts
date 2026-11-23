@@ -147,7 +147,11 @@ test.describe('Today page', () => {
         await expect(page.locator('.pm-card-title', { hasText: /^Recent Activity$/ })).toBeVisible();
     });
 
-    test('example-data cards are grouped, labelled, and hideable', async ({ page }) => {
+    test('example-data cards are grouped, labelled, and hideable', async ({ page, context }) => {
+        // Hiding them is saved with the account once the save goes out, and
+        // the tests after this one need user A's examples: hide a copy's.
+        await signInAsFreshUser(context);
+        await gotoAppPage(page, '/');
         const examples = page.getByTestId('today-examples');
         await expect(examples).toBeVisible();
         await expect(examples.getByTestId('sample-data-notice')).toBeVisible();
