@@ -788,20 +788,24 @@ export interface SyncDeps {
 /**
  * The stored prices that settle how an option holding reads when its
  * quantity, price and value fit two ways (launch item i63): each contract's
- * close in option_marks and each underlying's latest close. Both tables are
+ * close in option_marks with its session, and each underlying's latest
+ * close; and the day a price Plaid doesn't date is from, the last session
+ * that ended by `now`, which a close is checked against. Both tables are
  * shared and say nothing about who holds what.
  */
-export async function loadOptionPriceEvidence(securities: readonly PlaidSecurity[], database: Database = db): Promise<OptionPriceEvidence> {
+export async function loadOptionPriceEvidence(securities: readonly PlaidSecurity[], now: Date, database: Database = db): Promise<OptionPriceEvidence> {
     const { contracts, underlyings } = optionContractsIn(securities);
     if (contracts.length === 0) return {};
     const marks = await database
-        .select({ contract: optionMarks.contract, close: optionMarks.close })
+        .select({ contract: optionMarks.contract, close: optionMarks.close, date: optionMarks.closeDate })
         .from(optionMarks)
         .where(and(inArray(optionMarks.contract, contracts), isNotNull(optionMarks.close)));
     const closes = await getLatestCloses(underlyings, undefined, database);
     return {
-        contractCloses: new Map(marks.flatMap(({ contract, close }) => (close == null ? [] : [[contract, close] as const]))),
+        contractCloses: new Map(marks.flatMap(({ contract, close, date }) => (close == null ? [] : [[contract, { close, date }] as const]))),
         underlyingPrices: new Map([...closes].map(([symbol, { close }]) => [symbol, close] as const)),
+        // As replaceSyncedOptions dates such a price.
+        undatedPriceDay: lastCompletedSession(now),
     };
 }
 
@@ -835,7 +839,7 @@ export async function syncPlaidItem(userId: string, itemId: string, deps: SyncDe
             if (!(error instanceof PlaidApiError && error.errorCode === "PRODUCT_NOT_READY")) throw error;
         }
 
-        const evidence = await loadOptionPriceEvidence(holdingsPayload.securities, database);
+        const evidence = await loadOptionPriceEvidence(holdingsPayload.securities, now, database);
         const results: AccountSyncResult[] = [];
         const overLimit: string[] = [];
         for (const account of accounts) {

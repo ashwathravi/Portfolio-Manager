@@ -338,13 +338,24 @@ describe("accountHoldings: option contracts (launch item i63)", () => {
         assert.deepEqual(exercised.options[0], { ...ACME, price: 10.5 });
     });
 
+    // The day of the institution's price, and a session weeks before it.
+    const DAY = "2026-10-23";
+    const WEEKS_BEFORE = "2026-09-25";
+
     test("the stored close and the underlying's stored price settle a contract that reads two ways", () => {
         const contract = "O:ACME270115C00150000";
-        const closed = (close: number) => accountHoldings(ACCOUNT, [perContract(300)], [acmeCall()], { contractCloses: new Map([[contract, close]]) }).options;
-        assert.deepEqual(closed(4.25), [{ ...ACME, quantity: 300, premium: 3.5, price: 4.2 }]);
-        assert.deepEqual(closed(410), [{ ...ACME, quantity: 3, premium: 350, price: 420 }]);
+        const closed = (close: number) => accountHoldings(ACCOUNT, [perContract(300, { institution_price_as_of: DAY })], [acmeCall()], {
+            contractCloses: new Map([[contract, { close, date: DAY }]]),
+        }).options;
+        assert.deepEqual(closed(4.25), [{ ...ACME, quantity: 300, premium: 3.5, price: 4.2, priceDate: DAY }]);
+        assert.deepEqual(closed(410), [{ ...ACME, quantity: 3, premium: 350, price: 420, priceDate: DAY }]);
         // A close that far from both says nothing: Plaid's shares stand.
-        assert.deepEqual(closed(30), [{ ...ACME, quantity: 3, premium: 350, price: 420 }]);
+        assert.deepEqual(closed(30), [{ ...ACME, quantity: 3, premium: 350, price: 420, priceDate: DAY }]);
+        // A price Plaid doesn't date is the sync's last session's.
+        const undated = (undatedPriceDay?: string) => accountHoldings(ACCOUNT, [perContract(300)], [acmeCall()], {
+            contractCloses: new Map([[contract, { close: 4.25, date: DAY }]]), undatedPriceDay,
+        }).options.map((o) => o.quantity);
+        assert.deepEqual([undated(DAY), undated("2026-10-26"), undated(), undated("2026-10-27")], [[300], [300], [3], [3]]);
 
         const stored = accountHoldings(ACCOUNT, [perContract(300)], [acmeCall()], { underlyingPrices: new Map([["ACME", 145]]) });
         assert.deepEqual(stored.options, [{ ...ACME, quantity: 300, premium: 3.5, price: 4.2 }]);
@@ -357,11 +368,41 @@ describe("accountHoldings: option contracts (launch item i63)", () => {
 
     test("regression: when the price's bounds and the stored close disagree, the contract is left out and its row kept", () => {
         const put = holding("acme_p", { quantity: -300, institution_price: 420, institution_value: -126_000, cost_basis: -105_000 });
-        const result = accountHoldings(ACCOUNT, [put], [acmePut()], { contractCloses: new Map([["O:ACME270115P00150000", 400]]) });
+        const result = accountHoldings(ACCOUNT, [put], [acmePut()], {
+            contractCloses: new Map([["O:ACME270115P00150000", { close: 400, date: DAY }]]), undatedPriceDay: DAY,
+        });
         assert.deepEqual(
             [result.options, result.skipped, result.optionsKept],
             [[], [{ reason: "option", name: "ACME Jan 15 2027 150 Put" }], ["O:ACME270115P00150000"]],
         );
+    });
+
+    test("regression: a stored close from weeks before the price says nothing about how its lots read", () => {
+        // A cheap call as Plaid documents it: 3 contracts at $0.40 a share. Its last
+        // trade, weeks before, was at $0.01, within three times of $0.004: the price
+        // read per contract, as 300 contracts.
+        const contract = "O:ACME270115C00150000";
+        const cheap = acmeHolding({ institution_price: 0.4, institution_value: 120, cost_basis: 30, institution_price_as_of: DAY });
+        const read = (date: string | null) => accountHoldings(ACCOUNT, [cheap], [acmeCall()], {
+            contractCloses: new Map([[contract, { close: 0.01, date }]]), underlyingPrices: new Map([["ACME", 100]]),
+        });
+        for (const date of [WEEKS_BEFORE, "2026-10-21", "2026-10-27", null]) {
+            assert.deepEqual(read(date).options, [{ ...ACME, quantity: 3, premium: 0.1, price: 0.4, priceDate: DAY }], String(date));
+        }
+        // A close from the price's session, or the one before or after it, is asked.
+        for (const date of [DAY, "2026-10-22", "2026-10-26"]) {
+            assert.deepEqual(read(date).options.map((o) => [o.quantity, o.premium, o.price]), [[300, 0.001, 0.004]], date);
+        }
+
+        // In the money, 3 contracts at $60 a share on ACME at $210: a close of $0.65
+        // weeks before fits $0.60 a share, well under what the call is worth
+        // exercised, and the contract was left out and its synced row kept.
+        const deep = acmeHolding({ institution_price: 60, institution_value: 18_000, cost_basis: 1500, institution_price_as_of: DAY });
+        const result = accountHoldings(ACCOUNT, [deep], [acmeCall()], {
+            contractCloses: new Map([[contract, { close: 0.65, date: WEEKS_BEFORE }]]), underlyingPrices: new Map([["ACME", 210]]),
+        });
+        assert.deepEqual(result.options, [{ ...ACME, quantity: 3, premium: 5, price: 60, priceDate: DAY }]);
+        assert.deepEqual([result.skipped, result.optionsKept], [[], []]);
     });
 
     test("an institution that prices its other contracts per contract settles one that reads two ways", () => {

@@ -19,6 +19,7 @@
 
 import { z } from "zod";
 
+import { getMarketDay, previousTradingDay } from "@/lib/markets/market-hours";
 import {
     describeOptionContract,
     isCalendarDate,
@@ -418,16 +419,29 @@ export function optionLotReadings(
     });
 }
 
+/** A contract's stored close per share, and the session it's from (option_marks). */
+export interface StoredOptionClose {
+    close: number;
+    /** YYYY-MM-DD; null when the database doesn't say. */
+    date: string | null;
+}
+
 /**
  * What else says how an institution prices its options, for a contract
  * whose lots read two ways: the database's prices, looked up for the
  * contracts a holdings response has (optionContractsIn).
  */
 export interface OptionPriceEvidence {
-    /** Each contract's stored close per share (option_marks), by contract (O:ACME270115C00150000). */
-    contractCloses?: ReadonlyMap<string, number>;
+    /** Each contract's stored close (option_marks), by contract (O:ACME270115C00150000). */
+    contractCloses?: ReadonlyMap<string, StoredOptionClose>;
     /** Each underlying's latest stored close, by ticker. */
     underlyingPrices?: ReadonlyMap<string, number>;
+    /**
+     * The day of an institution's price Plaid doesn't date: the last session
+     * that ended by the sync, as the sync stores it. A stored close is
+     * checked against an undated price only with it.
+     */
+    undatedPriceDay?: string;
 }
 
 /** One lot of an option contract, as Plaid reports it. */
@@ -468,12 +482,41 @@ function couldBePriced(perShare: number, { contractType, strike }: OptionContrac
 }
 
 /**
- * Within three times of a stored close: the readings are a hundred times
- * apart, so at most one is, and an option that moved more than three times
- * since its close says nothing either way.
+ * Within three times of a stored close. The readings are a hundred times
+ * apart, so at most one is. An option that moved between three and about 33
+ * times since its close is near neither, but one that moved between about
+ * 33 and 300 times is near the other reading, the wrong one: so only a close
+ * from about the price's session is asked (closeForPriceDay).
  */
 function nearClose(perShare: number, close: number): boolean {
     return Math.abs(Math.log10(perShare / close)) < Math.log10(3);
+}
+
+/** The session a day's price is from: the day itself when the market traded, else the last day it did. */
+function sessionOf(day: string): string {
+    return getMarketDay(day).isTradingDay ? day : previousTradingDay(day);
+}
+
+/**
+ * A contract's stored close, when it's from about the session of the price
+ * it's checked against (`priceDay`): the same session, or the one before or
+ * after, as the institution's price and the nightly close can be a session
+ * apart. Null otherwise, or when either has no day. option_marks keeps a
+ * close until a newer one arrives, so an illiquid contract's can be weeks
+ * old, and in that time an option can move far enough for its close to fit
+ * the wrong reading (nearClose).
+ */
+function closeForPriceDay(stored: StoredOptionClose | undefined, priceDay: string | null): number | null {
+    const close = positivePrice(stored?.close);
+    if (close == null || !stored?.date || !isCalendarDate(stored.date) || priceDay == null) return null;
+    try {
+        const closed = sessionOf(stored.date);
+        const priced = sessionOf(priceDay);
+        return closed === priced || previousTradingDay(closed) === priced || previousTradingDay(priced) === closed ? close : null;
+    } catch {
+        // A day before the market calendar starts, far too old to say anything.
+        return null;
+    }
 }
 
 /**
@@ -483,9 +526,10 @@ function nearClose(perShare: number, close: number): boolean {
  * shares stand unless something says otherwise: a price per share the
  * option can't have (a put's above its strike, a call's above its
  * underlying's price, either's well under what it's worth exercised), its
- * stored close, or the institution pricing its other contracts per
- * contract. Null when the lots don't agree, or what says how they read
- * disagrees, so a guess is never stored.
+ * stored close from about the session of its price (closeForPriceDay), or
+ * the institution pricing its other contracts per contract. Null when the
+ * lots don't agree, or what says how they read disagrees, so a guess is
+ * never stored.
  */
 function contractReading(
     { details, lots }: ContractLots,
@@ -693,7 +737,8 @@ export function accountHoldings(
         }
         const { underlying } = held.details;
         const reading = contractReading(held, {
-            close: positivePrice(evidence.contractCloses?.get(contract)),
+            // The readings are checked against the first lot's price: a close counts only from about its day.
+            close: closeForPriceDay(evidence.contractCloses?.get(contract), held.lots[0].priceDate ?? evidence.undatedPriceDay ?? null),
             underlying: underlyingPrices.get(underlying) ?? positivePrice(evidence.underlyingPrices?.get(underlying)),
             pricesPerContract,
         });
