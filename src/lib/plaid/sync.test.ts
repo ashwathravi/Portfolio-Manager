@@ -1,7 +1,7 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 
-import { linkedPortfolioDescription, linkedPortfolioName, plaidConfigFromEnv, plaidSyncAccountResponse, transactionsStart, uniqueAccountName } from "./sync";
+import { linkedAccountKind, linkedPortfolioDescription, linkedPortfolioName, plaidConfigFromEnv, plaidSyncAccountResponse, transactionsStart, uniqueAccountName } from "./sync";
 import { plaidSyncMessage } from "./sync-summary";
 
 // The writes and the whole sync run against Postgres in scripts/db/plaid-sync.test.ts.
@@ -33,6 +33,24 @@ describe("Plaid sync", () => {
         assert.equal(uniqueAccountName("Fidelity Individual", "5678", ["Fidelity Individual", "Fidelity Individual ••5678"]), "Fidelity Individual (2)");
         const long = "A".repeat(80);
         assert.equal(uniqueAccountName(long, "1234", [long]), `${"A".repeat(73)} ••1234`);
+    });
+
+    test("a linked account's kind is Plaid's subtype mapped, with the connection's institution, and never an ownership", () => {
+        const kind = linkedAccountKind("brokerage", " Example Brokerage ");
+        assert.deepEqual(kind, { accountType: "brokerage", institution: "Example Brokerage", taxTreatment: "taxable" });
+        // Plaid doesn't say whose name an account is in: only the user sets it.
+        assert.deepEqual(Object.keys(kind).sort(), ["accountType", "institution", "taxTreatment"]);
+        assert.equal(linkedAccountKind("brokerage", "B".repeat(90)).institution, "B".repeat(80));
+        assert.equal(linkedAccountKind("brokerage", "  ").institution, null);
+        // Retirement subtypes are kept from Link now (normalizeSubtype), so they arrive with their kind.
+        assert.deepEqual(linkedAccountKind("401k", "Example Brokerage"), { accountType: "401k", institution: "Example Brokerage", taxTreatment: "tax_deferred" });
+        assert.deepEqual(linkedAccountKind("roth 401k", null), { accountType: "401k", institution: null, taxTreatment: "tax_free" });
+    });
+
+    test("a subtype Atlas has no kind for gives no type or tax treatment, never a guess", () => {
+        for (const subtype of ["other", null]) {
+            assert.deepEqual(linkedAccountKind(subtype, "Example Brokerage"), { accountType: null, institution: "Example Brokerage", taxTreatment: null });
+        }
     });
 
     test("its description says where it comes from", () => {

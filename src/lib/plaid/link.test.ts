@@ -4,6 +4,7 @@ import {
     connectedPlaidAccountMatchesDiscovered,
     createPlaidLinkToken,
     exchangePlaidPublicToken,
+    mapPlaidAccount,
     plaidAccountFingerprint,
     plaidAccountToConnectedAccount,
     plaidBaseUrl,
@@ -96,6 +97,48 @@ describe("Plaid Link helpers", () => {
             plaidAccountFingerprint({ institutionId: null, institutionName: "Fidelity", name: "Roth", mask: "1", subtype: "roth" }),
             plaidAccountFingerprint({ institutionName: "fidelity", name: "Roth", mask: "1", subtype: "Roth" }),
         );
+    });
+
+    test("Plaid's subtype is kept, lower-cased, when Atlas has a kind for it; any other is \"other\"", () => {
+        const subtypeOf = (subtype: unknown, type = "investment") => mapPlaidAccount({
+            account: { account_id: "acc-1", name: "Retirement", mask: "1234", type, subtype, balances: { current: 100 } },
+            institution: { id: "ins_1", name: "Example Brokerage" },
+            products: new Set(["investments"]),
+        }).subtype;
+        // So a linked 401(k), 529 or HSA gets its type and tax treatment.
+        for (const subtype of ["401k", "403b", "529", "hsa", "ugma", "pension", "sep ira", "brokerage", "ira", "roth"]) {
+            assert.strictEqual(subtypeOf(subtype), subtype);
+        }
+        assert.strictEqual(subtypeOf(" Roth 401k "), "roth 401k");
+        assert.strictEqual(subtypeOf("checking", "depository"), "checking");
+        assert.strictEqual(subtypeOf("credit card", "credit"), "credit card");
+        for (const subtype of ["gic", "cd", "", null, 7]) assert.strictEqual(subtypeOf(subtype), "other", String(subtype));
+    });
+
+    test("regression: an account stored before its subtype was kept still matches itself linked again", () => {
+        // Until then every subtype but six was stored as "other". Compared as
+        // stored, a 401(k) listed again as "401k" would no longer match, and
+        // would sync into a second account.
+        const account = { institutionId: "ins_1", institutionName: "Example Brokerage", name: "Retirement", mask: "1234" };
+        const stored = plaidAccountFingerprint({ ...account, subtype: "other" });
+        assert.strictEqual(plaidAccountFingerprint({ ...account, subtype: "401k" }), stored);
+        assert.strictEqual(plaidAccountFingerprint({ ...account, subtype: "Roth 401k" }), stored);
+        // The six kept from the start still tell accounts apart.
+        assert.notStrictEqual(plaidAccountFingerprint({ ...account, subtype: "roth" }), stored);
+        assert.notStrictEqual(plaidAccountFingerprint({ ...account, subtype: "brokerage" }), plaidAccountFingerprint({ ...account, subtype: "ira" }));
+
+        // The account the browser kept from Link then ("Other · …"), against the one Plaid lists now.
+        const listed = mapPlaidAccount({
+            account: { account_id: "acc-new", name: "Retirement", mask: "1234", type: "investment", subtype: "401k", balances: { current: 100 } },
+            institution: { id: "ins_1", name: "Example Brokerage" },
+            products: new Set(["investments"]),
+        });
+        assert.strictEqual(listed.subtype, "401k");
+        const kept = { provider: "plaid", name: "Retirement", type: "Other · Example Brokerage", accountMask: "****1234", institutionId: "ins_1", institutionName: "Example Brokerage", plaidAccountId: "acc-old" };
+        assert.strictEqual(connectedPlaidAccountMatchesDiscovered(kept, listed), true);
+        const connected = plaidAccountToConnectedAccount({ account: listed, itemId: "item-1", lastSynced: "Nov 23, 2026" });
+        assert.strictEqual(connected.type, "401k · Example Brokerage");
+        assert.strictEqual(connectedPlaidAccountMatchesDiscovered({ ...connected, plaidAccountId: "acc-old" }, listed), true);
     });
 
     test("rejects missing Plaid client user ids", async () => {

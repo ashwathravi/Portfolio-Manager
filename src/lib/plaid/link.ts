@@ -1,3 +1,4 @@
+import { accountTypeForPlaid } from "@/lib/portfolio/account-kinds";
 import type {
     PlaidAccountSubtype,
     PlaidAccountType,
@@ -260,7 +261,8 @@ export function plaidAccountToConnectedAccount({
 /**
  * The same account at the same institution, whatever Item it came through:
  * linking a brokerage again can give its accounts new IDs, so they're told
- * apart by institution, name, last four digits and subtype.
+ * apart by institution, name, last four digits and subtype, as coarsely as
+ * Atlas first stored it (fingerprintSubtype).
  */
 export function plaidAccountFingerprint(account: {
     institutionId?: string | null;
@@ -273,7 +275,7 @@ export function plaidAccountFingerprint(account: {
         normalizeFingerprintPart(account.institutionId || account.institutionName || undefined),
         normalizeFingerprintPart(account.name),
         normalizeAccountMask(account.mask ?? undefined),
-        normalizeFingerprintPart(account.subtype),
+        fingerprintSubtype(account.subtype),
     ].join("|");
 }
 
@@ -292,8 +294,24 @@ function connectedPlaidAccountFingerprint(account: PlaidConnectedAccountLike): s
         normalizeFingerprintPart(account.institutionId || account.institutionName),
         normalizeFingerprintPart(account.name),
         normalizeAccountMask(account.accountMask),
-        normalizeFingerprintPart(account.type.split("·")[0]),
+        fingerprintSubtype(account.type.split("·")[0]),
     ].join("|");
+}
+
+/**
+ * The subtypes Atlas kept from the start; until it kept every one it has
+ * an account kind for (normalizeSubtype), any other was stored as "other".
+ */
+const FIRST_KEPT_SUBTYPES: ReadonlySet<string> = new Set(["brokerage", "ira", "roth", "checking", "savings", "credit card"]);
+
+/**
+ * A subtype as coarsely as Atlas first stored it, so an account stored
+ * then still matches itself linked again (a 401(k) stored as "other" and
+ * listed now as "401k") rather than syncing into a second account.
+ */
+function fingerprintSubtype(value: string | undefined): string {
+    const subtype = normalizeFingerprintPart(value);
+    return FIRST_KEPT_SUBTYPES.has(subtype) ? subtype : "other";
 }
 
 function normalizeAccountMask(value: string | undefined): string {
@@ -452,18 +470,14 @@ function normalizeType(value: string | undefined | null): PlaidAccountType {
     return "other";
 }
 
+/**
+ * Plaid's subtype, lower-cased, when Atlas has an account kind for it (so
+ * a linked 401(k), 529 or HSA gets its type and tax treatment) or it's
+ * checking, savings or a credit card; any other is "other".
+ */
 function normalizeSubtype(value: string | undefined | null): PlaidAccountSubtype {
-    if (
-        value === "brokerage" ||
-        value === "ira" ||
-        value === "roth" ||
-        value === "checking" ||
-        value === "savings" ||
-        value === "credit card"
-    ) {
-        return value;
-    }
-    return "other";
+    const subtype = value?.trim().toLowerCase() ?? "";
+    return FIRST_KEPT_SUBTYPES.has(subtype) || accountTypeForPlaid(subtype) !== null ? subtype : "other";
 }
 
 function normalizeVerificationStatus(

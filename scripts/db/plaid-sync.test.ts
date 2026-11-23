@@ -535,6 +535,39 @@ describe('Plaid sync into portfolios', { skip: !DATABASE_URL && 'SCRIPTS_TEST_DA
         }
     });
 
+    test('regression: a 401(k) stored before its subtype was kept comes back on reconnect into the same account, which then gets its type', async () => {
+        // Every subtype but six was stored as "other", so a linked 401(k) had
+        // no type or tax treatment. Listed again as "401k" under a new ID, it
+        // must still match itself, or it would sync into a second account.
+        await linkedUser('u-401k', 'item-401k', [['acc_401k_old', 'Retirement', 'investment']]);
+        await sql`UPDATE plaid_accounts SET subtype = 'other', institution_id = 'ins_1', institution_name = 'Fidelity' WHERE user_id = 'u-401k'`;
+        await selectPlaidAccounts('u-401k', 'item-401k', ['acc_401k_old'], database);
+        const sync = (account: string, at: Date) => syncPlaidItem('u-401k', 'item-401k', deps(fakePlaid({
+            '/investments/holdings/get': holdingsOf(account, [['sec_vti', 2, 250, 400]]),
+            '/investments/transactions/get': transactionsOf(account, []),
+        }).fetchImpl, at));
+        const accounts = () => sql<{ id: string; type: string | null; tax: string | null }[]>`
+            SELECT id, account_type AS type, tax_treatment AS tax FROM portfolios WHERE user_id = 'u-401k'`;
+        await sync('acc_401k_old', NOW);
+        const [before] = await accounts();
+        assert.deepEqual([before.type, before.tax], [null, null]);
+
+        const reconnect = fakePlaid({
+            '/item/get': () => ({ json: { item: { item_id: 'item-401k', error: null, consent_expiration_time: null } } }),
+            '/accounts/get': () => ({ json: { accounts: [
+                { account_id: 'acc_401k_new', name: 'Retirement', mask: '1234', type: 'investment', subtype: '401k', balances: { current: 500, iso_currency_code: 'USD' } },
+            ] } }),
+        });
+        assert.deepEqual(await refreshPlaidItem('u-401k', 'item-401k', deps(reconnect.fetchImpl)), { status: 'active', accountsRemoved: 1, accountsAdded: 1 });
+        const stored = await sql<{ id: string; subtype: string; status: string }[]>`
+            SELECT plaid_account_id AS id, subtype, sync_status AS status FROM plaid_accounts WHERE user_id = 'u-401k' ORDER BY plaid_account_id`;
+        assert.deepEqual(stored.map((r) => [r.id, r.subtype, r.status]), [['acc_401k_new', '401k', 'sync_ready'], ['acc_401k_old', 'other', 'excluded']]);
+
+        const synced = await sync('acc_401k_new', new Date('2026-10-26T22:30:00.000Z'));
+        assert.deepEqual(synced.accounts.map((a) => [a.portfolioId, a.created]), [[before.id, false]]);
+        assert.deepEqual((await accounts()).map((r) => [r.id, r.type, r.tax]), [[before.id, '401k', 'tax_deferred']]);
+    });
+
     test('history that isn\'t ready yet: positions now, two years of transactions next time', async () => {
         await linkedUser('u-ready', 'item-ready', [['acc_new', 'Individual', 'investment']]);
         await selectPlaidAccounts('u-ready', 'item-ready', ['acc_new'], database);
